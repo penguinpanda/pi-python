@@ -1,0 +1,58 @@
+"""
+pi-agent-core  最小核心 LLM Agent 循环
+
+纯函数 Agent 循环 + 有状态 Agent 包装类。
+
+用法:
+    from pi_agent import Agent, set_default_stream_fn
+    from pi_ai import create_default_models
+
+    models = create_default_models()
+    set_default_stream_fn(models.stream)
+
+    agent = Agent()
+    await agent.prompt("Hello!")
+"""
+
+from ._agent import Agent, AgentOptions
+from ._agent_loop import run_agent_loop, run_agent_loop_continue
+from ._stream_fn import get_default_stream_fn, set_default_stream_fn
+from ._types import (
+    AfterToolCallResult,
+    AgentContext,
+    AgentEvent,
+    AgentLoopConfig,
+    AgentMessage,
+    AgentState,
+    AgentTool,
+    AgentToolResult,
+    BeforeToolCallResult,
+    StreamFn,
+    ThinkingLevel,
+    ToolExecutionMode,
+)
+
+__all__ = [
+    # Agent
+    "Agent",
+    "AgentOptions",
+    # Loop
+    "run_agent_loop",
+    "run_agent_loop_continue",
+    # Stream
+    "set_default_stream_fn",
+    "get_default_stream_fn",
+    # Types
+    "AgentTool",
+    "AgentToolResult",
+    "AgentState",
+    "AgentContext",
+    "AgentEvent",
+    "AgentLoopConfig",
+    "AgentMessage",
+    "StreamFn",
+    "ThinkingLevel",
+    "ToolExecutionMode",
+    "BeforeToolCallResult",
+    "AfterToolCallResult",
+]

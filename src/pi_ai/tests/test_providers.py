@@ -82,7 +82,7 @@ class TestDeepSeekProvider:
     def test_model_list(self):
         provider = deepseek_provider()
         models = provider.get_models()
-        assert _model_ids(models) == ["deepseek-chat", "deepseek-reasoner"]
+        assert _model_ids(models) == ["deepseek-chat", "deepseek-reasoner", "deepseek-v4-flash"]
 
     def test_model_capabilities(self):
         provider = deepseek_provider()
@@ -98,6 +98,12 @@ class TestDeepSeekProvider:
         assert reasoner.thinking is True
         assert reasoner.supportsToolCalling is False
 
+        v4_flash = by_id["deepseek-v4-flash"]
+        assert v4_flash.api == "openai-completions"
+        assert v4_flash.thinking is True
+        assert v4_flash.supportsToolCalling is True
+        assert v4_flash.maxTokens == 384000
+
 
 class TestModelConstants:
     """OPENAI_MODELS / DEEPSEEK_MODELS 常量。"""
@@ -106,7 +112,9 @@ class TestModelConstants:
         assert _model_ids(OPENAI_MODELS) == ["gpt-4o", "gpt-4o-mini", "o4-mini"]
 
     def test_deepseek_models_constant(self):
-        assert _model_ids(DEEPSEEK_MODELS) == ["deepseek-chat", "deepseek-reasoner"]
+        assert _model_ids(DEEPSEEK_MODELS) == [
+            "deepseek-chat", "deepseek-reasoner", "deepseek-v4-flash",
+        ]
 
     def test_all_models_have_provider_and_api(self):
         for model in OPENAI_MODELS + DEEPSEEK_MODELS:

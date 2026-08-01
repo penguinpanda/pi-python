@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "pi-ai"
 version = "0.1.0"
-description = "Unified LLM API with provider abstraction — Python port for learning"
+description = "Pi monorepo: Unified LLM API (pi-ai) + Agent core loop (pi-agent) — Python port for learning"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -24,6 +24,7 @@ classifiers = [
 dependencies = [
     "openai>=1.0",
     "httpx>=0.25",
+    "python-dotenv>=1.2.2",
 ]
 
 [dependency-groups]
@@ -34,16 +35,16 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/pi_ai"]
+packages = ["src/pi_ai", "src/pi_agent", "src/pi_coding_agent"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["src/pi_ai/tests"]
-addopts = "--cov=pi_ai --cov-report=term-missing --cov-report=html"
+testpaths = ["src/pi_ai/tests", "src/pi_agent/tests", "src/pi_coding_agent/tests"]
+addopts = "--cov=pi_ai --cov=pi_agent --cov=pi_coding_agent --cov-report=term-missing --cov-report=html"
 
 [tool.coverage.run]
 # 只统计 src 下的包代码，不统计测试自身。
-omit = ["src/pi_ai/tests/*"]
+omit = ["src/pi_ai/tests/*", "src/pi_agent/tests/*", "src/pi_coding_agent/tests/*"]
 
 [tool.coverage.report]
 show_missing = true

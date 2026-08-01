@@ -30,7 +30,8 @@ class TestModelsRegistry:
     def test_get_models_all(self):
         models = create_default_models()
         all_models = models.get_models()
-        assert len(all_models) >= 5  # gpt-4o, gpt-4o-mini, o4-mini, deepseek-chat, deepseek-reasoner
+        # gpt-4o, gpt-4o-mini, o4-mini, deepseek-chat, deepseek-reasoner, deepseek-v4-flash
+        assert len(all_models) == 6
 
     def test_get_models_by_provider(self):
         models = create_default_models()
@@ -39,8 +40,9 @@ class TestModelsRegistry:
         assert any(m.id == "gpt-4o" for m in openai_models)
 
         deepseek_models = models.get_models("deepseek")
-        assert len(deepseek_models) == 2
+        assert len(deepseek_models) == 3
         assert any(m.id == "deepseek-chat" for m in deepseek_models)
+        assert any(m.id == "deepseek-v4-flash" for m in deepseek_models)
 
     def test_get_model_specific(self):
         models = create_default_models()
