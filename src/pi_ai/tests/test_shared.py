@@ -1,0 +1,422 @@
+"""
+Unit tests for _shared.py — shared helper functions.
+"""
+
+import pytest
+
+from pi_ai._types import (
+    AssistantMessage,
+    ImageContent,
+    Message,
+    Model,
+    TextContent,
+    ThinkingContent,
+    Tool,
+    ToolCallContent,
+    Usage,
+)
+from pi_ai.api._shared import (
+    accumulate_tool_calls,
+    build_error_message,
+    empty_usage,
+    extract_text,
+    to_openai_messages,
+    to_openai_tools,
+)
+
+
+# ---------------------------------------------------------------------------
+# Test helpers
+# ---------------------------------------------------------------------------
+
+def _make_model(
+    model_id: str = "test-model",
+    provider: str = "test-provider",
+    api: str = "openai-completions",
+    supports_images: bool = False,
+) -> Model:
+    return Model(
+        id=model_id,
+        provider=provider,
+        api=api,
+        name=model_id,
+        input=["text"] + (["image"] if supports_images else []),
+        output=["text"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# to_openai_messages
+# ---------------------------------------------------------------------------
+
+class TestToOpenaiMessages:
+    """Message format conversion: SDK → OpenAI Chat Completions."""
+
+    def test_system_message(self):
+        messages: list[Message] = [
+            {"role": "system", "content": "You are helpful."}  # type: ignore[typeddict-unknown-key]
+        ]
+        result = to_openai_messages(messages, _make_model())
+        assert result == [{"role": "system", "content": "You are helpful."}]
+
+    def test_user_message_string(self):
+        messages: list[Message] = [
+            {"role": "user", "content": "Hello"}  # type: ignore[typeddict-unknown-key]
+        ]
+        result = to_openai_messages(messages, _make_model())
+        assert result == [{"role": "user", "content": "Hello"}]
+
+    def test_user_message_multimodal(self):
+        messages: list[Message] = [
+            {  # type: ignore[typeddict-unknown-key]
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What is this?"},
+                    {"type": "image", "url": "https://example.com/img.png", "data": None, "mediaType": None},
+                ],
+            }
+        ]
+        model = _make_model(supports_images=True)
+        result = to_openai_messages(messages, model)
+        assert len(result) == 1
+        assert result[0]["role"] == "user"
+        assert isinstance(result[0]["content"], list)
+        parts = result[0]["content"]
+        text_part = next(p for p in parts if p["type"] == "text")
+        assert text_part["text"] == "What is this?"
+        image_part = next(p for p in parts if p["type"] == "image_url")
+        assert image_part["image_url"]["url"] == "https://example.com/img.png"
+
+    def test_user_message_image_base64_data(self):
+        messages: list[Message] = [
+            {  # type: ignore[typeddict-unknown-key]
+                "role": "user",
+                "content": [
+                    {"type": "image", "url": None, "data": "abc123", "mediaType": "image/jpeg"},
+                ],
+            }
+        ]
+        model = _make_model(supports_images=True)
+        result = to_openai_messages(messages, model)
+        parts = result[0]["content"]
+        image_part = next(p for p in parts if p["type"] == "image_url")
+        assert image_part["image_url"]["url"] == "data:image/jpeg;base64,abc123"
+
+    def test_user_message_image_skipped_when_model_no_images(self):
+        messages: list[Message] = [
+            {  # type: ignore[typeddict-unknown-key]
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Hi"},
+                    {"type": "image", "url": "https://example.com/img.png", "data": None, "mediaType": None},
+                ],
+            }
+        ]
+        model = _make_model(supports_images=False)
+        result = to_openai_messages(messages, model)
+        # image should be filtered out; only text remains
+        assert result[0]["content"] == "Hi"
+
+    def test_user_message_single_text_optimized(self):
+        messages: list[Message] = [
+            {  # type: ignore[typeddict-unknown-key]
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Just text"},
+                ],
+            }
+        ]
+        result = to_openai_messages(messages, _make_model())
+        # single text part → optimized to plain string content
+        assert result[0]["content"] == "Just text"
+
+    def test_assistant_message_text(self):
+        messages: list[Message] = [
+            {  # type: ignore[typeddict-unknown-key]
+                "role": "assistant",
+                "content": [{"type": "text", "text": "I can help."}],
+                "api": "openai-completions",
+                "provider": "test",
+                "model": "test-model",
+            }
+        ]
+        result = to_openai_messages(messages, _make_model())
+        assert len(result) == 1
+        assert result[0]["role"] == "assistant"
+        assert result[0]["content"] == "I can help."
+
+    def test_assistant_message_with_tool_calls(self):
+        messages: list[Message] = [
+            {  # type: ignore[typeddict-unknown-key]
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "Let me search."},
+                    {"type": "toolCall", "toolCallId": "call_1", "toolName": "search", "args": '{"q":"test"}'},
+                ],
+                "api": "openai-completions",
+                "provider": "test",
+                "model": "test-model",
+            }
+        ]
+        result = to_openai_messages(messages, _make_model())
+        oai_msg = result[0]
+        assert oai_msg["content"] == "Let me search."
+        assert len(oai_msg["tool_calls"]) == 1
+        tc = oai_msg["tool_calls"][0]
+        assert tc["id"] == "call_1"
+        assert tc["type"] == "function"
+        assert tc["function"]["name"] == "search"
+        assert tc["function"]["arguments"] == '{"q":"test"}'
+
+    def test_assistant_thinking_skipped(self):
+        messages: list[Message] = [
+            {  # type: ignore[typeddict-unknown-key]
+                "role": "assistant",
+                "content": [
+                    {"type": "thinking", "thinking": "Hmm...", "signature": None},
+                    {"type": "text", "text": "Answer."},
+                ],
+                "api": "openai-completions",
+                "provider": "test",
+                "model": "test-model",
+            }
+        ]
+        result = to_openai_messages(messages, _make_model())
+        # thinking should be skipped; only text remains
+        assert result[0]["content"] == "Answer."
+        assert "tool_calls" not in result[0]
+
+    def test_tool_result_message(self):
+        messages: list[Message] = [
+            {  # type: ignore[typeddict-unknown-key]
+                "role": "toolResult",
+                "toolCallId": "call_1",
+                "toolName": "search",
+                "content": [{"type": "text", "text": "42 results found."}],
+            }
+        ]
+        result = to_openai_messages(messages, _make_model())
+        assert result[0]["role"] == "tool"
+        assert result[0]["tool_call_id"] == "call_1"
+        assert result[0]["content"] == "42 results found."
+
+    def test_multiple_messages(self):
+        messages: list[Message] = [
+            {"role": "system", "content": "System prompt"},  # type: ignore[typeddict-unknown-key]
+            {"role": "user", "content": "User question"},  # type: ignore[typeddict-unknown-key]
+        ]
+        result = to_openai_messages(messages, _make_model())
+        assert len(result) == 2
+        assert result[0]["role"] == "system"
+        assert result[1]["role"] == "user"
+
+
+# ---------------------------------------------------------------------------
+# to_openai_tools
+# ---------------------------------------------------------------------------
+
+class TestToOpenaiTools:
+    """Tool schema conversion: SDK Tool → OpenAI function tool."""
+
+    def test_empty_tools(self):
+        assert to_openai_tools([]) == []
+
+    def test_single_tool(self):
+        tools = [
+            Tool(
+                name="search",
+                description="Search the web",
+                inputSchema={"type": "object", "properties": {"q": {"type": "string"}}},
+            )
+        ]
+        result = to_openai_tools(tools)
+        assert len(result) == 1
+        assert result[0]["type"] == "function"
+        fn = result[0]["function"]
+        assert fn["name"] == "search"
+        assert fn["description"] == "Search the web"
+        assert fn["parameters"] == {"type": "object", "properties": {"q": {"type": "string"}}}
+
+    def test_multiple_tools(self):
+        tools = [
+            Tool(name="t1", description="d1", inputSchema={}),
+            Tool(name="t2", description="d2", inputSchema={}),
+        ]
+        result = to_openai_tools(tools)
+        assert len(result) == 2
+        assert result[0]["function"]["name"] == "t1"
+        assert result[1]["function"]["name"] == "t2"
+
+
+# ---------------------------------------------------------------------------
+# empty_usage
+# ---------------------------------------------------------------------------
+
+class TestEmptyUsage:
+    """Construct zeroed Usage."""
+
+    def test_all_zero(self):
+        usage = empty_usage()
+        assert usage["input"] == 0
+        assert usage["output"] == 0
+        assert usage["cacheRead"] == 0
+        assert usage["cacheWrite"] == 0
+        assert usage["totalTokens"] == 0
+
+    def test_cost_dict(self):
+        usage = empty_usage()
+        assert "cost" in usage
+        cost = usage["cost"]
+        assert cost["input"] == 0
+        assert cost["output"] == 0
+        assert cost["cacheRead"] == 0
+        assert cost["cacheWrite"] == 0
+        assert cost["total"] == 0
+
+
+# ---------------------------------------------------------------------------
+# build_error_message
+# ---------------------------------------------------------------------------
+
+class TestBuildErrorMessage:
+    """Error AssistantMessage construction."""
+
+    def test_structure(self):
+        model = _make_model("gpt-4o", "openai", "openai-responses")
+        exc = ValueError("API key missing")
+        msg = build_error_message(model, exc)
+        assert msg["role"] == "assistant"
+        assert msg["content"] == []
+        assert msg["api"] == "openai-responses"
+        assert msg["provider"] == "openai"
+        assert msg["model"] == "gpt-4o"
+        assert msg["stopReason"] == "error"
+        assert msg["errorMessage"] == "API key missing"
+        assert msg["usage"]["input"] == 0
+        assert msg["timestamp"] == 0
+
+    def test_different_exception_types(self):
+        model = _make_model()
+        for exc in [RuntimeError("err"), ConnectionError("conn"), TimeoutError("timeout")]:
+            msg = build_error_message(model, exc)
+            assert msg["errorMessage"] == str(exc)
+
+
+# ---------------------------------------------------------------------------
+# extract_text
+# ---------------------------------------------------------------------------
+
+class TestExtractText:
+    """Pure-text extraction from ContentBlock list."""
+
+    def test_text_only(self):
+        content = [
+            {"type": "text", "text": "Hello"},
+            {"type": "text", "text": "World"},
+        ]
+        assert extract_text(content) == "Hello\nWorld"
+
+    def test_thinking_only(self):
+        content = [
+            {"type": "thinking", "thinking": "Let me think...", "signature": None},
+        ]
+        assert extract_text(content) == "Let me think..."
+
+    def test_mixed(self):
+        content = [
+            {"type": "thinking", "thinking": "Hmm", "signature": None},
+            {"type": "text", "text": "Result"},
+            {"type": "thinking", "thinking": "Done", "signature": None},
+        ]
+        assert extract_text(content) == "Hmm\nResult\nDone"
+
+    def test_empty_list(self):
+        assert extract_text([]) == ""
+
+    def test_tool_call_ignored(self):
+        content = [
+            {"type": "toolCall", "toolCallId": "c1", "toolName": "search", "args": "{}"},
+            {"type": "text", "text": "Answer"},
+        ]
+        assert extract_text(content) == "Answer"
+
+
+# ---------------------------------------------------------------------------
+# accumulate_tool_calls
+# ---------------------------------------------------------------------------
+
+class TestAccumulateToolCalls:
+    """Streaming tool-call incremental merge."""
+
+    def test_first_call_creates_new_block(self):
+        content: list = []
+        index, name = accumulate_tool_calls(
+            content=content,
+            index=None,
+            delta_id="call_1",
+            delta_name=None,
+            delta_args=None,
+        )
+        assert len(content) == 1
+        assert content[0]["type"] == "toolCall"
+        assert content[0]["toolCallId"] == "call_1"
+        assert content[0]["toolName"] == ""
+        assert content[0]["args"] == ""
+        assert index == 0
+        assert name is None
+
+    def test_existing_call_updates_args(self):
+        content = [{"type": "toolCall", "toolCallId": "call_1", "toolName": "", "args": ""}]
+        index, name = accumulate_tool_calls(
+            content=content,
+            index=None,
+            delta_id="call_1",
+            delta_name="search",
+            delta_args=None,
+        )
+        assert content[0]["toolName"] == "search"
+        assert name == "search"
+
+        index2, _ = accumulate_tool_calls(
+            content=content,
+            index=index,
+            delta_id=None,
+            delta_name=None,
+            delta_args='{"q":',
+        )
+        assert content[0]["args"] == '{"q":'
+
+        accumulate_tool_calls(
+            content=content,
+            index=index2,
+            delta_id=None,
+            delta_name=None,
+            delta_args='"test"}',
+        )
+        assert content[0]["args"] == '{"q":"test"}'
+
+    def test_args_concatenation(self):
+        content = [{"type": "toolCall", "toolCallId": "c1", "toolName": "fn", "args": ""}]
+        accumulate_tool_calls(content, index=0, delta_id=None, delta_name=None, delta_args="a")
+        accumulate_tool_calls(content, index=0, delta_id=None, delta_name=None, delta_args="b")
+        accumulate_tool_calls(content, index=0, delta_id=None, delta_name=None, delta_args="c")
+        assert content[0]["args"] == "abc"
+
+    def test_multiple_different_tool_calls(self):
+        content: list = []
+        accumulate_tool_calls(content, None, "call_1", "fn_a", None)
+        accumulate_tool_calls(content, None, "call_2", "fn_b", None)
+        assert len(content) == 2
+        assert content[0]["toolCallId"] == "call_1"
+        assert content[1]["toolCallId"] == "call_2"
+
+    def test_return_values(self):
+        content: list = []
+        idx, name = accumulate_tool_calls(content, None, "c1", "my_fn", '{"x":1}')
+        assert idx == 0
+        assert name == "my_fn"
+        # second chunk — same call, just more args (simple string concat)
+        idx2, name2 = accumulate_tool_calls(content, idx, None, None, ",2}")
+        assert idx2 == 0
+        assert name2 == "my_fn"
+        assert content[0]["args"] == '{"x":1},2}'

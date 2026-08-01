@@ -1,0 +1,357 @@
+"""
+Unit tests for completions.py — Chat Completions API helpers.
+"""
+import pytest
+from pi_ai.api.completions import _map_stop_reason
+
+class TestMapStopReason:
+    @pytest.mark.parametrize('raw,expected', [
+        ('stop', 'end'), ('length', 'length'), ('tool_calls', 'toolCall'),
+        ('content_filter', 'refusal'), ('function_call', 'toolCall'),
+        ('some_unknown_reason', 'some_unknown_reason'),
+    ])
+    def test_mapping(self, raw, expected):
+        assert _map_stop_reason(raw) == expected
+
+    def test_empty_string(self):
+        assert _map_stop_reason('') == ''
+
+    def test_none_equivalent(self):
+        assert _map_stop_reason('None') == 'None'
+
+
+# ===========================================================================
+# Chat Completions 流式主循环
+#
+# 通过 patch 掉 _create_client 返回 mock 客户端，
+# 完全离线测试 chunk → event → AssistantMessage 的转换逻辑。
+#
+# 注意：chat_completions_stream() 会立即返回并后台调度 _run()，
+# 因此必须在 patch 生效期间同时完成流的创建与消费。
+# ===========================================================================
+
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import httpx
+
+from pi_ai._types import Context, Model, Tool
+from pi_ai.api.completions import _create_client, chat_completions_stream
+
+
+def _make_model(
+    model_id: str = "deepseek-chat",
+    provider: str = "deepseek",
+    api: str = "openai-completions",
+) -> Model:
+    return Model(
+        id=model_id, provider=provider, api=api, name=model_id,
+        input=["text"], output=["text"],
+    )
+
+
+def _async_iter(items):
+    """将一个列表包装成异步可迭代对象（模拟 OpenAI streaming response）。"""
+    async def gen():
+        for item in items:
+            yield item
+    return gen()
+
+
+def _chunk(content=None, tool_calls=None, finish_reason=None, usage=None):
+    """构造一个假的 OpenAI Streaming Chunk。"""
+    return SimpleNamespace(
+        choices=[SimpleNamespace(
+            index=0,
+            delta=SimpleNamespace(content=content, tool_calls=tool_calls),
+            finish_reason=finish_reason,
+        )],
+        usage=usage,
+    )
+
+
+def _tool_call(index, id_, name, arguments):
+    """构造一个假的 delta.tool_calls 元素。"""
+    return SimpleNamespace(
+        index=index,
+        id=id_,
+        function=SimpleNamespace(name=name, arguments=arguments),
+    )
+
+
+def _mock_client(chunks):
+    """构造一个 mock 的 AsyncOpenAI 客户端，create() 返回异步可迭代对象。"""
+    client = MagicMock()
+    client.chat.completions.create = AsyncMock(return_value=_async_iter(chunks))
+    return client
+
+
+def _empty_usage_dict():
+    """与 _shared.empty_usage() 一致的完整空 Usage（含 cost）。"""
+    return {
+        "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 0,
+        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0},
+    }
+
+
+async def _collect_events(model, context, client, options=None, base_url="https://api.test.com"):
+    """在 patch 生效期间创建并消费流，返回 (events, stream)。"""
+    with patch("pi_ai.api.completions._create_client", return_value=client):
+        stream = await chat_completions_stream(model, context, "sk-test", base_url, options)
+        events = [e async for e in stream]
+        return events, stream
+
+
+class TestCreateClient:
+    """_create_client() 客户端工厂。"""
+
+    def test_constructs_openai_client(self):
+        with patch("pi_ai.api.completions.AsyncOpenAI") as mock_openai:
+            _create_client("sk-test", "https://api.test.com", timeout=30.0)
+
+        mock_openai.assert_called_once()
+        kwargs = mock_openai.call_args.kwargs
+        assert kwargs["api_key"] == "sk-test"
+        assert kwargs["base_url"] == "https://api.test.com"
+        assert kwargs["max_retries"] == 2
+        assert isinstance(kwargs["timeout"], httpx.Timeout)
+        assert kwargs["timeout"].connect == 30.0
+
+    def test_base_url_trailing_slash_stripped(self):
+        with patch("pi_ai.api.completions.AsyncOpenAI") as mock_openai:
+            _create_client("sk-test", "https://api.test.com///")
+
+        kwargs = mock_openai.call_args.kwargs
+        assert kwargs["base_url"] == "https://api.test.com"
+
+    def test_default_timeout(self):
+        with patch("pi_ai.api.completions.AsyncOpenAI") as mock_openai:
+            _create_client("sk-test", "https://api.test.com")
+
+        kwargs = mock_openai.call_args.kwargs
+        assert kwargs["timeout"].connect == 120.0
+
+
+class TestCompletionsStream:
+    """chat_completions_stream() 流式主循环。"""
+
+    @pytest.mark.asyncio
+    async def test_text_stream(self):
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        chunks = [
+            _chunk(content="Hello", finish_reason=None),
+            _chunk(content=" world", finish_reason="stop"),
+        ]
+        client = _mock_client(chunks)
+
+        events, _ = await _collect_events(model, context, client)
+        assert [e["type"] for e in events] == ["delta", "delta", "done"]
+        assert events[0]["text"] == "Hello"
+        assert events[1]["text"] == " world"
+
+        msg = events[-1]["message"]
+        assert msg["role"] == "assistant"
+        # 每个 delta chunk 生成一个独立的 TextContent 块。
+        assert msg["content"] == [
+            {"type": "text", "text": "Hello"},
+            {"type": "text", "text": " world"},
+        ]
+        assert msg["stopReason"] == "end"
+        assert msg["model"] == "deepseek-chat"
+        assert msg["provider"] == "deepseek"
+        assert msg["api"] == "openai-completions"
+        assert msg["usage"] == _empty_usage_dict()
+
+    @pytest.mark.asyncio
+    async def test_result_returns_message(self):
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        chunks = [_chunk(content="ok", finish_reason="stop")]
+        client = _mock_client(chunks)
+
+        events, stream = await _collect_events(model, context, client)
+        msg = await stream.result()
+        assert msg["role"] == "assistant"
+        assert msg["content"] == [{"type": "text", "text": "ok"}]
+        assert events[-1]["type"] == "done"
+
+    @pytest.mark.asyncio
+    async def test_no_choices_chunk_skipped(self):
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        # choices 为空的 chunk 应被跳过，不产生事件也不崩溃。
+        chunks = [SimpleNamespace(choices=[], usage=None)]
+        client = _mock_client(chunks)
+
+        events, _ = await _collect_events(model, context, client)
+        assert [e["type"] for e in events] == ["done"]
+        assert events[-1]["message"]["content"] == []
+
+    @pytest.mark.asyncio
+    async def test_delta_none_skipped(self):
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        # delta 为 None 的 chunk 应被跳过。
+        chunks = [SimpleNamespace(
+            choices=[SimpleNamespace(index=0, delta=None, finish_reason=None)],
+            usage=None,
+        )]
+        client = _mock_client(chunks)
+
+        events, _ = await _collect_events(model, context, client)
+        assert [e["type"] for e in events] == ["done"]
+
+    @pytest.mark.asyncio
+    async def test_tool_call_accumulation(self):
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "weather?"}])
+        chunks = [
+            _chunk(
+                tool_calls=[_tool_call(0, "call_1", "get_weather", '{"city":')],
+                finish_reason=None,
+            ),
+            _chunk(
+                tool_calls=[_tool_call(0, None, None, '"Beijing"}')],
+                finish_reason="tool_calls",
+            ),
+        ]
+        client = _mock_client(chunks)
+
+        events, _ = await _collect_events(model, context, client)
+        tool_deltas = [e for e in events if e["type"] == "toolCallDelta"]
+        assert len(tool_deltas) == 2
+        assert tool_deltas[0] == {
+            "type": "toolCallDelta",
+            "toolCallId": "call_1",
+            "toolName": "get_weather",
+            "argsDelta": '{"city":',
+        }
+        assert tool_deltas[1]["argsDelta"] == '"Beijing"}'
+
+        msg = events[-1]["message"]
+        assert msg["stopReason"] == "toolCall"
+        assert msg["content"] == [{
+            "type": "toolCall",
+            "toolCallId": "call_1",
+            "toolName": "get_weather",
+            "args": '{"city":"Beijing"}',
+        }]
+
+    @pytest.mark.asyncio
+    async def test_usage_extraction(self):
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        usage = SimpleNamespace(
+            prompt_tokens=10,
+            completion_tokens=5,
+            total_tokens=15,
+            prompt_tokens_details=SimpleNamespace(cached_tokens=3),
+        )
+        chunks = [_chunk(content="Hi", finish_reason="stop", usage=usage)]
+        client = _mock_client(chunks)
+
+        events, stream = await _collect_events(model, context, client)
+        msg = await stream.result()
+        assert msg["usage"] == {
+            "input": 10, "output": 5, "cacheRead": 3, "cacheWrite": 0,
+            "totalTokens": 15,
+        }
+
+    @pytest.mark.asyncio
+    async def test_request_kwargs(self):
+        model = _make_model()
+        tool = Tool(
+            name="get_weather",
+            description="Get weather",
+            inputSchema={"type": "object", "properties": {}},
+        )
+        context = Context(
+            messages=[{"role": "user", "content": "Hi"}],
+            tools=[tool],
+            system="You are helpful",
+        )
+        options = {"temperature": 0.5, "maxTokens": 100}
+        client = _mock_client([_chunk(content="Hi", finish_reason="stop")])
+        with patch("pi_ai.api.completions._create_client", return_value=client):
+            stream = await chat_completions_stream(
+                model, context, "sk-test", "https://api.test.com", options
+            )
+            [e async for e in stream]
+
+        create = client.chat.completions.create
+        create.assert_called_once()
+        kwargs = create.call_args.kwargs
+        assert kwargs["model"] == "deepseek-chat"
+        assert kwargs["stream"] is True
+        assert kwargs["stream_options"] == {"include_usage": True}
+        assert kwargs["temperature"] == 0.5
+        assert kwargs["max_tokens"] == 100
+        # System Prompt 作为第一条 message。
+        assert kwargs["messages"][0] == {"role": "system", "content": "You are helpful"}
+        assert kwargs["messages"][1] == {"role": "user", "content": "Hi"}
+        # tools 已转换为 OpenAI Tool Schema。
+        assert kwargs["tools"] == [{
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "description": "Get weather",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }]
+
+    @pytest.mark.asyncio
+    async def test_no_options_no_tools(self):
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        client = _mock_client([_chunk(content="Hi", finish_reason="stop")])
+        with patch("pi_ai.api.completions._create_client", return_value=client):
+            stream = await chat_completions_stream(
+                model, context, "sk-test", "https://api.test.com"
+            )
+            [e async for e in stream]
+
+        kwargs = client.chat.completions.create.call_args.kwargs
+        assert "temperature" not in kwargs
+        assert "max_tokens" not in kwargs
+        assert "tools" not in kwargs
+
+    @pytest.mark.asyncio
+    async def test_error_event(self):
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(
+            side_effect=RuntimeError("boom")
+        )
+
+        events, stream = await _collect_events(model, context, client)
+        assert events[-1]["type"] == "error"
+        assert events[-1]["reason"] == "error"
+        err = events[-1]["error"]
+        assert err["role"] == "assistant"
+        assert err["errorMessage"] == "boom"
+        assert err["stopReason"] == "error"
+        assert err["content"] == []
+
+        # result() 返回携带错误的 AssistantMessage。
+        msg = await stream.result()
+        assert msg["errorMessage"] == "boom"
+
+    @pytest.mark.asyncio
+    async def test_cancelled_error(self):
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(
+            side_effect=asyncio.CancelledError()
+        )
+        with patch("pi_ai.api.completions._create_client", return_value=client):
+            stream = await chat_completions_stream(
+                model, context, "sk-test", "https://api.test.com"
+            )
+            # 让后台协程有机会执行。
+            await asyncio.sleep(0.01)
+            with pytest.raises(asyncio.CancelledError):
+                await stream.result()
