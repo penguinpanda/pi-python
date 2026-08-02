@@ -1,31 +1,20 @@
 """_agent_loop.py 模块测试。
 
-使用 mock StreamFn 注入假的 LLM 事件流，验证 agent 循环的各个路径。
+使用 Faux Provider 注入脚本化的 LLM 事件流，验证 agent 循环的各个路径。
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
-from typing import Any
 
 import pytest
-from pi_ai._event_stream import AssistantMessageEventStream
 from pi_ai._types import (
     AssistantMessage,
-    ContentBlock,
-    DeltaEvent,
-    DoneEvent,
-    ErrorEvent,
-    ImageContent,
     Model,
     TextContent,
-    ToolCallContent,
-    ToolCallDeltaEvent,
-    ToolResultMessage,
-    Usage,
     UserMessage,
 )
+from pi_ai.providers.faux import FauxCore, faux_assistant_message, faux_provider, faux_tool_call
 
 from pi_agent._agent_loop import run_agent_loop, run_agent_loop_continue
 from pi_agent._types import (
@@ -54,42 +43,41 @@ def _make_model() -> Model:
     )
 
 
-def _make_stream(
-    events: list[dict[str, Any]],
-    final_message: AssistantMessage,
-) -> AssistantMessageEventStream:
-    """创建预设事件的 AssistantMessageEventStream。"""
-    stream = AssistantMessageEventStream()
-    for evt in events:
-        stream.push(evt)  # type: ignore[arg-type]
-    stream.end(final_message)
-    return stream
+def _make_faux(responses: list[AssistantMessage]) -> FauxCore:
+    """创建脚本化 Faux 响应序列，返回 FauxCore。
+
+    其 `.stream` 签名即 StreamFn，可直接传给 run_agent_loop。
+    """
+    core = faux_provider()
+    core.set_responses(responses)
+    return core
 
 
-def _make_stream_fn(
-    events: list[dict[str, Any]],
-    final_message: AssistantMessage,
-) -> StreamFn:
-    """创建返回预设事件的 mock stream_fn。"""
-    async def _fn(model, context, options):
-        return _make_stream(events, final_message)
-    return _fn
+def _make_stream_fn(message: AssistantMessage) -> StreamFn:
+    """创建返回单条脚本化响应的 Faux stream_fn。"""
+    return _make_faux([message]).stream
 
 
-def _make_counting_stream_fn(
-    responses: list[tuple[list[dict[str, Any]], AssistantMessage]],
-) -> StreamFn:
-    """创建按调用次数返回不同响应的 mock stream_fn。"""
-    call_count = [0]
+def _make_counting_stream_fn(messages: list[AssistantMessage]) -> StreamFn:
+    """创建按调用次数顺序消费脚本化响应的 Faux stream_fn。"""
+    return _make_faux(list(messages)).stream
 
-    async def _fn(model, context, options):
-        idx = call_count[0]
-        call_count[0] += 1
-        if idx >= len(responses):
-            raise RuntimeError(f"Unexpected LLM call #{idx}")
-        events, final = responses[idx]
-        return _make_stream(events, final)
-    return _fn
+
+def _make_llm_text_response(text: str) -> AssistantMessage:
+    """创建纯文本 LLM 响应的 AssistantMessage。"""
+    return faux_assistant_message(text)
+
+
+def _make_llm_tool_response(
+    tool_name: str,
+    args: dict,
+    tool_call_id: str = "tc-1",
+) -> AssistantMessage:
+    """创建工具调用 LLM 响应的 AssistantMessage。"""
+    return faux_assistant_message(
+        [faux_tool_call(tool_name, args, tool_call_id=tool_call_id)],
+        stop_reason="toolCall",
+    )
 
 
 async def _collect_events(
@@ -138,51 +126,6 @@ def _make_tool(name: str, result_text: str = "ok") -> AgentTool:
     )
 
 
-def _make_llm_text_response(text: str) -> tuple[list[dict], AssistantMessage]:
-    """创建纯文本 LLM 响应的 (events, final_msg)。"""
-    events: list[dict] = [{"type": "delta", "text": text}]
-    final: AssistantMessage = {
-        "role": "assistant",
-        "content": [TextContent(type="text", text=text)],
-        "api": "openai-completions",
-        "provider": "test",
-        "model": "test-model",
-        "stopReason": "end",
-    }
-    return events, final
-
-
-def _make_llm_tool_response(
-    tool_name: str,
-    args: dict,
-    tool_call_id: str = "tc-1",
-) -> tuple[list[dict], AssistantMessage]:
-    """创建工具调用 LLM 响应的 (events, final_msg)。"""
-    args_str = json.dumps(args)
-    events: list[dict] = [{
-        "type": "toolCallDelta",
-        "toolCallId": tool_call_id,
-        "toolName": tool_name,
-        "argsDelta": args_str,
-    }]
-    final: AssistantMessage = {
-        "role": "assistant",
-        "content": [
-            ToolCallContent(
-                type="toolCall",
-                toolCallId=tool_call_id,
-                toolName=tool_name,
-                args=args_str,
-            )
-        ],
-        "api": "openai-completions",
-        "provider": "test",
-        "model": "test-model",
-        "stopReason": "toolCall",
-    }
-    return events, final
-
-
 # ============================================================================
 # 测试
 # ============================================================================
@@ -196,8 +139,8 @@ class TestSingleTurnText:
         prompts = [UserMessage(role="user", content="Hello")]
         context = AgentContext(system_prompt="You are helpful.", messages=[])
 
-        events_data, final = _make_llm_text_response("Hi there!")
-        stream_fn = _make_stream_fn(events_data, final)
+        final = _make_llm_text_response("Hi there!")
+        stream_fn = _make_stream_fn(final)
 
         config = AgentLoopConfig(
             model=_make_model(),
@@ -241,14 +184,11 @@ class TestToolCallLoop:
         )
 
         # Turn 1: tool call
-        tc_events, tc_final = _make_llm_tool_response("search", {"q": "X"})
+        tc_final = _make_llm_tool_response("search", {"q": "X"})
         # Turn 2: text response
-        text_events, text_final = _make_llm_text_response("Found it!")
+        text_final = _make_llm_text_response("Found it!")
 
-        stream_fn = _make_counting_stream_fn([
-            (tc_events, tc_final),
-            (text_events, text_final),
-        ])
+        stream_fn = _make_counting_stream_fn([tc_final, text_final])
 
         config = AgentLoopConfig(
             model=_make_model(),
@@ -299,12 +239,9 @@ class TestToolCallLoop:
             tools=[tool],
         )
 
-        tc_events, tc_final = _make_llm_tool_response("bad_tool", {})
-        text_events, text_final = _make_llm_text_response("ok")
-        stream_fn = _make_counting_stream_fn([
-            (tc_events, tc_final),
-            (text_events, text_final),
-        ])
+        tc_final = _make_llm_tool_response("bad_tool", {})
+        text_final = _make_llm_text_response("ok")
+        stream_fn = _make_counting_stream_fn([tc_final, text_final])
 
         config = AgentLoopConfig(
             model=_make_model(),
@@ -334,26 +271,11 @@ class TestLengthTruncation:
         )
 
         # 模拟 length 截断响应
-        args_str = json.dumps({"q": "incomplete"})
-        final: AssistantMessage = {
-            "role": "assistant",
-            "content": [
-                ToolCallContent(
-                    type="toolCall",
-                    toolCallId="tc-1",
-                    toolName="search",
-                    args=args_str,
-                )
-            ],
-            "api": "test",
-            "provider": "test",
-            "model": "test",
-            "stopReason": "length",
-        }
-
-        stream_fn = _make_stream_fn(
-            [{"type": "done", "message": final}], final
+        final = faux_assistant_message(
+            [faux_tool_call("search", {"q": "incomplete"}, tool_call_id="tc-1")],
+            stop_reason="length",
         )
+        stream_fn = _make_stream_fn(final)
 
         config = AgentLoopConfig(
             model=_make_model(),
@@ -386,12 +308,9 @@ class TestHooks:
             tools=[tool],
         )
 
-        tc_events, tc_final = _make_llm_tool_response("search", {"q": "X"})
-        text_events, text_final = _make_llm_text_response("ok")
-        stream_fn = _make_counting_stream_fn([
-            (tc_events, tc_final),
-            (text_events, text_final),
-        ])
+        tc_final = _make_llm_tool_response("search", {"q": "X"})
+        text_final = _make_llm_text_response("ok")
+        stream_fn = _make_counting_stream_fn([tc_final, text_final])
 
         def _before(tc_id, tc_name, args, ctx):
             from pi_agent._types import BeforeToolCallResult
@@ -427,12 +346,9 @@ class TestHooks:
             tools=[tool],
         )
 
-        tc_events, tc_final = _make_llm_tool_response("search", {"q": "X"})
-        text_events, text_final = _make_llm_text_response("ok")
-        stream_fn = _make_counting_stream_fn([
-            (tc_events, tc_final),
-            (text_events, text_final),
-        ])
+        tc_final = _make_llm_tool_response("search", {"q": "X"})
+        text_final = _make_llm_text_response("ok")
+        stream_fn = _make_counting_stream_fn([tc_final, text_final])
 
         def _after(tc_id, tc_name, result, is_error, ctx):
             from pi_agent._types import AfterToolCallResult
@@ -485,8 +401,8 @@ class TestTerminate:
             tools=[tool],
         )
 
-        tc_events, tc_final = _make_llm_tool_response("finish", {})
-        stream_fn = _make_stream_fn(tc_events, tc_final)
+        tc_final = _make_llm_tool_response("finish", {})
+        stream_fn = _make_stream_fn(tc_final)
 
         config = AgentLoopConfig(
             model=_make_model(),
@@ -509,8 +425,8 @@ class TestShouldStopAfterTurn:
         prompts = [UserMessage(role="user", content="Hi")]
         context = AgentContext(system_prompt="test", messages=[])
 
-        events_data, final = _make_llm_text_response("Hello")
-        stream_fn = _make_stream_fn(events_data, final)
+        final = _make_llm_text_response("Hello")
+        stream_fn = _make_stream_fn(final)
 
         config = AgentLoopConfig(
             model=_make_model(),
@@ -534,8 +450,8 @@ class TestCancellation:
         prompts = [UserMessage(role="user", content="Hi")]
         context = AgentContext(system_prompt="test", messages=[])
 
-        events_data, final = _make_llm_text_response("Hello")
-        stream_fn = _make_stream_fn(events_data, final)
+        final = _make_llm_text_response("Hello")
+        stream_fn = _make_stream_fn(final)
 
         config = AgentLoopConfig(
             model=_make_model(),
@@ -568,18 +484,10 @@ class TestLLMError:
         prompts = [UserMessage(role="user", content="Hi")]
         context = AgentContext(system_prompt="test", messages=[])
 
-        error_msg: AssistantMessage = {
-            "role": "assistant",
-            "content": [],
-            "api": "test",
-            "provider": "test",
-            "model": "test",
-            "stopReason": "error",
-            "errorMessage": "API call failed",
-        }
-        events_data: list[dict] = [{"type": "error", "reason": "API call failed", "error": error_msg}]
-
-        stream_fn = _make_stream_fn(events_data, error_msg)
+        error_msg = faux_assistant_message(
+            [], stop_reason="error", error_message="API call failed"
+        )
+        stream_fn = _make_stream_fn(error_msg)
 
         config = AgentLoopConfig(
             model=_make_model(),
@@ -613,8 +521,8 @@ class TestRunAgentLoopContinue:
             ],
         )
 
-        events_data, final = _make_llm_text_response("How can I help?")
-        stream_fn = _make_stream_fn(events_data, final)
+        final = _make_llm_text_response("How can I help?")
+        stream_fn = _make_stream_fn(final)
 
         config = AgentLoopConfig(
             model=_make_model(),

@@ -56,6 +56,16 @@ uv run python -m pi_coding_agent --model deepseek-v4-flash -p "explain this code
 # 指定 provider
 uv run python -m pi_coding_agent --provider openai --model gpt-4o -p "what is Python?"
 
+# 本地 Ollama（需 Ollama 已运行且模型已 pull）
+uv run python -m pi_coding_agent --provider ollama --model qwen3:30b -p "what is Python?"
+
+# Faux Provider（离线验证管道，无脚本化响应时返回错误消息）
+uv run python -m pi_coding_agent --provider faux --model faux-1 -p "hi"
+
+# 列出所有可用模型（可配合 --provider 过滤）
+uv run python -m pi_coding_agent --list-models
+uv run python -m pi_coding_agent --list-models --provider ollama
+
 # 自定义系统提示
 uv run python -m pi_coding_agent --system-prompt "You are a Python expert." -p "..."
 
@@ -80,7 +90,7 @@ uv run python -m pi_coding_agent --version
 ## CLI 参考
 
 ```
-pi [-p] [--model MODEL] [--provider PROVIDER]
+pi [-p] [--model MODEL] [--provider PROVIDER] [--list-models]
    [--system-prompt PROMPT] [--append-system-prompt PROMPT]
    [--session PATH] [--no-session]
    [--tools WHITELIST] [--exclude-tools BLACKLIST] [--no-tools]
@@ -92,7 +102,8 @@ pi [-p] [--model MODEL] [--provider PROVIDER]
 |------|------|------|
 | `-p, --print` | flag | 单次 print 模式（非交互） |
 | `--model` | str | 模型 ID（如 `deepseek-chat`、`gpt-4o`） |
-| `--provider` | str | Provider ID（如 `deepseek`、`openai`） |
+| `--provider` | str | Provider ID（如 `deepseek`、`openai`、`ollama`、`faux`） |
+| `--list-models` | flag | 列出所有可用模型并退出（可配合 `--provider` 过滤） |
 | `--system-prompt` | str | 覆盖系统提示 |
 | `--append-system-prompt` | str | 追加到系统提示 |
 | `--session` | str | 已有会话 JSONL 文件路径 |

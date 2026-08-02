@@ -49,6 +49,10 @@ async def _async_main(args: list[str] | None = None) -> int:
     models = create_default_models()
     set_agent_stream_fn(models.stream)
 
+    # --list-models: 列出所有可用模型后直接退出（支持 --provider 过滤）
+    if parsed.list_models:
+        return _print_models(models, provider_id=parsed.provider)
+
     # 解析模型
     model = _resolve_model(models, parsed, settings)
 
@@ -109,7 +113,9 @@ def _create_parser() -> argparse.ArgumentParser:
 
     # 模型选择
     p.add_argument("--model", type=str, help="Model ID (e.g., deepseek-chat, gpt-4o)")
-    p.add_argument("--provider", type=str, help="Provider ID (e.g., deepseek, openai)")
+    p.add_argument("--provider", type=str, help="Provider ID (e.g., deepseek, openai, ollama, faux)")
+    p.add_argument("--list-models", action="store_true",
+                   help="List all available models and exit")
 
     # 系统提示
     p.add_argument("--system-prompt", type=str, help="Override system prompt")
@@ -133,6 +139,37 @@ def _create_parser() -> argparse.ArgumentParser:
     p.add_argument("message", nargs="?", type=str, help="User message (optional, can use stdin)")
 
     return p
+
+
+def _print_models(models, provider_id: str | None = None) -> int:
+    """列出 Provider 及其模型与能力。
+
+    provider_id 非空时只列该 Provider；不存在则返回 1。
+
+    Returns:
+        0: 成功；1: provider 不存在
+    """
+    if provider_id is not None:
+        provider = models.get_provider(provider_id)
+        if provider is None:
+            print(f"Unknown provider: {provider_id}", file=sys.stderr)
+            return 1
+        providers = [provider]
+    else:
+        providers = models.get_providers()
+
+    for provider in providers:
+        print(f"{provider.name} ({provider.id}):")
+        for m in provider.get_models():
+            caps: list[str] = []
+            if m.thinking:
+                caps.append("thinking")
+            if m.supportsToolCalling:
+                caps.append("tools")
+            if m.supportsImages:
+                caps.append("images")
+            print(f"  {m.id:<40} {m.name}  [{', '.join(caps) or 'text'}]")
+    return 0
 
 
 def _resolve_model(models, parsed, settings: dict):

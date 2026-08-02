@@ -3,20 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 import pytest
-from pi_ai._event_stream import AssistantMessageEventStream
 from pi_ai._types import (
     AssistantMessage,
     Model,
     TextContent,
-    ToolCallContent,
     UserMessage,
 )
+from pi_ai.providers.faux import FauxCore, faux_assistant_message, faux_provider
 
 from pi_agent._agent import Agent, AgentOptions
-from pi_agent._stream_fn import get_default_stream_fn, set_default_stream_fn
+from pi_agent._stream_fn import set_default_stream_fn
 from pi_agent._types import (
     AgentEvent,
     AgentTool,
@@ -40,40 +38,24 @@ def _make_model() -> Model:
     )
 
 
-def _make_text_stream(text: str) -> AssistantMessageEventStream:
-    """创建纯文本响应的流。"""
-    stream = AssistantMessageEventStream()
-    stream.push({"type": "delta", "text": text})
-    final: AssistantMessage = {
-        "role": "assistant",
-        "content": [TextContent(type="text", text=text)],
-        "api": "openai-completions",
-        "provider": "test",
-        "model": "test-model",
-        "stopReason": "end",
-    }
-    stream.end(final)
-    return stream
+def _make_faux(responses: list[AssistantMessage]) -> FauxCore:
+    """创建脚本化 Faux 响应序列，返回 FauxCore。
+
+    其 `.stream` 签名即 StreamFn，可直接注入 Agent 或注册为默认。
+    """
+    core = faux_provider()
+    core.set_responses(responses)
+    return core
 
 
 def _make_faux_stream_fn(text: str = "Hello!") -> StreamFn:
-    """创建返回固定文本响应的 mock stream_fn。"""
-    async def _fn(model, context, options):
-        return _make_text_stream(text)
-    return _fn
+    """创建返回固定文本响应的 Faux stream_fn。"""
+    return _make_faux([faux_assistant_message(text)]).stream
 
 
 def _make_modeled_stream_fn(responses: list[str]) -> StreamFn:
-    """创建按调用次数返回不同文本的 mock stream_fn。"""
-    call_count = [0]
-
-    async def _fn(model, context, options):
-        idx = call_count[0]
-        call_count[0] += 1
-        if idx >= len(responses):
-            raise RuntimeError(f"Unexpected call #{idx}")
-        return _make_text_stream(responses[idx])
-    return _fn
+    """创建按调用次数返回不同文本的 Faux stream_fn（顺序消费响应序列）。"""
+    return _make_faux([faux_assistant_message(r) for r in responses]).stream
 
 
 def _make_tool(name: str, result_text: str = "tool result") -> AgentTool:
@@ -223,31 +205,32 @@ class TestAgentAbort:
     @pytest.mark.asyncio
     async def test_abort_stops_run(self):
         """abort() 后 agent loop 停止，agent_end 事件正确发出。"""
-        # 创建一个永不结束的 stream_fn（一直等待）
-        async def _hanging_fn(model, context, options):
-            stream = AssistantMessageEventStream()
-            # 不推送任何事件也不 end → 永远等待
-            return stream
+        # 用 Faux 慢速流模拟长回复：abort 在流式输出过程中触发，
+        # agent loop 的 signal 检查会中断循环并发出 agent_end。
+        core = faux_provider(tokens_per_second=5)
+        core.set_responses([faux_assistant_message("A" * 500)])
 
         agent = Agent(AgentOptions(
             model=_make_model(),
-            stream_fn=_hanging_fn,
+            stream_fn=core.stream,
         ))
 
         received: list[AgentEvent] = []
         agent.subscribe(lambda e: received.append(e))
 
-        # 在后台启动 prompt
+        # 在后台启动 prompt，稍后 abort
         async def _run_and_abort():
             await asyncio.sleep(0.05)  # 给 prompt 时间启动
             agent.abort()
 
-        # 并发运行
-        with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(
-                asyncio.gather(agent.prompt("Hi"), _run_and_abort()),
-                timeout=2.0,
-            )
+        # 不应超时：abort 应让 loop 干净停止
+        await asyncio.wait_for(
+            asyncio.gather(agent.prompt("Hi"), _run_and_abort()),
+            timeout=2.0,
+        )
+
+        event_types = [e["type"] for e in received]
+        assert "agent_end" in event_types
 
 
 class TestAgentMutualExclusion:
@@ -256,13 +239,13 @@ class TestAgentMutualExclusion:
     @pytest.mark.asyncio
     async def test_concurrent_prompts_raise(self):
         """两个并发 prompt() 抛 RuntimeError。"""
-        async def _slow_fn(model, context, options):
-            await asyncio.sleep(0.1)
-            return _make_text_stream("slow")
+        # Faux 慢速流：第一个 prompt 仍在流式输出时，第二个 prompt 抛 RuntimeError。
+        core = faux_provider(tokens_per_second=4)
+        core.set_responses([faux_assistant_message("A" * 20)])
 
         agent = Agent(AgentOptions(
             model=_make_model(),
-            stream_fn=_slow_fn,
+            stream_fn=core.stream,
         ))
 
         async def _first():
@@ -297,13 +280,13 @@ class TestAgentReset:
     @pytest.mark.asyncio
     async def test_reset_while_running_raises(self):
         """运行时 reset 抛异常。"""
-        async def _slow_fn(model, context, options):
-            await asyncio.sleep(10)
-            return _make_text_stream("slow")
+        # Faux 慢速流：prompt 仍在流式输出时 reset 抛 RuntimeError。
+        core = faux_provider(tokens_per_second=4)
+        core.set_responses([faux_assistant_message("A" * 20)])
 
         agent = Agent(AgentOptions(
             model=_make_model(),
-            stream_fn=_slow_fn,
+            stream_fn=core.stream,
         ))
 
         # 启动 prompt 但不等待
@@ -336,22 +319,23 @@ class TestAgentState:
         assert agent.state.is_streaming is False
 
     @pytest.mark.asyncio
-    async def test_error_message_on_exception(self):
-        """异常时合成 agent_end 事件。"""
-        called: list = []
-
-        async def _failing_fn(model, context, options):
-            raise RuntimeError("Boom!")
+    async def test_error_response_sets_error_message(self):
+        """LLM 返回 error stopReason → agent_end 事件 + state.error_message。"""
+        core = _make_faux([
+            faux_assistant_message([], stop_reason="error", error_message="Boom!"),
+        ])
 
         agent = Agent(AgentOptions(
             model=_make_model(),
-            stream_fn=_failing_fn,
+            stream_fn=core.stream,
         ))
 
+        called: list[str] = []
         agent.subscribe(lambda e: called.append(e["type"]))
 
-        with pytest.raises(RuntimeError, match="Boom!"):
-            await agent.prompt("Hi")
+        await agent.prompt("Hi")
 
-        # 应有 agent_end（由 Agent 在异常处理中合成）
+        # agent_end 应发出
         assert "agent_end" in called
+        # AgentState 记录错误消息
+        assert agent.state.error_message == "Boom!"
