@@ -220,22 +220,20 @@ Tool:
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import TYPE_CHECKING, cast
 
 from pi_ai._types import (
     AssistantMessage,
-    DeltaEvent,
     DoneEvent,
     ErrorEvent,
     Message,
+    StartEvent,
     StreamOptions,
     TextContent,
-    ThinkingDeltaEvent,
-    ToolCallContent,
-    ToolCallDeltaEvent,
+    ToolCall,
     ToolResultMessage,
     UserMessage,
+    now_ms,
 )
 
 from ._types import (
@@ -550,8 +548,8 @@ async def _run_loop(
             return messages
 
         # -- 提取工具调用 --
-        tool_calls: list[ToolCallContent] = cast(
-            list[ToolCallContent],
+        tool_calls: list[ToolCall] = cast(
+            list[ToolCall],
             [
                 c
                 for c in assistant_msg.get("content", [])
@@ -692,7 +690,7 @@ async def _stream_assistant_response(
     llm_context = LlmContext(
         messages=llm_messages,
         tools=_tools_to_pi_ai(context.tools or []),
-        system=context.system_prompt,
+        systemPrompt=context.system_prompt,
     )
 
     # 5. 调用 LLM
@@ -702,13 +700,15 @@ async def _stream_assistant_response(
 
     response = await stream_fn(config.model, llm_context, options)
 
-    # 6. 迭代事件流，累积 partial message
-    partial_content: list = []
+    # 6. 迭代事件流。
+    #
+    # 12 事件协议下，每个增量事件都携带 partial 快照，
+    # 因此不需要在此自行拼接内容块。
     final_stop_reason = "stop"
     final_error_message: str | None = None
     _final_msg: AssistantMessage | None = None  # DoneEvent/ErrorEvent 的完整消息
 
-    # 发出 message_start（使用临时占位消息）
+    # 当前 partial 消息（随增量事件更新）。
     temp_msg: AssistantMessage = {
         "role": "assistant",
         "content": [],
@@ -724,50 +724,20 @@ async def _stream_assistant_response(
 
             event_type = event.get("type")
 
-            if event_type == "delta":
-                delta = cast(DeltaEvent, event)
-                partial_content.append(TextContent(type="text", text=delta["text"]))
-                temp_msg["content"] = list(partial_content)
-                await emit({
-                    "type": "message_update",
-                    "message": temp_msg,
-                    "assistant_message_event": delta,
-                })
+            if event_type == "start":
+                temp_msg = cast(StartEvent, event)["partial"]
 
-            elif event_type == "toolCallDelta":
-                tcd = cast(ToolCallDeltaEvent, event)
-                tc_id = tcd["toolCallId"]
-                tc_name = tcd["toolName"]
-                tc_args_delta = tcd["argsDelta"]
-                existing = _find_tool_call_block(partial_content, tc_id)
-                if existing is not None:
-                    existing["args"] += tc_args_delta
-                else:
-                    partial_content.append(ToolCallContent(
-                        type="toolCall",
-                        toolCallId=tc_id,
-                        toolName=tc_name,
-                        args=tc_args_delta,
-                    ))
-                temp_msg["content"] = list(partial_content)
+            elif event_type in (
+                "text_start", "text_delta", "text_end",
+                "thinking_start", "thinking_delta", "thinking_end",
+                "toolcall_start", "toolcall_delta", "toolcall_end",
+            ):
+                partial = event["partial"]
+                temp_msg = partial
                 await emit({
                     "type": "message_update",
                     "message": temp_msg,
-                    "assistant_message_event": tcd,
-                })
-
-            elif event_type == "thinkingDelta":
-                td = cast(ThinkingDeltaEvent, event)
-                partial_content.append({
-                    "type": "thinking",
-                    "thinking": td["thinking"],
-                    "signature": None,
-                })
-                temp_msg["content"] = list(partial_content)
-                await emit({
-                    "type": "message_update",
-                    "message": temp_msg,
-                    "assistant_message_event": td,
+                    "assistant_message_event": event,
                 })
 
             elif event_type == "done":
@@ -806,14 +776,9 @@ async def _stream_assistant_response(
             if "stopReason" not in result:
                 result["stopReason"] = final_stop_reason
         else:
-            result = cast(AssistantMessage, {
-                "role": "assistant",
-                "content": partial_content,
-                "api": config.model.api,
-                "provider": config.model.provider,
-                "model": config.model.id,
-                "stopReason": final_stop_reason,
-            })
+            # 没有 done/error 时，回退到最后一次 partial 快照
+            result = temp_msg
+            result["stopReason"] = final_stop_reason
         if final_error_message and "errorMessage" not in result:
             result["errorMessage"] = final_error_message
 
@@ -828,7 +793,7 @@ async def _stream_assistant_response(
 
 
 async def _execute_tool_calls(
-    tool_calls: list[ToolCallContent],
+    tool_calls: list[ToolCall],
     tools: list,
     config: AgentLoopConfig,
     emit: AgentEventSink,
@@ -850,8 +815,9 @@ async def _execute_tool_calls(
     [
     {
     type:"toolCall",
-    toolName:"search",
-    args:"{\"query\":\"python\"}"
+    id:"call_1",
+    name:"search",
+    arguments:{"query":"python"}
     }
     ]
 
@@ -931,14 +897,11 @@ async def _execute_tool_calls(
     for tc in tool_calls:
         _check_signal(signal)
 
-        tc_id: str = tc["toolCallId"]
-        tc_name: str = tc["toolName"]
+        tc_id: str = tc["id"]
+        tc_name: str = tc["name"]
 
-        # 解析 args
-        try:
-            args = json.loads(tc["args"])
-        except json.JSONDecodeError:
-            args = {}
+        # 参数已由事件协议解析为对象（ToolCall.arguments）。
+        args: dict = tc["arguments"]
 
         # === 阶段 1: 准备 ===
         tool_def = _find_tool(tools, tc_name)
@@ -1062,22 +1025,14 @@ def _find_tool(tools: list, name: str):
     return None
 
 
-def _find_tool_call_block(blocks: list, tc_id: str) -> ToolCallContent | None:
-    """在 content blocks 中查找特定 toolCallId 的块。"""
-    for b in blocks:
-        if b.get("type") == "toolCall" and b.get("toolCallId") == tc_id:
-            return b
-    return None
-
-
 def _fail_tool_calls_from_truncated(
-    tool_calls: list[ToolCallContent],
+    tool_calls: list[ToolCall],
 ) -> list[ToolResultMessage]:
     """截断保护：stopReason="length" 时将所有工具标记为错误。"""
     results: list[ToolResultMessage] = []
     for tc in tool_calls:
-        tc_id = tc["toolCallId"]
-        tc_name = tc["toolName"]
+        tc_id = tc["id"]
+        tc_name = tc["name"]
         error_text = (
             f"Tool call arguments may be truncated because the model response "
             f"reached its max output length. Tool '{tc_name}' was not executed."
@@ -1087,6 +1042,8 @@ def _fail_tool_calls_from_truncated(
             toolCallId=tc_id,
             toolName=tc_name,
             content=[TextContent(type="text", text=error_text)],
+            isError=True,
+            timestamp=now_ms(),
         ))
     return results
 
@@ -1103,6 +1060,8 @@ def _make_tool_result_message(
         "toolCallId": tc_id,
         "toolName": tc_name,
         "content": list(result.content),
+        "isError": is_error,
+        "timestamp": now_ms(),
     }
     if result.added_tool_names:
         msg["addedToolNames"] = list(result.added_tool_names)

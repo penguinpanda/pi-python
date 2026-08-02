@@ -21,7 +21,7 @@ class TestToResponsesInput:
     def test_user_multimodal_text_and_image_url(self):
         messages = [{'role': 'user', 'content': [
             {'type': 'text', 'text': 'Describe:'},
-            {'type': 'image', 'url': 'https://example.com/pic.png', 'data': None, 'mediaType': None},
+            {'type': 'image', 'url': 'https://example.com/pic.png', 'data': None, 'mimeType': None},
         ]}]
         result = _to_responses_input(messages, system=None)
         parts = result[0]['content']
@@ -30,7 +30,7 @@ class TestToResponsesInput:
 
     def test_user_image_base64(self):
         messages = [{'role': 'user', 'content': [
-            {'type': 'image', 'url': None, 'data': 'abc123', 'mediaType': 'image/jpeg'},
+            {'type': 'image', 'url': None, 'data': 'abc123', 'mimeType': 'image/jpeg'},
         ]}]
         result = _to_responses_input(messages, system=None)
         img = result[0]['content'][0]
@@ -66,7 +66,7 @@ class TestToResponsesInput:
     def test_user_image_filtered_when_model_no_images(self):
         messages = [{'role': 'user', 'content': [
             {'type': 'text', 'text': 'Hi'},
-            {'type': 'image', 'url': 'https://example.com/pic.png', 'data': None, 'mediaType': None},
+            {'type': 'image', 'url': 'https://example.com/pic.png', 'data': None, 'mimeType': None},
         ]}]
         # _make_model() default input=['text'] — no image capability
         result = _to_responses_input(messages, system=None, model=_make_model())
@@ -77,7 +77,7 @@ class TestToResponsesInput:
 
     def test_user_image_kept_when_model_supports_images(self):
         messages = [{'role': 'user', 'content': [
-            {'type': 'image', 'url': 'https://example.com/pic.png', 'data': None, 'mediaType': None},
+            {'type': 'image', 'url': 'https://example.com/pic.png', 'data': None, 'mimeType': None},
         ]}]
         model = _make_model()
         model.input = ['text', 'image']
@@ -181,9 +181,11 @@ class TestResponsesStream:
         client = _mock_client(events)
 
         collected, _ = await _collect_events(model, context, client)
-        assert [e["type"] for e in collected] == ["delta", "delta", "done"]
-        assert collected[0]["text"] == "Hello"
-        assert collected[1]["text"] == " world"
+        assert [e["type"] for e in collected] == [
+            "start", "text_start", "text_delta", "text_delta", "text_end", "done",
+        ]
+        assert collected[2]["delta"] == "Hello"
+        assert collected[3]["delta"] == " world"
 
         msg = collected[-1]["message"]
         assert msg["role"] == "assistant"
@@ -207,13 +209,19 @@ class TestResponsesStream:
         client = _mock_client(events)
 
         collected, _ = await _collect_events(model, context, client)
-        thinking = [e for e in collected if e["type"] == "thinkingDelta"]
-        assert [t["thinking"] for t in thinking] == ["Let me think", " step by step"]
+        assert [e["type"] for e in collected] == [
+            "start",
+            "thinking_start", "thinking_delta", "thinking_delta", "thinking_end",
+            "text_start", "text_delta", "text_end",
+            "done",
+        ]
+        thinking = [e for e in collected if e["type"] == "thinking_delta"]
+        assert [t["delta"] for t in thinking] == ["Let me think", " step by step"]
 
         msg = collected[-1]["message"]
         # Thinking 块在 Text 块之前。
         assert msg["content"] == [
-            {"type": "thinking", "thinking": "Let me think step by step", "signature": None},
+            {"type": "thinking", "thinking": "Let me think step by step"},
             {"type": "text", "text": "Answer"},
         ]
 
@@ -233,7 +241,7 @@ class TestResponsesStream:
         client = _mock_client(events)
 
         collected, _ = await _collect_events(model, context, client)
-        assert [e["type"] for e in collected] == ["done"]
+        assert [e["type"] for e in collected] == ["start", "done"]
         assert collected[-1]["message"]["content"] == []
 
     @pytest.mark.asyncio
@@ -254,22 +262,20 @@ class TestResponsesStream:
         client = _mock_client(events)
 
         collected, _ = await _collect_events(model, context, client)
-        tool_deltas = [e for e in collected if e["type"] == "toolCallDelta"]
+        assert [e["type"] for e in collected] == [
+            "start", "toolcall_start", "toolcall_delta", "toolcall_delta", "toolcall_end", "done",
+        ]
+        tool_deltas = [e for e in collected if e["type"] == "toolcall_delta"]
         assert len(tool_deltas) == 2
-        assert tool_deltas[0] == {
-            "type": "toolCallDelta",
-            "toolCallId": "call_1",
-            "toolName": "get_weather",
-            "argsDelta": '{"city":',
-        }
-        assert tool_deltas[1]["argsDelta"] == '"Beijing"}'
+        assert tool_deltas[0]["delta"] == '{"city":'
+        assert tool_deltas[1]["delta"] == '"Beijing"}'
 
         msg = collected[-1]["message"]
         assert msg["content"] == [{
             "type": "toolCall",
-            "toolCallId": "call_1",
-            "toolName": "get_weather",
-            "args": '{"city":"Beijing"}',
+            "id": "call_1",
+            "name": "get_weather",
+            "arguments": {"city": "Beijing"},
         }]
 
     @pytest.mark.asyncio
@@ -288,7 +294,7 @@ class TestResponsesStream:
         client = _mock_client(events)
 
         collected, _ = await _collect_events(model, context, client)
-        assert [e["type"] for e in collected] == ["done"]
+        assert [e["type"] for e in collected] == ["start", "done"]
         assert collected[-1]["message"]["content"] == []
 
     @pytest.mark.asyncio
@@ -309,6 +315,7 @@ class TestResponsesStream:
         assert msg["usage"] == {
             "input": 7, "output": 3, "cacheRead": 0, "cacheWrite": 0,
             "totalTokens": 10,
+            "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0},
         }
 
     @pytest.mark.asyncio
@@ -320,7 +327,7 @@ class TestResponsesStream:
         client = _mock_client(events)
 
         collected, _ = await _collect_events(model, context, client)
-        assert [e["type"] for e in collected] == ["done"]
+        assert [e["type"] for e in collected] == ["start", "done"]
         msg = collected[-1]["message"]
         assert msg["content"] == []
         assert msg["usage"]["totalTokens"] == 0
@@ -332,7 +339,7 @@ class TestResponsesStream:
         client = _mock_client([])
 
         collected, _ = await _collect_events(model, context, client)
-        assert [e["type"] for e in collected] == ["done"]
+        assert [e["type"] for e in collected] == ["start", "done"]
         assert collected[-1]["message"]["content"] == []
 
     @pytest.mark.asyncio
@@ -346,7 +353,7 @@ class TestResponsesStream:
         context = Context(
             messages=[{"role": "user", "content": "Hi"}],
             tools=[tool],
-            system="Be helpful",
+            systemPrompt="Be helpful",
         )
         options = {"temperature": 0.5, "maxTokens": 100}
         client = _mock_client([_event("response.completed", response=None)])

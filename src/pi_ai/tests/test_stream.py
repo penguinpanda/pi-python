@@ -131,5 +131,5 @@ async def test_tool_calling():
     ]
     if tool_calls:
         tc = tool_calls[0]
-        assert tc["toolName"] == "get_weather"
-        assert "Beijing" in tc["args"]
+        assert tc["name"] == "get_weather"
+        assert tc["arguments"].get("city") == "Beijing"

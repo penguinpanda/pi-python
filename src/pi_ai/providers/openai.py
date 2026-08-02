@@ -37,7 +37,7 @@ OpenAI Provider。
             Provider
 """
 
-from .._types import Model
+from .._types import Model, ModelCost
 from ..auth import env_api_key_auth
 from ..provider import create_provider, Provider
 
@@ -80,10 +80,10 @@ OPENAI_MODELS: list[Model] = [
         input=["text", "image"],
         output=["text"],
         maxTokens=16384,
-        thinking=False,
+        reasoning=False,
         supportsToolCalling=True,
         supportsImages=True,
-        cost={"input": 2.50, "output": 10.00, "cacheRead": 1.25, "cacheWrite": 2.50},
+        cost=ModelCost(input=2.50, output=10.00, cacheRead=1.25, cacheWrite=2.50),
     ),
 
     # ------------------------------------------------------
@@ -106,10 +106,10 @@ OPENAI_MODELS: list[Model] = [
         input=["text", "image"],
         output=["text"],
         maxTokens=16384,
-        thinking=False,
+        reasoning=False,
         supportsToolCalling=True,
         supportsImages=True,
-        cost={"input": 0.15, "output": 0.60, "cacheRead": 0.075, "cacheWrite": 0.15},
+        cost=ModelCost(input=0.15, output=0.60, cacheRead=0.075, cacheWrite=0.15),
     ),
 
     # ------------------------------------------------------
@@ -131,10 +131,10 @@ OPENAI_MODELS: list[Model] = [
         input=["text"],
         output=["text"],
         maxTokens=100000,
-        thinking=True,
+        reasoning=True,
         supportsToolCalling=True,
         supportsImages=False,
-        cost={"input": 1.10, "output": 4.40, "cacheRead": 0.275, "cacheWrite": 1.10},
+        cost=ModelCost(input=1.10, output=4.40, cacheRead=0.275, cacheWrite=1.10),
     ),
 ]
 

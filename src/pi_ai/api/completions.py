@@ -52,17 +52,27 @@ from openai import AsyncOpenAI
 from .._event_stream import AssistantMessageEventStream
 from .._types import (
     AssistantMessage,
+    ContentBlock,
     Context,
     Model,
+    StartEvent,
     StopReason,
     StreamOptions,
     TextContent,
+    TextDeltaEvent,
+    TextEndEvent,
+    TextStartEvent,
+    ToolCall,
+    ToolCallDeltaEvent,
+    ToolCallEndEvent,
+    ToolCallStartEvent,
     Usage,
+    now_ms,
 )
 from ._shared import (
-    accumulate_tool_calls,
     build_error_message,
     empty_usage,
+    parse_tool_arguments,
     to_openai_messages,
     to_openai_tools,
 )
@@ -188,8 +198,8 @@ async def chat_completions_stream(
             # Chat Completions API
             #
             # System Prompt 作为第一条 message。
-            if context.system:
-                messages.insert(0, {"role": "system", "content": context.system})
+            if context.systemPrompt:
+                messages.insert(0, {"role": "system", "content": context.systemPrompt})
 
             # OpenAI Chat Completions 参数。
             #
@@ -222,27 +232,61 @@ async def chat_completions_stream(
             response = await client.chat.completions.create(**kwargs)
 
             # 最终 AssistantMessage.content。
-            content_blocks: list = []
+            content_blocks: list[ContentBlock] = []
 
-            # Tool Call 顺序编号。
-            tool_index: int | None = None
+            # 当前正在累积的内容块（text / toolCall）。
+            current_index: int | None = None
+            current_kind: str | None = None
 
-            # index -> toolCallId
-            #
-            # OpenAI Tool Call
-            #
-            # 会分多次返回，
-            # 因此需要保存映射。
-            tool_call_ids: dict[int, str] = {}  # index -> toolCallId
-
-            # 当前 Tool 名称。
-            current_tool_name: str | None = None
+            # 当前 toolCall 的流式状态。
+            current_tool_id: str | None = None
+            current_raw_args: str = ""
 
             # Token 使用统计。
             usage: Usage = empty_usage()
 
             # 停止标识。
             stop_reason: StopReason = "stop"
+
+            def _partial() -> AssistantMessage:
+                """构造当前累积状态的 partial AssistantMessage 快照。"""
+                return AssistantMessage(
+                    role="assistant",
+                    content=cast(list[ContentBlock], [dict(block) for block in content_blocks]),
+                    api=model.api,
+                    provider=model.provider,
+                    model=model.id,
+                    usage=usage,
+                    stopReason="pending",
+                    timestamp=now_ms(),
+                )
+
+            def _end_current_block() -> None:
+                """结束当前累积块并发射对应的 *_end 事件。"""
+                nonlocal current_kind, current_index, current_tool_id
+                if current_kind == "text" and current_index is not None:
+                    block = cast(TextContent, content_blocks[current_index])
+                    stream.push(TextEndEvent(
+                        type="text_end",
+                        contentIndex=current_index,
+                        content=block["text"],
+                        partial=_partial(),
+                    ))
+                elif current_kind == "toolCall" and current_index is not None:
+                    block = cast(ToolCall, content_blocks[current_index])
+                    block["arguments"] = parse_tool_arguments(current_raw_args)
+                    stream.push(ToolCallEndEvent(
+                        type="toolcall_end",
+                        contentIndex=current_index,
+                        toolCall=block,
+                        partial=_partial(),
+                    ))
+                current_kind = None
+                current_index = None
+                current_tool_id = None
+
+            # 流开始事件。
+            stream.push(StartEvent(type="start", partial=_partial()))
 
             # 持续读取 OpenAI Streaming Chunk。
             #
@@ -266,46 +310,73 @@ async def chat_completions_stream(
 
                 # 文本增量。
                 #
-                # OpenAI 每次返回一小段文本。
-                #
-                # 一方面保存到最终消息，
-                #
-                # 一方面立即推送 Event。
+                # 块切换：当前块不是文本时先结束上一个块。
                 if delta.content:
-                    content_blocks.append(TextContent(type="text", text=delta.content))
-                    stream.push({"type": "delta", "text": delta.content})
+                    if current_kind != "text":
+                        _end_current_block()
+                        current_kind = "text"
+                        content_blocks.append(TextContent(type="text", text=""))
+                        current_index = len(content_blocks) - 1
+                        stream.push(TextStartEvent(
+                            type="text_start",
+                            contentIndex=current_index,
+                            partial=_partial(),
+                        ))
+                    idx = cast(int, current_index)
+                    block = cast(TextContent, content_blocks[idx])
+                    block["text"] += delta.content
+                    stream.push(TextDeltaEvent(
+                        type="text_delta",
+                        contentIndex=idx,
+                        delta=delta.content,
+                        partial=_partial(),
+                    ))
 
                 # Tool Calling 增量。
                 #
                 # Tool 参数可能被拆分成多个 Chunk，
                 #
-                # 因此需要不断拼接。
+                # 因此需要不断拼接原始字符串，
+                # 块结束时再解析为 JSON。
                 if delta.tool_calls:
                     for tc in delta.tool_calls:
-                        idx = tc.index if tc.index is not None else tool_index
-                        # Track tool call ID
-                        if tc.id:
-                            tool_call_ids[idx or 0] = tc.id
+                        tc_id = tc.id or current_tool_id
+                        tc_name = tc.function.name if tc.function else None
+                        tc_args = tc.function.arguments if tc.function else None
 
-                        # 将 Tool Call 增量
-                        #
-                        # 合并到 content_blocks。
-                        tool_index, tool_name = accumulate_tool_calls(
-                            content=content_blocks,
-                            index=idx,
-                            delta_id=tc.id,
-                            delta_name=tc.function.name if tc.function else None,
-                            delta_args=tc.function.arguments if tc.function else None,
-                        )
-                        if tool_name:
-                            current_tool_name = tool_name
-                        if tc.function and tc.function.arguments:
-                            stream.push({
-                                "type": "toolCallDelta",
-                                "toolCallId": tool_call_ids.get(idx or 0, ""),
-                                "toolName": current_tool_name or "",
-                                "argsDelta": tc.function.arguments,
-                            })
+                        # 块切换：当前块不是 toolCall，或出现了新的 toolCall id。
+                        if current_kind != "toolCall" or (tc_id and tc_id != current_tool_id):
+                            _end_current_block()
+                            current_kind = "toolCall"
+                            current_tool_id = tc_id
+                            current_raw_args = ""
+                            content_blocks.append(ToolCall(
+                                type="toolCall",
+                                id=tc_id or "",
+                                name=tc_name or "",
+                                arguments={},
+                            ))
+                            current_index = len(content_blocks) - 1
+                            stream.push(ToolCallStartEvent(
+                                type="toolcall_start",
+                                contentIndex=current_index,
+                                partial=_partial(),
+                            ))
+
+                        block = cast(ToolCall, content_blocks[cast(int, current_index)])
+
+                        # 工具名称可能延迟到达。
+                        if tc_name:
+                            block["name"] = tc_name
+
+                        if tc_args:
+                            current_raw_args += tc_args
+                            stream.push(ToolCallDeltaEvent(
+                                type="toolcall_delta",
+                                contentIndex=cast(int, current_index),
+                                delta=tc_args,
+                                partial=_partial(),
+                            ))
 
                 # Finish reason
                 if choice.finish_reason:
@@ -322,10 +393,14 @@ async def chat_completions_stream(
                         cacheRead=cached_tokens,
                         cacheWrite=0,
                         totalTokens=chunk.usage.total_tokens or 0,
+                        cost={"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0},
                     )
 
             # 所有 Chunk 已处理完成，
             #
+            # 结束最后一个块（若有）。
+            _end_current_block()
+
             # 构造最终 AssistantMessage。
             msg = AssistantMessage(
                 role="assistant",
@@ -336,7 +411,7 @@ async def chat_completions_stream(
                 usage=usage,
                 stopReason=_map_stop_reason(stop_reason),
                 errorMessage=None,
-                timestamp=0,
+                timestamp=now_ms(),
             )
             # reason 取映射后的 stopReason。
             #
@@ -375,8 +450,6 @@ def _map_stop_reason(reason: str) -> StopReason:
 
     转换为 SDK 内部 Stop Reason。
 
-    与 TS mapStopReason() 对齐：
-
         stop / end          → stop
         length              → length
         tool_calls          → toolUse
@@ -397,4 +470,4 @@ def _map_stop_reason(reason: str) -> StopReason:
         "content_filter": "error",
         "network_error": "error",
     }
-    return mapping.get(reason, "error")
+    return cast(StopReason, mapping.get(reason, "error"))

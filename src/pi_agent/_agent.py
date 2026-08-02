@@ -24,6 +24,7 @@ from pi_ai._types import (
     StreamOptions,
     TextContent,
     UserMessage,
+    now_ms,
 )
 
 from ._agent_loop import run_agent_loop, run_agent_loop_continue
@@ -384,8 +385,8 @@ def _normalize_input(
         if images:
             content: list = [TextContent(type="text", text=input)]
             content.extend(images)
-            return [UserMessage(role="user", content=content)]
-        return [UserMessage(role="user", content=input)]
+            return [UserMessage(role="user", content=content, timestamp=now_ms())]
+        return [UserMessage(role="user", content=input, timestamp=now_ms())]
 
     # 单条 AgentMessage
     return [input]

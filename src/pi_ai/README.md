@@ -94,7 +94,7 @@ async def main():
 
     # 构造上下文
     context = Context(
-        system="You are a helpful assistant.",
+        systemPrompt="You are a helpful assistant.",
         messages=[
             {"role": "user", "content": "Hello!"},
         ],
@@ -112,8 +112,8 @@ async def main():
 
     # 流式调用：逐 Token 输出
     async for event in await models.stream(model, context):
-        if event["type"] == "delta":
-            print(event["text"], end="", flush=True)
+        if event["type"] == "text_delta":
+            print(event["delta"], end="", flush=True)
 
 
 asyncio.run(main())
@@ -135,8 +135,8 @@ msg = await models.complete(model, context)
 #     "role": "assistant",
 #     "content": [
 #         {"type": "text", "text": "..."},
-#         {"type": "thinking", "text": "..."},      # 推理模型
-#         {"type": "toolCall", "tool": {...}},       # 工具调用
+#         {"type": "thinking", "thinking": "..."},       # 推理模型
+#         {"type": "toolCall", "id": "...", "name": "...", "arguments": {...}},  # 工具调用
 #     ],
 #     "usage": {"input": 100, "output": 50, ...},
 #     "stopReason": "stop",
@@ -150,25 +150,30 @@ msg = await models.complete(model, context)
 ```python
 async for event in await models.stream(model, context):
     match event["type"]:
-        case "delta":
-            print(event["text"], end="", flush=True)
-        case "toolCallDelta":
-            print(f"\n🔧 calling {event['tool']}...")
-        case "thinkingDelta":
+        case "text_delta":
+            print(event["delta"], end="", flush=True)
+        case "toolcall_delta":
+            pass  # 工具参数增量（原始 JSON 片段）
+        case "thinking_delta":
             pass  # 推理过程（可选输出）
         case "done":
             print(f"\n✅ done ({event['message']['usage']})")
 ```
 
-事件类型一览：
+事件类型一览（12 种）：
 
 | 事件类型 | 说明 | 关键字段 |
 |----------|------|----------|
-| `delta` | 文本增量 | `text` |
-| `toolCallDelta` | 工具调用增量 | `tool` |
-| `thinkingDelta` | 推理过程增量 | `thinking` |
+| `start` | 流开始 | `partial` |
+| `text_start` / `text_delta` / `text_end` | 文本块生命周期 | `contentIndex`, `delta`, `partial` |
+| `thinking_start` / `thinking_delta` / `thinking_end` | 推理块生命周期 | `contentIndex`, `delta`, `partial` |
+| `toolcall_start` / `toolcall_delta` / `toolcall_end` | 工具调用块生命周期 | `contentIndex`, `delta` / `toolCall`, `partial` |
 | `done` | 流正常结束 | `message`（完整 `AssistantMessage`） |
 | `error` | 流异常结束 | `reason`, `error` |
+
+每个增量事件（`start` / `*_start` / `*_delta` / `*_end`）都携带 `partial` 字段——
+当前累积状态的 `AssistantMessage` 快照，消费方无需自行拼接。
+`toolcall_end` 额外携带已解析的 `ToolCall`（`arguments` 为对象）。
 
 也可以通过 `await result()` 等待最终结果：
 
@@ -216,14 +221,14 @@ async def main():
     msg = await models.complete(model, context)
     for block in msg["content"]:
         if block["type"] == "toolCall":
-            print(f"模型要调用工具: {block['toolName']}")
-            print(f"参数: {block['args']}")
+            print(f"模型要调用工具: {block['name']}")
+            print(f"参数: {block['arguments']}")
 
     # 第二轮：将工具执行结果返回给模型
     context.messages.append(msg)  # assistant 消息
     context.messages.append({
         "role": "toolResult",
-        "toolCallId": msg["content"][0]["toolCallId"],
+        "toolCallId": msg["content"][0]["id"],
         "toolName": "get_weather",
         "content": [{"type": "text", "text": "北京今天晴，25°C"}],
     })
@@ -259,12 +264,12 @@ context = Context(
 )
 
 async for event in await models.stream(model, context):
-    if event["type"] == "thinkingDelta":
+    if event["type"] == "thinking_delta":
         # 推理过程
-        print(f"[思考] {event['thinking']}", end="", flush=True)
-    elif event["type"] == "delta":
+        print(f"[思考] {event['delta']}", end="", flush=True)
+    elif event["type"] == "text_delta":
         # 最终回复
-        print(event["text"], end="", flush=True)
+        print(event["delta"], end="", flush=True)
     elif event["type"] == "done":
         msg = event["message"]
         # content 中同时包含 thinking 和 text
@@ -321,8 +326,8 @@ async for event in await models.stream(model, context):
         print(f"请求失败: {event.get('reason', 'unknown')}")
         # event["error"] 包含一个 fallback AssistantMessage
         break
-    elif event["type"] == "delta":
-        print(event["text"], end="")
+    elif event["type"] == "text_delta":
+        print(event["delta"], end="")
 ```
 
 ---
@@ -353,7 +358,7 @@ models.add_provider(
                 input=["text"],
                 output=["text"],
                 maxTokens=16384,
-                thinking=False,
+                reasoning=False,
                 supportsToolCalling=True,
                 supportsImages=False,
             ),

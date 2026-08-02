@@ -10,8 +10,6 @@ from pi_ai._event_stream import AssistantMessageEventStream
 from pi_ai._types import (
     AssistantMessage,
     Context,
-    DeltaEvent,
-    DoneEvent,
     Model,
 )
 from pi_ai.auth import EnvApiKeyAuth

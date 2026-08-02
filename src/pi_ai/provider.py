@@ -64,13 +64,14 @@ Provider 本身不负责：
 """
 
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable, Literal
+from typing import Literal
 
 from ._event_stream import AssistantMessageEventStream
 from ._types import (
     AssistantMessage,
     Context,
     Model,
+    StreamFunction,
     StreamOptions,
 )
 
@@ -88,7 +89,7 @@ from .auth import EnvApiKeyAuth, InMemoryCredentialStore, resolve_api_key
 
 ApiKind = Literal["completions", "responses"]
 
-# 自定义流函数类型。
+# 自定义流函数类型（定义已上移到 _types.py，此处从 _types 导入）。
 #
 # 当 Provider 设置了 _stream_fn 时，
 # stream() 会直接调用它，
@@ -98,11 +99,6 @@ ApiKind = Literal["completions", "responses"]
 #     - API 类型分发（completions / responses）
 #
 # 通常用于测试（例如 Faux Provider）。
-StreamFunction = Callable[
-    [Model, Context, StreamOptions | None],
-    Awaitable[AssistantMessageEventStream],
-]
-
 @dataclass(slots=True)
 class Provider:
     """

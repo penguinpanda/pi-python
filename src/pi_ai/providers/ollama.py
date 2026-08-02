@@ -45,7 +45,7 @@ Ollama 是本地模型运行时，
 
 import httpx
 
-from .._types import Model
+from .._types import Model, ModelCost
 from ..provider import create_provider, Provider
 
 
@@ -89,10 +89,10 @@ OLLAMA_MODELS: list[Model] = [
         input=["text"],
         output=["text"],
         maxTokens=8192,
-        thinking=True,
+        reasoning=True,
         supportsToolCalling=True,
         supportsImages=False,
-        cost={},  # 本地运行，无费用
+        cost=ModelCost(),  # 本地运行，无费用
     ),
 
     # Qwen3 30B-A3B（MoE 版本）
@@ -104,10 +104,10 @@ OLLAMA_MODELS: list[Model] = [
         input=["text"],
         output=["text"],
         maxTokens=8192,
-        thinking=True,
+        reasoning=True,
         supportsToolCalling=True,
         supportsImages=False,
-        cost={},
+        cost=ModelCost(),
     ),
 
     # Qwen3 14B Abliterated（社区去审查版）
@@ -119,10 +119,10 @@ OLLAMA_MODELS: list[Model] = [
         input=["text"],
         output=["text"],
         maxTokens=8192,
-        thinking=True,
+        reasoning=True,
         supportsToolCalling=True,
         supportsImages=False,
-        cost={},
+        cost=ModelCost(),
     ),
 
     # GPT-OSS 20B
@@ -141,10 +141,10 @@ OLLAMA_MODELS: list[Model] = [
         input=["text"],
         output=["text"],
         maxTokens=32768,
-        thinking=True,
+        reasoning=True,
         supportsToolCalling=True,
         supportsImages=False,
-        cost={},
+        cost=ModelCost(),
     ),
 
     # Llama 3.2 Vision
@@ -163,10 +163,10 @@ OLLAMA_MODELS: list[Model] = [
         input=["text", "image"],
         output=["text"],
         maxTokens=4096,
-        thinking=False,
+        reasoning=False,
         supportsToolCalling=True,
         supportsImages=True,
-        cost={},
+        cost=ModelCost(),
     ),
 
     # Qwen 2.5 7B Instruct
@@ -178,10 +178,10 @@ OLLAMA_MODELS: list[Model] = [
         input=["text"],
         output=["text"],
         maxTokens=8192,
-        thinking=False,
+        reasoning=False,
         supportsToolCalling=True,
         supportsImages=False,
-        cost={},
+        cost=ModelCost(),
     ),
 
     # DeepSeek R1 14B
@@ -200,10 +200,10 @@ OLLAMA_MODELS: list[Model] = [
         input=["text"],
         output=["text"],
         maxTokens=8192,
-        thinking=True,
+        reasoning=True,
         supportsToolCalling=False,
         supportsImages=False,
-        cost={},
+        cost=ModelCost(),
     ),
 ]
 
@@ -223,10 +223,10 @@ def _default_model(name: str) -> Model:
         input=["text"],
         output=["text"],
         maxTokens=8192,
-        thinking=False,
+        reasoning=False,
         supportsToolCalling=True,
         supportsImages=False,
-        cost={},  # 本地运行，无费用
+        cost=ModelCost(),  # 本地运行，无费用
     )
 
 

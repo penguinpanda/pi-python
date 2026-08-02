@@ -64,19 +64,31 @@ from openai import AsyncOpenAI
 from .._event_stream import AssistantMessageEventStream
 from .._types import (
     AssistantMessage,
+    ContentBlock,
     Context,
     Model,
+    StartEvent,
     StopReason,
     StreamOptions,
     TextContent,
+    TextDeltaEvent,
+    TextEndEvent,
+    TextStartEvent,
     ThinkingContent,
-    ToolCallContent,
+    ThinkingDeltaEvent,
+    ThinkingEndEvent,
+    ThinkingStartEvent,
+    ToolCall,
+    ToolCallDeltaEvent,
+    ToolCallEndEvent,
+    ToolCallStartEvent,
     Usage,
-    ContentBlock,
+    now_ms,
 )
 from ._shared import (
     build_error_message,
     empty_usage,
+    parse_tool_arguments,
     to_openai_tools,
 )
 
@@ -212,7 +224,7 @@ def _to_responses_input(
                             #
                             # 转换为 Data URL。
                             img["image_url"] = (
-                                f"data:{block.get('mediaType', 'image/png')};base64,{block['data']}"
+                                f"data:{block.get('mimeType', 'image/png')};base64,{block['data']}"
                             )
                         parts.append(img)
                 items.append({"role": "user", "content": parts})
@@ -313,7 +325,7 @@ async def responses_stream(
 
         try:
             client = _create_client(api_key, base_url)
-            input_items = _to_responses_input(context.messages, context.system, model)
+            input_items = _to_responses_input(context.messages, context.systemPrompt, model)
             tools = to_openai_tools(context.tools) if context.tools else None
 
             # Responses API 请求参数。
@@ -347,32 +359,98 @@ async def responses_stream(
             response = await client.responses.create(**kwargs)
 
             # 最终 AssistantMessage.content。
-            content_blocks: list[ContentBlock] = [] 
+            content_blocks: list[ContentBlock] = []
 
-            # 收集模型推理内容。
-            #
-            # Responses API
-            #
-            # Thinking 会单独返回。
-            reasoning_text = ""
+            # 当前正在累积的内容块（text / thinking / toolCall）。
+            current_index: int | None = None
+            current_kind: str | None = None
 
-            # 最终回复文本。
-            current_text = ""
+            # 当前 toolCall 的流式状态。
+            current_tool_id: str = ""
+            current_tool_name: str = ""
+            current_raw_args: str = ""
 
             # Token 使用统计。
             usage: Usage = empty_usage()
             stop_reason: StopReason = "stop"
 
-            # 当前 Tool Call ID。
-            current_call_id: str | None = None
+            def _partial() -> AssistantMessage:
+                """构造当前累积状态的 partial AssistantMessage 快照。"""
+                return AssistantMessage(
+                    role="assistant",
+                    content=cast(list[ContentBlock], [dict(block) for block in content_blocks]),
+                    api=model.api,
+                    provider=model.provider,
+                    model=model.id,
+                    usage=usage,
+                    stopReason="pending",
+                    timestamp=now_ms(),
+                )
 
-            # 当前 Tool 名称。
-            current_call_name: str = ""
+            def _end_current_block() -> None:
+                """结束当前累积块并发射对应的 *_end 事件。"""
+                nonlocal current_kind, current_index, current_tool_id
+                if current_kind == "text" and current_index is not None:
+                    block = content_blocks[current_index]
+                    stream.push(TextEndEvent(
+                        type="text_end",
+                        contentIndex=current_index,
+                        content=block["text"],
+                        partial=_partial(),
+                    ))
+                elif current_kind == "thinking" and current_index is not None:
+                    block = content_blocks[current_index]
+                    stream.push(ThinkingEndEvent(
+                        type="thinking_end",
+                        contentIndex=current_index,
+                        content=block["thinking"],
+                        partial=_partial(),
+                    ))
+                elif current_kind == "toolCall" and current_index is not None:
+                    block = content_blocks[current_index]
+                    block["arguments"] = parse_tool_arguments(current_raw_args)
+                    stream.push(ToolCallEndEvent(
+                        type="toolcall_end",
+                        contentIndex=current_index,
+                        toolCall=cast(ToolCall, block),
+                        partial=_partial(),
+                    ))
+                current_kind = None
+                current_index = None
+                current_tool_id = ""
 
-            # 当前 Tool 参数。
-            #
-            # 会持续拼接。
-            current_call_args: str = ""
+            def _begin_text() -> int:
+                """确保当前块为文本块，返回 contentIndex。"""
+                nonlocal current_kind, current_index
+                if current_kind != "text":
+                    _end_current_block()
+                    current_kind = "text"
+                    content_blocks.append(TextContent(type="text", text=""))
+                    current_index = len(content_blocks) - 1
+                    stream.push(TextStartEvent(
+                        type="text_start",
+                        contentIndex=current_index,
+                        partial=_partial(),
+                    ))
+                return current_index  # type: ignore[return-value]
+
+            def _begin_thinking() -> int:
+                """确保当前块为思考块，返回 contentIndex。"""
+                nonlocal current_kind, current_index
+                if current_kind != "thinking":
+                    _end_current_block()
+                    current_kind = "thinking"
+                    content_blocks.append(ThinkingContent(type="thinking", thinking=""))
+                    current_index = len(content_blocks) - 1
+                    stream.push(ThinkingStartEvent(
+                        type="thinking_start",
+                        contentIndex=current_index,
+                        partial=_partial(),
+                    ))
+                return current_index  # type: ignore[return-value]
+
+            # 流开始事件。
+            stream.push(StartEvent(type="start", partial=_partial()))
 
             # 持续读取 Responses Event。
             #
@@ -383,86 +461,105 @@ async def responses_stream(
                 event_type = getattr(event, "type", None)
 
                 # 文本增量。
-                #
-                # 一方面保存，
-                #
-                # 一方面立即推送 Event。
                 if event_type == "response.output_text.delta":
                     delta = getattr(event, "delta", "")
-                    current_text += delta
-                    stream.push({"type": "delta", "text": delta})
+                    idx = _begin_text()
+                    content_blocks[idx]["text"] += delta
+                    stream.push(TextDeltaEvent(
+                        type="text_delta",
+                        contentIndex=idx,
+                        delta=delta,
+                        partial=_partial(),
+                    ))
 
                 # 新 Tool Call。
-                #
-                # 创建 ToolCall Block。
                 elif event_type == "response.output_item.added":
                     item = getattr(event, "item", None)
                     if item and getattr(item, "type", None) == "function_call":
-                        current_call_id = getattr(item, "call_id", "")
-                        current_call_name = getattr(item, "name", "")
-                        current_call_args = ""
-                        content_blocks.append(ToolCallContent(
+                        _end_current_block()
+                        current_kind = "toolCall"
+                        current_tool_id = getattr(item, "call_id", "") or ""
+                        current_tool_name = getattr(item, "name", "") or ""
+                        current_raw_args = ""
+                        content_blocks.append(ToolCall(
                             type="toolCall",
-                            toolCallId=current_call_id or "",
-                            toolName="",
-                            args="",
+                            id=current_tool_id,
+                            name=current_tool_name,
+                            arguments={},
+                        ))
+                        current_index = len(content_blocks) - 1
+                        stream.push(ToolCallStartEvent(
+                            type="toolcall_start",
+                            contentIndex=current_index,
+                            partial=_partial(),
                         ))
 
                 # Tool 参数增量。
-                #
-                # 持续拼接 Arguments。
                 elif event_type == "response.function_call_arguments.delta":
                     delta = getattr(event, "delta", "")
-                    current_call_args += delta
-                    stream.push({
-                        "type": "toolCallDelta",
-                        "toolCallId": current_call_id or "",
-                        "toolName": current_call_name,
-                        "argsDelta": delta,
-                    })
+                    current_raw_args += delta
+                    stream.push(ToolCallDeltaEvent(
+                        type="toolcall_delta",
+                        contentIndex=current_index or 0,
+                        delta=delta,
+                        partial=_partial(),
+                    ))
 
                 # Tool 参数结束。
-                #
-                # 更新最终 ToolCall Block。
                 elif event_type == "response.function_call_arguments.done":
-                    # Finalize the tool call args
-                    for block in content_blocks:
-                        if block["type"] == "toolCall" and block["toolCallId"] == current_call_id:
-                            block["toolName"] = current_call_name
-                            block["args"] = current_call_args
-                            break
+                    _end_current_block()
 
                 # 模型推理内容。
-                #
-                # Responses API
-                #
-                # 会独立发送。
                 elif event_type == "response.reasoning_summary_part.added":
                     summary = getattr(event, "part", None)
                     if summary and getattr(summary, "type", None) == "summary_text":
                         text = getattr(summary, "text", "")
-                        reasoning_text += text
-                        stream.push({"type": "thinkingDelta", "thinking": text})
+                        idx = _begin_thinking()
+                        content_blocks[idx]["thinking"] += text
+                        stream.push(ThinkingDeltaEvent(
+                            type="thinking_delta",
+                            contentIndex=idx,
+                            delta=text,
+                            partial=_partial(),
+                        ))
 
                 elif event_type == "response.reasoning_text.delta":
                     delta = getattr(event, "delta", "")
-                    reasoning_text += delta
-                    stream.push({"type": "thinkingDelta", "thinking": delta})
+                    idx = _begin_thinking()
+                    content_blocks[idx]["thinking"] += delta
+                    stream.push(ThinkingDeltaEvent(
+                        type="thinking_delta",
+                        contentIndex=idx,
+                        delta=delta,
+                        partial=_partial(),
+                    ))
 
                 # 整个 Responses 请求结束。
-                #
-                # 获取：
-                #
-                # 输出文本
-                #
-                # Usage。
                 elif event_type == "response.completed":
                     resp = getattr(event, "response", None)
                     if resp:
-                        # Extract output text
+                        # 权威输出文本：覆盖实时累积的 text 块；
+                        # 若尚未有 text 块（如仅 completed 事件），则新建。
                         output_text = getattr(resp, "output_text", "")
                         if output_text:
-                            current_text = output_text
+                            if current_kind == "text" and current_index is not None:
+                                content_blocks[current_index]["text"] = output_text
+                            else:
+                                _end_current_block()
+                                current_kind = "text"
+                                content_blocks.append(TextContent(type="text", text=output_text))
+                                current_index = len(content_blocks) - 1
+                                stream.push(TextStartEvent(
+                                    type="text_start",
+                                    contentIndex=current_index,
+                                    partial=_partial(),
+                                ))
+                                stream.push(TextEndEvent(
+                                    type="text_end",
+                                    contentIndex=current_index,
+                                    content=output_text,
+                                    partial=_partial(),
+                                ))
 
                         # Extract usage
                         if hasattr(resp, "usage") and resp.usage:
@@ -472,17 +569,13 @@ async def responses_stream(
                                 cacheRead=0,
                                 cacheWrite=0,
                                 totalTokens=resp.usage.total_tokens or 0,
+                                cost={"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0},
                             )
 
-            if reasoning_text:
-                    content_blocks.append(ThinkingContent(
-                        type="thinking",
-                        thinking=reasoning_text,
-                        signature=None,
-                    ))
-            # 构造最终 ContentBlock。
-            if current_text:
-                content_blocks.append(TextContent(type="text", text=current_text))
+            # 所有事件已处理完成，
+            #
+            # 结束最后一个块（若有）。
+            _end_current_block()
 
             msg = AssistantMessage(
                 role="assistant",
@@ -493,7 +586,7 @@ async def responses_stream(
                 usage=usage,
                 stopReason=stop_reason,
                 errorMessage=None,
-                timestamp=0,
+                timestamp=now_ms(),
             )
             # reason 与 stopReason 一致；Responses API 无独立 error 映射，
             # 未知情况仍以 done 事件结束（保持既有行为）。

@@ -37,7 +37,7 @@ DeepSeek Provider。
            Provider
 """
 
-from .._types import Model
+from .._types import Model, ModelCost
 from ..auth import env_api_key_auth
 from ..provider import create_provider, Provider
 
@@ -70,7 +70,7 @@ DEEPSEEK_MODELS: list[Model] = [
         input=["text"],
         output=["text"],
         maxTokens=65536,            # 64K output # 最大输出 Token 数
-        thinking=False,             # 模型不会生成推理过程。
+        reasoning=False,             # 模型不会生成推理过程。
         supportsToolCalling=True,   # 支持 Function Calling
         supportsImages=False,       # 不支持图片输入
 
@@ -78,7 +78,7 @@ DEEPSEEK_MODELS: list[Model] = [
         #
         # 单位由 Provider 自行约定，
         # 一般与官方 API 定价一致。
-        cost={"input": 0.27, "output": 1.10, "cacheRead": 0.07, "cacheWrite": 0.27},
+        cost=ModelCost(input=0.27, output=1.10, cacheRead=0.07, cacheWrite=0.27),
     ),
 
     # DeepSeek Reasoner
@@ -97,10 +97,10 @@ DEEPSEEK_MODELS: list[Model] = [
         input=["text"],
         output=["text"],
         maxTokens=65536,
-        thinking=True, # 模型会生成推理过程。
+        reasoning=True, # 模型会生成推理过程。
         supportsToolCalling=False,
         supportsImages=False,
-        cost={"input": 0.55, "output": 2.19, "cacheRead": 0.14, "cacheWrite": 0.55},
+        cost=ModelCost(input=0.55, output=2.19, cacheRead=0.14, cacheWrite=0.55),
     ),
 
     # DeepSeek V4 Flash
@@ -118,7 +118,7 @@ DEEPSEEK_MODELS: list[Model] = [
         input=["text"],
         output=["text"],
         maxTokens=384000,           # 最大输出 Token 数
-        thinking=True,             # 模型会生成推理过程。
+        reasoning=True,             # 模型会生成推理过程。
         supportsToolCalling=True,   # 支持 Function Calling
         supportsImages=False,       # 不支持图片输入
 
@@ -126,7 +126,7 @@ DEEPSEEK_MODELS: list[Model] = [
         #
         # 单位由 Provider 自行约定，
         # 一般与官方 API 定价一致。
-        cost={"input": 0.27, "output": 1.10, "cacheRead": 0.07, "cacheWrite": 0.27},
+        cost=ModelCost(input=0.27, output=1.10, cacheRead=0.07, cacheWrite=0.27),
     ),
 ]
 

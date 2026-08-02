@@ -48,16 +48,21 @@ OpenAI API 类型
 仅负责不同数据结构之间的转换。
 """
 
-from typing import Any
+import json
+from typing import Any, cast
 
 from .._types import (
     AssistantMessage,
     ContentBlock,
     Message,
     Model,
+    SystemMessage,
     Tool,
-    ToolCallContent,
+    ToolCall,
+    ToolResultMessage,
     Usage,
+    UserMessage,
+    now_ms,
 )
 
 
@@ -136,7 +141,8 @@ def to_openai_messages(
         # 两种 SDK 格式一致，
         # 直接转换。
         if role == "system":
-            result.append({"role": "system", "content": msg["content"]})
+            sys_msg = cast(SystemMessage, msg)
+            result.append({"role": "system", "content": sys_msg["content"]})
 
         # User Message
         #
@@ -156,7 +162,8 @@ def to_openai_messages(
         # 根据不同内容，
         # 转换为 OpenAI Message。
         elif role == "user":
-            content = msg["content"]
+            user_msg = cast(UserMessage, msg)
+            content = user_msg["content"]
             if isinstance(content, str):
                 result.append({"role": "user", "content": content})
             else:
@@ -179,7 +186,7 @@ def to_openai_messages(
                             #
                             # data URL。
                             image_part["image_url"] = {
-                                "url": f"data:{block.get('mediaType', 'image/png')};base64,{block['data']}"
+                                "url": f"data:{block.get('mimeType', 'image/png')};base64,{block['data']}"
                             }
 
                         parts.append(image_part)
@@ -202,20 +209,21 @@ def to_openai_messages(
         # Thinking 不发送给 OpenAI，
         # 因为属于 Provider 内部信息。
         elif role == "assistant":
+            asst_msg = cast(AssistantMessage, msg)
             oai_msg: dict[str, Any] = {"role": "assistant", "content": None}
             tool_calls: list[dict[str, Any]] = []
             text_parts: list[str] = []
 
-            for block in msg["content"]:
+            for block in asst_msg["content"]:
                 if block["type"] == "text":
                     text_parts.append(block["text"])
                 elif block["type"] == "toolCall":
                     tool_calls.append({
-                        "id": block["toolCallId"],
+                        "id": block["id"],
                         "type": "function",
                         "function": {
-                            "name": block["toolName"],
-                            "arguments": block["args"],
+                            "name": block["name"],
+                            "arguments": json.dumps(block["arguments"], ensure_ascii=False),
                         },
                     })
                 elif block["type"] == "thinking":
@@ -242,14 +250,15 @@ def to_openai_messages(
         #
         # tool
         elif role == "toolResult":
+            tr_msg = cast(ToolResultMessage, msg)
             content_str = ""
-            for block in msg["content"]:
+            for block in tr_msg["content"]:
                 if block["type"] == "text":
                     content_str += block["text"]
 
             result.append({
                 "role": "tool",
-                "tool_call_id": msg["toolCallId"],
+                "tool_call_id": tr_msg["toolCallId"],
                 "content": content_str,
             })
 
@@ -344,7 +353,7 @@ def build_error_message(
         usage=empty_usage(),
         stopReason="error",
         errorMessage=str(error),
-        timestamp=0,
+        timestamp=now_ms(),
     )
 
 
@@ -380,100 +389,16 @@ def extract_text(content_blocks: list[ContentBlock]) -> str:
     return "\n".join(parts)
 
 
-def accumulate_tool_calls(
-    content: list[ContentBlock],
-    index: int | None,
-    delta_id: str | None,
-    delta_name: str | None,
-    delta_args: str | None,
-) -> tuple[int | None, str | None]:
+def parse_tool_arguments(raw: str) -> dict[str, Any]:
+    """解析流式累积的 tool call arguments JSON。
+
+    对应 TS 的 parseStreamingJson / repairJson 职责：
+    解析失败返回错误占位，避免拖垮整个流。
     """
-    合并 Tool Call 增量。
-
-    OpenAI Streaming
-
-    不会一次返回完整 Tool Call。
-
-    例如：
-
-    Chunk1
-
-    name="search"
-
-    Chunk2
-
-    args="{"
-
-    Chunk3
-
-    args="\"query\""
-
-    Chunk4
-
-    args="}"
-
-    因此需要不断拼接。
-
-    最终得到：
-
-    ToolCallContent
-    """
-
-    tool_name: str | None = None
-
-    # 新 Tool Call。
-    #
-    # 如果不存在，
-    #
-    # 创建新的 ToolCallContent。
-    if delta_id is not None:
-        # Find existing block with matching id or create new slot
-        found = False
-        for i, block in enumerate(content):
-
-            # 查找已有 Tool Call。
-            #
-            # 如果已经创建，
-            #
-            # 后续 Chunk
-            #
-            # 会继续写入。
-            if block["type"] == "toolCall" and block["toolCallId"] == delta_id:
-                index = i
-                found = True
-                break
-
-            # 第一次出现 Tool Call。
-            #
-            # 创建一个空 Block，
-            #
-            # 后续不断填充。
-        if not found:
-            content.append(ToolCallContent(
-                type="toolCall",
-                toolCallId=delta_id,
-                toolName="",
-                args="",
-            ))
-            index = len(content) - 1
-
-    if index is not None and index < len(content):
-        block = content[index]
-        if block["type"] == "toolCall":
-            if delta_name:
-
-                # 更新 Tool Name。
-                block["toolName"] = delta_name
-                tool_name = delta_name
-
-            if delta_args:
-
-                # 拼接 Arguments。
-                #
-                # OpenAI Arguments
-                #
-                # 会分多次返回。
-                block["args"] += delta_args
-                tool_name = block["toolName"] or tool_name
-
-    return index, tool_name
+    if not raw.strip():
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"_error": "Invalid JSON arguments"}
+    return parsed if isinstance(parsed, dict) else {"value": parsed}

@@ -68,8 +68,8 @@ async def main():
     async for event in await models.stream(model, Context(
         messages=[{"role": "user", "content": "Hello!"}],
     )):
-        if event["type"] == "delta":
-            print(event["text"], end="", flush=True)
+        if event["type"] == "text_delta":
+            print(event["delta"], end="", flush=True)
 
 asyncio.run(main())
 ```

@@ -7,7 +7,7 @@ Faux Provider 单元测试。
     • 动态响应工厂（context / state / model 感知）
     • 消息重写（api / provider / model）
     • Usage 估算
-    • 流式事件（delta / toolCallDelta / thinkingDelta / done / error）
+    • 流式事件（text_delta / toolcall_delta / thinking_delta / done / error）
     • 中止信号（abort）
     • 与 Models 注册表集成
 """
@@ -65,20 +65,19 @@ class TestFauxHelpers:
         assert faux_thinking("think") == {
             "type": "thinking",
             "thinking": "think",
-            "signature": None,
         }
 
     def test_faux_tool_call_dict_args(self):
         tc = faux_tool_call("echo", {"text": "hi"}, tool_call_id="call-1")
         assert tc["type"] == "toolCall"
-        assert tc["toolCallId"] == "call-1"
-        assert tc["toolName"] == "echo"
-        assert tc["args"] == '{"text": "hi"}'
+        assert tc["id"] == "call-1"
+        assert tc["name"] == "echo"
+        assert tc["arguments"] == {"text": "hi"}
 
     def test_faux_tool_call_string_args(self):
         tc = faux_tool_call("echo", '{"a": 1}')
-        assert tc["args"] == '{"a": 1}'
-        assert tc["toolCallId"].startswith("tool:")
+        assert tc["arguments"] == {"a": 1}
+        assert tc["id"].startswith("tool:")
 
     def test_faux_assistant_message_normalizes_content(self):
         # str → 单个 TextContent
@@ -120,12 +119,12 @@ class TestFauxProviderFactory:
     def test_custom_models(self):
         models = [
             Model(id="faux-fast", provider="faux", api="openai-completions", name="Faux Fast"),
-            Model(id="faux-thinker", provider="faux", api="openai-completions", name="Faux Thinker", thinking=True),
+            Model(id="faux-thinker", provider="faux", api="openai-completions", name="Faux Thinker", reasoning=True),
         ]
         faux = faux_provider(models=models)
         assert [m.id for m in faux.models] == ["faux-fast", "faux-thinker"]
         assert faux.get_model("faux-thinker") is not None
-        assert faux.get_model("faux-thinker").thinking is True  # type: ignore[union-attr]
+        assert faux.get_model("faux-thinker").reasoning is True  # type: ignore[union-attr]
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +139,7 @@ class TestBasicResponses:
     async def test_complete_returns_scripted_text_and_usage(self):
         faux = faux_provider()
         faux.set_responses([faux_assistant_message("hello world")])
-        ctx = Context(system="Be concise.", messages=[{"role": "user", "content": "hi there"}])
+        ctx = Context(systemPrompt="Be concise.", messages=[{"role": "user", "content": "hi there"}])
 
         msg = await faux.provider.complete(faux.models[0], ctx)
 
@@ -168,8 +167,8 @@ class TestBasicResponses:
         msg = await faux.provider.complete(faux.models[0], _context())
 
         assert msg["content"] == [
-            {"type": "thinking", "thinking": "think", "signature": None},
-            {"type": "toolCall", "toolCallId": "call-1", "toolName": "echo", "args": '{"text": "hi"}'},
+            {"type": "thinking", "thinking": "think"},
+            {"type": "toolCall", "id": "call-1", "name": "echo", "arguments": {"text": "hi"}},
             {"type": "text", "text": "done"},
         ]
         assert msg["stopReason"] == "toolUse"
@@ -260,13 +259,13 @@ class TestResponseFactory:
     @pytest.mark.asyncio
     async def test_model_aware_factory(self):
         models = [
-            Model(id="faux-fast", provider="faux", api="openai-completions", name="Faux Fast", thinking=False),
-            Model(id="faux-thinker", provider="faux", api="openai-completions", name="Faux Thinker", thinking=True),
+            Model(id="faux-fast", provider="faux", api="openai-completions", name="Faux Fast", reasoning=False),
+            Model(id="faux-thinker", provider="faux", api="openai-completions", name="Faux Thinker", reasoning=True),
         ]
         faux = faux_provider(models=models)
 
         async def factory(context, options, state, model):
-            return faux_assistant_message(f"{model.id}:{model.thinking}")
+            return faux_assistant_message(f"{model.id}:{model.reasoning}")
 
         faux.set_responses([factory, factory])
 
@@ -328,13 +327,13 @@ class TestUsageEstimation:
             },
         )
         context = Context(
-            system="sys",
+            systemPrompt="sys",
             messages=[
                 {
                     "role": "user",
                     "content": [
                         {"type": "text", "text": "hello"},
-                        {"type": "image", "url": None, "data": "abcd", "mediaType": "image/png"},
+                        {"type": "image", "url": None, "data": "abcd", "mimeType": "image/png"},
                     ],
                 },
                 faux_assistant_message("prior"),
@@ -378,7 +377,7 @@ class TestUsageEstimation:
 
 
 class TestStreamingEvents:
-    """流式输出事件（delta / toolCallDelta / thinkingDelta / done / error）。"""
+    """流式输出事件（text_delta / toolcall_delta / thinking_delta / done / error）。"""
 
     @pytest.mark.asyncio
     async def test_text_deltas_and_done(self):
@@ -390,8 +389,8 @@ class TestStreamingEvents:
         types = [e["type"] for e in events]
         assert types[-1] == "done"
 
-        deltas = [e for e in events if e["type"] == "delta"]
-        assert "".join(e["text"] for e in deltas) == "hello world"
+        deltas = [e for e in events if e["type"] == "text_delta"]
+        assert "".join(e["delta"] for e in deltas) == "hello world"
 
         msg = events[-1]["message"]
         assert msg["content"] == [{"type": "text", "text": "hello world"}]
@@ -404,8 +403,8 @@ class TestStreamingEvents:
 
         events = await _collect(await faux.provider.stream(faux.models[0], _context()))
 
-        thinking_deltas = [e for e in events if e["type"] == "thinkingDelta"]
-        assert "".join(e["thinking"] for e in thinking_deltas) == "reasoning here"
+        thinking_deltas = [e for e in events if e["type"] == "thinking_delta"]
+        assert "".join(e["delta"] for e in thinking_deltas) == "reasoning here"
         assert events[-1]["type"] == "done"
 
     @pytest.mark.asyncio
@@ -420,16 +419,14 @@ class TestStreamingEvents:
 
         events = await _collect(await faux.provider.stream(faux.models[0], _context()))
 
-        tool_deltas = [e for e in events if e["type"] == "toolCallDelta"]
+        tool_deltas = [e for e in events if e["type"] == "toolcall_delta"]
         assert len(tool_deltas) >= 1
-        assert "".join(e["argsDelta"] for e in tool_deltas) == '{"text": "hi"}'
-        assert tool_deltas[0]["toolCallId"] == "call-1"
-        assert tool_deltas[0]["toolName"] == "echo"
+        assert "".join(e["delta"] for e in tool_deltas) == '{"text": "hi"}'
 
         msg = events[-1]["message"]
         assert msg["stopReason"] == "toolUse"
         assert msg["content"] == [
-            {"type": "toolCall", "toolCallId": "call-1", "toolName": "echo", "args": '{"text": "hi"}'}
+            {"type": "toolCall", "id": "call-1", "name": "echo", "arguments": {"text": "hi"}}
         ]
 
     @pytest.mark.asyncio

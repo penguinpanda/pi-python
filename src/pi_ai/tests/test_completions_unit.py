@@ -148,16 +148,17 @@ class TestCompletionsStream:
         client = _mock_client(chunks)
 
         events, _ = await _collect_events(model, context, client)
-        assert [e["type"] for e in events] == ["delta", "delta", "done"]
-        assert events[0]["text"] == "Hello"
-        assert events[1]["text"] == " world"
+        assert [e["type"] for e in events] == [
+            "start", "text_start", "text_delta", "text_delta", "text_end", "done",
+        ]
+        assert events[2]["delta"] == "Hello"
+        assert events[3]["delta"] == " world"
 
         msg = events[-1]["message"]
         assert msg["role"] == "assistant"
-        # 每个 delta chunk 生成一个独立的 TextContent 块。
+        # 连续的 text delta 累积到同一个 TextContent 块。
         assert msg["content"] == [
-            {"type": "text", "text": "Hello"},
-            {"type": "text", "text": " world"},
+            {"type": "text", "text": "Hello world"},
         ]
         assert msg["stopReason"] == "stop"
         assert msg["model"] == "deepseek-chat"
@@ -187,7 +188,7 @@ class TestCompletionsStream:
         client = _mock_client(chunks)
 
         events, _ = await _collect_events(model, context, client)
-        assert [e["type"] for e in events] == ["done"]
+        assert [e["type"] for e in events] == ["start", "done"]
         assert events[-1]["message"]["content"] == []
 
     @pytest.mark.asyncio
@@ -202,7 +203,7 @@ class TestCompletionsStream:
         client = _mock_client(chunks)
 
         events, _ = await _collect_events(model, context, client)
-        assert [e["type"] for e in events] == ["done"]
+        assert [e["type"] for e in events] == ["start", "done"]
 
     @pytest.mark.asyncio
     async def test_tool_call_accumulation(self):
@@ -221,23 +222,21 @@ class TestCompletionsStream:
         client = _mock_client(chunks)
 
         events, _ = await _collect_events(model, context, client)
-        tool_deltas = [e for e in events if e["type"] == "toolCallDelta"]
+        assert [e["type"] for e in events] == [
+            "start", "toolcall_start", "toolcall_delta", "toolcall_delta", "toolcall_end", "done",
+        ]
+        tool_deltas = [e for e in events if e["type"] == "toolcall_delta"]
         assert len(tool_deltas) == 2
-        assert tool_deltas[0] == {
-            "type": "toolCallDelta",
-            "toolCallId": "call_1",
-            "toolName": "get_weather",
-            "argsDelta": '{"city":',
-        }
-        assert tool_deltas[1]["argsDelta"] == '"Beijing"}'
+        assert tool_deltas[0]["delta"] == '{"city":'
+        assert tool_deltas[1]["delta"] == '"Beijing"}'
 
         msg = events[-1]["message"]
         assert msg["stopReason"] == "toolUse"
         assert msg["content"] == [{
             "type": "toolCall",
-            "toolCallId": "call_1",
-            "toolName": "get_weather",
-            "args": '{"city":"Beijing"}',
+            "id": "call_1",
+            "name": "get_weather",
+            "arguments": {"city": "Beijing"},
         }]
 
     @pytest.mark.asyncio
@@ -258,6 +257,7 @@ class TestCompletionsStream:
         assert msg["usage"] == {
             "input": 10, "output": 5, "cacheRead": 3, "cacheWrite": 0,
             "totalTokens": 15,
+            "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0},
         }
 
     @pytest.mark.asyncio
@@ -271,7 +271,7 @@ class TestCompletionsStream:
         context = Context(
             messages=[{"role": "user", "content": "Hi"}],
             tools=[tool],
-            system="You are helpful",
+            systemPrompt="You are helpful",
         )
         options = {"temperature": 0.5, "maxTokens": 100}
         client = _mock_client([_chunk(content="Hi", finish_reason="stop")])

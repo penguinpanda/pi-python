@@ -16,7 +16,7 @@ Faux Provider（测试用假 Provider）
 
     ③ 支持基于上下文的动态响应工厂
 
-    ④ 模拟流式输出（delta / toolCallDelta / thinkingDelta）
+    ④ 模拟流式输出（text_delta / toolcall_delta / thinking_delta）
 
     ⑤ 估算 Token Usage
 
@@ -49,20 +49,29 @@ from .._types import (
     AssistantMessage,
     ContentBlock,
     Context,
-    DeltaEvent,
     DoneEvent,
     ErrorEvent,
     Message,
     Model,
+    ModelCost,
+    StartEvent,
     StopReason,
     StreamOptions,
     TextContent,
+    TextDeltaEvent,
+    TextEndEvent,
+    TextStartEvent,
     ThinkingContent,
     ThinkingDeltaEvent,
+    ThinkingEndEvent,
+    ThinkingStartEvent,
     Tool,
-    ToolCallContent,
+    ToolCall,
     ToolCallDeltaEvent,
+    ToolCallEndEvent,
+    ToolCallStartEvent,
     Usage,
+    now_ms,
 )
 from ..api._shared import empty_usage
 from ..provider import Provider, create_provider
@@ -87,10 +96,10 @@ FAUX_MODEL = Model(
     input=["text"],
     output=["text"],
     maxTokens=16384,
-    thinking=False,
+    reasoning=False,
     supportsToolCalling=True,
     supportsImages=False,
-    cost={"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+    cost=ModelCost(input=0, output=0, cacheRead=0, cacheWrite=0),
 )
 
 
@@ -106,7 +115,7 @@ def faux_text(text: str) -> TextContent:
 
 def faux_thinking(thinking: str) -> ThinkingContent:
     """创建 faux 思考内容块。"""
-    return ThinkingContent(type="thinking", thinking=thinking, signature=None)
+    return ThinkingContent(type="thinking", thinking=thinking)
 
 
 def faux_tool_call(
@@ -114,18 +123,21 @@ def faux_tool_call(
     args: dict[str, Any] | str,
     *,
     tool_call_id: str | None = None,
-) -> ToolCallContent:
+) -> ToolCall:
     """创建 faux 工具调用内容块。
 
-    args 可以是 dict（自动序列化为 JSON 字符串）
-    或已经是 JSON 字符串。
+    args 可以是 dict（解析后的参数对象）
+    或 JSON 字符串（自动解析）。
     """
-    args_str = args if isinstance(args, str) else json.dumps(args, ensure_ascii=False)
-    return ToolCallContent(
+    if isinstance(args, str):
+        parsed: Any = json.loads(args) if args.strip() else {}
+    else:
+        parsed = args
+    return ToolCall(
         type="toolCall",
-        toolCallId=tool_call_id or f"tool:{int(time.time() * 1000)}",
-        toolName=name,
-        args=args_str,
+        id=tool_call_id or f"tool:{int(time.time() * 1000)}",
+        name=name,
+        arguments=parsed if isinstance(parsed, dict) else {"value": parsed},
     )
 
 
@@ -168,6 +180,7 @@ def faux_assistant_message(
         usage=usage or empty_usage(),
         stopReason=stop_reason,
         errorMessage=error_message,
+        timestamp=now_ms(),
     )
 
 
@@ -213,13 +226,13 @@ def _blocks_to_text(blocks: Sequence[ContentBlock]) -> str:
         if block["type"] == "text":
             parts.append(block["text"])
         elif block["type"] == "image":
-            media_type = block.get("mediaType")
+            media_type = block.get("mimeType")
             data_len = len(block.get("data") or "")
             parts.append(f"[image:{media_type}:{data_len}]")
         elif block["type"] == "thinking":
             parts.append(block["thinking"])
         elif block["type"] == "toolCall":
-            parts.append(f"{block['toolName']}:{block['args']}")
+            parts.append(f"{block['name']}:{json.dumps(block['arguments'], ensure_ascii=False)}")
     return "\n".join(parts)
 
 
@@ -248,8 +261,8 @@ def _tool_to_dict(tool: Tool) -> dict[str, Any]:
 def _serialize_context(context: Context) -> str:
     """将 Context 序列化为纯文本，用于估算输入 token。"""
     parts: list[str] = []
-    if context.system:
-        parts.append(f"system:{context.system}")
+    if context.systemPrompt:
+        parts.append(f"system:{context.systemPrompt}")
     for message in context.messages:
         parts.append(f"{message['role']}:{_message_to_text(message)}")
     if context.tools:
@@ -441,33 +454,57 @@ class FauxCore:
         # 可选的中止信号（asyncio.Event）。
         signal = (opts or {}).get("signal")
 
-        for block in message["content"]:
+        # partial 快照：faux 直接使用完整脚本化消息。
+        def _partial() -> AssistantMessage:
+            return message
+
+        for content_index, block in enumerate(message["content"]):
             if block["type"] == "text":
+                stream.push(TextStartEvent(
+                    type="text_start", contentIndex=content_index, partial=_partial(),
+                ))
                 for chunk in self._chunk_text(block["text"]):
                     if signal and signal.is_set():
                         self._push_aborted(stream, message)
                         return
-                    stream.push(DeltaEvent(type="delta", text=chunk))
+                    stream.push(TextDeltaEvent(
+                        type="text_delta", contentIndex=content_index, delta=chunk, partial=_partial(),
+                    ))
                     await self._delay(chunk)
+                stream.push(TextEndEvent(
+                    type="text_end", contentIndex=content_index, content=block["text"], partial=_partial(),
+                ))
             elif block["type"] == "thinking":
+                stream.push(ThinkingStartEvent(
+                    type="thinking_start", contentIndex=content_index, partial=_partial(),
+                ))
                 for chunk in self._chunk_text(block["thinking"]):
                     if signal and signal.is_set():
                         self._push_aborted(stream, message)
                         return
-                    stream.push(ThinkingDeltaEvent(type="thinkingDelta", thinking=chunk))
+                    stream.push(ThinkingDeltaEvent(
+                        type="thinking_delta", contentIndex=content_index, delta=chunk, partial=_partial(),
+                    ))
                     await self._delay(chunk)
+                stream.push(ThinkingEndEvent(
+                    type="thinking_end", contentIndex=content_index, content=block["thinking"], partial=_partial(),
+                ))
             elif block["type"] == "toolCall":
-                for chunk in self._chunk_text(block["args"]):
+                stream.push(ToolCallStartEvent(
+                    type="toolcall_start", contentIndex=content_index, partial=_partial(),
+                ))
+                args_json = json.dumps(block["arguments"], ensure_ascii=False)
+                for chunk in self._chunk_text(args_json):
                     if signal and signal.is_set():
                         self._push_aborted(stream, message)
                         return
                     stream.push(ToolCallDeltaEvent(
-                        type="toolCallDelta",
-                        toolCallId=block["toolCallId"],
-                        toolName=block["toolName"],
-                        argsDelta=chunk,
+                        type="toolcall_delta", contentIndex=content_index, delta=chunk, partial=_partial(),
                     ))
                     await self._delay(chunk)
+                stream.push(ToolCallEndEvent(
+                    type="toolcall_end", contentIndex=content_index, toolCall=cast(ToolCall, block), partial=_partial(),
+                ))
 
         if stop_reason in ("error", "aborted"):
             stream.push(ErrorEvent(type="error", reason=stop_reason, error=message))

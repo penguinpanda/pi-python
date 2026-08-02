@@ -12,14 +12,14 @@ from pi_ai._types import (
     TextContent,
     ThinkingContent,
     Tool,
-    ToolCallContent,
+    ToolCall,
     Usage,
 )
 from pi_ai.api._shared import (
-    accumulate_tool_calls,
     build_error_message,
     empty_usage,
     extract_text,
+    parse_tool_arguments,
     to_openai_messages,
     to_openai_tools,
 )
@@ -72,7 +72,7 @@ class TestToOpenaiMessages:
                 "role": "user",
                 "content": [
                     {"type": "text", "text": "What is this?"},
-                    {"type": "image", "url": "https://example.com/img.png", "data": None, "mediaType": None},
+                    {"type": "image", "url": "https://example.com/img.png", "data": None, "mimeType": None},
                 ],
             }
         ]
@@ -92,7 +92,7 @@ class TestToOpenaiMessages:
             {  # type: ignore[typeddict-unknown-key]
                 "role": "user",
                 "content": [
-                    {"type": "image", "url": None, "data": "abc123", "mediaType": "image/jpeg"},
+                    {"type": "image", "url": None, "data": "abc123", "mimeType": "image/jpeg"},
                 ],
             }
         ]
@@ -108,7 +108,7 @@ class TestToOpenaiMessages:
                 "role": "user",
                 "content": [
                     {"type": "text", "text": "Hi"},
-                    {"type": "image", "url": "https://example.com/img.png", "data": None, "mediaType": None},
+                    {"type": "image", "url": "https://example.com/img.png", "data": None, "mimeType": None},
                 ],
             }
         ]
@@ -151,7 +151,7 @@ class TestToOpenaiMessages:
                 "role": "assistant",
                 "content": [
                     {"type": "text", "text": "Let me search."},
-                    {"type": "toolCall", "toolCallId": "call_1", "toolName": "search", "args": '{"q":"test"}'},
+                    {"type": "toolCall", "id": "call_1", "name": "search", "arguments": {"q": "test"}},
                 ],
                 "api": "openai-completions",
                 "provider": "test",
@@ -166,14 +166,14 @@ class TestToOpenaiMessages:
         assert tc["id"] == "call_1"
         assert tc["type"] == "function"
         assert tc["function"]["name"] == "search"
-        assert tc["function"]["arguments"] == '{"q":"test"}'
+        assert tc["function"]["arguments"] == '{"q": "test"}'
 
     def test_assistant_thinking_skipped(self):
         messages: list[Message] = [
             {  # type: ignore[typeddict-unknown-key]
                 "role": "assistant",
                 "content": [
-                    {"type": "thinking", "thinking": "Hmm...", "signature": None},
+                    {"type": "thinking", "thinking": "Hmm..."},
                     {"type": "text", "text": "Answer."},
                 ],
                 "api": "openai-completions",
@@ -293,7 +293,7 @@ class TestBuildErrorMessage:
         assert msg["stopReason"] == "error"
         assert msg["errorMessage"] == "API key missing"
         assert msg["usage"]["input"] == 0
-        assert msg["timestamp"] == 0
+        assert msg["timestamp"] > 0
 
     def test_different_exception_types(self):
         model = _make_model()
@@ -318,15 +318,15 @@ class TestExtractText:
 
     def test_thinking_only(self):
         content = [
-            {"type": "thinking", "thinking": "Let me think...", "signature": None},
+            {"type": "thinking", "thinking": "Let me think..."},
         ]
         assert extract_text(content) == "Let me think..."
 
     def test_mixed(self):
         content = [
-            {"type": "thinking", "thinking": "Hmm", "signature": None},
+            {"type": "thinking", "thinking": "Hmm"},
             {"type": "text", "text": "Result"},
-            {"type": "thinking", "thinking": "Done", "signature": None},
+            {"type": "thinking", "thinking": "Done"},
         ]
         assert extract_text(content) == "Hmm\nResult\nDone"
 
@@ -335,88 +335,30 @@ class TestExtractText:
 
     def test_tool_call_ignored(self):
         content = [
-            {"type": "toolCall", "toolCallId": "c1", "toolName": "search", "args": "{}"},
+            {"type": "toolCall", "id": "c1", "name": "search", "arguments": {}},
             {"type": "text", "text": "Answer"},
         ]
         assert extract_text(content) == "Answer"
 
 
 # ---------------------------------------------------------------------------
-# accumulate_tool_calls
+# parse_tool_arguments
 # ---------------------------------------------------------------------------
 
-class TestAccumulateToolCalls:
-    """Streaming tool-call incremental merge."""
+class TestParseToolArguments:
+    """Streaming tool-call raw JSON parsing."""
 
-    def test_first_call_creates_new_block(self):
-        content: list = []
-        index, name = accumulate_tool_calls(
-            content=content,
-            index=None,
-            delta_id="call_1",
-            delta_name=None,
-            delta_args=None,
-        )
-        assert len(content) == 1
-        assert content[0]["type"] == "toolCall"
-        assert content[0]["toolCallId"] == "call_1"
-        assert content[0]["toolName"] == ""
-        assert content[0]["args"] == ""
-        assert index == 0
-        assert name is None
+    def test_empty_string(self):
+        assert parse_tool_arguments("") == {}
 
-    def test_existing_call_updates_args(self):
-        content = [{"type": "toolCall", "toolCallId": "call_1", "toolName": "", "args": ""}]
-        index, name = accumulate_tool_calls(
-            content=content,
-            index=None,
-            delta_id="call_1",
-            delta_name="search",
-            delta_args=None,
-        )
-        assert content[0]["toolName"] == "search"
-        assert name == "search"
+    def test_whitespace_only(self):
+        assert parse_tool_arguments("   ") == {}
 
-        index2, _ = accumulate_tool_calls(
-            content=content,
-            index=index,
-            delta_id=None,
-            delta_name=None,
-            delta_args='{"q":',
-        )
-        assert content[0]["args"] == '{"q":'
+    def test_valid_object(self):
+        assert parse_tool_arguments('{"q":"test"}') == {"q": "test"}
 
-        accumulate_tool_calls(
-            content=content,
-            index=index2,
-            delta_id=None,
-            delta_name=None,
-            delta_args='"test"}',
-        )
-        assert content[0]["args"] == '{"q":"test"}'
+    def test_non_object_json(self):
+        assert parse_tool_arguments("[1,2,3]") == {"value": [1, 2, 3]}
 
-    def test_args_concatenation(self):
-        content = [{"type": "toolCall", "toolCallId": "c1", "toolName": "fn", "args": ""}]
-        accumulate_tool_calls(content, index=0, delta_id=None, delta_name=None, delta_args="a")
-        accumulate_tool_calls(content, index=0, delta_id=None, delta_name=None, delta_args="b")
-        accumulate_tool_calls(content, index=0, delta_id=None, delta_name=None, delta_args="c")
-        assert content[0]["args"] == "abc"
-
-    def test_multiple_different_tool_calls(self):
-        content: list = []
-        accumulate_tool_calls(content, None, "call_1", "fn_a", None)
-        accumulate_tool_calls(content, None, "call_2", "fn_b", None)
-        assert len(content) == 2
-        assert content[0]["toolCallId"] == "call_1"
-        assert content[1]["toolCallId"] == "call_2"
-
-    def test_return_values(self):
-        content: list = []
-        idx, name = accumulate_tool_calls(content, None, "c1", "my_fn", '{"x":1}')
-        assert idx == 0
-        assert name == "my_fn"
-        # second chunk — same call, just more args (simple string concat)
-        idx2, name2 = accumulate_tool_calls(content, idx, None, None, ",2}")
-        assert idx2 == 0
-        assert name2 == "my_fn"
-        assert content[0]["args"] == '{"x":1},2}'
+    def test_invalid_json(self):
+        assert parse_tool_arguments('{"q":') == {"_error": "Invalid JSON arguments"}
