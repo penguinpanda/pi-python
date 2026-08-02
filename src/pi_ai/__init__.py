@@ -123,9 +123,20 @@ from .providers import (
 )
 from .providers.all import create_default_models
 from .utils import (
+    ContextUsageEstimate,
+    NON_OVERFLOW_PATTERNS,
+    OVERFLOW_PATTERNS,
     RetryCallbacks,
     RetryPolicy,
+    calculate_context_tokens,
     compute_backoff_delay,
+    estimate_context_tokens,
+    estimate_message_tokens,
+    estimate_text_and_image_content_tokens,
+    estimate_text_tokens,
+    estimate_tools_tokens,
+    get_overflow_patterns,
+    is_context_overflow,
     is_retryable_error,
     retry_assistant_call,
 )
@@ -141,6 +152,19 @@ __all__ = [
     "retry_assistant_call",
     "is_retryable_error",
     "compute_backoff_delay",
+
+    # Token / Context
+    "ContextUsageEstimate",
+    "calculate_context_tokens",
+    "estimate_context_tokens",
+    "estimate_message_tokens",
+    "estimate_text_and_image_content_tokens",
+    "estimate_text_tokens",
+    "estimate_tools_tokens",
+    "is_context_overflow",
+    "get_overflow_patterns",
+    "OVERFLOW_PATTERNS",
+    "NON_OVERFLOW_PATTERNS",
 
     # Provider
     "Provider",

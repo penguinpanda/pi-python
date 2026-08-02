@@ -76,6 +76,7 @@ from ._shared import (
     to_openai_messages,
     to_openai_tools,
 )
+from .simple_options import clamp_max_tokens_to_context
 from .transform_messages import normalize_tool_call_id, transform_messages
 
 
@@ -247,9 +248,14 @@ async def chat_completions_stream(
             temperature = opts.get("temperature")
             if temperature is not None:
                 kwargs["temperature"] = temperature
-            max_tokens = opts.get("max_tokens")
-            if max_tokens is not None:
-                kwargs["max_tokens"] = max_tokens
+            # max_tokens 收敛到模型上下文窗口内（对齐 TS buildBaseOptions）：
+            # 未指定时使用模型默认 max_tokens，始终发送收敛后的值。
+            requested = opts.get("max_tokens")
+            kwargs["max_tokens"] = clamp_max_tokens_to_context(
+                model,
+                context,
+                requested if requested is not None else model.max_tokens,
+            )
 
             # 发起流式请求。
             #

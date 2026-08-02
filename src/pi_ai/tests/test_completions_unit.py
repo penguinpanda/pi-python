@@ -372,8 +372,30 @@ class TestCompletionsStream:
 
         kwargs = client.chat.completions.create.call_args.kwargs
         assert "temperature" not in kwargs
-        assert "max_tokens" not in kwargs
+        # 对齐 TS buildBaseOptions：max_tokens 始终发送收敛后的值
+        # （context_window=0 → 不收敛，返回模型默认 max_tokens 4096）。
+        assert kwargs["max_tokens"] == 4096
         assert "tools" not in kwargs
+
+    @pytest.mark.asyncio
+    async def test_max_tokens_clamped_to_context(self):
+        """max_tokens 被收敛到模型上下文窗口内（预留安全余量）。"""
+        model = _make_model()
+        model.context_window = 10_000
+        model.max_tokens = 8_000
+        # "x"*4000 → 估算 1000 tokens
+        context = Context(messages=[{"role": "user", "content": "x" * 4_000}])
+        client = _mock_client([_chunk(content="Hi", finish_reason="stop")])
+        with patch("pi_ai.api.completions._create_client", return_value=client):
+            stream = await chat_completions_stream(
+                model, context, "sk-test", "https://api.test.com",
+                {"max_tokens": 8_000},
+            )
+            [e async for e in stream]
+
+        kwargs = client.chat.completions.create.call_args.kwargs
+        # available = 10000 - 1000 - 4096 = 4904
+        assert kwargs["max_tokens"] == 4_904
 
     @pytest.mark.asyncio
     async def test_error_event(self):
