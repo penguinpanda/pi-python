@@ -270,7 +270,7 @@ class ProviderStreams(Protocol):
     ) -> "AssistantMessageEventStream": ...
 
 
-# 流函数类型别名（返回值用字符串前向引用：避免与 _event_stream 循环导入）
+# 流函数类型别名（返回值用字符串前向引用：避免与 utils._event_stream 循环导入）
 StreamFunction = Callable[
     [Model, Context, StreamOptions | None],
     "Awaitable[AssistantMessageEventStream]",

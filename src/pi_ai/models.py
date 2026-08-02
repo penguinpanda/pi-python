@@ -64,7 +64,7 @@ Models 相当于整个 SDK 的调度中心，
 负责根据 Model.provider 找到对应 Provider。
 """
 
-from ._event_stream import AssistantMessageEventStream
+from .utils._event_stream import AssistantMessageEventStream
 from ._types import(
     AssistantMessage,
     Context,

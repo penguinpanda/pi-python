@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from pi_ai._event_stream import AssistantMessageEventStream
+from pi_ai.utils._event_stream import AssistantMessageEventStream
 from pi_ai._types import (
     AssistantMessage,
     Context,

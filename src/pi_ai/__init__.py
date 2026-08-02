@@ -4,7 +4,7 @@ pi-ai  统一管理不同模型的 API,返回一个一致的 AI 调用接口。
 暂支持 Openai、Deepseek、Ollama 与 Faux(测试用假 Provider)
 """
 
-from ._event_stream import AssistantMessageEventStream, EventStream
+from .utils._event_stream import AssistantMessageEventStream, EventStream
 from ._types import (
     AgentMessage,
     AnthropicMessagesCompat,

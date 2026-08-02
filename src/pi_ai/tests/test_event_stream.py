@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from pi_ai._event_stream import AssistantMessageEventStream, EventStream
+from pi_ai.utils._event_stream import AssistantMessageEventStream, EventStream
 from pi_ai._types import (
     AssistantMessage,
     DoneEvent,

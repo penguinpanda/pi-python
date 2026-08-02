@@ -66,7 +66,7 @@ Provider 本身不负责：
 from dataclasses import dataclass, field
 from typing import Literal
 
-from ._event_stream import AssistantMessageEventStream
+from .utils._event_stream import AssistantMessageEventStream
 from ._types import (
     AssistantMessage,
     AsyncHTTPClient,

@@ -42,7 +42,7 @@ from pi_ai._types import (
     ToolResultMessage,
     Usage,
 )
-from pi_ai._event_stream import AssistantMessageEventStream
+from pi_ai.utils._event_stream import AssistantMessageEventStream
 
 # Context 类型（pi_ai 中是 dataclass，可通过 pi_ai 导入）
 from pi_ai import Context as LlmContext

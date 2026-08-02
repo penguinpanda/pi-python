@@ -61,7 +61,7 @@ from typing import Any, cast
 import httpx
 from openai import AsyncOpenAI
 
-from .._event_stream import AssistantMessageEventStream
+from ..utils._event_stream import AssistantMessageEventStream
 from .._types import (
     AssistantMessage,
     ContentBlock,

@@ -260,7 +260,7 @@ class TestModelsComplete:
     @pytest.mark.asyncio
     async def test_complete_returns_assistant_message(self):
         from unittest.mock import AsyncMock, patch
-        from pi_ai._event_stream import AssistantMessageEventStream
+        from pi_ai.utils._event_stream import AssistantMessageEventStream
         from pi_ai._types import AssistantMessage
 
         models = create_default_models()
