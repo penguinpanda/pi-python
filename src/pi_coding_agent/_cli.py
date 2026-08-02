@@ -16,6 +16,7 @@ from pathlib import Path
 from pi_agent import Agent, AgentOptions
 from pi_agent import set_default_stream_fn as set_agent_stream_fn
 from pi_ai import create_default_models
+from pi_ai.providers.ollama import discover_ollama_models, ollama_provider
 
 from ._config import get_sessions_dir, load_settings
 from ._print_mode import run_print_mode
@@ -48,6 +49,9 @@ async def _async_main(args: list[str] | None = None) -> int:
     # 创建 Models + 设置默认流函数
     models = create_default_models()
     set_agent_stream_fn(models.stream)
+
+    # Ollama 运行时动态发现：用实际安装的模型替换静态列表（失败则保留静态）
+    await _refresh_ollama_provider(models)
 
     # --list-models: 列出所有可用模型后直接退出（支持 --provider 过滤）
     if parsed.list_models:
@@ -161,15 +165,19 @@ def _print_models(models, provider_id: str | None = None) -> int:
     for provider in providers:
         print(f"{provider.name} ({provider.id}):")
         for m in provider.get_models():
-            caps: list[str] = []
-            if m.thinking:
-                caps.append("thinking")
-            if m.supportsToolCalling:
-                caps.append("tools")
-            if m.supportsImages:
-                caps.append("images")
+            caps = m.capabilities()
             print(f"  {m.id:<40} {m.name}  [{', '.join(caps) or 'text'}]")
     return 0
+
+
+async def _refresh_ollama_provider(models) -> None:
+    """尝试用 Ollama /api/tags 动态发现模型并替换 ollama provider。
+
+    不可用（未运行/超时）时保留静态 OLLAMA_MODELS，不报错。
+    """
+    discovered = await discover_ollama_models()
+    if discovered is not None:
+        models.add_provider(ollama_provider(models=discovered))
 
 
 def _resolve_model(models, parsed, settings: dict):
@@ -187,9 +195,9 @@ def _resolve_model(models, parsed, settings: dict):
 
     # 2. 只指定了 model → 跨所有 provider 搜索
     if model_id:
-        for m in models.get_models():
-            if m.id == model_id:
-                return m
+        model = models.get_model_by_id(model_id)
+        if model:
+            return model
 
     # 3. 只指定了 provider → 返回该 provider 的第一个模型
     if provider_id:

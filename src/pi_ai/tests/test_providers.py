@@ -19,6 +19,9 @@ from pi_ai.providers import (
     ollama_provider,
     openai_provider,
 )
+from pi_ai.providers.ollama import _merge_ollama_models, discover_ollama_models
+
+import httpx
 
 
 def _model_ids(models: list[Model]) -> list[str]:
@@ -135,6 +138,31 @@ class TestModelConstants:
             assert model.api in ("openai-completions", "openai-responses")
 
 
+class TestModelCapabilities:
+    """Model.capabilities() 能力标签。"""
+
+    def test_capabilities_all(self):
+        m = Model(
+            id="x", provider="p", api="a",
+            thinking=True, supportsToolCalling=True, supportsImages=True,
+        )
+        assert m.capabilities() == ["thinking", "tools", "images"]
+
+    def test_capabilities_none(self):
+        m = Model(
+            id="x", provider="p", api="a",
+            thinking=False, supportsToolCalling=False, supportsImages=False,
+        )
+        assert m.capabilities() == []
+
+    def test_capabilities_partial(self):
+        m = Model(
+            id="x", provider="p", api="a",
+            thinking=True, supportsToolCalling=False, supportsImages=True,
+        )
+        assert m.capabilities() == ["thinking", "images"]
+
+
 class TestOllamaProvider:
     """ollama_provider() 工厂。"""
 
@@ -186,3 +214,107 @@ class TestOllamaProvider:
             assert model.provider == "ollama"
             assert model.api == "openai-completions"
             assert model.cost == {}
+
+
+class TestOllamaDiscovery:
+    """Ollama 运行时动态发现。"""
+
+    def test_merge_known_and_unknown(self):
+        models = _merge_ollama_models(["qwen3:30b", "brand-new:latest"])
+        assert [m.id for m in models] == ["qwen3:30b", "brand-new:latest"]
+        # 已知模型保留静态元数据
+        known = models[0]
+        assert known.thinking is True
+        assert known.supportsToolCalling is True
+        # 未知模型合成默认元数据
+        unknown = models[1]
+        assert unknown.provider == "ollama"
+        assert unknown.api == "openai-completions"
+        assert unknown.supportsToolCalling is True
+        assert unknown.cost == {}
+
+    def test_merge_order_follows_api_tags(self):
+        models = _merge_ollama_models(["deepseek-r1:14b", "qwen3:30b"])
+        assert [m.id for m in models] == ["deepseek-r1:14b", "qwen3:30b"]
+        # 复用静态对象元数据
+        assert models[1].thinking is True
+
+    def test_provider_accepts_discovered_models(self):
+        discovered = _merge_ollama_models(["qwen3:30b", "brand-new:latest"])
+        provider = ollama_provider(models=discovered)
+        assert [m.id for m in provider.get_models()] == [
+            "qwen3:30b", "brand-new:latest",
+        ]
+
+    async def test_discover_success(self, monkeypatch):
+        from pi_ai.providers import ollama as ollama_mod
+
+        class _FakeResponse:
+            status_code = 200
+
+            def json(self):
+                return {"models": [{"name": "qwen3:30b"}, {"name": "new:latest"}]}
+
+        class _FakeClient:
+            def __init__(self, response):
+                self._response = response
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def get(self, url):
+                assert url.endswith("/api/tags")
+                return self._response
+
+        monkeypatch.setattr(
+            ollama_mod.httpx, "AsyncClient",
+            lambda **kw: _FakeClient(_FakeResponse()),
+        )
+
+        models = await ollama_mod.discover_ollama_models()
+        assert models is not None
+        assert [m.id for m in models] == ["qwen3:30b", "new:latest"]
+
+    async def test_discover_connection_error_returns_none(self, monkeypatch):
+        from pi_ai.providers import ollama as ollama_mod
+
+        class _FakeClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def get(self, url):
+                raise httpx.ConnectError("connection refused")
+
+        monkeypatch.setattr(
+            ollama_mod.httpx, "AsyncClient", lambda **kw: _FakeClient()
+        )
+
+        assert await ollama_mod.discover_ollama_models() is None
+
+    async def test_discover_non_200_returns_none(self, monkeypatch):
+        from pi_ai.providers import ollama as ollama_mod
+
+        class _FakeResponse:
+            status_code = 500
+
+        class _FakeClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def get(self, url):
+                return _FakeResponse()
+
+        monkeypatch.setattr(
+            ollama_mod.httpx, "AsyncClient", lambda **kw: _FakeClient()
+        )
+
+        assert await ollama_mod.discover_ollama_models() is None

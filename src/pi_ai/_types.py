@@ -368,6 +368,20 @@ class Model:
     supportsToolCalling: bool = True    # 是否支持 Tool Calling
     supportsImages: bool = False        # 是否支持图片
 
+    def capabilities(self) -> list[str]:
+        """返回模型支持的能力标签列表（thinking / tools / images）。
+
+        供 CLI、日志等展示层消费，避免各调用方重复拼装能力逻辑。
+        """
+        caps: list[str] = []
+        if self.thinking:
+            caps.append("thinking")
+        if self.supportsToolCalling:
+            caps.append("tools")
+        if self.supportsImages:
+            caps.append("images")
+        return caps
+
 
 # =========================================================
 # Context

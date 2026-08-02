@@ -1,6 +1,11 @@
 from .openai import openai_provider, OPENAI_MODELS
 from .deepseek import deepseek_provider, DEEPSEEK_MODELS
-from .ollama import ollama_provider, OLLAMA_MODELS
+from .ollama import (
+    OLLAMA_BASE_URL,
+    OLLAMA_MODELS,
+    discover_ollama_models,
+    ollama_provider,
+)
 from .faux import (
     FAUX_MODEL,
     faux_assistant_message,
@@ -17,6 +22,8 @@ __all__ = [
     "DEEPSEEK_MODELS",
     "ollama_provider",
     "OLLAMA_MODELS",
+    "OLLAMA_BASE_URL",
+    "discover_ollama_models",
     "faux_provider",
     "FAUX_MODEL",
     "faux_assistant_message",

@@ -222,6 +222,27 @@ class Models:
 
         return None
 
+    def get_model_by_id(self, model_id: str) -> Model | None:
+        """
+        跨所有 Provider 按模型 ID 查找。
+
+        当不关心 Provider 归属时，
+        直接按 ID 全局查找。
+
+        例如：
+
+            get_model_by_id("deepseek-chat")
+
+        返回第一个匹配的模型。
+        """
+
+        for provider in self._providers.values():
+            for model in provider.get_models():
+                if model.id == model_id:
+                    return model
+
+        return None
+
     # 请求调度
 
     async def stream(

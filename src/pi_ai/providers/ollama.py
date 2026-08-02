@@ -17,7 +17,7 @@ Ollama 是本地模型运行时，
 
 主要包括：
 
-    ① 定义本地已安装的模型
+    ① 定义本地已安装的模型（静态目录 + 运行时动态发现）
 
     ② 配置 API 类型（completions）
 
@@ -43,19 +43,29 @@ Ollama 是本地模型运行时，
            Provider
 """
 
+import httpx
+
 from .._types import Model
 from ..provider import create_provider, Provider
 
 
+# Ollama 服务根地址（原生 API /api/tags 使用，不带 /v1）。
+#
+# 使用 127.0.0.1 而非 localhost：
+# httpx 默认读取 Windows 系统代理（trust_env=True），
+# localhost 可能被本地代理拦截导致 503。
+OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+
+
 # ------------------------------------------------------
-# 本地已安装的模型列表。
+# 静态模型目录（丰富元数据来源）。
 #
 # 来源：`ollama list`。
 #
 # Ollama 的模型是动态 pull 的，
-# 如果之后安装/卸载了模型，
-# 需要同步更新本列表
-# （或者改为运行时调用 /api/tags 动态生成）。
+# 安装/卸载后与 `ollama list` 可能不一致。
+# 运行时动态发现见 discover_ollama_models()：
+# 已知模型复用本目录的元数据，未知模型合成默认元数据。
 #
 # 模型 ID 必须与 `ollama list` 的 NAME 完全一致，
 # 因为它会原样作为 model 参数发送给 API。
@@ -198,7 +208,73 @@ OLLAMA_MODELS: list[Model] = [
 ]
 
 
-def ollama_provider() -> Provider:
+# ------------------------------------------------------
+# 运行时动态发现
+# ------------------------------------------------------
+
+
+def _default_model(name: str) -> Model:
+    """为静态目录中不存在的模型合成默认元数据。"""
+    return Model(
+        id=name,
+        provider="ollama",
+        api="openai-completions",
+        name=name,
+        input=["text"],
+        output=["text"],
+        maxTokens=8192,
+        thinking=False,
+        supportsToolCalling=True,
+        supportsImages=False,
+        cost={},  # 本地运行，无费用
+    )
+
+
+def _merge_ollama_models(names: list[str]) -> list[Model]:
+    """将 /api/tags 返回的模型名与静态元数据合并。
+
+    已知模型保留静态目录的丰富元数据（thinking / 工具 / 图片）；
+    未知模型（新 pull 的）合成默认元数据。
+    返回顺序与 /api/tags 一致。
+    """
+    static_by_id = {m.id: m for m in OLLAMA_MODELS}
+    result: list[Model] = []
+    for name in names:
+        static = static_by_id.get(name)
+        result.append(static if static is not None else _default_model(name))
+    return result
+
+
+async def discover_ollama_models(
+    base_url: str = OLLAMA_BASE_URL,
+    timeout: float = 1.0,
+) -> list[Model] | None:
+    """运行时发现 Ollama 已安装的模型（GET /api/tags）。
+
+    返回按 /api/tags 顺序、合并静态元数据的模型列表，
+    使 `ollama pull` / `ollama rm` 后模型列表实时同步。
+
+    失败（未运行 / 超时 / 非 200）返回 None，
+    调用方可回退到静态 OLLAMA_MODELS。
+    """
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.get(f"{base_url}/api/tags")
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        names = [
+            item.get("name", "")
+            for item in data.get("models", [])
+            if item.get("name")
+        ]
+        return _merge_ollama_models(names)
+    except Exception:
+        # 任何网络/解析失败都不阻断调用方，回退静态列表。
+        return None
+
+
+def ollama_provider(models: list[Model] | None = None) -> Provider:
     """
     创建并返回一个 Ollama Provider。
 
@@ -214,6 +290,11 @@ def ollama_provider() -> Provider:
 
     Ollama 本地服务默认不需要 API Key，
     因此不配置认证（auth=None）。
+
+    models：
+
+        默认使用静态 OLLAMA_MODELS。
+        传入 discover_ollama_models() 的结果可启用运行时动态发现。
 
     调用者通常只需要：
 
@@ -237,7 +318,7 @@ def ollama_provider() -> Provider:
         # 本地服务无需 API Key。
         auth=None,
 
-        models=OLLAMA_MODELS,
+        models=models if models is not None else OLLAMA_MODELS,
 
         # Ollama 提供 OpenAI Chat Completions 兼容接口。
         api_kind="completions",

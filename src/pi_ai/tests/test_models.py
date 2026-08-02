@@ -63,6 +63,19 @@ class TestModelsRegistry:
         assert models.get_model("openai", "nonexistent") is None
         assert models.get_model("unknown", "gpt-4o") is None
 
+    def test_get_model_by_id_across_providers(self):
+        models = create_default_models()
+        # 跨 provider 按 ID 全局查找
+        m = models.get_model_by_id("deepseek-chat")
+        assert m is not None
+        assert m.provider == "deepseek"
+        assert models.get_model_by_id("qwen3:30b") is not None
+        assert models.get_model_by_id("faux-1") is not None
+
+    def test_get_model_by_id_missing(self):
+        models = create_default_models()
+        assert models.get_model_by_id("nonexistent") is None
+
     def test_add_remove_provider(self):
         models = Models()
         assert len(models.get_providers()) == 0
