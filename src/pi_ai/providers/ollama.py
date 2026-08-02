@@ -46,7 +46,7 @@ Ollama 是本地模型运行时，
 import httpx
 
 from .._types import Model, ModelCapabilities, ModelCost
-from ..provider import create_provider, Provider
+from ..provider import create_provider, Provider, RefreshModelsContext
 
 
 # Ollama 服务根地址（原生 API /api/tags 使用，不带 /v1）。
@@ -258,6 +258,14 @@ async def discover_ollama_models(
         return None
 
 
+async def _fetch_ollama_models(context: RefreshModelsContext) -> list[Model]:
+    """refreshModels 用的抓取实现：失败抛异常（由 Models.refresh 收集）。"""
+    discovered = await discover_ollama_models()
+    if discovered is None:
+        raise RuntimeError("Ollama model discovery failed (GET /api/tags)")
+    return discovered
+
+
 def ollama_provider(models: list[Model] | None = None) -> Provider:
     """
     创建并返回一个 Ollama Provider。
@@ -313,4 +321,5 @@ def ollama_provider(models: list[Model] | None = None) -> Provider:
         # 避免 httpx 走 Windows 系统代理。
         base_url="http://127.0.0.1:11434/v1",
         # base_url="http://localhost/v1",
+        fetch_models=_fetch_ollama_models,
     )

@@ -65,6 +65,7 @@ from .._types import (
     now_ms,
 )
 from ..utils.diagnostics import create_assistant_message_diagnostic
+from .constrained_sampling import resolve_json_schema_strict_sampling
 
 
 def to_openai_messages(
@@ -269,7 +270,11 @@ def to_openai_messages(
     return result
 
 
-def to_openai_tools(tools: list[Tool]) -> list[dict[str, Any]]:
+def to_openai_tools(
+    tools: list[Tool],
+    *,
+    supports_strict_mode: bool = True,
+) -> list[dict[str, Any]]:
     """
     将 SDK Tool
 
@@ -286,17 +291,23 @@ def to_openai_tools(tools: list[Tool]) -> list[dict[str, Any]]:
         ...
     }
     """
-    return [
-        {
-            "type": "function",
-            "function": {
-                "name": t.name,
-                "description": t.description,
-                "parameters": t.input_schema,
-            },
+    result: list[dict[str, Any]] = []
+    for t in tools:
+        strict = resolve_json_schema_strict_sampling(t, supports_strict_mode)
+        function_schema: dict[str, Any] = {
+            "name": t.name,
+            "description": t.description,
+            "parameters": t.input_schema,
         }
-        for t in tools
-    ]
+        if strict:
+            function_schema["strict"] = True
+        result.append(
+            {
+                "type": "function",
+                "function": function_schema,
+            }
+        )
+    return result
 
 
 def empty_usage() -> Usage:

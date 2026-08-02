@@ -38,6 +38,14 @@ from .validation import (
     validate_tool_arguments,
     validate_tool_call,
 )
+from .json_parse import (
+    parse_json_with_repair,
+    parse_streaming_json,
+    repair_json,
+)
+from .partial_json import partial_json
+from .provider_env import get_provider_env_value
+from .uuid import uuidv7
 
 __all__ = [
     "AssistantMessageEventStream",
@@ -58,6 +66,15 @@ __all__ = [
     "validate_arguments",
     "validate_tool_arguments",
     "validate_tool_call",
+    # JSON 修复 / 流式解析
+    "repair_json",
+    "parse_json_with_repair",
+    "parse_streaming_json",
+    "partial_json",
+    # Provider 环境检测
+    "get_provider_env_value",
+    # UUID v7
+    "uuidv7",
     # Token / Context
     "ContextUsageEstimate",
     "CHARS_PER_TOKEN",

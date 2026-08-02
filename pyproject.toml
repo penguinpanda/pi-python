@@ -40,6 +40,7 @@ packages = ["src/pi_ai", "src/pi_agent", "src/pi_coding_agent"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["src/pi_ai/tests", "src/pi_agent/tests", "src/pi_coding_agent/tests"]
+pythonpath = ["src", "."]
 addopts = "--cov=pi_ai --cov=pi_agent --cov=pi_coding_agent --cov-report=term-missing --cov-report=html"
 
 [tool.coverage.run]

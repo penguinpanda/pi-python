@@ -64,15 +64,44 @@ Models 相当于整个 SDK 的调度中心，
 负责根据 Model.provider 找到对应 Provider。
 """
 
-from .utils._event_stream import AssistantMessageEventStream
-from ._types import(
+import asyncio
+
+from dataclasses import dataclass, field
+
+from ..utils._event_stream import AssistantMessageEventStream
+from .._types import(
     AssistantMessage,
     Context,
     Model,
     StreamOptions
 )
-from .auth import InMemoryCredentialStore
-from .provider import Provider
+from ..auth import InMemoryCredentialStore
+from ..provider import Provider, RefreshModelsContext
+from .models_store import (
+    InMemoryModelsStore,
+    ModelsStore,
+    provider_models_store,
+)
+
+
+@dataclass(slots=True)
+class ModelsRefreshOptions:
+    """Models.refresh 选项。"""
+
+    # False 表示离线/仅缓存初始化（不访问网络）。
+    allow_network: bool = True
+    # 绕过 provider 新鲜度检查立即抓取。
+    force: bool = False
+    # 可选中止信号（asyncio.Event）。
+    signal: asyncio.Event | None = None
+
+
+@dataclass(slots=True)
+class ModelsRefreshResult:
+    """Models.refresh 结果：aborted + 每 provider 的错误（不抛给调用方）。"""
+
+    aborted: bool = False
+    errors: dict[str, Exception] = field(default_factory=dict)
 
 
 class Models:
@@ -92,7 +121,7 @@ class Models:
 
     所有网络请求都会转发给对应 Provider。
     """
-    def __init__(self) -> None:
+    def __init__(self, *, models_store: ModelsStore | None = None) -> None:
         
         # 已注册的 Provider
         #
@@ -115,6 +144,9 @@ class Models:
         # Provider 获取 API Key 时，
         # 会统一从这里读取。
         self._credentials = InMemoryCredentialStore()
+
+        # 模型目录持久化（ModelsStore）。
+        self._models_store = models_store or InMemoryModelsStore()
 
     # 模型提供者 管理
 
@@ -243,6 +275,66 @@ class Models:
 
         return None
 
+    # 动态模型刷新
+
+    async def refresh(
+        self,
+        options: ModelsRefreshOptions | None = None,
+    ) -> ModelsRefreshResult:
+        """并发刷新所有支持 refreshModels 的 provider。
+
+        对齐 TS Models.refresh：
+        - 单个 provider 失败记录到 errors，不整体抛异常；
+        - 失败后以 allow_network=False 重跑一次做缓存恢复（best-effort）；
+        - 中止（signal set）不产生错误。
+        """
+        opts = options or ModelsRefreshOptions()
+        result = ModelsRefreshResult()
+        refreshable = [
+            provider
+            for provider in self._providers.values()
+            if getattr(provider, "refresh_models", None) is not None
+        ]
+
+        async def _refresh_one(provider: Provider) -> None:
+            if opts.signal is not None and opts.signal.is_set():
+                result.aborted = True
+                return
+            store = provider_models_store(self._models_store, provider.id)
+            credential = await self._credentials.read(provider.id)
+            context = RefreshModelsContext(
+                credential=credential,
+                store=store,
+                allow_network=opts.allow_network,
+                force=opts.force,
+                signal=opts.signal,
+            )
+            try:
+                await provider.refresh_models(context)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if opts.signal is not None and opts.signal.is_set():
+                    result.aborted = True
+                    return
+                result.errors[provider.id] = exc
+                # 失败后 best-effort 缓存恢复（离线重跑）。
+                try:
+                    await provider.refresh_models(
+                        RefreshModelsContext(
+                            credential=credential,
+                            store=store,
+                            allow_network=False,
+                            force=opts.force,
+                            signal=opts.signal,
+                        )
+                    )
+                except Exception:
+                    pass
+
+        await asyncio.gather(*(_refresh_one(p) for p in refreshable))
+        return result
+
     # 请求调度
 
     async def stream(
@@ -256,35 +348,20 @@ class Models:
 
         工作流程：
 
-                Model
+                立即返回 EventStream
 
-                │
+                后台异步 setup（认证解析 + Provider 调度）
 
-                ▼
-
-        找到对应 Provider
-
-                │
-
-                ▼
-
-        Provider.stream(...)
-
-                │
-
-                ▼
-
-        AssistantMessageEventStream
-
-        返回后即可：
-
-            async for
-
-        持续读取模型输出。 
+                失败 → error 事件优雅降级（对齐 TS lazyStream）
         """
 
-        provider = self._require_provider(model.provider)
-        return await provider.stream(model, context, options)
+        from ..api.lazy import lazy_stream
+
+        async def _setup():
+            provider = self._require_provider(model.provider)
+            return await provider.stream(model, context, options)
+
+        return lazy_stream(model, _setup)
 
     async def complete(
             self,
@@ -328,7 +405,7 @@ class Models:
         而不是环境变量。 
         """
 
-        from .auth import ApiKeyCredential
+        from ..auth import ApiKeyCredential
         await self._credentials.write(provider_id, ApiKeyCredential(key=api_key))
 
 

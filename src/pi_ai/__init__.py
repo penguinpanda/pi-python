@@ -105,6 +105,7 @@ from .auth import (
     InMemoryCredentialStore,
     env_api_key_auth,
 )
+from .auth.resolve import ModelsError
 from .models import Models
 from .provider import Provider, create_provider
 from .providers import (
@@ -291,4 +292,5 @@ __all__ = [
     "env_api_key_auth",
     "ApiKeyCredential",
     "InMemoryCredentialStore",
+    "ModelsError",
 ]

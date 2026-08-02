@@ -78,6 +78,7 @@ from ._shared import (
 )
 from .simple_options import clamp_max_tokens_to_context
 from .transform_messages import normalize_tool_call_id, transform_messages
+from .compat_runtime import max_tokens_field, supports_long_cache_retention, supports_strict_mode
 from ..utils.prompt_cache import (
     clamp_openai_prompt_cache_key,
     resolve_cache_retention,
@@ -223,7 +224,14 @@ async def chat_completions_stream(
             messages = to_openai_messages(transformed_messages, model)
 
             # Tool 定义转换为 OpenAI Tool Schema。
-            tools = to_openai_tools(context.tools) if context.tools else None
+            tools = (
+                to_openai_tools(
+                    context.tools,
+                    supports_strict_mode=supports_strict_mode(model),
+                )
+                if context.tools
+                else None
+            )
 
             # Chat Completions API
             #
@@ -255,7 +263,7 @@ async def chat_completions_stream(
             # max_tokens 收敛到模型上下文窗口内（对齐 TS buildBaseOptions）：
             # 未指定时使用模型默认 max_tokens，始终发送收敛后的值。
             requested = opts.get("max_tokens")
-            kwargs["max_tokens"] = clamp_max_tokens_to_context(
+            kwargs[max_tokens_field(model)] = clamp_max_tokens_to_context(
                 model,
                 context,
                 requested if requested is not None else model.max_tokens,
@@ -268,11 +276,7 @@ async def chat_completions_stream(
             cache_retention = resolve_cache_retention(
                 opts.get("cache_retention"), opts.get("env")
             )
-            supports_long = (
-                model.compat.get("supportsLongCacheRetention", True)
-                if model.compat
-                else True
-            )
+            supports_long = supports_long_cache_retention(model)
             if (
                 "api.openai.com" in base_url and cache_retention != "none"
             ) or (cache_retention == "long" and supports_long):

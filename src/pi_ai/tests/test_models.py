@@ -100,8 +100,16 @@ class TestModelsRegistry:
         )
         ctx = Context(messages=[{"role": "user", "content": "hi"}])
 
-        with pytest.raises(ValueError, match="Unknown provider"):
-            asyncio.run(models.stream(fake_model, ctx))
+        # 对齐 TS：未知 provider 以 error 事件优雅降级，而非抛出。
+        import asyncio as _asyncio
+
+        async def _assert_error_event():
+            stream = await models.stream(fake_model, ctx)
+            events = [event async for event in stream]
+            assert events[0]["type"] == "error"
+            assert "Unknown provider" in events[0]["error"]["error_message"]
+
+        _asyncio.run(_assert_error_event())
 
 
 class TestAuth:

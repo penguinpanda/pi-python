@@ -63,8 +63,10 @@ Provider 本身不负责：
       responses_stream()
 """
 
+import asyncio
+
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Awaitable, Callable, Literal, Protocol
 
 from .utils._event_stream import AssistantMessageEventStream
 from ._types import (
@@ -79,6 +81,12 @@ from ._types import (
 from .api.completions import chat_completions_stream
 from .api.responses import responses_stream
 from .auth import EnvApiKeyAuth, InMemoryCredentialStore, resolve_api_key
+from .models.models_store import (
+    ModelsStoreEntry,
+    ProviderModelsStore,
+    provider_models_store,
+)
+from ._types import now_ms
 
 # Provider 使用的 API 类型。
 #
@@ -89,6 +97,22 @@ from .auth import EnvApiKeyAuth, InMemoryCredentialStore, resolve_api_key
 #     Responses API
 
 ApiKind = Literal["completions", "responses"]
+
+
+@dataclass(slots=True)
+class RefreshModelsContext:
+    """provider 侧 refreshModels 的上下文（对齐 TS RefreshModelsContext）。"""
+
+    # 生效中的凭证（OAuth 已按需刷新）；API Key provider 可忽略。
+    credential: Any = None
+    # 当前 provider 的持久化存储视图（只读自己的目录）。
+    store: ProviderModelsStore | None = None
+    # False 表示离线/仅缓存初始化。
+    allow_network: bool = True
+    # 绕过新鲜度检查立即抓取。
+    force: bool = False
+    # 可选中止信号（asyncio.Event；set 即中止）。
+    signal: asyncio.Event | None = None
 
 # 自定义流函数类型（定义已上移到 _types.py，此处从 _types 导入）。
 #
@@ -190,6 +214,12 @@ class Provider:
     # 主要用于测试（例如 Faux Provider）。
     _stream_fn: StreamFunction | None = None
 
+    # 运行时动态发现的模型（fetch_models 抓取结果，覆盖同 id 的静态模型）。
+    _dynamic_models: list[Model] = field(default_factory=list, repr=False, compare=False)
+
+    # 动态模型刷新实现（由 create_provider(fetch_models=...) 构建）。
+    refresh_models: Callable[[RefreshModelsContext], Awaitable[None]] | None = None
+
     # 自定义异步 HTTP 客户端（可选）。
     #
     # 设置后用于 Provider 的 HTTP 请求；
@@ -205,7 +235,17 @@ class Provider:
         避免调用者修改内部列表。
         """
 
-        return list(self.models)
+        if not self._dynamic_models:
+            return list(self.models)
+        merged = list(self.models)
+        for model in self._dynamic_models:
+            for index, existing in enumerate(merged):
+                if existing.id == model.id:
+                    merged[index] = model
+                    break
+            else:
+                merged.append(model)
+        return merged
 
     async def stream(
             self,
@@ -344,6 +384,9 @@ def create_provider(
         api_kind: ApiKind = "completions",
         base_url: str | None = None,
         stream_fn: StreamFunction | None = None,
+        fetch_models: (
+            Callable[[RefreshModelsContext], Awaitable[list[Model]]] | None
+        ) = None,
 ) -> Provider:
     """
     创建 Provider。
@@ -374,7 +417,7 @@ def create_provider(
     Provider 注册。
     """
 
-    return Provider(
+    provider = Provider(
         id=id,
         name=name or id,
         auth=auth,
@@ -383,3 +426,59 @@ def create_provider(
         base_url=base_url,
         _stream_fn=stream_fn,
     )
+
+    if fetch_models is not None:
+        provider.refresh_models = _build_refresh_models(provider, fetch_models)
+    return provider
+
+
+def _build_refresh_models(
+    provider: Provider,
+    fetch_models: Callable[[RefreshModelsContext], Awaitable[list[Model]]],
+) -> Callable[[RefreshModelsContext], Awaitable[None]]:
+    """构建 provider.refresh_models：缓存恢复 → 网络抓取 → 持久化。
+
+    对齐 TS createProvider 的 refreshModels：
+    - 先恢复 store 中的目录（allow_network=False 时仅此一步）；
+    - 网络失败时保留上一次的列表（dynamic 不变），错误由 Models.refresh 收集；
+    - 并发调用共享同一个 in-flight 任务。
+    """
+    inflight: asyncio.Task | None = None
+
+    async def _refresh(context: RefreshModelsContext) -> None:
+        nonlocal inflight
+        if inflight is not None:
+            await inflight
+            return
+
+        async def _impl() -> None:
+            if context.store is not None:
+                stored = await context.store.read()
+                if stored is not None:
+                    provider._dynamic_models[:] = [
+                        m for m in stored.models if m.provider == provider.id
+                    ]
+            if not context.allow_network or (
+                context.signal is not None and context.signal.is_set()
+            ):
+                return
+            refreshed = await fetch_models(context)
+            if context.signal is not None and context.signal.is_set():
+                return
+            provider._dynamic_models[:] = refreshed
+            if context.store is not None:
+                await context.store.write(
+                    ModelsStoreEntry(
+                        models=list(refreshed),
+                        checked_at=now_ms(),
+                    )
+                )
+
+        task = asyncio.create_task(_impl())
+        inflight = task
+        try:
+            await task
+        finally:
+            inflight = None
+
+    return _refresh

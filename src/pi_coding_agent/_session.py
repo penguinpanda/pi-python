@@ -355,6 +355,13 @@ class AgentSession:
             self._unsub_agent = None
         self._agent.abort()
         self._listeners.clear()
+        # 统一清理该会话注册的资源（不阻断 dispose 自身）。
+        from pi_agent.session_resources import cleanup_session_resources
+
+        try:
+            cleanup_session_resources(self._session_manager.session_id)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # 内部：事件桥接

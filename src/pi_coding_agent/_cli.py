@@ -16,9 +16,10 @@ from pathlib import Path
 from pi_agent import Agent, AgentOptions
 from pi_agent import set_default_stream_fn as set_agent_stream_fn
 from pi_ai import create_default_models
-from pi_ai.providers.ollama import discover_ollama_models, ollama_provider
+from pi_ai.auth.credential_store import FileCredentialStore
+from pi_ai.auth.oauth import builtin_oauth_providers
 
-from ._config import get_sessions_dir, load_settings
+from ._config import get_agent_dir, get_sessions_dir, load_settings
 from ._print_mode import run_print_mode
 from ._session import AgentSession
 from ._session_manager import SessionManager
@@ -35,6 +36,12 @@ def main(args: list[str] | None = None) -> int:
 
 async def _async_main(args: list[str] | None = None) -> int:
     """CLI 异步主入口。"""
+    # OAuth 子命令：pi login / logout / list（在 argparse 之前拦截，
+    # 避免 "login" 被当作位置参数 message 解析）。
+    effective_args = args if args is not None else sys.argv[1:]
+    if effective_args and effective_args[0] in ("login", "logout", "list"):
+        return await _run_auth_command(effective_args)
+
     parser = _create_parser()
     parsed = parser.parse_args(args)
 
@@ -101,6 +108,125 @@ async def _async_main(args: list[str] | None = None) -> int:
         return 1
 
     return await run_print_mode(session, message)
+
+
+# ---------------------------------------------------------------------------
+# OAuth 子命令（pi login / logout / list）
+# ---------------------------------------------------------------------------
+
+
+def _auth_store() -> FileCredentialStore:
+    """凭证存储：~/.pi/agent/auth.json（跟随现有配置目录约定）。"""
+    return FileCredentialStore(get_agent_dir() / "auth.json")
+
+
+class _CliAuthInteraction:
+    """AuthInteraction 的终端适配（input/print）。"""
+
+    def __init__(self) -> None:
+        self.signal = None
+
+    async def prompt(self, prompt) -> str:
+        if prompt["type"] == "select":
+            print(f"\n{prompt['message']}")
+            options = prompt.get("options") or []
+            for index, option in enumerate(options, 1):
+                description = option.get("description") or ""
+                suffix = f" — {description}" if description else ""
+                print(f"  {index}. {option['label']}{suffix}")
+            while True:
+                raw = input(f"Enter number (1-{len(options)}): ").strip()
+                try:
+                    return options[int(raw) - 1]["id"]
+                except (ValueError, IndexError):
+                    print("Invalid selection.")
+        placeholder = prompt.get("placeholder")
+        suffix = f" ({placeholder})" if placeholder else ""
+        return input(f"{prompt['message']}{suffix}: ")
+
+    def notify(self, event) -> None:
+        if event["type"] == "auth_url":
+            print(f"\nOpen this URL in your browser:\n{event['url']}")
+            instructions = event.get("instructions")
+            if instructions:
+                print(instructions)
+        elif event["type"] == "device_code":
+            print(f"\nOpen this URL in your browser:\n{event['verificationUri']}")
+            print(f"Enter code: {event['userCode']}")
+        elif event["type"] in ("info", "progress"):
+            message = event.get("message")
+            if message:
+                print(message)
+
+
+async def _run_auth_command(args: list[str]) -> int:
+    command = args[0]
+    if command == "list":
+        return await _auth_list()
+    if command == "login":
+        provider_id = args[1] if len(args) > 1 else None
+        return await _auth_login(provider_id)
+    if command == "logout":
+        provider_id = args[1] if len(args) > 1 else None
+        return await _auth_logout(provider_id)
+    print(f"Unknown auth command: {command}", file=sys.stderr)
+    return 1
+
+
+async def _auth_list() -> int:
+    store = _auth_store()
+    infos = await store.list()
+    logged_in = {info["provider_id"] for info in infos}
+    for provider_id, name, _flow in builtin_oauth_providers():
+        status = "logged in" if provider_id in logged_in else "not logged in"
+        print(f"  {provider_id:<20} {name}  [{status}]")
+    return 0
+
+
+async def _auth_login(provider_id: str | None) -> int:
+    providers = builtin_oauth_providers()
+    if provider_id is None:
+        print("Select a provider:")
+        for index, (_pid, name, _flow) in enumerate(providers, 1):
+            print(f"  {index}. {name}")
+        while True:
+            raw = input(f"Enter number (1-{len(providers)}): ").strip()
+            try:
+                provider_id = providers[int(raw) - 1][0]
+                break
+            except (ValueError, IndexError):
+                print("Invalid selection.")
+
+    match = next((p for p in providers if p[0] == provider_id), None)
+    if match is None:
+        print(f"Unknown provider: {provider_id}", file=sys.stderr)
+        return 1
+    _pid, _name, flow = match
+    interaction = _CliAuthInteraction()
+    try:
+        credential = await flow.login(interaction)
+    except Exception as exc:
+        print(f"Login failed: {exc}", file=sys.stderr)
+        return 1
+
+    store = _auth_store()
+
+    async def _set(_current):
+        return credential
+
+    await store.modify(_pid, _set)
+    print(f"\nCredentials saved to {store._path}")
+    return 0
+
+
+async def _auth_logout(provider_id: str | None) -> int:
+    if provider_id is None:
+        print("Usage: pi logout <provider>", file=sys.stderr)
+        return 1
+    store = _auth_store()
+    await store.delete(provider_id)
+    print(f"Logged out: {provider_id}")
+    return 0
 
 
 def _create_parser() -> argparse.ArgumentParser:
@@ -182,11 +308,9 @@ def _print_models(models, provider_id: str | None = None) -> int:
 async def _refresh_ollama_provider(models) -> None:
     """尝试用 Ollama /api/tags 动态发现模型并替换 ollama provider。
 
-    不可用（未运行/超时）时保留静态 OLLAMA_MODELS，不报错。
+    经 Models.refresh() 统一编排；失败保留静态/上次列表，不报错。
     """
-    discovered = await discover_ollama_models()
-    if discovered is not None:
-        models.add_provider(ollama_provider(models=discovered))
+    await models.refresh()
 
 
 def _resolve_model(models, parsed, settings: dict):

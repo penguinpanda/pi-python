@@ -93,6 +93,7 @@ from ._shared import (
     to_openai_tools,
 )
 from .simple_options import clamp_max_tokens_to_context
+from .compat_runtime import max_tokens_field, supports_long_cache_retention, supports_strict_mode
 from .transform_messages import (
     normalize_responses_tool_call_id,
     short_hash,
@@ -556,7 +557,14 @@ async def responses_stream(
             input_items = _to_responses_input(
                 transformed_messages, context.system_prompt, model
             )
-            tools = to_openai_tools(context.tools) if context.tools else None
+            tools = (
+                to_openai_tools(
+                    context.tools,
+                    supports_strict_mode=supports_strict_mode(model),
+                )
+                if context.tools
+                else None
+            )
 
             # Responses API 请求参数。
             #
@@ -582,7 +590,7 @@ async def responses_stream(
             # max_tokens 收敛到模型上下文窗口内（对齐 TS buildBaseOptions）：
             # 未指定时使用模型默认 max_tokens，始终发送收敛后的值。
             requested = opts.get("max_tokens")
-            kwargs["max_tokens"] = clamp_max_tokens_to_context(
+            kwargs[max_tokens_field(model)] = clamp_max_tokens_to_context(
                 model,
                 context,
                 requested if requested is not None else model.max_tokens,
@@ -594,11 +602,7 @@ async def responses_stream(
             cache_retention = resolve_cache_retention(
                 opts.get("cache_retention"), opts.get("env")
             )
-            supports_long = (
-                model.compat.get("supportsLongCacheRetention", True)
-                if model.compat
-                else True
-            )
+            supports_long = supports_long_cache_retention(model)
             if cache_retention != "none":
                 kwargs["prompt_cache_key"] = clamp_openai_prompt_cache_key(
                     opts.get("session_id")

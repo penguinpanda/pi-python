@@ -1,4 +1,5 @@
-"""
+"""pi_ai.auth — 认证包入口（原 auth.py 迁移而来，保持导入兼容）。
+
 认证(Authentication)
 
 =========================================================
@@ -252,7 +253,7 @@ class EnvApiKeyAuth:
 
     def resolve(
             self,
-            credential: ApiKeyCredential | None = None,
+            credential: ApiKeyCredential | dict | None = None,
     ) -> ResolvedAuth | None:
         """
         解析 API Key.
@@ -280,8 +281,13 @@ class EnvApiKeyAuth:
         是否认为缺少 API Key 是错误,
         由调用者决定.
         """
-        if credential and credential.key:
-            return ResolvedAuth(api_key=credential.key, source="stored credential")
+        key = (
+            credential.get("key")
+            if isinstance(credential, dict)
+            else getattr(credential, "key", None)
+        )
+        if key:
+            return ResolvedAuth(api_key=key, source="stored credential")
 
         for var in self.env_vars:
             value = os.environ.get(var)
@@ -338,3 +344,13 @@ async def resolve_api_key(
         )
 
     return result.api_key
+
+
+# ---------------------------------------------------------------------------
+# 新式凭证存储（含 modify/list；沿用旧名称保持导入兼容）。
+# ---------------------------------------------------------------------------
+
+from .credential_store import (  # noqa: E402,F401
+    FileCredentialStore,
+    InMemoryCredentialStore,
+)
