@@ -76,6 +76,7 @@ from ._shared import (
     to_openai_messages,
     to_openai_tools,
 )
+from .transform_messages import normalize_tool_call_id, transform_messages
 
 
 def _create_client(
@@ -203,10 +204,18 @@ async def chat_completions_stream(
                 max_retries=opts.get("max_retries", 2),
             )
 
-            # 将 SDK Message
+            # 跨 Provider 消息规范化。
+            #
+            # 图片降级 / thinking 块 / 工具调用 ID 规范化 /
+            # 孤立 tool call 合成错误结果。
+            transformed_messages = transform_messages(
+                context.messages, model, normalize_tool_call_id
+            )
+
+            # 将规范化后的 SDK Message
             #
             # 转换成 OpenAI Message。
-            messages = to_openai_messages(context.messages, model)
+            messages = to_openai_messages(transformed_messages, model)
 
             # Tool 定义转换为 OpenAI Tool Schema。
             tools = to_openai_tools(context.tools) if context.tools else None

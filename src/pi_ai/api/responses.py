@@ -56,6 +56,7 @@ Responses API 返回的是"事件(Event)"，
 """
 
 import asyncio
+import json
 from typing import Any, cast
 
 import httpx
@@ -91,6 +92,7 @@ from ._shared import (
     parse_tool_arguments,
     to_openai_tools,
 )
+from .transform_messages import transform_messages
 
 
 def _create_client(
@@ -245,6 +247,21 @@ def _to_responses_input(
             for block in msg["content"]:
                 if block["type"] == "text":
                     content_parts.append({"type": "output_text", "text": block["text"]})
+                elif block["type"] == "toolCall":
+                    # 工具调用历史 → function_call item。
+                    #
+                    # transform 合成的孤立 toolResult 在 Responses 侧
+                    # 会转为 function_call_output；必须有对应的
+                    # function_call 历史才合法。
+                    content_parts.append({
+                        "type": "function_call",
+                        "call_id": block["id"],
+                        "name": block["name"],
+                        "arguments": json.dumps(
+                            block["arguments"] if block["arguments"] is not None else {},
+                            ensure_ascii=False,
+                        ),
+                    })
             items.append({"role": "assistant", "content": content_parts})
 
         # Tool 调用结果。
@@ -342,7 +359,14 @@ async def responses_stream(
                 timeout=timeout_ms / 1000.0 if timeout_ms else 180.0,
                 max_retries=opts.get("max_retries", 2),
             )
-            input_items = _to_responses_input(context.messages, context.system_prompt, model)
+            # 跨 Provider 消息规范化。
+            #
+            # 图片降级 / thinking 块 / 工具调用 ID 规范化 /
+            # 孤立 tool call 合成错误结果。
+            transformed_messages = transform_messages(context.messages, model)
+            input_items = _to_responses_input(
+                transformed_messages, context.system_prompt, model
+            )
             tools = to_openai_tools(context.tools) if context.tools else None
 
             # Responses API 请求参数。
