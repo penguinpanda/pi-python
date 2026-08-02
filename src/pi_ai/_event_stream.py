@@ -388,6 +388,7 @@ class AssistantMessageEventStream(
 
     def __init__(self) -> None:
         super().__init__(
+            
             # --------------------------------------------------
             # 收到 done 或 error 即认为整个流结束
             # --------------------------------------------------

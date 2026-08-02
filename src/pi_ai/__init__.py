@@ -1,7 +1,7 @@
 """
 pi-ai  统一管理不同模型的 API,返回一个一致的 AI 调用接口。
 
-暂只支持 Openai 与 Deepseek 
+暂支持 Openai、Deepseek 与 Ollama
 """
 
 from ._event_stream import AssistantMessageEventStream, EventStream
@@ -37,8 +37,10 @@ from .models import Models
 from .provider import Provider, create_provider
 from .providers import (
     DEEPSEEK_MODELS,
+    OLLAMA_MODELS,
     OPENAI_MODELS,
     deepseek_provider,
+    ollama_provider,
     openai_provider,
 )
 
@@ -62,10 +64,12 @@ __all__ = [
     # Provider factories
     "openai_provider",
     "deepseek_provider",
+    "ollama_provider",
 
     # Model lists
     "OPENAI_MODELS",
     "DEEPSEEK_MODELS",
+    "OLLAMA_MODELS",
 
     # Types
     "Model",

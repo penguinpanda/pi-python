@@ -339,6 +339,7 @@ KnownApi = Literal[
 KnownProvider = Literal[
     "openai",
     "deepseek",
+    "ollama",
 ]
 
 

@@ -2,7 +2,7 @@
 
 统一的 LLM API，Provider 抽象模式。
 
-基于 [pi-mono/packages/ai](https://github.com/earendil-works/pi-mono) 的 TypeScript 版本复刻，目前支持 **OpenAI** 和 **DeepSeek** 两个 provider。
+基于 [pi-mono/packages/ai](https://github.com/earendil-works/pi-mono) 的 TypeScript 版本复刻，目前支持 **OpenAI**、**DeepSeek** 和 **Ollama** 三个 provider。
 
 ---
 
@@ -16,6 +16,16 @@
 | DeepSeek | `deepseek-chat` | Completions | ✗ | ✓ | ✗ | 65,536 |
 | DeepSeek | `deepseek-reasoner` | Completions | ✓ | ✗ | ✗ | 65,536 |
 | DeepSeek | `deepseek-v4-flash` | Completions | ✓ | ✓ | ✗ | 384,000 |
+| Ollama | `qwen3:30b` | Completions | ✓ | ✓ | ✗ | 8,192 |
+| Ollama | `qwen3:30b-a3b` | Completions | ✓ | ✓ | ✗ | 8,192 |
+| Ollama | `richardyoung/qwen3-14b-abliterated:Q5_K_M` | Completions | ✓ | ✓ | ✗ | 8,192 |
+| Ollama | `gpt-oss:20b` | Completions | ✓ | ✓ | ✗ | 32,768 |
+| Ollama | `llama3.2-vision:latest` | Completions | ✗ | ✓ | ✓ | 4,096 |
+| Ollama | `qwen2.5:7b-instruct-q8_0` | Completions | ✗ | ✓ | ✗ | 8,192 |
+| Ollama | `deepseek-r1:14b` | Completions | ✓ | ✗ | ✗ | 8,192 |
+
+Ollama 模型列表对应本地 `ollama list` 的输出；新增或卸载模型后需要同步更新
+`OLLAMA_MODELS`（或改为运行时调用 `/api/tags` 动态生成）。
 
 ---
 
@@ -42,6 +52,20 @@ export OPENAI_API_KEY="sk-..."
 # DeepSeek
 export DEEPSEEK_API_KEY="sk-..."
 ```
+
+Ollama 是本地服务，默认不需要 API Key：
+
+```python
+from pi_ai import Models
+from pi_ai.providers import ollama_provider
+
+models = Models()
+models.add_provider(ollama_provider())
+```
+
+Ollama 默认地址为 `http://127.0.0.1:11434/v1`
+（不使用 `localhost`，避免 httpx 走 Windows 系统代理导致 503），
+如果修改了 `OLLAMA_HOST`，需要同步调整 Provider 的 `base_url`。
 
 也可以在代码中动态设置：
 

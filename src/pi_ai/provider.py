@@ -135,7 +135,10 @@ class Provider:
     #
     # Provider 获取 API Key 时，
     # 会通过这里解析。
-    auth: EnvApiKeyAuth
+    #
+    # auth=None 表示不需要认证，
+    # 例如本地服务（Ollama）。
+    auth: EnvApiKeyAuth | None
 
     # Provider 支持的模型列表。
     models: list[Model]
@@ -231,8 +234,18 @@ class Provider:
         # ↓
         #
         # Environment Variable
+        #
+        # auth=None（本地服务，如 Ollama）：
+        # 跳过认证解析，使用占位值。
+        # OpenAI SDK 在发请求时要求 api_key 非空，
+        # 本地服务会忽略 Authorization 头。
         opts = options or {}
-        api_key = opts.get("apiKey") or await resolve_api_key(self.auth, self._credential_store, self.id)
+        api_key = opts.get("apiKey")
+        if api_key is None:
+            if self.auth is None:
+                api_key = "ollama"
+            else:
+                api_key = await resolve_api_key(self.auth, self._credential_store, self.id)
         base_url = self.base_url or ""
 
         # 根据 Provider 使用的 API 类型，
@@ -240,9 +253,13 @@ class Provider:
         #
         # 不同 Provider 可以共享同一套 Models，
         # 但底层 API 实现不同。
+
+        # responses：适合构建复杂的 AI Agent，例如需要联网搜索、文件检索、自动执行代码或多步推理的智能应用。
         if self._api_kind == "responses":
             return await responses_stream(model, context, api_key, base_url, options)
-        else:
+
+        # completions：适合简单的文本生成任务，如基础聊天机器人、内容总结、分类等。
+        elif self._api_kind == "completions":
             return await chat_completions_stream(model, context, api_key, base_url, options)
 
     async def complete(
@@ -277,7 +294,7 @@ class Provider:
 def create_provider(
         id: str,
         name: str,
-        auth: EnvApiKeyAuth,
+        auth: EnvApiKeyAuth | None,
         models: list[Model],
         api_kind: ApiKind = "completions",
         base_url: str | None = None,
@@ -291,6 +308,11 @@ def create_provider(
 
     - 默认值
     - 更简单的参数
+
+    auth 传 None：
+
+        表示 Provider 不需要 API Key，
+        例如本地服务（Ollama）。
 
     主要用于：
 

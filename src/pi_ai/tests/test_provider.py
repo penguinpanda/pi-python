@@ -188,6 +188,38 @@ class TestProviderStreamDispatch:
         mock_resolve.assert_not_called()
         assert mock_completions.call_args[0][2] == "sk-override"  # api_key arg
 
+    @pytest.mark.asyncio
+    async def test_no_auth_skips_key_resolution(self):
+        """auth=None（本地服务）跳过 resolve_api_key，传空 api_key。"""
+        provider = Provider(
+            id="keyless",
+            name="Keyless",
+            auth=None,
+            models=[_make_model(provider="keyless")],
+            _api_kind="completions",
+            base_url="http://localhost:11434/v1",
+        )
+        model = _make_model(provider="keyless")
+        context = Context(messages=[
+            {"role": "user", "content": "Hi"}  # type: ignore[typeddict-unknown-key]
+        ])
+
+        fake_stream = AssistantMessageEventStream()
+        fake_stream.push({"type": "done", "message": AssistantMessage(
+            role="assistant", content=[], api=model.api,
+            provider=model.provider, model=model.id,
+            usage={"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 0},
+            stopReason="stop", errorMessage=None, timestamp=0,
+        )})
+
+        with patch("pi_ai.provider.resolve_api_key") as mock_resolve:
+            with patch("pi_ai.provider.chat_completions_stream", new=AsyncMock(return_value=fake_stream)) as mock_completions:
+                await provider.stream(model, context)
+
+        mock_resolve.assert_not_called()
+        assert mock_completions.call_args[0][2] == "ollama"  # api_key 占位值
+        assert mock_completions.call_args[0][3] == "http://localhost:11434/v1"
+
 
 # ---------------------------------------------------------------------------
 # Provider.complete()
