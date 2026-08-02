@@ -20,9 +20,12 @@ from pathlib import Path
 from typing import Any
 
 from pi_agent import AgentMessage
+from pi_ai import now_ms
 
 from ._types import (
     CURRENT_SESSION_VERSION,
+    CompactionEntry,
+    SessionEntry,
     SessionHeader,
     SessionMessageEntry,
 )
@@ -158,13 +161,14 @@ class SessionManager:
     def build_context(self) -> list[AgentMessage]:
         """沿单链重建消息列表（按时间顺序）。
 
-        从第一个 entry 沿 parentId 链走到 leaf，收集所有消息。
+        遇到 compaction 条目时：产出 compactionSummary 消息并停止继续向下
+        遍历（compaction 之前的旧历史已由摘要替代）。
         """
         if not self._entries:
             return []
 
         # 构建 id → entry 映射
-        entry_map: dict[str, SessionMessageEntry] = {}
+        entry_map: dict[str, SessionEntry] = {}
         for e in self._entries:
             entry_map[e["id"]] = e
 
@@ -175,6 +179,16 @@ class SessionManager:
             entry = entry_map.get(current_id)
             if entry is None:
                 break
+            if entry["type"] == "compaction":
+                # 压缩条目：以 summary 消息替代旧历史，不再向下遍历。
+                reversed_messages.append(
+                    _compaction_summary_message(
+                        entry["summary"],
+                        entry.get("tokensBefore", 0),
+                        entry["timestamp"],
+                    )
+                )
+                break
             reversed_messages.append(entry["message"])
             current_id = entry["parentId"]
 
@@ -182,7 +196,38 @@ class SessionManager:
         reversed_messages.reverse()
         return reversed_messages
 
-    def get_entries(self) -> list[SessionMessageEntry]:
+    async def append_compaction(
+        self,
+        summary: str,
+        first_kept_entry_id: str,
+        tokens_before: int,
+        details: dict | None = None,
+    ) -> str:
+        """追加一条压缩条目到 JSONL，返回 entryId。
+
+        压缩条目挂在链尾，作为新历史的前缀；旧历史（firstKeptEntryId
+        之前）仍保留在文件中但不再进入 build_context()。
+        """
+        entry_id = uuid.uuid4().hex[:16]
+        entry: CompactionEntry = {
+            "type": "compaction",
+            "id": entry_id,
+            "parentId": self._leaf_parent_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "summary": summary,
+            "firstKeptEntryId": first_kept_entry_id,
+            "tokensBefore": tokens_before,
+        }
+
+        self._entries.append(entry)
+        self._leaf_parent_id = entry_id
+
+        if self._session_path:
+            _append_jsonl_line_sync_append(self._session_path, entry)
+
+        return entry_id
+
+    def get_entries(self) -> list[SessionEntry]:
         """返回所有条目（用于测试/检查）。"""
         return list(self._entries)
 
@@ -206,10 +251,10 @@ def _write_jsonl_line_sync(filepath: Path, entry: dict[str, Any]) -> None:
 
 def _read_jsonl_sync(
     filepath: Path,
-) -> tuple[SessionHeader, list[SessionMessageEntry]]:
+) -> tuple[SessionHeader, list[SessionEntry]]:
     """同步读取 JSONL 文件，返回 (header, entries)。"""
     header: SessionHeader | None = None
-    entries: list[SessionMessageEntry] = []
+    entries: list[SessionEntry] = []
 
     with open(filepath, "r", encoding="utf-8") as f:
         for line in f:
@@ -222,11 +267,31 @@ def _read_jsonl_sync(
                 header = obj  # type: ignore[assignment]
             elif entry_type == "message":
                 entries.append(obj)  # type: ignore[arg-type]
+            elif entry_type == "compaction":
+                entries.append(obj)  # type: ignore[arg-type]
 
     if header is None:
         raise ValueError(f"Invalid session file: no header found in {filepath}")
 
     return header, entries
+
+
+def _compaction_summary_message(
+    summary: str,
+    tokens_before: int,
+    timestamp_iso: str,
+) -> AgentMessage:
+    """把压缩条目转换为上下文中的 compactionSummary 消息（对齐 TS）。"""
+    try:
+        ts = int(datetime.fromisoformat(timestamp_iso).timestamp() * 1000)
+    except (ValueError, TypeError):
+        ts = now_ms()
+    return {
+        "role": "compactionSummary",
+        "summary": summary,
+        "tokens_before": tokens_before,
+        "timestamp": ts,
+    }
 
 
 def _append_jsonl_line_sync_append(filepath: Path, entry: dict[str, Any]) -> None:

@@ -148,3 +148,72 @@ class TestSessionManagerBuildContext:
         assert len(messages) == 5
         for i, m in enumerate(messages):
             assert m["content"] == f"msg{i}"
+
+
+class TestSessionManagerCompaction:
+    """压缩条目：append_compaction + build_context。"""
+
+    def test_append_compaction_replaces_old_history(self):
+        mgr = SessionManager.in_memory(cwd="/tmp/test")
+        import asyncio
+
+        e1 = asyncio.run(mgr.append_message(UserMessage(role="user", content="old1")))
+        e2 = asyncio.run(
+            mgr.append_message(
+                {
+                    "role": "assistant",
+                    "content": [TextContent(type="text", text="old2")],
+                    "api": "openai-completions",
+                    "provider": "deepseek",
+                    "model": "deepseek-chat",
+                }
+            )
+        )
+        asyncio.run(mgr.append_compaction("compacted summary", e2, 100))
+        asyncio.run(mgr.append_message(UserMessage(role="user", content="new")))
+
+        messages = mgr.build_context()
+        assert len(messages) == 2
+        assert messages[0]["role"] == "compactionSummary"
+        assert messages[0]["summary"] == "compacted summary"
+        assert messages[0]["tokens_before"] == 100
+        assert messages[1]["role"] == "user"
+        assert messages[1]["content"] == "new"
+
+    def test_append_compaction_returns_entry_id(self):
+        mgr = SessionManager.in_memory(cwd="/tmp/test")
+        import asyncio
+
+        e1 = asyncio.run(mgr.append_message(UserMessage(role="user", content="old")))
+        entry_id = asyncio.run(mgr.append_compaction("summary", e1, 10))
+        assert entry_id is not None
+        entries = mgr.get_entries()
+        assert entries[-1]["type"] == "compaction"
+        assert entries[-1]["summary"] == "summary"
+        assert entries[-1]["firstKeptEntryId"] == e1
+
+    def test_persisted_compaction_roundtrip(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            import asyncio
+
+            mgr1 = SessionManager.create(cwd="/tmp/test", sessions_dir=tmpdir)
+            e1 = asyncio.run(mgr1.append_message(UserMessage(role="user", content="old")))
+            asyncio.run(mgr1.append_compaction("summary", e1, 10))
+            asyncio.run(mgr1.append_message(UserMessage(role="user", content="new")))
+
+            session_path = Path(tmpdir) / f"{mgr1.session_id}.jsonl"
+            mgr2 = SessionManager.open(session_path)
+            messages = mgr2.build_context()
+            assert len(messages) == 2
+            assert messages[0]["role"] == "compactionSummary"
+            assert messages[1]["content"] == "new"
+
+    def test_build_context_without_compaction_unchanged(self):
+        mgr = SessionManager.in_memory(cwd="/tmp/test")
+        import asyncio
+
+        asyncio.run(mgr.append_message(UserMessage(role="user", content="a")))
+        asyncio.run(mgr.append_message(UserMessage(role="user", content="b")))
+        messages = mgr.build_context()
+        assert [m["content"] for m in messages] == ["a", "b"]
+

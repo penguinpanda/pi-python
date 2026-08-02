@@ -41,6 +41,21 @@ class SessionMessageEntry(TypedDict):
     message: AgentMessage
 
 
+class CompactionEntry(TypedDict):
+    """JSONL 压缩条目 —— 摘要替代旧历史，标记保留起点。"""
+    type: Literal["compaction"]
+    id: str
+    parentId: str | None
+    timestamp: str
+    summary: str
+    firstKeptEntryId: str
+    tokensBefore: int
+
+
+# 会话条目联合（消息 + 压缩）。
+SessionEntry = SessionMessageEntry | CompactionEntry
+
+
 # ---------------------------------------------------------------------------
 # 配置类型
 # ---------------------------------------------------------------------------

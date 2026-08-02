@@ -399,18 +399,44 @@ def _normalize_input(
     return [input]
 
 
+# 压缩/分支摘要消息包装（对齐 TS coding-agent messages.ts）。
+COMPACTION_SUMMARY_PREFIX = (
+    "The conversation history before this point was compacted into the following summary:\n\n<summary>\n"
+)
+COMPACTION_SUMMARY_SUFFIX = "\n</summary>"
+BRANCH_SUMMARY_PREFIX = (
+    "The following is a summary of a branch that this conversation came back from:\n\n<summary>\n"
+)
+BRANCH_SUMMARY_SUFFIX = "</summary>"
+
+
 def _default_convert_to_llm(
     messages: list[AgentMessage],
 ) -> list[Message]:
     """默认 AgentMessage → LLM Message 转换：直接透传。
 
-    过滤规则：移除没有 role 或不支持的 role 的消息。
+    - system/user/assistant/toolResult 直接透传
+    - compactionSummary / branchSummary 包装为 user 消息（对齐 TS convertToLlm）
+    - 其余不支持 role 的消息被过滤
     """
     result: list[Message] = []
     for m in messages:
         role = m.get("role", "")
         if role in ("system", "user", "assistant", "toolResult"):
             result.append(m)
+        elif role in ("compactionSummary", "branchSummary"):
+            summary = m.get("summary", "")
+            prefix = (
+                COMPACTION_SUMMARY_PREFIX if role == "compactionSummary" else BRANCH_SUMMARY_PREFIX
+            )
+            suffix = (
+                COMPACTION_SUMMARY_SUFFIX if role == "compactionSummary" else BRANCH_SUMMARY_SUFFIX
+            )
+            result.append({
+                "role": "user",
+                "content": prefix + summary + suffix,
+                "timestamp": m.get("timestamp"),
+            })
     return result
 
 
