@@ -92,7 +92,104 @@ from ._shared import (
     parse_tool_arguments,
     to_openai_tools,
 )
-from .transform_messages import transform_messages
+from .transform_messages import (
+    normalize_responses_tool_call_id,
+    short_hash,
+    transform_messages,
+)
+
+
+def encode_text_signature_v1(id_: str, phase: str | None = None) -> str:
+    """构造 TextSignatureV1 JSON（对齐 TS encodeTextSignatureV1）。
+
+    用于把 Responses message item 的 id / phase 持久化到
+    TextContent.text_signature，供后续轮次回放。
+    """
+
+    payload: dict[str, Any] = {"v": 1, "id": id_}
+    if phase:
+        payload["phase"] = phase
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def parse_text_signature(signature: str | None) -> dict[str, Any] | None:
+    """解析 TextContent.text_signature（对齐 TS parseTextSignature）。
+
+    - 以 "{" 开头：尝试 JSON 解析，v==1 且 id 为 str 时返回 {id, phase?}
+    - 其他（旧版纯字符串 id）：返回 {id: signature}
+    """
+
+    if not signature:
+        return None
+
+    if signature.startswith("{"):
+        try:
+            parsed = json.loads(signature)
+        except (ValueError, TypeError):
+            parsed = None
+        if isinstance(parsed, dict) and parsed.get("v") == 1 and isinstance(parsed.get("id"), str):
+            phase = parsed.get("phase")
+            result: dict[str, Any] = {"id": parsed["id"]}
+            if phase in ("commentary", "final_answer"):
+                result["phase"] = phase
+            return result
+
+    return {"id": signature}
+
+
+def _to_jsonable(obj: Any) -> Any:
+    """递归转换为可 JSON 序列化的结构。
+
+    兼容 openai SDK 的 pydantic 模型与测试用的 SimpleNamespace。
+    """
+
+    if isinstance(obj, dict):
+        return {k: _to_jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_to_jsonable(v) for v in obj]
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
+    if hasattr(obj, "model_dump"):
+        return _to_jsonable(obj.model_dump())
+    if hasattr(obj, "__dict__"):
+        return {
+            k: _to_jsonable(v)
+            for k, v in vars(obj).items()
+            if not k.startswith("_")
+        }
+    return str(obj)
+
+
+def _convert_tool_result_output(
+    model: Model | None,
+    content: list[Any],
+) -> str | list[dict[str, Any]]:
+    """转换 toolResult 内容（对齐 TS convertToolResultOutput）。
+
+    - 非视觉模型 / 无图片：返回纯文本（空结果用占位文本）。
+    - 视觉模型且含图片：返回 input_text + input_image 数组。
+    """
+
+    text_result = "\n".join(b["text"] for b in content if b.get("type") == "text")
+    images = [b for b in content if b.get("type") == "image"]
+    has_text = len(text_result) > 0
+
+    if not images or model is None or not (model.input and "image" in model.input):
+        if has_text:
+            return text_result
+        return "(see attached image)" if images else "(no tool output)"
+
+    output: list[dict[str, Any]] = []
+    if has_text:
+        output.append({"type": "input_text", "text": text_result})
+    for image in images:
+        mime = image.get("mime_type") or "image/png"
+        output.append({
+            "type": "input_image",
+            "detail": "auto",
+            "image_url": f"data:{mime};base64,{image.get('data') or ''}",
+        })
+    return output
 
 
 def _create_client(
@@ -186,6 +283,9 @@ def _to_responses_input(
     if system:
         items.append({"role": "system", "content": system})
 
+    # 消息索引：用于文本消息 fallback id（msg_pi_{index}）。
+    msg_index = 0
+
     for msg in messages:
         role = msg["role"]
 
@@ -238,31 +338,112 @@ def _to_responses_input(
 
         # Assistant 历史消息。
         #
-        # Responses API
+        # 对齐 TS openai-responses-shared：
         #
-        # 使用 output_text。
+        # 每个内容块展开为独立的顶层 Response Item：
+        #
+        #     thinking → reasoning（回放 thinking_signature 中的完整 item）
+        #     text     → message（output_text + id / phase）
+        #     toolCall → function_call（call_id + fc_ item id）
+        #
+        # 而不是包在单个 {"role":"assistant","content":[...]} 里，
+        # 因为 reasoning item 必须作为独立项存在。
         elif role == "assistant":
-            # Responses API uses "assistant" items for history
-            content_parts: list[dict[str, Any]] = []
+            output: list[dict[str, Any]] = []
+            is_different_model = bool(
+                model
+                and msg.get("model") != model.id
+                and msg.get("provider") == model.provider
+                and msg.get("api") == model.api
+            )
+            text_block_index = 0
+
             for block in msg["content"]:
-                if block["type"] == "text":
-                    content_parts.append({"type": "output_text", "text": block["text"]})
-                elif block["type"] == "toolCall":
-                    # 工具调用历史 → function_call item。
+                block_type = block["type"]
+
+                # 推理历史 → reasoning item 回放。
+                #
+                # thinking_signature 存有完整的 ResponseReasoningItem
+                # （含 id / summary / content / encrypted_content），
+                # 原样回放以支持多轮续传（OpenAI 的 store:false 场景）。
+                if block_type == "thinking":
+                    signature = block.get("thinking_signature")
+                    if signature:
+                        try:
+                            reasoning_item = json.loads(signature)
+                        except (ValueError, TypeError):
+                            reasoning_item = None
+                        if isinstance(reasoning_item, dict):
+                            output.append(reasoning_item)
+
+                # 文本块 → message item。
+                #
+                # id 优先取 text_signature 中的持久化 id，
+                # 否则用 msg_pi_{index} fallback；超过 64 字符用 short_hash。
+                elif block_type == "text":
+                    parsed = parse_text_signature(block.get("text_signature"))
+                    fallback_id = (
+                        f"msg_pi_{msg_index}"
+                        if text_block_index == 0
+                        else f"msg_pi_{msg_index}_{text_block_index}"
+                    )
+                    text_block_index += 1
+
+                    msg_id = parsed["id"] if parsed else None
+                    if not msg_id:
+                        msg_id = fallback_id
+                    elif len(msg_id) > 64:
+                        msg_id = f"msg_{short_hash(msg_id)}"
+
+                    text_item: dict[str, Any] = {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{
+                            "type": "output_text",
+                            "text": block["text"],
+                            "annotations": [],
+                        }],
+                        "status": "completed",
+                        "id": msg_id,
+                    }
+                    if parsed and parsed.get("phase"):
+                        text_item["phase"] = parsed["phase"]
+                    output.append(text_item)
+
+                # 工具调用 → function_call item。
+                elif block_type == "toolCall":
+                    call_id, _, item_id_raw = block["id"].partition("|")
+                    item_id = item_id_raw or None
+
+                    # 仅保留 fc_ 开头且非跨模型的 item id。
                     #
-                    # transform 合成的孤立 toolResult 在 Responses 侧
-                    # 会转为 function_call_output；必须有对应的
-                    # function_call 历史才合法。
-                    content_parts.append({
+                    # OpenAI 会校验 fc_xxx 与 rs_xxx reasoning 的配对；
+                    # 跨模型消息省略 id 可避开该校验（与跨 provider 一致）。
+                    keep_item_id = (
+                        item_id is not None
+                        and item_id.startswith("fc_")
+                        and not is_different_model
+                    )
+                    if not keep_item_id:
+                        item_id = None
+
+                    fc_item: dict[str, Any] = {
                         "type": "function_call",
-                        "call_id": block["id"],
+                        "call_id": call_id,
                         "name": block["name"],
                         "arguments": json.dumps(
                             block["arguments"] if block["arguments"] is not None else {},
                             ensure_ascii=False,
                         ),
-                    })
-            items.append({"role": "assistant", "content": content_parts})
+                    }
+                    if item_id is not None:
+                        fc_item["id"] = item_id
+                    output.append(fc_item)
+
+            if not output:
+                msg_index += 1
+                continue
+            items.extend(output)
 
         # Tool 调用结果。
         #
@@ -270,16 +451,15 @@ def _to_responses_input(
         #
         # 使用 function_call_output。
         elif role == "toolResult":
-            # Function call output
-            text = ""
-            for block in msg["content"]:
-                if block["type"] == "text":
-                    text += block["text"]
+            # 双段 ID（call_id|fc_item_id）只保留 call_id。
+            call_id = msg["tool_call_id"].partition("|")[0]
             items.append({
                 "type": "function_call_output",
-                "call_id": msg["tool_call_id"],
-                "output": text,
+                "call_id": call_id,
+                "output": _convert_tool_result_output(model, msg["content"]),
             })
+
+        msg_index += 1
 
     return items
 
@@ -363,7 +543,11 @@ async def responses_stream(
             #
             # 图片降级 / thinking 块 / 工具调用 ID 规范化 /
             # 孤立 tool call 合成错误结果。
-            transformed_messages = transform_messages(context.messages, model)
+            #
+            # Responses 系 provider 使用管道分隔 ID（call_id|fc_item_id）。
+            transformed_messages = transform_messages(
+                context.messages, model, normalize_responses_tool_call_id
+            )
             input_items = _to_responses_input(
                 transformed_messages, context.system_prompt, model
             )
@@ -520,7 +704,11 @@ async def responses_stream(
                     if item and getattr(item, "type", None) == "function_call":
                         _end_current_block()
                         current_kind = "toolCall"
-                        current_tool_id = getattr(item, "call_id", "") or ""
+                        call_id = getattr(item, "call_id", "") or ""
+                        item_id = getattr(item, "id", None) or ""
+                        # 保存完整双段 ID（call_id|fc_item_id），
+                        # 供后续轮次回放时的跨 provider 规范化。
+                        current_tool_id = f"{call_id}|{item_id}" if item_id else call_id
                         current_tool_name = getattr(item, "name", "") or ""
                         current_raw_args = ""
                         content_blocks.append(ToolCall(
@@ -551,6 +739,45 @@ async def responses_stream(
                 # Tool 参数结束。
                 elif event_type == "response.function_call_arguments.done":
                     _end_current_block()
+
+                # 输出项完成。
+                #
+                # reasoning / message 等类型的完整 item 在此事件到达。
+                elif event_type == "response.output_item.done":
+                    item = getattr(event, "item", None)
+                    item_type = getattr(item, "type", None) if item else None
+
+                    # Reasoning 项：
+                    #
+                    # 捕获完整 item（含 id / summary / content /
+                    # encrypted_content）存入 thinking_signature，
+                    # 供后续轮次回放（对齐 TS openai-responses-shared）。
+                    if (
+                        item_type == "reasoning"
+                        and current_kind == "thinking"
+                        and current_index is not None
+                    ):
+                        block = cast(dict[str, Any], content_blocks[current_index])
+                        summary = getattr(item, "summary", None) or []
+                        content = getattr(item, "content", None) or []
+                        summary_text = "\n\n".join(
+                            getattr(p, "text", "") or "" for p in summary
+                        )
+                        content_text = "\n\n".join(
+                            getattr(p, "text", "") or "" for p in content
+                        )
+                        block["thinking"] = summary_text or content_text or block["thinking"]
+                        block["thinking_signature"] = json.dumps(
+                            _to_jsonable(item), ensure_ascii=False
+                        )
+                        stream.push(ThinkingEndEvent(
+                            type="thinking_end",
+                            content_index=current_index,
+                            content=block["thinking"],
+                            partial=_partial(),
+                        ))
+                        current_kind = None
+                        current_index = None
 
                 # 模型推理内容。
                 elif event_type == "response.reasoning_summary_part.added":

@@ -19,6 +19,7 @@ from pi_ai.api.responses import _to_responses_input
 from pi_ai.api.transform_messages import (
     NON_VISION_TOOL_IMAGE_PLACEHOLDER,
     NON_VISION_USER_IMAGE_PLACEHOLDER,
+    normalize_responses_tool_call_id,
     normalize_tool_call_id,
     short_hash,
     transform_messages,
@@ -400,6 +401,89 @@ class TestToolCallNormalization:
 
 
 # ---------------------------------------------------------------------------
+# Responses 系 Tool Call ID 规范化（fc_ item id）
+# ---------------------------------------------------------------------------
+
+class TestResponsesToolCallNormalization:
+    def test_pipe_id_normalized_and_result_remapped(self):
+        model = _make_model(model_id="gpt-5", provider="openai", api="openai-responses")
+        raw_id = "call_1|fc_abc"
+        messages: list[Message] = [
+            {"role": "user", "content": "run", "timestamp": 1},
+            _asst(
+                [_tool_call(raw_id, "bash", {})],
+                provider="openai",
+                api="openai-responses",
+                model="gpt-5",
+            ),
+            {
+                "role": "toolResult",
+                "tool_call_id": raw_id,
+                "tool_name": "bash",
+                "content": [{"type": "text", "text": "out"}],
+                "is_error": False,
+                "timestamp": 1,
+            },
+        ]
+        result = transform_messages(messages, model, normalize_responses_tool_call_id)
+        asst = result[1]
+        tr = result[2]
+        # 同模型：双段 ID 原样保留，toolResult 重映射一致。
+        assert asst["content"][0]["id"] == "call_1|fc_abc"
+        assert tr["tool_call_id"] == "call_1|fc_abc"
+
+    def test_foreign_pipe_id_hashed_to_fc(self):
+        model = _make_model(model_id="gpt-5", provider="openai", api="openai-responses")
+        raw_id = "call_1|fc_xyz"
+        messages: list[Message] = [
+            {"role": "user", "content": "run", "timestamp": 1},
+            # 默认 _asst 是 src-provider → 跨模型。
+            _asst([_tool_call(raw_id, "bash", {})]),
+            {
+                "role": "toolResult",
+                "tool_call_id": raw_id,
+                "tool_name": "bash",
+                "content": [{"type": "text", "text": "out"}],
+                "is_error": False,
+                "timestamp": 1,
+            },
+        ]
+        result = transform_messages(messages, model, normalize_responses_tool_call_id)
+        asst = result[1]
+        tr = result[2]
+        # 跨模型：item id 用 short_hash 重建为 fc_ 短 id，并保持双段结构。
+        assert asst["content"][0]["id"] == tr["tool_call_id"]
+        call_id, _, item_id = tr["tool_call_id"].partition("|")
+        assert call_id == "call_1"
+        assert item_id.startswith("fc_")
+        assert len(item_id) <= 64
+
+    def test_disallowed_provider_degrades_to_single_part(self):
+        model = _make_model(model_id="deepseek-chat", provider="deepseek", api="openai-completions")
+        raw_id = "call_1|fc_abc"
+        messages: list[Message] = [
+            {"role": "user", "content": "run", "timestamp": 1},
+            _asst(
+                [_tool_call(raw_id, "bash", {})],
+                provider="openai",
+                api="openai-responses",
+                model="gpt-5",
+            ),
+            {
+                "role": "toolResult",
+                "tool_call_id": raw_id,
+                "tool_name": "bash",
+                "content": [{"type": "text", "text": "out"}],
+                "is_error": False,
+                "timestamp": 1,
+            },
+        ]
+        result = transform_messages(messages, model, normalize_responses_tool_call_id)
+        assert result[1]["content"][0]["id"] == "call_1_fc_abc"
+        assert result[2]["tool_call_id"] == "call_1_fc_abc"
+
+
+# ---------------------------------------------------------------------------
 # 第二遍：孤立 tool call 合成 + error/aborted 跳过
 # ---------------------------------------------------------------------------
 
@@ -532,13 +616,17 @@ class TestResponsesIntegration:
         ]
         transformed = transform_messages(messages, model)
         items = _to_responses_input(transformed, None, model)
-        asst = next(i for i in items if i.get("role") == "assistant")
-        assert asst["content"][0] == {
+        # 工具调用历史 → 顶层 function_call item。
+        fc = next(i for i in items if i.get("type") == "function_call")
+        assert fc == {
             "type": "function_call",
             "call_id": "call_1",
             "name": "bash",
             "arguments": '{"command": "ls"}',
         }
+        # 对应 toolResult → function_call_output。
+        fco = next(i for i in items if i.get("type") == "function_call_output")
+        assert fco["call_id"] == "call_1"
 
     def test_responses_synthetic_result_valid(self):
         model = _make_model(model_id="gpt-5", provider="openai", api="openai-responses")

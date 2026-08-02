@@ -229,6 +229,69 @@ def normalize_tool_call_id(
 
 
 # ==========================================================
+# Responses 系 Tool Call ID 规范化
+# ==========================================================
+
+# 生成管道分隔 ID（call_id|fc_item_id）的 Responses 系 provider。
+#
+# OpenAI Responses API 的 item id 以 "fc_" 开头（可达 400+ 字符、含特殊字符），
+# 只有这些 provider 生成的 ID 需要保留双段结构；其他 provider 一律退化为单段。
+ALLOWED_RESPONSES_TOOL_CALL_PROVIDERS = frozenset({"openai", "openai-codex", "opencode"})
+
+
+def normalize_id_part(part: str) -> str:
+    """规范化 ID 单段：sanitize + 64 字符截断 + 去尾部下划线。"""
+
+    sanitized = re.sub(r"[^a-zA-Z0-9_-]", "_", part)
+    normalized = sanitized[:64] if len(sanitized) > 64 else sanitized
+    return normalized.rstrip("_")
+
+
+def build_foreign_responses_item_id(item_id: str) -> str:
+    """为跨 provider 的 item id 构建稳定的 fc_ 短 id。"""
+
+    normalized = f"fc_{short_hash(item_id)}"
+    return normalized[:64] if len(normalized) > 64 else normalized
+
+
+def normalize_responses_tool_call_id(
+    id_: str,
+    model: Model,
+    source: AssistantMessage,
+) -> str:
+    """Responses 系工具调用 ID 规范化（对齐 TS openai-responses-shared）。
+
+    - 目标 provider 不在允许集合：整体退化为单段。
+    - 无 "|"：单段规范化。
+    - 有 "|"：call_id 规范化 + item_id 规范化；
+      跨模型（source 非当前 provider/api）时用 short_hash 重建 fc_ item id；
+      item id 必须 fc_ 开头。
+    """
+
+    if model.provider not in ALLOWED_RESPONSES_TOOL_CALL_PROVIDERS:
+        return normalize_id_part(id_)
+
+    if "|" not in id_:
+        return normalize_id_part(id_)
+
+    call_id, _, item_id = id_.partition("|")
+    normalized_call_id = normalize_id_part(call_id)
+    is_foreign_tool_call = (
+        source.get("provider") != model.provider
+        or source.get("api") != model.api
+    )
+    if is_foreign_tool_call:
+        normalized_item_id = build_foreign_responses_item_id(item_id)
+    else:
+        normalized_item_id = normalize_id_part(item_id)
+
+    if not normalized_item_id.startswith("fc_"):
+        normalized_item_id = normalize_id_part(f"fc_{normalized_item_id}")
+
+    return f"{normalized_call_id}|{normalized_item_id}"
+
+
+# ==========================================================
 # 主转换函数
 # ==========================================================
 
@@ -478,5 +541,9 @@ __all__ = [
     "replace_images_with_placeholder",
     "downgrade_unsupported_images",
     "normalize_tool_call_id",
+    "ALLOWED_RESPONSES_TOOL_CALL_PROVIDERS",
+    "normalize_id_part",
+    "build_foreign_responses_item_id",
+    "normalize_responses_tool_call_id",
     "transform_messages",
 ]
