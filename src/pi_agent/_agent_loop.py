@@ -235,6 +235,11 @@ from pi_ai._types import (
     UserMessage,
     now_ms,
 )
+from pi_ai.utils.retry import (
+    RetryCallbacks,
+    RetryPolicy,
+    retry_assistant_call,
+)
 
 from ._types import (
     AfterToolCallResult,
@@ -693,96 +698,159 @@ async def _stream_assistant_response(
         system_prompt=context.system_prompt,
     )
 
-    # 5. 调用 LLM
+    # 5. 调用 LLM（带应用层重试）。
     options = StreamOptions()
     if api_key is not None:
         options["api_key"] = api_key
 
-    response = await stream_fn(config.model, llm_context, options)
+    # retry_policy 为 None 时使用默认策略（enabled=True, max_retries=3）。
+    # 显式传入 RetryPolicy(enabled=False) 可关闭重试。
+    retry_policy = config.retry_policy
+    if retry_policy is None:
+        retry_policy = RetryPolicy()
 
-    # 6. 迭代事件流。
-    #
-    # 12 事件协议下，每个增量事件都携带 partial 快照，
-    # 因此不需要在此自行拼接内容块。
-    final_stop_reason = "stop"
-    final_error_message: str | None = None
-    _final_msg: AssistantMessage | None = None  # DoneEvent/ErrorEvent 的完整消息
+    async def _produce() -> AssistantMessage:
+        """单次 LLM 调用：流式消费并发射 message_start/update。
 
-    # 当前 partial 消息（随增量事件更新）。
-    temp_msg: AssistantMessage = {
-        "role": "assistant",
-        "content": [],
-        "api": config.model.api,
-        "provider": config.model.provider,
-        "model": config.model.id,
-    }
-    await emit({"type": "message_start", "message": temp_msg})
+        正常结束返回最终消息（不发 message_end —— 由外层统一发射，
+        避免失败尝试被提交到状态）。
+        中止 / 意外异常时补发对应 message_end 后向上传播（保持现状）。
+        """
+        response = await stream_fn(config.model, llm_context, options)
 
-    try:
-        async for event in response:
-            _check_signal(signal)
+        # 6. 迭代事件流。
+        #
+        # 12 事件协议下，每个增量事件都携带 partial 快照，
+        # 因此不需要在此自行拼接内容块。
+        final_stop_reason = "stop"
+        final_error_message: str | None = None
+        _final_msg: AssistantMessage | None = None  # DoneEvent/ErrorEvent 的完整消息
 
-            event_type = event.get("type")
+        # 当前 partial 消息（随增量事件更新）。
+        temp_msg: AssistantMessage = {
+            "role": "assistant",
+            "content": [],
+            "api": config.model.api,
+            "provider": config.model.provider,
+            "model": config.model.id,
+        }
+        await emit({"type": "message_start", "message": temp_msg})
 
-            if event_type == "start":
-                temp_msg = cast(StartEvent, event)["partial"]
-
-            elif event_type in (
-                "text_start", "text_delta", "text_end",
-                "thinking_start", "thinking_delta", "thinking_end",
-                "toolcall_start", "toolcall_delta", "toolcall_end",
-            ):
-                partial = event["partial"]
-                temp_msg = partial
-                await emit({
-                    "type": "message_update",
-                    "message": temp_msg,
-                    "assistant_message_event": event,
-                })
-
-            elif event_type == "done":
-                done_event = cast(DoneEvent, event)
-                _final_msg = done_event["message"]
-                final_stop_reason = _final_msg.get("stop_reason", "stop")
-                final_error_message = _final_msg.get("error_message")
-                break
-
-            elif event_type == "error":
-                err_event = cast(ErrorEvent, event)
-                _final_msg = err_event["error"]
-                final_stop_reason = "error"
-                final_error_message = _final_msg.get(
-                    "error_message", err_event.get("reason", "Unknown error")
-                )
-                break
-
-    except asyncio.CancelledError:
-        final_stop_reason = "aborted"
-        final_error_message = "Aborted"
-        raise
-    else:
-        # 如果没有收到 done/error 事件，从 stream.result() 获取最终消息
-        if _final_msg is None:
-            _final_msg = await response.result()
+        def _finalize() -> AssistantMessage:
+            """构建最终消息：优先使用 DoneEvent/ErrorEvent 的完整消息。"""
+            result: AssistantMessage
             if _final_msg is not None:
-                final_stop_reason = _final_msg.get("stop_reason", "stop")
-                final_error_message = _final_msg.get("error_message")
-    finally:
-        # 构建最终消息：优先使用 DoneEvent/ErrorEvent 的完整消息
-        result: AssistantMessage
-        if _final_msg is not None:
-            result = _final_msg
-            # 确保 stop_reason 被正确设置
-            if "stop_reason" not in result:
+                result = _final_msg
+                # 确保 stop_reason 被正确设置
+                if "stop_reason" not in result:
+                    result["stop_reason"] = final_stop_reason
+            else:
+                # 没有 done/error 时，回退到最后一次 partial 快照
+                result = temp_msg
                 result["stop_reason"] = final_stop_reason
-        else:
-            # 没有 done/error 时，回退到最后一次 partial 快照
-            result = temp_msg
-            result["stop_reason"] = final_stop_reason
-        if final_error_message and "error_message" not in result:
-            result["error_message"] = final_error_message
+            if final_error_message and "error_message" not in result:
+                result["error_message"] = final_error_message
+            return result
 
-        await emit({"type": "message_end", "message": result})
+        try:
+            async for event in response:
+                _check_signal(signal)
+
+                event_type = event.get("type")
+
+                if event_type == "start":
+                    temp_msg = cast(StartEvent, event)["partial"]
+
+                elif event_type in (
+                    "text_start", "text_delta", "text_end",
+                    "thinking_start", "thinking_delta", "thinking_end",
+                    "toolcall_start", "toolcall_delta", "toolcall_end",
+                ):
+                    partial = event["partial"]
+                    temp_msg = partial
+                    await emit({
+                        "type": "message_update",
+                        "message": temp_msg,
+                        "assistant_message_event": event,
+                    })
+
+                elif event_type == "done":
+                    done_event = cast(DoneEvent, event)
+                    _final_msg = done_event["message"]
+                    final_stop_reason = _final_msg.get("stop_reason", "stop")
+                    final_error_message = _final_msg.get("error_message")
+                    break
+
+                elif event_type == "error":
+                    err_event = cast(ErrorEvent, event)
+                    _final_msg = err_event["error"]
+                    final_stop_reason = "error"
+                    final_error_message = _final_msg.get(
+                        "error_message", err_event.get("reason", "Unknown error")
+                    )
+                    break
+
+        except asyncio.CancelledError:
+            # 中止：补发 aborted 的 message_end（保持现状）后向上传播。
+            # 中止永不重试（retry_assistant_call 不会捕获）。
+            final_stop_reason = "aborted"
+            final_error_message = "Aborted"
+            result = _finalize()
+            await emit({"type": "message_end", "message": result})
+            raise
+        except Exception:
+            # 意外异常：补发 error 的 message_end（保持现状）后向上传播。
+            result = _finalize()
+            await emit({"type": "message_end", "message": result})
+            raise
+        else:
+            # 如果没有收到 done/error 事件，从 stream.result() 获取最终消息
+            if _final_msg is None:
+                _final_msg = await response.result()
+                if _final_msg is not None:
+                    final_stop_reason = _final_msg.get("stop_reason", "stop")
+                    final_error_message = _final_msg.get("error_message")
+            return _finalize()
+
+    # 重试回调 → AgentEvent（异步 emit）
+    async def _on_retry_scheduled(
+        attempt: int,
+        max_attempts: int,
+        delay_ms: float,
+        error_message: str,
+    ) -> None:
+        await emit({
+            "type": "auto_retry_start",
+            "attempt": attempt,
+            "max_attempts": max_attempts,
+            "delay_ms": delay_ms,
+            "error_message": error_message,
+        })
+
+    async def _on_retry_finished(
+        success: bool,
+        attempt: int,
+        final_error: str | None,
+    ) -> None:
+        await emit({
+            "type": "auto_retry_end",
+            "success": success,
+            "attempt": attempt,
+            "final_error": final_error,
+        })
+
+    result = await retry_assistant_call(
+        _produce,
+        policy=retry_policy,
+        signal=signal,
+        callbacks=RetryCallbacks(
+            on_retry_scheduled=_on_retry_scheduled,
+            on_retry_finished=_on_retry_finished,
+        ),
+    )
+
+    # message_end 只对最终结果发射一次（重试失败尝试不提交）。
+    await emit({"type": "message_end", "message": result})
 
     return result
 

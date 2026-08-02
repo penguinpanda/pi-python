@@ -133,6 +133,13 @@ class TestCreateClient:
         kwargs = mock_openai.call_args.kwargs
         assert kwargs["timeout"].connect == 120.0
 
+    def test_custom_max_retries(self):
+        with patch("pi_ai.api.completions.AsyncOpenAI") as mock_openai:
+            _create_client("sk-test", "https://api.test.com", max_retries=5)
+
+        kwargs = mock_openai.call_args.kwargs
+        assert kwargs["max_retries"] == 5
+
 
 class TestCompletionsStream:
     """chat_completions_stream() 流式主循环。"""
@@ -178,6 +185,55 @@ class TestCompletionsStream:
         assert msg["role"] == "assistant"
         assert msg["content"] == [{"type": "text", "text": "ok"}]
         assert events[-1]["type"] == "done"
+
+    @pytest.mark.asyncio
+    async def test_options_max_retries_timeout_forwarded(self):
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        chunks = [_chunk(content="ok", finish_reason="stop")]
+        client = _mock_client(chunks)
+
+        captured: dict[str, object] = {}
+
+        def _spy(api_key: str, base_url: str, *, timeout: float = 120.0, max_retries: int = 2):
+            captured["timeout"] = timeout
+            captured["max_retries"] = max_retries
+            return client
+
+        with patch("pi_ai.api.completions._create_client", side_effect=_spy):
+            stream = await chat_completions_stream(
+                model, context, "sk-test", "https://api.test.com",
+                options={"max_retries": 5, "timeout_ms": 30000},
+            )
+            events = [e async for e in stream]
+
+        assert events[-1]["type"] == "done"
+        assert captured["max_retries"] == 5
+        assert captured["timeout"] == 30.0
+
+    @pytest.mark.asyncio
+    async def test_options_defaults_when_absent(self):
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        chunks = [_chunk(content="ok", finish_reason="stop")]
+        client = _mock_client(chunks)
+
+        captured: dict[str, object] = {}
+
+        def _spy(api_key: str, base_url: str, *, timeout: float = 120.0, max_retries: int = 2):
+            captured["timeout"] = timeout
+            captured["max_retries"] = max_retries
+            return client
+
+        with patch("pi_ai.api.completions._create_client", side_effect=_spy):
+            stream = await chat_completions_stream(
+                model, context, "sk-test", "https://api.test.com",
+            )
+            events = [e async for e in stream]
+
+        assert events[-1]["type"] == "done"
+        assert captured["max_retries"] == 2
+        assert captured["timeout"] == 120.0
 
     @pytest.mark.asyncio
     async def test_no_choices_chunk_skipped(self):

@@ -122,11 +122,25 @@ from .providers import (
     openai_provider,
 )
 from .providers.all import create_default_models
+from .utils import (
+    RetryCallbacks,
+    RetryPolicy,
+    compute_backoff_delay,
+    is_retryable_error,
+    retry_assistant_call,
+)
 
 __all__ = [
     # Core registry
     "Models",
     "create_default_models",
+
+    # Retry
+    "RetryPolicy",
+    "RetryCallbacks",
+    "retry_assistant_call",
+    "is_retryable_error",
+    "compute_backoff_delay",
 
     # Provider
     "Provider",

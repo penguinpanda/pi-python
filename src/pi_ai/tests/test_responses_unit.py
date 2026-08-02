@@ -163,6 +163,13 @@ class TestResponsesCreateClient:
         assert isinstance(kwargs["timeout"], httpx.Timeout)
         assert kwargs["timeout"].connect == 180.0
 
+    def test_custom_max_retries(self):
+        with patch("pi_ai.api.responses.AsyncOpenAI") as mock_openai:
+            _create_client("sk-test", base_url="https://api.openai.com/v1", max_retries=5)
+
+        kwargs = mock_openai.call_args.kwargs
+        assert kwargs["max_retries"] == 5
+
 
 class TestResponsesStream:
     """responses_stream() 流式主循环。"""
@@ -382,6 +389,51 @@ class TestResponsesStream:
                 "parameters": {"type": "object", "properties": {}},
             },
         }]
+
+    @pytest.mark.asyncio
+    async def test_options_max_retries_timeout_forwarded(self):
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        client = _mock_client([_event("response.completed", response=None)])
+
+        captured: dict[str, object] = {}
+
+        def _spy(api_key: str, base_url: str = "", *, timeout: float = 180.0, max_retries: int = 2):
+            captured["timeout"] = timeout
+            captured["max_retries"] = max_retries
+            return client
+
+        with patch("pi_ai.api.responses._create_client", side_effect=_spy):
+            stream = await responses_stream(
+                model, context, "sk-test", "https://api.openai.com/v1",
+                options={"max_retries": 5, "timeout_ms": 45000},
+            )
+            [e async for e in stream]
+
+        assert captured["max_retries"] == 5
+        assert captured["timeout"] == 45.0
+
+    @pytest.mark.asyncio
+    async def test_options_defaults_when_absent(self):
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        client = _mock_client([_event("response.completed", response=None)])
+
+        captured: dict[str, object] = {}
+
+        def _spy(api_key: str, base_url: str = "", *, timeout: float = 180.0, max_retries: int = 2):
+            captured["timeout"] = timeout
+            captured["max_retries"] = max_retries
+            return client
+
+        with patch("pi_ai.api.responses._create_client", side_effect=_spy):
+            stream = await responses_stream(
+                model, context, "sk-test", "https://api.openai.com/v1",
+            )
+            [e async for e in stream]
+
+        assert captured["max_retries"] == 2
+        assert captured["timeout"] == 180.0
 
     @pytest.mark.asyncio
     async def test_error_event(self):

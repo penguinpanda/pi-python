@@ -93,7 +93,12 @@ from ._shared import (
 )
 
 
-def _create_client(api_key: str, base_url: str = "", timeout: float = 180.0) -> AsyncOpenAI:
+def _create_client(
+    api_key: str,
+    base_url: str = "",
+    timeout: float = 180.0,
+    max_retries: int = 2,
+) -> AsyncOpenAI:
     """
     创建 AsyncOpenAI 客户端。
 
@@ -102,7 +107,7 @@ def _create_client(api_key: str, base_url: str = "", timeout: float = 180.0) -> 
         • API Key
         • Base URL
         • Timeout
-        • Retry
+        • Retry（默认 2，可从 StreamOptions.max_retries 覆盖）
 
     Responses API 与 Chat Completions API
 
@@ -112,7 +117,7 @@ def _create_client(api_key: str, base_url: str = "", timeout: float = 180.0) -> 
     kwargs: dict[str, Any] = {
         "api_key": api_key,
         "timeout": httpx.Timeout(timeout),
-        "max_retries": 2,
+        "max_retries": max_retries,
     }
     if base_url:
         kwargs["base_url"] = base_url.rstrip("/")
@@ -324,7 +329,19 @@ async def responses_stream(
         """
 
         try:
-            client = _create_client(api_key, base_url)
+            # 创建 OpenAI SDK 客户端。
+            #
+            # 重试参数从 StreamOptions 读取（缺省保持 SDK 默认 2）。
+            # retry-after / retry-after-ms / x-should-retry / 408/409/429/5xx
+            # 由 openai SDK 内置处理，指数退避封顶 60s。
+            # （max_retry_delay_ms 暂不生效：SDK 客户端不接受该参数。）
+            timeout_ms = opts.get("timeout_ms")
+            client = _create_client(
+                api_key,
+                base_url,
+                timeout=timeout_ms / 1000.0 if timeout_ms else 180.0,
+                max_retries=opts.get("max_retries", 2),
+            )
             input_items = _to_responses_input(context.messages, context.system_prompt, model)
             tools = to_openai_tools(context.tools) if context.tools else None
 

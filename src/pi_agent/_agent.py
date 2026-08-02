@@ -26,6 +26,7 @@ from pi_ai._types import (
     UserMessage,
     now_ms,
 )
+from pi_ai import RetryPolicy
 
 from ._agent_loop import run_agent_loop, run_agent_loop_continue
 from ._stream_fn import get_default_stream_fn
@@ -87,6 +88,9 @@ class AgentOptions:
         ) = None,
         should_stop_after_turn: Callable[[AgentContext], bool] | None = None,
         tool_execution: ToolExecutionMode = "sequential",
+        # 重试策略。None = 默认启用（enabled=True, max_retries=3, base_delay_ms=2000）；
+        # 传入 RetryPolicy(enabled=False) 可关闭重试。
+        retry_policy: RetryPolicy | None = None,
     ):
         self.system_prompt = system_prompt
         self.model = model
@@ -102,6 +106,7 @@ class AgentOptions:
         self.prepare_next_turn = prepare_next_turn
         self.should_stop_after_turn = should_stop_after_turn
         self.tool_execution = tool_execution
+        self.retry_policy = retry_policy
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +150,7 @@ class Agent:
         self.prepare_next_turn = opts.prepare_next_turn
         self.should_stop_after_turn = opts.should_stop_after_turn
         self.tool_execution: ToolExecutionMode = opts.tool_execution
+        self.retry_policy: RetryPolicy | None = opts.retry_policy
 
         # -- 运行时 --
         self._active: bool = False
@@ -319,6 +325,7 @@ class Agent:
             before_tool_call=self.before_tool_call,
             after_tool_call=self.after_tool_call,
             tool_execution=self.tool_execution,
+            retry_policy=self.retry_policy,
         )
 
     def _resolve_stream_fn(self) -> StreamFn:

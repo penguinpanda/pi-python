@@ -46,6 +46,7 @@ from pi_ai._event_stream import AssistantMessageEventStream
 
 # Context 类型（pi_ai 中是 dataclass，可通过 pi_ai 导入）
 from pi_ai import Context as LlmContext
+from pi_ai import RetryPolicy
 
 # ---------------------------------------------------------------------------
 # AgentMessage
@@ -240,6 +241,23 @@ class ToolExecutionEndEvent(TypedDict):
     is_error: bool
 
 
+class AutoRetryStartEvent(TypedDict):
+    """重试已计划：退避等待开始前发射（对齐 TS auto_retry_start）。"""
+    type: Literal["auto_retry_start"]
+    attempt: int          # 本次重试序号（从 1 起）
+    max_attempts: int     # 策略重试上限
+    delay_ms: float       # 退避延迟（毫秒）
+    error_message: str    # 触发重试的错误消息
+
+
+class AutoRetryEndEvent(TypedDict):
+    """重试循环结束（成功 / 放弃）发射（对齐 TS auto_retry_end）。"""
+    type: Literal["auto_retry_end"]
+    success: bool          # 是否最终成功
+    attempt: int           # 结束时的重试序号
+    final_error: str | None  # 最终错误（成功时为 None）
+
+
 AgentEvent = Union[
     AgentStartEvent,
     AgentEndEvent,
@@ -251,6 +269,8 @@ AgentEvent = Union[
     ToolExecutionStartEvent,
     ToolExecutionUpdateEvent,
     ToolExecutionEndEvent,
+    AutoRetryStartEvent,
+    AutoRetryEndEvent,
 ]
 
 # 事件发射回调
@@ -342,3 +362,7 @@ class AgentLoopConfig:
 
     # 配置
     tool_execution: ToolExecutionMode = "sequential"
+
+    # 重试策略。None 表示使用默认策略（enabled=True, max_retries=3）。
+    # 显式传入 RetryPolicy(enabled=False) 可关闭重试。
+    retry_policy: RetryPolicy | None = None
