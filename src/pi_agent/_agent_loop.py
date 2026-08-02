@@ -86,8 +86,8 @@ run_agent_loop()
 直到：
 
 1. 模型没有 toolCall
-2. stopReason == error
-3. stopReason == aborted
+2. stop_reason == error
+3. stop_reason == aborted
 4. should_stop_after_turn 返回 True
 
 
@@ -329,7 +329,7 @@ async def run_agent_loop(
         UserMessage("天气?"),
 
         AssistantMessage(
-            toolCall="weather"
+            tool_call="weather"
         ),
 
         ToolResultMessage(
@@ -537,7 +537,7 @@ async def _run_loop(
         messages.append(assistant_msg)
 
         # 检查错误/中止
-        stop_reason = assistant_msg.get("stopReason", "stop")
+        stop_reason = assistant_msg.get("stop_reason", "stop")
         if stop_reason in ("error", "aborted"):
             await emit({
                 "type": "turn_end",
@@ -561,7 +561,7 @@ async def _run_loop(
         has_more_tool_calls = False
 
         if tool_calls:
-            # 截断保护：stopReason="length" 时参数可能不完整
+            # 截断保护：stop_reason="length" 时参数可能不完整
             if stop_reason == "length":
                 tool_results = _fail_tool_calls_from_truncated(tool_calls)
             else:
@@ -679,7 +679,7 @@ async def _stream_assistant_response(
     # 2. convertToLlm（必须）
     llm_messages = config.convert_to_llm(agent_messages)
 
-    # 3. getApiKey（可选）
+    # 3. get_api_key（可选）
     api_key: str | None = None
     if config.get_api_key is not None:
         api_key = config.get_api_key(config.model.provider)
@@ -690,13 +690,13 @@ async def _stream_assistant_response(
     llm_context = LlmContext(
         messages=llm_messages,
         tools=_tools_to_pi_ai(context.tools or []),
-        systemPrompt=context.system_prompt,
+        system_prompt=context.system_prompt,
     )
 
     # 5. 调用 LLM
     options = StreamOptions()
     if api_key is not None:
-        options["apiKey"] = api_key
+        options["api_key"] = api_key
 
     response = await stream_fn(config.model, llm_context, options)
 
@@ -743,8 +743,8 @@ async def _stream_assistant_response(
             elif event_type == "done":
                 done_event = cast(DoneEvent, event)
                 _final_msg = done_event["message"]
-                final_stop_reason = _final_msg.get("stopReason", "stop")
-                final_error_message = _final_msg.get("errorMessage")
+                final_stop_reason = _final_msg.get("stop_reason", "stop")
+                final_error_message = _final_msg.get("error_message")
                 break
 
             elif event_type == "error":
@@ -752,7 +752,7 @@ async def _stream_assistant_response(
                 _final_msg = err_event["error"]
                 final_stop_reason = "error"
                 final_error_message = _final_msg.get(
-                    "errorMessage", err_event.get("reason", "Unknown error")
+                    "error_message", err_event.get("reason", "Unknown error")
                 )
                 break
 
@@ -765,22 +765,22 @@ async def _stream_assistant_response(
         if _final_msg is None:
             _final_msg = await response.result()
             if _final_msg is not None:
-                final_stop_reason = _final_msg.get("stopReason", "stop")
-                final_error_message = _final_msg.get("errorMessage")
+                final_stop_reason = _final_msg.get("stop_reason", "stop")
+                final_error_message = _final_msg.get("error_message")
     finally:
         # 构建最终消息：优先使用 DoneEvent/ErrorEvent 的完整消息
         result: AssistantMessage
         if _final_msg is not None:
             result = _final_msg
-            # 确保 stopReason 被正确设置
-            if "stopReason" not in result:
-                result["stopReason"] = final_stop_reason
+            # 确保 stop_reason 被正确设置
+            if "stop_reason" not in result:
+                result["stop_reason"] = final_stop_reason
         else:
             # 没有 done/error 时，回退到最后一次 partial 快照
             result = temp_msg
-            result["stopReason"] = final_stop_reason
-        if final_error_message and "errorMessage" not in result:
-            result["errorMessage"] = final_error_message
+            result["stop_reason"] = final_stop_reason
+        if final_error_message and "error_message" not in result:
+            result["error_message"] = final_error_message
 
         await emit({"type": "message_end", "message": result})
 
@@ -900,8 +900,9 @@ async def _execute_tool_calls(
         tc_id: str = tc["id"]
         tc_name: str = tc["name"]
 
-        # 参数已由事件协议解析为对象（ToolCall.arguments）。
-        args: dict = tc["arguments"]
+        # 参数已由事件协议解析为对象（ToolCall.arguments）；
+        # 方案 B：arguments 可能为 None（尚未解析）——按空参数处理。
+        args: dict = tc["arguments"] if tc["arguments"] is not None else {}
 
         # === 阶段 1: 准备 ===
         tool_def = _find_tool(tools, tc_name)
@@ -953,6 +954,22 @@ async def _execute_tool_calls(
         # === 阶段 2: 执行 ===
         is_error = False
         try:
+            def _on_update(partial: AgentToolResult) -> None:
+                # 注意：这是同步回调，不能 await emit
+                pass  # 简化：最小核心不做流式 tool update
+
+            # Tool 生命周期：before_execute（可选，可替换参数）
+            if tool_def.before_execute is not None:
+                raw_before_tool = tool_def.before_execute(
+                    args, AgentContext(system_prompt="", messages=[], tools=tools),
+                )
+                if asyncio.iscoroutine(raw_before_tool):
+                    replaced = await raw_before_tool
+                else:
+                    replaced = raw_before_tool
+                if replaced is not None:
+                    args = replaced
+
             await emit({
                 "type": "tool_execution_start",
                 "tool_call_id": tc_id,
@@ -960,11 +977,17 @@ async def _execute_tool_calls(
                 "args": args,
             })
 
-            def _on_update(partial: AgentToolResult) -> None:
-                # 注意：这是同步回调，不能 await emit
-                pass  # 简化：最小核心不做流式 tool update
-
             result = await tool_def.execute(tc_id, args, signal, _on_update)
+
+            # Tool 生命周期：after_execute（可选，可替换结果）
+            if tool_def.after_execute is not None:
+                raw_after_tool = tool_def.after_execute(result)
+                if asyncio.iscoroutine(raw_after_tool):
+                    after_val = await raw_after_tool
+                else:
+                    after_val = raw_after_tool
+                if after_val is not None:
+                    result = after_val
         except Exception as exc:
             is_error = True
             result = AgentToolResult(
@@ -1028,7 +1051,7 @@ def _find_tool(tools: list, name: str):
 def _fail_tool_calls_from_truncated(
     tool_calls: list[ToolCall],
 ) -> list[ToolResultMessage]:
-    """截断保护：stopReason="length" 时将所有工具标记为错误。"""
+    """截断保护：stop_reason="length" 时将所有工具标记为错误。"""
     results: list[ToolResultMessage] = []
     for tc in tool_calls:
         tc_id = tc["id"]
@@ -1039,10 +1062,10 @@ def _fail_tool_calls_from_truncated(
         )
         results.append(ToolResultMessage(
             role="toolResult",
-            toolCallId=tc_id,
-            toolName=tc_name,
+            tool_call_id=tc_id,
+            tool_name=tc_name,
             content=[TextContent(type="text", text=error_text)],
-            isError=True,
+            is_error=True,
             timestamp=now_ms(),
         ))
     return results
@@ -1057,14 +1080,14 @@ def _make_tool_result_message(
     """构造 ToolResultMessage。"""
     msg: ToolResultMessage = {
         "role": "toolResult",
-        "toolCallId": tc_id,
-        "toolName": tc_name,
+        "tool_call_id": tc_id,
+        "tool_name": tc_name,
         "content": list(result.content),
-        "isError": is_error,
+        "is_error": is_error,
         "timestamp": now_ms(),
     }
     if result.added_tool_names:
-        msg["addedToolNames"] = list(result.added_tool_names)
+        msg["added_tool_names"] = list(result.added_tool_names)
     return msg
 
 
@@ -1095,6 +1118,8 @@ def _tools_to_pi_ai(tools: list) -> list:
         result.append(PiAiTool(
             name=t.name,
             description=t.description,
-            inputSchema=t.input_schema,
+            input_schema=t.input_schema,
+            before_execute=t.before_execute,
+            after_execute=t.after_execute,
         ))
     return result

@@ -72,7 +72,7 @@ class TestToOpenaiMessages:
                 "role": "user",
                 "content": [
                     {"type": "text", "text": "What is this?"},
-                    {"type": "image", "url": "https://example.com/img.png", "data": None, "mimeType": None},
+                    {"type": "image", "url": "https://example.com/img.png", "data": None, "mime_type": None},
                 ],
             }
         ]
@@ -92,7 +92,7 @@ class TestToOpenaiMessages:
             {  # type: ignore[typeddict-unknown-key]
                 "role": "user",
                 "content": [
-                    {"type": "image", "url": None, "data": "abc123", "mimeType": "image/jpeg"},
+                    {"type": "image", "url": None, "data": "abc123", "mime_type": "image/jpeg"},
                 ],
             }
         ]
@@ -108,7 +108,7 @@ class TestToOpenaiMessages:
                 "role": "user",
                 "content": [
                     {"type": "text", "text": "Hi"},
-                    {"type": "image", "url": "https://example.com/img.png", "data": None, "mimeType": None},
+                    {"type": "image", "url": "https://example.com/img.png", "data": None, "mime_type": None},
                 ],
             }
         ]
@@ -190,8 +190,8 @@ class TestToOpenaiMessages:
         messages: list[Message] = [
             {  # type: ignore[typeddict-unknown-key]
                 "role": "toolResult",
-                "toolCallId": "call_1",
-                "toolName": "search",
+                "tool_call_id": "call_1",
+                "tool_name": "search",
                 "content": [{"type": "text", "text": "42 results found."}],
             }
         ]
@@ -210,6 +210,36 @@ class TestToOpenaiMessages:
         assert result[0]["role"] == "system"
         assert result[1]["role"] == "user"
 
+    def test_agent_message_skipped_safely(self):
+        """AgentMessage（未知 role）不崩溃；由调用方自定义转换。"""
+        messages: list[Message] = [
+            {"role": "user", "content": "Hi"},  # type: ignore[typeddict-unknown-key]
+            {
+                "role": "planner",
+                "content": "Plan: search then answer",
+            },  # type: ignore[typeddict-unknown-key]
+        ]
+        result = to_openai_messages(messages, _make_model())
+        # 未知 role 安全跳过，不抛异常
+        assert result == [{"role": "user", "content": "Hi"}]
+
+    def test_assistant_code_content_skipped(self):
+        """Assistant 消息中的 CodeContent（未知块类型）安全跳过。"""
+        messages: list[Message] = [
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "Here is code:"},
+                    {"type": "code", "language": "python", "code": "print('hi')"},
+                ],
+                "api": "openai-completions",
+                "provider": "test",
+                "model": "test",
+            },  # type: ignore[typeddict-unknown-key]
+        ]
+        result = to_openai_messages(messages, _make_model())
+        assert result == [{"role": "assistant", "content": "Here is code:"}]
+
 
 # ---------------------------------------------------------------------------
 # to_openai_tools
@@ -226,7 +256,7 @@ class TestToOpenaiTools:
             Tool(
                 name="search",
                 description="Search the web",
-                inputSchema={"type": "object", "properties": {"q": {"type": "string"}}},
+                input_schema={"type": "object", "properties": {"q": {"type": "string"}}},
             )
         ]
         result = to_openai_tools(tools)
@@ -239,8 +269,8 @@ class TestToOpenaiTools:
 
     def test_multiple_tools(self):
         tools = [
-            Tool(name="t1", description="d1", inputSchema={}),
-            Tool(name="t2", description="d2", inputSchema={}),
+            Tool(name="t1", description="d1", input_schema={}),
+            Tool(name="t2", description="d2", input_schema={}),
         ]
         result = to_openai_tools(tools)
         assert len(result) == 2
@@ -259,9 +289,9 @@ class TestEmptyUsage:
         usage = empty_usage()
         assert usage["input"] == 0
         assert usage["output"] == 0
-        assert usage["cacheRead"] == 0
-        assert usage["cacheWrite"] == 0
-        assert usage["totalTokens"] == 0
+        assert usage["cache_read"] == 0
+        assert usage["cache_write"] == 0
+        assert usage["total_tokens"] == 0
 
     def test_cost_dict(self):
         usage = empty_usage()
@@ -269,8 +299,8 @@ class TestEmptyUsage:
         cost = usage["cost"]
         assert cost["input"] == 0
         assert cost["output"] == 0
-        assert cost["cacheRead"] == 0
-        assert cost["cacheWrite"] == 0
+        assert cost["cache_read"] == 0
+        assert cost["cache_write"] == 0
         assert cost["total"] == 0
 
 
@@ -290,8 +320,8 @@ class TestBuildErrorMessage:
         assert msg["api"] == "openai-responses"
         assert msg["provider"] == "openai"
         assert msg["model"] == "gpt-4o"
-        assert msg["stopReason"] == "error"
-        assert msg["errorMessage"] == "API key missing"
+        assert msg["stop_reason"] == "error"
+        assert msg["error_message"] == "API key missing"
         assert msg["usage"]["input"] == 0
         assert msg["timestamp"] > 0
 
@@ -299,7 +329,7 @@ class TestBuildErrorMessage:
         model = _make_model()
         for exc in [RuntimeError("err"), ConnectionError("conn"), TimeoutError("timeout")]:
             msg = build_error_message(model, exc)
-            assert msg["errorMessage"] == str(exc)
+            assert msg["error_message"] == str(exc)
 
 
 # ---------------------------------------------------------------------------

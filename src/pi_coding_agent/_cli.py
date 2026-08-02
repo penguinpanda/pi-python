@@ -165,8 +165,15 @@ def _print_models(models, provider_id: str | None = None) -> int:
     for provider in providers:
         print(f"{provider.name} ({provider.id}):")
         for m in provider.get_models():
-            caps = m.capabilities()
-            print(f"  {m.id:<40} {m.name}  [{', '.join(caps) or 'text'}]")
+            caps = m.capabilities
+            labels: list[str] = []
+            if caps.reasoning:
+                labels.append("thinking")
+            if caps.tools:
+                labels.append("tools")
+            if caps.images:
+                labels.append("images")
+            print(f"  {m.id:<40} {m.name}  [{', '.join(labels) or 'text'}]")
     return 0
 
 

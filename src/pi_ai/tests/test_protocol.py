@@ -143,10 +143,11 @@ async def test_toolcall_end_carries_parsed_toolcall():
     ]
 
     end = [e for e in events if e["type"] == "toolcall_end"][0]
-    assert end["toolCall"] == {
+    assert end["tool_call"] == {
         "type": "toolCall",
         "id": "call_1",
         "name": "get_weather",
+        "raw_arguments": '{"city":"Beijing"}',
         "arguments": {"city": "Beijing"},
     }
     # partial 中的 toolCall 块也已完成解析。
@@ -154,6 +155,7 @@ async def test_toolcall_end_carries_parsed_toolcall():
         "type": "toolCall",
         "id": "call_1",
         "name": "get_weather",
+        "raw_arguments": '{"city":"Beijing"}',
         "arguments": {"city": "Beijing"},
     }]
 
@@ -172,4 +174,4 @@ async def test_invalid_tool_arguments_error_placeholder():
     ])
 
     end = [e for e in events if e["type"] == "toolcall_end"][0]
-    assert end["toolCall"]["arguments"] == {"_error": "Invalid JSON arguments"}
+    assert end["tool_call"]["arguments"] == {"_error": "Invalid JSON arguments"}

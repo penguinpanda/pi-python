@@ -273,9 +273,9 @@ class TestModelsComplete:
             api=model.api,
             provider=model.provider,
             model=model.id,
-            usage={"input": 1, "output": 1, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 2},
-            stopReason="stop",
-            errorMessage=None,
+            usage={"input": 1, "output": 1, "cache_read": 0, "cache_write": 0, "total_tokens": 2},
+            stop_reason="stop",
+            error_message=None,
             timestamp=0,
         )
 
@@ -288,7 +288,7 @@ class TestModelsComplete:
             result = await models.complete(model, ctx)
 
         assert result["role"] == "assistant"
-        assert result["stopReason"] == "stop"
+        assert result["stop_reason"] == "stop"
 
 
 def asyncio_sync(coro):

@@ -162,7 +162,7 @@ class TestToolCallLoop:
         core.set_responses([
             faux_assistant_message(
                 [faux_tool_call("read", {"path": "notes.txt"}, tool_call_id="tc-1")],
-                stop_reason="toolUse",
+                stop_reason="tool_call",
             ),
             faux_assistant_message("Read complete. The file contains: hello world"),
         ])
@@ -218,7 +218,7 @@ class TestPrintMode:
         assert code == 0
 
     async def test_print_mode_error_exit_code(self, faux_env, tmp_path, capsys):
-        """LLM 返回 error stopReason → 退出码 1。"""
+        """LLM 返回 error stop_reason → 退出码 1。"""
         models, core = faux_env
         core.set_responses([
             faux_assistant_message(

@@ -45,7 +45,7 @@ Ollama 是本地模型运行时，
 
 import httpx
 
-from .._types import Model, ModelCost
+from .._types import Model, ModelCapabilities, ModelCost
 from ..provider import create_provider, Provider
 
 
@@ -88,10 +88,8 @@ OLLAMA_MODELS: list[Model] = [
         name="Qwen3 30B",
         input=["text"],
         output=["text"],
-        maxTokens=8192,
-        reasoning=True,
-        supportsToolCalling=True,
-        supportsImages=False,
+        max_tokens=8192,
+        capabilities=ModelCapabilities(reasoning=True, tools=True),
         cost=ModelCost(),  # 本地运行，无费用
     ),
 
@@ -103,10 +101,8 @@ OLLAMA_MODELS: list[Model] = [
         name="Qwen3 30B A3B",
         input=["text"],
         output=["text"],
-        maxTokens=8192,
-        reasoning=True,
-        supportsToolCalling=True,
-        supportsImages=False,
+        max_tokens=8192,
+        capabilities=ModelCapabilities(reasoning=True, tools=True),
         cost=ModelCost(),
     ),
 
@@ -118,10 +114,8 @@ OLLAMA_MODELS: list[Model] = [
         name="Qwen3 14B Abliterated",
         input=["text"],
         output=["text"],
-        maxTokens=8192,
-        reasoning=True,
-        supportsToolCalling=True,
-        supportsImages=False,
+        max_tokens=8192,
+        capabilities=ModelCapabilities(reasoning=True, tools=True),
         cost=ModelCost(),
     ),
 
@@ -140,10 +134,8 @@ OLLAMA_MODELS: list[Model] = [
         name="GPT-OSS 20B",
         input=["text"],
         output=["text"],
-        maxTokens=32768,
-        reasoning=True,
-        supportsToolCalling=True,
-        supportsImages=False,
+        max_tokens=32768,
+        capabilities=ModelCapabilities(reasoning=True, tools=True),
         cost=ModelCost(),
     ),
 
@@ -162,10 +154,8 @@ OLLAMA_MODELS: list[Model] = [
         name="Llama 3.2 Vision",
         input=["text", "image"],
         output=["text"],
-        maxTokens=4096,
-        reasoning=False,
-        supportsToolCalling=True,
-        supportsImages=True,
+        max_tokens=4096,
+        capabilities=ModelCapabilities(tools=True, images=True),
         cost=ModelCost(),
     ),
 
@@ -177,10 +167,8 @@ OLLAMA_MODELS: list[Model] = [
         name="Qwen 2.5 7B Instruct",
         input=["text"],
         output=["text"],
-        maxTokens=8192,
-        reasoning=False,
-        supportsToolCalling=True,
-        supportsImages=False,
+        max_tokens=8192,
+        capabilities=ModelCapabilities(tools=True),
         cost=ModelCost(),
     ),
 
@@ -199,10 +187,8 @@ OLLAMA_MODELS: list[Model] = [
         name="DeepSeek R1 14B",
         input=["text"],
         output=["text"],
-        maxTokens=8192,
-        reasoning=True,
-        supportsToolCalling=False,
-        supportsImages=False,
+        max_tokens=8192,
+        capabilities=ModelCapabilities(reasoning=True),
         cost=ModelCost(),
     ),
 ]
@@ -222,10 +208,8 @@ def _default_model(name: str) -> Model:
         name=name,
         input=["text"],
         output=["text"],
-        maxTokens=8192,
-        reasoning=False,
-        supportsToolCalling=True,
-        supportsImages=False,
+        max_tokens=8192,
+        capabilities=ModelCapabilities(tools=True),
         cost=ModelCost(),  # 本地运行，无费用
     )
 

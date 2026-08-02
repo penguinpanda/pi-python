@@ -21,7 +21,7 @@ class TestToResponsesInput:
     def test_user_multimodal_text_and_image_url(self):
         messages = [{'role': 'user', 'content': [
             {'type': 'text', 'text': 'Describe:'},
-            {'type': 'image', 'url': 'https://example.com/pic.png', 'data': None, 'mimeType': None},
+            {'type': 'image', 'url': 'https://example.com/pic.png', 'data': None, 'mime_type': None},
         ]}]
         result = _to_responses_input(messages, system=None)
         parts = result[0]['content']
@@ -30,7 +30,7 @@ class TestToResponsesInput:
 
     def test_user_image_base64(self):
         messages = [{'role': 'user', 'content': [
-            {'type': 'image', 'url': None, 'data': 'abc123', 'mimeType': 'image/jpeg'},
+            {'type': 'image', 'url': None, 'data': 'abc123', 'mime_type': 'image/jpeg'},
         ]}]
         result = _to_responses_input(messages, system=None)
         img = result[0]['content'][0]
@@ -44,7 +44,7 @@ class TestToResponsesInput:
         assert result[0]['content'] == [{'type': 'output_text', 'text': 'Answer'}]
 
     def test_tool_result_message(self):
-        messages = [{'role': 'toolResult', 'toolCallId': 'call_1', 'toolName': 'search',
+        messages = [{'role': 'toolResult', 'tool_call_id': 'call_1', 'tool_name': 'search',
             'content': [{'type': 'text', 'text': '42 results'}]}]
         result = _to_responses_input(messages, system=None)
         assert result[0]['type'] == 'function_call_output'
@@ -66,7 +66,7 @@ class TestToResponsesInput:
     def test_user_image_filtered_when_model_no_images(self):
         messages = [{'role': 'user', 'content': [
             {'type': 'text', 'text': 'Hi'},
-            {'type': 'image', 'url': 'https://example.com/pic.png', 'data': None, 'mimeType': None},
+            {'type': 'image', 'url': 'https://example.com/pic.png', 'data': None, 'mime_type': None},
         ]}]
         # _make_model() default input=['text'] — no image capability
         result = _to_responses_input(messages, system=None, model=_make_model())
@@ -77,7 +77,7 @@ class TestToResponsesInput:
 
     def test_user_image_kept_when_model_supports_images(self):
         messages = [{'role': 'user', 'content': [
-            {'type': 'image', 'url': 'https://example.com/pic.png', 'data': None, 'mimeType': None},
+            {'type': 'image', 'url': 'https://example.com/pic.png', 'data': None, 'mime_type': None},
         ]}]
         model = _make_model()
         model.input = ['text', 'image']
@@ -190,7 +190,7 @@ class TestResponsesStream:
         msg = collected[-1]["message"]
         assert msg["role"] == "assistant"
         assert msg["content"] == [{"type": "text", "text": "Hello world"}]
-        assert msg["stopReason"] == "stop"
+        assert msg["stop_reason"] == "stop"
 
     @pytest.mark.asyncio
     async def test_thinking_events(self):
@@ -275,6 +275,7 @@ class TestResponsesStream:
             "type": "toolCall",
             "id": "call_1",
             "name": "get_weather",
+            "raw_arguments": '{"city":"Beijing"}',
             "arguments": {"city": "Beijing"},
         }]
 
@@ -313,9 +314,9 @@ class TestResponsesStream:
         msg = await stream.result()
         assert msg["content"] == [{"type": "text", "text": "Hi"}]
         assert msg["usage"] == {
-            "input": 7, "output": 3, "cacheRead": 0, "cacheWrite": 0,
-            "totalTokens": 10,
-            "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0},
+            "input": 7, "output": 3, "cache_read": 0, "cache_write": 0,
+            "total_tokens": 10,
+            "cost": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0},
         }
 
     @pytest.mark.asyncio
@@ -330,7 +331,7 @@ class TestResponsesStream:
         assert [e["type"] for e in collected] == ["start", "done"]
         msg = collected[-1]["message"]
         assert msg["content"] == []
-        assert msg["usage"]["totalTokens"] == 0
+        assert msg["usage"]["total_tokens"] == 0
 
     @pytest.mark.asyncio
     async def test_empty_stream(self):
@@ -348,14 +349,14 @@ class TestResponsesStream:
         tool = Tool(
             name="get_weather",
             description="Get weather",
-            inputSchema={"type": "object", "properties": {}},
+            input_schema={"type": "object", "properties": {}},
         )
         context = Context(
             messages=[{"role": "user", "content": "Hi"}],
             tools=[tool],
-            systemPrompt="Be helpful",
+            system_prompt="Be helpful",
         )
-        options = {"temperature": 0.5, "maxTokens": 100}
+        options = {"temperature": 0.5, "max_tokens": 100}
         client = _mock_client([_event("response.completed", response=None)])
         with patch("pi_ai.api.responses._create_client", return_value=client):
             stream = await responses_stream(
@@ -394,12 +395,12 @@ class TestResponsesStream:
         assert collected[-1]["reason"] == "error"
         err = collected[-1]["error"]
         assert err["role"] == "assistant"
-        assert err["errorMessage"] == "boom"
-        assert err["stopReason"] == "error"
+        assert err["error_message"] == "boom"
+        assert err["stop_reason"] == "error"
 
         # result() 返回携带错误的 AssistantMessage。
         msg = await stream.result()
-        assert msg["errorMessage"] == "boom"
+        assert msg["error_message"] == "boom"
 
     @pytest.mark.asyncio
     async def test_cancelled_error(self):

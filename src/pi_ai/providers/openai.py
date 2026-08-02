@@ -37,7 +37,7 @@ OpenAI Provider。
             Provider
 """
 
-from .._types import Model, ModelCost
+from .._types import Model, ModelCapabilities, ModelCost
 from ..auth import env_api_key_auth
 from ..provider import create_provider, Provider
 
@@ -79,11 +79,9 @@ OPENAI_MODELS: list[Model] = [
         name="GPT-4o",
         input=["text", "image"],
         output=["text"],
-        maxTokens=16384,
-        reasoning=False,
-        supportsToolCalling=True,
-        supportsImages=True,
-        cost=ModelCost(input=2.50, output=10.00, cacheRead=1.25, cacheWrite=2.50),
+        max_tokens=16384,
+        capabilities=ModelCapabilities(reasoning=False, tools=True, images=True),
+        cost=ModelCost(input=2.50, output=10.00, cache_read=1.25, cache_write=2.50),
     ),
 
     # ------------------------------------------------------
@@ -105,11 +103,9 @@ OPENAI_MODELS: list[Model] = [
         name="GPT-4o Mini",
         input=["text", "image"],
         output=["text"],
-        maxTokens=16384,
-        reasoning=False,
-        supportsToolCalling=True,
-        supportsImages=True,
-        cost=ModelCost(input=0.15, output=0.60, cacheRead=0.075, cacheWrite=0.15),
+        max_tokens=16384,
+        capabilities=ModelCapabilities(reasoning=False, tools=True, images=True),
+        cost=ModelCost(input=0.15, output=0.60, cache_read=0.075, cache_write=0.15),
     ),
 
     # ------------------------------------------------------
@@ -130,11 +126,9 @@ OPENAI_MODELS: list[Model] = [
         name="o4 Mini",
         input=["text"],
         output=["text"],
-        maxTokens=100000,
-        reasoning=True,
-        supportsToolCalling=True,
-        supportsImages=False,
-        cost=ModelCost(input=1.10, output=4.40, cacheRead=0.275, cacheWrite=1.10),
+        max_tokens=100000,
+        capabilities=ModelCapabilities(reasoning=True, tools=True),
+        cost=ModelCost(input=1.10, output=4.40, cache_read=0.275, cache_write=1.10),
     ),
 ]
 

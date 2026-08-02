@@ -53,6 +53,7 @@ from .._types import (
     ErrorEvent,
     Message,
     Model,
+    ModelCapabilities,
     ModelCost,
     StartEvent,
     StopReason,
@@ -86,7 +87,7 @@ DEFAULT_TOKEN_SIZE = 4  # 每个流式 chunk 的 token 数（字符数 = token *
 # ------------------------------------------------------
 # Faux 默认模型。
 #
-# 注意：Model dataclass 没有 contextWindow 字段。
+# 注意：Model dataclass 没有 context_window 字段。
 # ------------------------------------------------------
 FAUX_MODEL = Model(
     id=DEFAULT_MODEL_ID,
@@ -95,11 +96,9 @@ FAUX_MODEL = Model(
     name=DEFAULT_MODEL_NAME,
     input=["text"],
     output=["text"],
-    maxTokens=16384,
-    reasoning=False,
-    supportsToolCalling=True,
-    supportsImages=False,
-    cost=ModelCost(input=0, output=0, cacheRead=0, cacheWrite=0),
+    max_tokens=16384,
+    capabilities=ModelCapabilities(tools=True),
+    cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
 )
 
 
@@ -131,12 +130,15 @@ def faux_tool_call(
     """
     if isinstance(args, str):
         parsed: Any = json.loads(args) if args.strip() else {}
+        raw = args
     else:
         parsed = args
+        raw = json.dumps(parsed, ensure_ascii=False)
     return ToolCall(
         type="toolCall",
         id=tool_call_id or f"tool:{int(time.time() * 1000)}",
         name=name,
+        raw_arguments=raw,
         arguments=parsed if isinstance(parsed, dict) else {"value": parsed},
     )
 
@@ -178,8 +180,8 @@ def faux_assistant_message(
         provider=provider_id,
         model=model_id,
         usage=usage or empty_usage(),
-        stopReason=stop_reason,
-        errorMessage=error_message,
+        stop_reason=stop_reason,
+        error_message=error_message,
         timestamp=now_ms(),
     )
 
@@ -226,7 +228,7 @@ def _blocks_to_text(blocks: Sequence[ContentBlock]) -> str:
         if block["type"] == "text":
             parts.append(block["text"])
         elif block["type"] == "image":
-            media_type = block.get("mimeType")
+            media_type = block.get("mime_type")
             data_len = len(block.get("data") or "")
             parts.append(f"[image:{media_type}:{data_len}]")
         elif block["type"] == "thinking":
@@ -244,7 +246,7 @@ def _message_to_text(message: Message) -> str:
     if message["role"] == "assistant":
         return _blocks_to_text(message["content"])
     if message["role"] == "toolResult":
-        return f"{message['toolName']}\n{_blocks_to_text(message['content'])}"
+        return f"{message['tool_name']}\n{_blocks_to_text(message['content'])}"
     # system：SystemMessage 没有参与 token 估算的内容。
     return ""
 
@@ -254,15 +256,15 @@ def _tool_to_dict(tool: Tool) -> dict[str, Any]:
     return {
         "name": tool.name,
         "description": tool.description,
-        "inputSchema": tool.inputSchema,
+        "input_schema": tool.input_schema,
     }
 
 
 def _serialize_context(context: Context) -> str:
     """将 Context 序列化为纯文本，用于估算输入 token。"""
     parts: list[str] = []
-    if context.systemPrompt:
-        parts.append(f"system:{context.systemPrompt}")
+    if context.system_prompt:
+        parts.append(f"system:{context.system_prompt}")
     for message in context.messages:
         parts.append(f"{message['role']}:{_message_to_text(message)}")
     if context.tools:
@@ -411,10 +413,10 @@ class FauxCore:
             "usage": Usage(
                 input=prompt_tokens,
                 output=output_tokens,
-                cacheRead=0,
-                cacheWrite=0,
-                totalTokens=prompt_tokens + output_tokens,
-                cost={"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0},
+                cache_read=0,
+                cache_write=0,
+                total_tokens=prompt_tokens + output_tokens,
+                cost={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0},
             ),
         })
 
@@ -433,8 +435,8 @@ class FauxCore:
         """以 aborted 结束流。"""
         aborted = cast(AssistantMessage, {
             **message,
-            "stopReason": "aborted",
-            "errorMessage": "Request was aborted",
+            "stop_reason": "aborted",
+            "error_message": "Request was aborted",
         })
         stream.push(ErrorEvent(type="error", reason="aborted", error=aborted))
         stream.end(aborted)
@@ -446,7 +448,7 @@ class FauxCore:
         opts: StreamOptions | None,
     ) -> None:
         """将脚本化消息拆分为增量事件输出。"""
-        stop_reason = message.get("stopReason", "stop")
+        stop_reason = message.get("stop_reason", "stop")
 
         if stop_reason == "pending":
             raise RuntimeError("Faux response ended without a stop reason")
@@ -461,49 +463,49 @@ class FauxCore:
         for content_index, block in enumerate(message["content"]):
             if block["type"] == "text":
                 stream.push(TextStartEvent(
-                    type="text_start", contentIndex=content_index, partial=_partial(),
+                    type="text_start", content_index=content_index, partial=_partial(),
                 ))
                 for chunk in self._chunk_text(block["text"]):
                     if signal and signal.is_set():
                         self._push_aborted(stream, message)
                         return
                     stream.push(TextDeltaEvent(
-                        type="text_delta", contentIndex=content_index, delta=chunk, partial=_partial(),
+                        type="text_delta", content_index=content_index, delta=chunk, partial=_partial(),
                     ))
                     await self._delay(chunk)
                 stream.push(TextEndEvent(
-                    type="text_end", contentIndex=content_index, content=block["text"], partial=_partial(),
+                    type="text_end", content_index=content_index, content=block["text"], partial=_partial(),
                 ))
             elif block["type"] == "thinking":
                 stream.push(ThinkingStartEvent(
-                    type="thinking_start", contentIndex=content_index, partial=_partial(),
+                    type="thinking_start", content_index=content_index, partial=_partial(),
                 ))
                 for chunk in self._chunk_text(block["thinking"]):
                     if signal and signal.is_set():
                         self._push_aborted(stream, message)
                         return
                     stream.push(ThinkingDeltaEvent(
-                        type="thinking_delta", contentIndex=content_index, delta=chunk, partial=_partial(),
+                        type="thinking_delta", content_index=content_index, delta=chunk, partial=_partial(),
                     ))
                     await self._delay(chunk)
                 stream.push(ThinkingEndEvent(
-                    type="thinking_end", contentIndex=content_index, content=block["thinking"], partial=_partial(),
+                    type="thinking_end", content_index=content_index, content=block["thinking"], partial=_partial(),
                 ))
             elif block["type"] == "toolCall":
                 stream.push(ToolCallStartEvent(
-                    type="toolcall_start", contentIndex=content_index, partial=_partial(),
+                    type="toolcall_start", content_index=content_index, partial=_partial(),
                 ))
-                args_json = json.dumps(block["arguments"], ensure_ascii=False)
+                args_json = block.get("raw_arguments") or json.dumps(block["arguments"] or {}, ensure_ascii=False)
                 for chunk in self._chunk_text(args_json):
                     if signal and signal.is_set():
                         self._push_aborted(stream, message)
                         return
                     stream.push(ToolCallDeltaEvent(
-                        type="toolcall_delta", contentIndex=content_index, delta=chunk, partial=_partial(),
+                        type="toolcall_delta", content_index=content_index, delta=chunk, partial=_partial(),
                     ))
                     await self._delay(chunk)
                 stream.push(ToolCallEndEvent(
-                    type="toolcall_end", contentIndex=content_index, toolCall=cast(ToolCall, block), partial=_partial(),
+                    type="toolcall_end", content_index=content_index, tool_call=cast(ToolCall, block), partial=_partial(),
                 ))
 
         if stop_reason in ("error", "aborted"):
@@ -512,7 +514,7 @@ class FauxCore:
             return
 
         # 走到这里时 stop_reason 已排除 pending / error / aborted，
-        # 即限定为 stop / length / toolUse。
+        # 即限定为 stop / length / tool_call。
         stream.push(DoneEvent(type="done", reason=cast(Any, stop_reason), message=message))
         stream.end(message)
 

@@ -42,6 +42,7 @@ from typing import (
     Callable,
     Generic,
     TypeVar,
+    cast,
 )
 
 # ------------------------------------------------------
@@ -362,7 +363,7 @@ class EventStream(Generic[T, R]):
 # AssistantMessage 专用事件流
 # ==========================================================
 
-from ._types import AssistantMessage, AssistantMessageEvent
+from ._types import AssistantMessage, AssistantMessageEvent, ErrorEvent
 
 
 class AssistantMessageEventStream(
@@ -417,6 +418,6 @@ class AssistantMessageEventStream(
             extract_result=lambda e: (
                 e["message"]
                 if e["type"] == "done"
-                else e["error"]
+                else cast(ErrorEvent, e)["error"]
             ),
         )

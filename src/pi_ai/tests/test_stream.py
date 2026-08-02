@@ -33,7 +33,7 @@ async def test_deepseek_chat_stream():
     )
 
     events = []
-    async for event in await models.stream(model, context, {"maxTokens": 50}):
+    async for event in await models.stream(model, context, {"max_tokens": 50}):
         events.append(event)
 
     # Should have at least a delta and a done event
@@ -41,7 +41,7 @@ async def test_deepseek_chat_stream():
     assert events[-1]["type"] == "done"
     msg = events[-1]["message"]
     assert msg["role"] == "assistant"
-    assert msg["stopReason"] in ("stop", "length")
+    assert msg["stop_reason"] in ("stop", "length")
 
 
 @pytest.mark.asyncio
@@ -59,7 +59,7 @@ async def test_deepseek_chat_complete():
         ]
     )
 
-    msg = await models.complete(model, context, {"maxTokens": 20})
+    msg = await models.complete(model, context, {"max_tokens": 20})
     assert msg["role"] == "assistant"
     assert len(msg["content"]) > 0
     text = "".join(
@@ -87,7 +87,7 @@ async def test_openai_chat_stream():
     )
 
     events = []
-    async for event in await models.stream(model, context, {"maxTokens": 50}):
+    async for event in await models.stream(model, context, {"max_tokens": 50}):
         events.append(event)
 
     assert len(events) >= 2
@@ -106,7 +106,7 @@ async def test_tool_calling():
     tool = Tool(
         name="get_weather",
         description="Get the weather for a city",
-        inputSchema={
+        input_schema={
             "type": "object",
             "properties": {
                 "city": {"type": "string", "description": "City name"},
@@ -122,7 +122,7 @@ async def test_tool_calling():
         tools=[tool],
     )
 
-    msg = await models.complete(model, context, {"maxTokens": 100})
+    msg = await models.complete(model, context, {"max_tokens": 100})
     assert msg["role"] == "assistant"
 
     # Check for tool calls in content

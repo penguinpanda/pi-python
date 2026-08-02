@@ -11,6 +11,7 @@ import pytest
 from pi_ai._types import (
     AssistantMessage,
     Model,
+    ModelCapabilities,
     TextContent,
     UserMessage,
 )
@@ -39,7 +40,7 @@ def _make_model() -> Model:
         provider="test",
         api="openai-completions",
         name="Test",
-        supportsToolCalling=True,
+        capabilities=ModelCapabilities(tools=True),
     )
 
 
@@ -76,7 +77,7 @@ def _make_llm_tool_response(
     """创建工具调用 LLM 响应的 AssistantMessage。"""
     return faux_assistant_message(
         [faux_tool_call(tool_name, args, tool_call_id=tool_call_id)],
-        stop_reason="toolUse",
+        stop_reason="tool_call",
     )
 
 
@@ -256,11 +257,11 @@ class TestToolCallLoop:
 
 
 class TestLengthTruncation:
-    """stopReason="length" 截断保护。"""
+    """stop_reason="length" 截断保护。"""
 
     @pytest.mark.asyncio
     async def test_truncated_tool_calls_marked_error(self):
-        """LLM 返回 length stopReason → 所有工具调用标记为错误（不执行）。"""
+        """LLM 返回 length stop_reason → 所有工具调用标记为错误（不执行）。"""
         tool = _make_tool("search")
 
         prompts = [UserMessage(role="user", content="Search")]
@@ -546,3 +547,91 @@ class TestRunAgentLoopContinue:
         assert len(_find_events(events, "agent_start")) == 1
         assert len(_find_events(events, "agent_end")) == 1
         assert len(result) >= 2
+
+
+class TestToolLifecycle:
+    """Tool 生命周期钩子（before_execute / after_execute）。"""
+
+    @pytest.mark.asyncio
+    async def test_before_execute_replaces_args(self):
+        """before_execute 返回的 dict 应替换传给 execute 的参数。"""
+        seen_args: list[dict] = []
+
+        async def _execute(tool_call_id, params, signal=None, on_update=None):
+            seen_args.append(params)
+            return AgentToolResult(
+                content=[TextContent(type="text", text="ok")],
+            )
+
+        async def _before(params, ctx):
+            return {"q": "replaced"}
+
+        tool = AgentTool(
+            name="search",
+            description="Tool: search",
+            input_schema={"type": "object", "properties": {}},
+            label="search",
+            execute=_execute,
+            before_execute=_before,
+        )
+        prompts = [UserMessage(role="user", content="Search")]
+        context = AgentContext(system_prompt="You are helpful.", messages=[], tools=[tool])
+
+        tc_final = _make_llm_tool_response("search", {"q": "original"})
+        text_final = _make_llm_text_response("done")
+        stream_fn = _make_counting_stream_fn([tc_final, text_final])
+
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+        )
+
+        result, events = await _collect_events(prompts, context, config, stream_fn)
+
+        assert seen_args == [{"q": "replaced"}]
+        # tool_execution_start 事件也应携带替换后的参数
+        tool_start = _find_events(events, "tool_execution_start")
+        assert tool_start[0]["args"] == {"q": "replaced"}
+
+    @pytest.mark.asyncio
+    async def test_after_execute_replaces_result(self):
+        """after_execute 返回的新值应替换最终工具结果。"""
+        async def _execute(tool_call_id, params, signal=None, on_update=None):
+            return AgentToolResult(
+                content=[TextContent(type="text", text="original")],
+            )
+
+        async def _after(result):
+            return AgentToolResult(
+                content=[TextContent(type="text", text="post-processed")],
+            )
+
+        tool = AgentTool(
+            name="search",
+            description="Tool: search",
+            input_schema={"type": "object", "properties": {}},
+            label="search",
+            execute=_execute,
+            after_execute=_after,
+        )
+        prompts = [UserMessage(role="user", content="Search")]
+        context = AgentContext(system_prompt="You are helpful.", messages=[], tools=[tool])
+
+        tc_final = _make_llm_tool_response("search", {"q": "x"})
+        text_final = _make_llm_text_response("done")
+        stream_fn = _make_counting_stream_fn([tc_final, text_final])
+
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+        )
+
+        result, events = await _collect_events(prompts, context, config, stream_fn)
+
+        # toolResult 消息应包含 after_execute 替换后的文本
+        tr_messages = [m for m in result if m.get("role") == "toolResult"]
+        assert len(tr_messages) == 1
+        text = "".join(
+            b["text"] for b in tr_messages[0]["content"] if b["type"] == "text"
+        )
+        assert text == "post-processed"

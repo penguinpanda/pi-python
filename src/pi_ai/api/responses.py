@@ -224,7 +224,7 @@ def _to_responses_input(
                             #
                             # 转换为 Data URL。
                             img["image_url"] = (
-                                f"data:{block.get('mimeType', 'image/png')};base64,{block['data']}"
+                                f"data:{block.get('mime_type', 'image/png')};base64,{block['data']}"
                             )
                         parts.append(img)
                 items.append({"role": "user", "content": parts})
@@ -255,7 +255,7 @@ def _to_responses_input(
                     text += block["text"]
             items.append({
                 "type": "function_call_output",
-                "call_id": msg["toolCallId"],
+                "call_id": msg["tool_call_id"],
                 "output": text,
             })
 
@@ -325,7 +325,7 @@ async def responses_stream(
 
         try:
             client = _create_client(api_key, base_url)
-            input_items = _to_responses_input(context.messages, context.systemPrompt, model)
+            input_items = _to_responses_input(context.messages, context.system_prompt, model)
             tools = to_openai_tools(context.tools) if context.tools else None
 
             # Responses API 请求参数。
@@ -349,7 +349,7 @@ async def responses_stream(
             temperature = opts.get("temperature")
             if temperature is not None:
                 kwargs["temperature"] = temperature
-            max_tokens = opts.get("maxTokens")
+            max_tokens = opts.get("max_tokens")
             if max_tokens is not None:
                 kwargs["max_tokens"] = max_tokens
 
@@ -383,7 +383,7 @@ async def responses_stream(
                     provider=model.provider,
                     model=model.id,
                     usage=usage,
-                    stopReason="pending",
+                    stop_reason="pending",
                     timestamp=now_ms(),
                 )
 
@@ -394,7 +394,7 @@ async def responses_stream(
                     block = content_blocks[current_index]
                     stream.push(TextEndEvent(
                         type="text_end",
-                        contentIndex=current_index,
+                        content_index=current_index,
                         content=block["text"],
                         partial=_partial(),
                     ))
@@ -402,17 +402,18 @@ async def responses_stream(
                     block = content_blocks[current_index]
                     stream.push(ThinkingEndEvent(
                         type="thinking_end",
-                        contentIndex=current_index,
+                        content_index=current_index,
                         content=block["thinking"],
                         partial=_partial(),
                     ))
                 elif current_kind == "toolCall" and current_index is not None:
                     block = content_blocks[current_index]
+                    block["raw_arguments"] = current_raw_args
                     block["arguments"] = parse_tool_arguments(current_raw_args)
                     stream.push(ToolCallEndEvent(
                         type="toolcall_end",
-                        contentIndex=current_index,
-                        toolCall=cast(ToolCall, block),
+                        content_index=current_index,
+                        tool_call=cast(ToolCall, block),
                         partial=_partial(),
                     ))
                 current_kind = None
@@ -420,7 +421,7 @@ async def responses_stream(
                 current_tool_id = ""
 
             def _begin_text() -> int:
-                """确保当前块为文本块，返回 contentIndex。"""
+                """确保当前块为文本块，返回 content_index。"""
                 nonlocal current_kind, current_index
                 if current_kind != "text":
                     _end_current_block()
@@ -429,13 +430,13 @@ async def responses_stream(
                     current_index = len(content_blocks) - 1
                     stream.push(TextStartEvent(
                         type="text_start",
-                        contentIndex=current_index,
+                        content_index=current_index,
                         partial=_partial(),
                     ))
                 return current_index  # type: ignore[return-value]
 
             def _begin_thinking() -> int:
-                """确保当前块为思考块，返回 contentIndex。"""
+                """确保当前块为思考块，返回 content_index。"""
                 nonlocal current_kind, current_index
                 if current_kind != "thinking":
                     _end_current_block()
@@ -444,7 +445,7 @@ async def responses_stream(
                     current_index = len(content_blocks) - 1
                     stream.push(ThinkingStartEvent(
                         type="thinking_start",
-                        contentIndex=current_index,
+                        content_index=current_index,
                         partial=_partial(),
                     ))
                 return current_index  # type: ignore[return-value]
@@ -467,7 +468,7 @@ async def responses_stream(
                     content_blocks[idx]["text"] += delta
                     stream.push(TextDeltaEvent(
                         type="text_delta",
-                        contentIndex=idx,
+                        content_index=idx,
                         delta=delta,
                         partial=_partial(),
                     ))
@@ -485,12 +486,13 @@ async def responses_stream(
                             type="toolCall",
                             id=current_tool_id,
                             name=current_tool_name,
-                            arguments={},
+                            raw_arguments="",
+                            arguments=None,
                         ))
                         current_index = len(content_blocks) - 1
                         stream.push(ToolCallStartEvent(
                             type="toolcall_start",
-                            contentIndex=current_index,
+                            content_index=current_index,
                             partial=_partial(),
                         ))
 
@@ -500,7 +502,7 @@ async def responses_stream(
                     current_raw_args += delta
                     stream.push(ToolCallDeltaEvent(
                         type="toolcall_delta",
-                        contentIndex=current_index or 0,
+                        content_index=current_index or 0,
                         delta=delta,
                         partial=_partial(),
                     ))
@@ -518,7 +520,7 @@ async def responses_stream(
                         content_blocks[idx]["thinking"] += text
                         stream.push(ThinkingDeltaEvent(
                             type="thinking_delta",
-                            contentIndex=idx,
+                            content_index=idx,
                             delta=text,
                             partial=_partial(),
                         ))
@@ -529,7 +531,7 @@ async def responses_stream(
                     content_blocks[idx]["thinking"] += delta
                     stream.push(ThinkingDeltaEvent(
                         type="thinking_delta",
-                        contentIndex=idx,
+                        content_index=idx,
                         delta=delta,
                         partial=_partial(),
                     ))
@@ -551,12 +553,12 @@ async def responses_stream(
                                 current_index = len(content_blocks) - 1
                                 stream.push(TextStartEvent(
                                     type="text_start",
-                                    contentIndex=current_index,
+                                    content_index=current_index,
                                     partial=_partial(),
                                 ))
                                 stream.push(TextEndEvent(
                                     type="text_end",
-                                    contentIndex=current_index,
+                                    content_index=current_index,
                                     content=output_text,
                                     partial=_partial(),
                                 ))
@@ -566,10 +568,10 @@ async def responses_stream(
                             usage = Usage(
                                 input=resp.usage.input_tokens or 0,
                                 output=resp.usage.output_tokens or 0,
-                                cacheRead=0,
-                                cacheWrite=0,
-                                totalTokens=resp.usage.total_tokens or 0,
-                                cost={"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0},
+                                cache_read=0,
+                                cache_write=0,
+                                total_tokens=resp.usage.total_tokens or 0,
+                                cost={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0},
                             )
 
             # 所有事件已处理完成，
@@ -584,11 +586,11 @@ async def responses_stream(
                 provider=model.provider,
                 model=model.id,
                 usage=usage,
-                stopReason=stop_reason,
-                errorMessage=None,
+                stop_reason=stop_reason,
+                error_message=None,
                 timestamp=now_ms(),
             )
-            # reason 与 stopReason 一致；Responses API 无独立 error 映射，
+            # reason 与 stop_reason 一致；Responses API 无独立 error 映射，
             # 未知情况仍以 done 事件结束（保持既有行为）。
             stream.push({
                 "type": "done",

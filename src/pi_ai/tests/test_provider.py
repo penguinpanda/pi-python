@@ -69,8 +69,8 @@ class TestProviderStreamDispatch:
         fake_stream.push({"type": "done", "reason": "stop", "message": AssistantMessage(
             role="assistant", content=[], api=model.api,
             provider=model.provider, model=model.id,
-            usage={"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 0},
-            stopReason="stop", errorMessage=None, timestamp=0,
+            usage={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total_tokens": 0},
+            stop_reason="stop", error_message=None, timestamp=0,
         )})
 
         with patch("pi_ai.provider.resolve_api_key", new=AsyncMock(return_value="sk-test")):
@@ -97,8 +97,8 @@ class TestProviderStreamDispatch:
         fake_stream.push({"type": "done", "reason": "stop", "message": AssistantMessage(
             role="assistant", content=[], api=model.api,
             provider=model.provider, model=model.id,
-            usage={"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 0},
-            stopReason="stop", errorMessage=None, timestamp=0,
+            usage={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total_tokens": 0},
+            stop_reason="stop", error_message=None, timestamp=0,
         )})
 
         with patch("pi_ai.provider.resolve_api_key", new=AsyncMock(return_value="sk-test")):
@@ -124,8 +124,8 @@ class TestProviderStreamDispatch:
         fake_stream.push({"type": "done", "reason": "stop", "message": AssistantMessage(
             role="assistant", content=[], api=model.api,
             provider=model.provider, model=model.id,
-            usage={"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 0},
-            stopReason="stop", errorMessage=None, timestamp=0,
+            usage={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total_tokens": 0},
+            stop_reason="stop", error_message=None, timestamp=0,
         )})
 
         with patch("pi_ai.provider.resolve_api_key", new=AsyncMock(return_value="sk-test")):
@@ -149,8 +149,8 @@ class TestProviderStreamDispatch:
         fake_stream.push({"type": "done", "reason": "stop", "message": AssistantMessage(
             role="assistant", content=[], api=model.api,
             provider=model.provider, model=model.id,
-            usage={"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 0},
-            stopReason="stop", errorMessage=None, timestamp=0,
+            usage={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total_tokens": 0},
+            stop_reason="stop", error_message=None, timestamp=0,
         )})
 
         with patch("pi_ai.provider.resolve_api_key", new=AsyncMock(return_value="sk-test")):
@@ -161,7 +161,7 @@ class TestProviderStreamDispatch:
 
     @pytest.mark.asyncio
     async def test_api_key_option_overrides_default(self):
-        """StreamOptions.apiKey overrides default resolution and skips resolve_api_key."""
+        """StreamOptions.api_key overrides default resolution and skips resolve_api_key."""
         provider = _make_provider(api_kind="completions")
         model = _make_model()
         context = Context(messages=[
@@ -172,17 +172,17 @@ class TestProviderStreamDispatch:
         fake_stream.push({"type": "done", "reason": "stop", "message": AssistantMessage(
             role="assistant", content=[], api=model.api,
             provider=model.provider, model=model.id,
-            usage={"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 0},
-            stopReason="stop", errorMessage=None, timestamp=0,
+            usage={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total_tokens": 0},
+            stop_reason="stop", error_message=None, timestamp=0,
         )})
 
-        options = {"apiKey": "sk-override"}
+        options = {"api_key": "sk-override"}
 
         with patch("pi_ai.provider.resolve_api_key") as mock_resolve:
             with patch("pi_ai.provider.chat_completions_stream", new=AsyncMock(return_value=fake_stream)) as mock_completions:
                 await provider.stream(model, context, options)
 
-        # resolve_api_key should NOT be called when apiKey is provided
+        # resolve_api_key should NOT be called when api_key is provided
         mock_resolve.assert_not_called()
         assert mock_completions.call_args[0][2] == "sk-override"  # api_key arg
 
@@ -206,8 +206,8 @@ class TestProviderStreamDispatch:
         fake_stream.push({"type": "done", "reason": "stop", "message": AssistantMessage(
             role="assistant", content=[], api=model.api,
             provider=model.provider, model=model.id,
-            usage={"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 0},
-            stopReason="stop", errorMessage=None, timestamp=0,
+            usage={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total_tokens": 0},
+            stop_reason="stop", error_message=None, timestamp=0,
         )})
 
         with patch("pi_ai.provider.resolve_api_key") as mock_resolve:
@@ -241,9 +241,9 @@ class TestProviderComplete:
             api=model.api,
             provider=model.provider,
             model=model.id,
-            usage={"input": 5, "output": 1, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 6},
-            stopReason="stop",
-            errorMessage=None,
+            usage={"input": 5, "output": 1, "cache_read": 0, "cache_write": 0, "total_tokens": 6},
+            stop_reason="stop",
+            error_message=None,
             timestamp=0,
         )
 
@@ -266,14 +266,14 @@ class TestProviderComplete:
         context = Context(messages=[
             {"role": "user", "content": "Hi"}  # type: ignore[typeddict-unknown-key]
         ])
-        options = {"temperature": 0.5, "maxTokens": 100}
+        options = {"temperature": 0.5, "max_tokens": 100}
 
         fake_stream = AssistantMessageEventStream()
         fake_stream.push({"type": "done", "reason": "stop", "message": AssistantMessage(
             role="assistant", content=[], api=model.api,
             provider=model.provider, model=model.id,
-            usage={"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 0},
-            stopReason="stop", errorMessage=None, timestamp=0,
+            usage={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total_tokens": 0},
+            stop_reason="stop", error_message=None, timestamp=0,
         )})
 
         with patch("pi_ai.provider.resolve_api_key", new=AsyncMock(return_value="sk-test")):
@@ -340,7 +340,7 @@ class TestProviderStreamFn:
                 api=model.api,
                 provider=model.provider,
                 model=model.id,
-                stopReason="stop",
+                stop_reason="stop",
             )})
             stream.end()
             return stream
@@ -375,7 +375,7 @@ class TestProviderStreamFn:
             stream.push({"type": "done", "reason": "stop", "message": AssistantMessage(
                 role="assistant", content=[], api=model.api,
                 provider=model.provider, model=model.id,
-                stopReason="stop",
+                stop_reason="stop",
             )})
             stream.end()
             return stream
@@ -386,7 +386,7 @@ class TestProviderStreamFn:
         context = Context(messages=[
             {"role": "user", "content": "Hi"}  # type: ignore[typeddict-unknown-key]
         ])
-        options = {"apiKey": "sk-test"}
+        options = {"api_key": "sk-test"}
 
         with patch("pi_ai.provider.resolve_api_key") as mock_resolve:
             await provider.stream(model, context, options)

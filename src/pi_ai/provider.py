@@ -69,6 +69,7 @@ from typing import Literal
 from ._event_stream import AssistantMessageEventStream
 from ._types import (
     AssistantMessage,
+    AsyncHTTPClient,
     Context,
     Model,
     StreamFunction,
@@ -189,6 +190,12 @@ class Provider:
     # 主要用于测试（例如 Faux Provider）。
     _stream_fn: StreamFunction | None = None
 
+    # 自定义异步 HTTP 客户端（可选）。
+    #
+    # 设置后用于 Provider 的 HTTP 请求；
+    # None 时使用默认客户端（openai SDK / httpx）。
+    http_client: AsyncHTTPClient | None = None
+
     def get_models(self) -> list[Model]:
         """
         返回 Provider 支持的所有模型。
@@ -256,13 +263,13 @@ class Provider:
         #
         # 优先级：
         #
-        # StreamOptions.apiKey（本次请求覆盖）
+        # StreamOptions.api_key（本次请求覆盖）
         #
-        # ↓
+        #       ↓
         #
         # Credential Store
         #
-        # ↓
+        #       ↓
         #
         # Environment Variable
         #
@@ -271,7 +278,7 @@ class Provider:
         # OpenAI SDK 在发请求时要求 api_key 非空，
         # 本地服务会忽略 Authorization 头。
         opts = options or {}
-        api_key = opts.get("apiKey")
+        api_key = opts.get("api_key")
         if api_key is None:
             if self.auth is None:
                 api_key = "ollama"

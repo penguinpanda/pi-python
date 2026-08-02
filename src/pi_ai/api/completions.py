@@ -198,8 +198,8 @@ async def chat_completions_stream(
             # Chat Completions API
             #
             # System Prompt 作为第一条 message。
-            if context.systemPrompt:
-                messages.insert(0, {"role": "system", "content": context.systemPrompt})
+            if context.system_prompt:
+                messages.insert(0, {"role": "system", "content": context.system_prompt})
 
             # OpenAI Chat Completions 参数。
             #
@@ -222,7 +222,7 @@ async def chat_completions_stream(
             temperature = opts.get("temperature")
             if temperature is not None:
                 kwargs["temperature"] = temperature
-            max_tokens = opts.get("maxTokens")
+            max_tokens = opts.get("max_tokens")
             if max_tokens is not None:
                 kwargs["max_tokens"] = max_tokens
 
@@ -257,7 +257,7 @@ async def chat_completions_stream(
                     provider=model.provider,
                     model=model.id,
                     usage=usage,
-                    stopReason="pending",
+                    stop_reason="pending",
                     timestamp=now_ms(),
                 )
 
@@ -268,17 +268,18 @@ async def chat_completions_stream(
                     block = cast(TextContent, content_blocks[current_index])
                     stream.push(TextEndEvent(
                         type="text_end",
-                        contentIndex=current_index,
+                        content_index=current_index,
                         content=block["text"],
                         partial=_partial(),
                     ))
                 elif current_kind == "toolCall" and current_index is not None:
                     block = cast(ToolCall, content_blocks[current_index])
+                    block["raw_arguments"] = current_raw_args
                     block["arguments"] = parse_tool_arguments(current_raw_args)
                     stream.push(ToolCallEndEvent(
                         type="toolcall_end",
-                        contentIndex=current_index,
-                        toolCall=block,
+                        content_index=current_index,
+                        tool_call=block,
                         partial=_partial(),
                     ))
                 current_kind = None
@@ -319,7 +320,7 @@ async def chat_completions_stream(
                         current_index = len(content_blocks) - 1
                         stream.push(TextStartEvent(
                             type="text_start",
-                            contentIndex=current_index,
+                            content_index=current_index,
                             partial=_partial(),
                         ))
                     idx = cast(int, current_index)
@@ -327,7 +328,7 @@ async def chat_completions_stream(
                     block["text"] += delta.content
                     stream.push(TextDeltaEvent(
                         type="text_delta",
-                        contentIndex=idx,
+                        content_index=idx,
                         delta=delta.content,
                         partial=_partial(),
                     ))
@@ -354,12 +355,13 @@ async def chat_completions_stream(
                                 type="toolCall",
                                 id=tc_id or "",
                                 name=tc_name or "",
-                                arguments={},
+                                raw_arguments="",
+                                arguments=None,
                             ))
                             current_index = len(content_blocks) - 1
                             stream.push(ToolCallStartEvent(
                                 type="toolcall_start",
-                                contentIndex=current_index,
+                                content_index=current_index,
                                 partial=_partial(),
                             ))
 
@@ -373,7 +375,7 @@ async def chat_completions_stream(
                             current_raw_args += tc_args
                             stream.push(ToolCallDeltaEvent(
                                 type="toolcall_delta",
-                                contentIndex=cast(int, current_index),
+                                content_index=cast(int, current_index),
                                 delta=tc_args,
                                 partial=_partial(),
                             ))
@@ -390,10 +392,10 @@ async def chat_completions_stream(
                     usage = Usage(
                         input=chunk.usage.prompt_tokens or 0,
                         output=chunk.usage.completion_tokens or 0,
-                        cacheRead=cached_tokens,
-                        cacheWrite=0,
-                        totalTokens=chunk.usage.total_tokens or 0,
-                        cost={"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0},
+                        cache_read=cached_tokens,
+                        cache_write=0,
+                        total_tokens=chunk.usage.total_tokens or 0,
+                        cost={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0},
                     )
 
             # 所有 Chunk 已处理完成，
@@ -409,17 +411,17 @@ async def chat_completions_stream(
                 provider=model.provider,
                 model=model.id,
                 usage=usage,
-                stopReason=_map_stop_reason(stop_reason),
-                errorMessage=None,
+                stop_reason=_map_stop_reason(stop_reason),
+                error_message=None,
                 timestamp=now_ms(),
             )
-            # reason 取映射后的 stopReason。
+            # reason 取映射后的 stop_reason。
             #
             # content_filter 等映射为 "error" 的罕见情况
             # 仍以 done 事件结束（保持既有行为）。
             stream.push({
                 "type": "done",
-                "reason": cast(Any, msg["stopReason"]),
+                "reason": cast(Any, msg["stop_reason"]),
                 "message": msg,
             })
             # stream.end(msg)
@@ -452,8 +454,8 @@ def _map_stop_reason(reason: str) -> StopReason:
 
         stop / end          → stop
         length              → length
-        tool_calls          → toolUse
-        function_call       → toolUse
+        tool_calls          → tool_call
+        function_call       → tool_call
         content_filter      → error
         network_error       → error
         空                   → stop（等价 TS 的 null）
@@ -465,8 +467,8 @@ def _map_stop_reason(reason: str) -> StopReason:
         "stop": "stop",
         "end": "stop",
         "length": "length",
-        "tool_calls": "toolUse",
-        "function_call": "toolUse",
+        "tool_calls": "tool_call",
+        "function_call": "tool_call",
         "content_filter": "error",
         "network_error": "error",
     }

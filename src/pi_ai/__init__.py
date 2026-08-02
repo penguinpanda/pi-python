@@ -6,24 +6,30 @@ pi-ai  统一管理不同模型的 API,返回一个一致的 AI 调用接口。
 
 from ._event_stream import AssistantMessageEventStream, EventStream
 from ._types import (
+    AgentMessage,
     AnthropicMessagesCompat,
     AssistantImages,
     AssistantMessage,
+    AssistantMessageDiagnostic,
     AssistantMessageEvent,
+    BaseContent,
+    BaseEvent,
+    BaseMessage,
     BedrockCompat,
     CacheRetention,
     ChatTemplateKwargValue,
     ChatTemplateKwargVar,
+    CodeContent,
     ConstrainedSamplingConfig,
     ContentBlock,
     Context,
     Cost,
     DoneEvent,
     ErrorEvent,
-    FetchFunction,
     GrammarFormat,
     GrammarSampling,
     GrammarVariants,
+    AsyncHTTPClient,
     ImageContent,
     ImagesApi,
     ImagesContext,
@@ -37,12 +43,19 @@ from ._types import (
     JsonSchemaSampling,
     KnownImagesApi,
     KnownImagesProvider,
+    ApiId,
+    MemoryStore,
     Message,
     Model,
+    ModelCapabilities,
+    ModelCompat,
     ModelCost,
     ModelCostRates,
     ModelCostTier,
+    ModelInput,
+    ModelOutput,
     ModelThinkingLevel,
+    ProviderId,
     OpenAICompletionsCompat,
     OpenAIResponsesCompat,
     OpenRouterRouting,
@@ -77,7 +90,10 @@ from ._types import (
     ToolCallDeltaEvent,
     ToolCallEndEvent,
     ToolCallStartEvent,
+    ToolDetails,
     ToolResultMessage,
+    Trace,
+    TraceSpan,
     Transport,
     Usage,
     UserMessage,
@@ -106,14 +122,6 @@ from .providers import (
     openai_provider,
 )
 from .providers.all import create_default_models
-
-
-# def create_default_models() -> Models:
-#     """ 创建一个预加载了OpenAI和DeepSeek的Models实例。 """
-#     models = Models()
-#     models.add_provider(openai_provider())
-#     models.add_provider(deepseek_provider())
-#     return models
 
 __all__ = [
     # Core registry
@@ -144,20 +152,35 @@ __all__ = [
 
     # Types
     "Model",
+    "ApiId",
+    "ProviderId",
+    "ModelCompat",
+    "ModelInput",
+    "ModelOutput",
+    "ModelCapabilities",
     "Context",
+    "MemoryStore",
     "Tool",
     "Message",
     "SystemMessage",
     "UserMessage",
     "AssistantMessage",
     "ToolResultMessage",
+    "AgentMessage",
+    "BaseMessage",
     "ContentBlock",
+    "BaseContent",
     "TextContent",
     "ImageContent",
     "ToolCall",
     "ThinkingContent",
+    "CodeContent",
     "Usage",
     "Cost",
+    "ToolDetails",
+    "AssistantMessageDiagnostic",
+    "Trace",
+    "TraceSpan",
     "now_ms",
     "StreamOptions",
 
@@ -170,7 +193,7 @@ __all__ = [
     "ChatTemplateKwargValue",
     "ProviderEnv",
     "ProviderHeaders",
-    "FetchFunction",
+    "AsyncHTTPClient",
     "SessionAffinityFormat",
     "ProviderResponse",
     "GrammarFormat",
@@ -220,6 +243,7 @@ __all__ = [
     "ToolCallEndEvent",
     "DoneEvent",
     "ErrorEvent",
+    "BaseEvent",
 
     # Stream
     "AssistantMessageEventStream",

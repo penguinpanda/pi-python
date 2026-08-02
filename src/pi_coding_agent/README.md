@@ -344,7 +344,7 @@ class AgentSession:
 2. `await session.prompt(message)` — 发送消息
 3. `await session.wait_for_idle()` — 等待完成
 4. 提取：`agent_end` 事件中从后往前找最后一条 `assistant` 消息 → 提取纯文本 → `print(final_text)`
-5. 错误处理：`stopReason` 为 `error`/`aborted` 返回 1；异常返回 1
+5. 错误处理：`stop_reason` 为 `error`/`aborted` 返回 1；异常返回 1
 6. `finally` 中取消订阅 + `await session.dispose()`
 
 返回码：`0` = 成功，`1` = 错误/中止。

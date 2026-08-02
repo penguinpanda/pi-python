@@ -186,7 +186,7 @@ def to_openai_messages(
                             #
                             # data URL。
                             image_part["image_url"] = {
-                                "url": f"data:{block.get('mimeType', 'image/png')};base64,{block['data']}"
+                                "url": f"data:{block.get('mime_type', 'image/png')};base64,{block['data']}"
                             }
 
                         parts.append(image_part)
@@ -223,7 +223,10 @@ def to_openai_messages(
                         "type": "function",
                         "function": {
                             "name": block["name"],
-                            "arguments": json.dumps(block["arguments"], ensure_ascii=False),
+                            "arguments": json.dumps(
+                                block["arguments"] if block["arguments"] is not None else {},
+                                ensure_ascii=False,
+                            ),
                         },
                     })
                 elif block["type"] == "thinking":
@@ -258,7 +261,7 @@ def to_openai_messages(
 
             result.append({
                 "role": "tool",
-                "tool_call_id": tr_msg["toolCallId"],
+                "tool_call_id": tr_msg["tool_call_id"],
                 "content": content_str,
             })
 
@@ -288,7 +291,7 @@ def to_openai_tools(tools: list[Tool]) -> list[dict[str, Any]]:
             "function": {
                 "name": t.name,
                 "description": t.description,
-                "parameters": t.inputSchema,
+                "parameters": t.input_schema,
             },
         }
         for t in tools
@@ -313,10 +316,10 @@ def empty_usage() -> Usage:
     return Usage(
         input=0,
         output=0,
-        cacheRead=0,
-        cacheWrite=0,
-        totalTokens=0,
-        cost={"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0},
+        cache_read=0,
+        cache_write=0,
+        total_tokens=0,
+        cost={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0},
     )
 
 
@@ -351,8 +354,8 @@ def build_error_message(
         provider=model.provider,
         model=model.id,
         usage=empty_usage(),
-        stopReason="error",
-        errorMessage=str(error),
+        stop_reason="error",
+        error_message=str(error),
         timestamp=now_ms(),
     )
 

@@ -111,15 +111,15 @@ class TestAssistantMessageEventStream:
             api="openai-completions",
             provider="deepseek",
             model="deepseek-chat",
-            usage={"input": 10, "output": 5, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 15},
-            stopReason="stop",
-            errorMessage=None,
+            usage={"input": 10, "output": 5, "cache_read": 0, "cache_write": 0, "total_tokens": 15},
+            stop_reason="stop",
+            error_message=None,
             timestamp=0,
         )
 
         stream.push({
             "type": "text_delta",
-            "contentIndex": 0,
+            "content_index": 0,
             "delta": "Hello",
             "partial": msg,
         })
@@ -131,7 +131,7 @@ class TestAssistantMessageEventStream:
         assert events[1]["type"] == "done"
 
         result = await stream.result()
-        assert result["stopReason"] == "stop"
+        assert result["stop_reason"] == "stop"
 
     @pytest.mark.asyncio
     async def test_error_event(self):
@@ -142,9 +142,9 @@ class TestAssistantMessageEventStream:
             api="openai-completions",
             provider="deepseek",
             model="deepseek-chat",
-            usage={"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 0},
-            stopReason="error",
-            errorMessage="Something went wrong",
+            usage={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total_tokens": 0},
+            stop_reason="error",
+            error_message="Something went wrong",
             timestamp=0,
         )
 
@@ -153,7 +153,7 @@ class TestAssistantMessageEventStream:
         events = [e async for e in stream]
         assert len(events) == 1
         assert events[0]["type"] == "error"
-        assert events[0]["error"]["errorMessage"] == "Something went wrong"
+        assert events[0]["error"]["error_message"] == "Something went wrong"
 
 
 class TestEventStreamCancellation:

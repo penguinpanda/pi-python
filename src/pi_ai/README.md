@@ -8,7 +8,7 @@
 
 ## 支持的模型
 
-| Provider | 模型 ID | API 类型 | Thinking | Tool Calling | 图片输入 | maxTokens |
+| Provider | 模型 ID | API 类型 | Thinking | Tool Calling | 图片输入 | max_tokens |
 |----------|---------|----------|:--------:|:------------:|:--------:|:---------:|
 | OpenAI | `gpt-4o` | Responses | ✗ | ✓ | ✓ | 16,384 |
 | OpenAI | `gpt-4o-mini` | Responses | ✗ | ✓ | ✓ | 16,384 |
@@ -94,7 +94,7 @@ async def main():
 
     # 构造上下文
     context = Context(
-        systemPrompt="You are a helpful assistant.",
+        system_prompt="You are a helpful assistant.",
         messages=[
             {"role": "user", "content": "Hello!"},
         ],
@@ -136,10 +136,10 @@ msg = await models.complete(model, context)
 #     "content": [
 #         {"type": "text", "text": "..."},
 #         {"type": "thinking", "thinking": "..."},       # 推理模型
-#         {"type": "toolCall", "id": "...", "name": "...", "arguments": {...}},  # 工具调用
+#         {"type": "toolCall", "id": "...", "name": "...", "raw_arguments": "...", "arguments": {...}},  # 工具调用
 #     ],
 #     "usage": {"input": 100, "output": 50, ...},
-#     "stopReason": "stop",
+#     "stop_reason": "stop",
 # }
 ```
 
@@ -165,9 +165,9 @@ async for event in await models.stream(model, context):
 | 事件类型 | 说明 | 关键字段 |
 |----------|------|----------|
 | `start` | 流开始 | `partial` |
-| `text_start` / `text_delta` / `text_end` | 文本块生命周期 | `contentIndex`, `delta`, `partial` |
-| `thinking_start` / `thinking_delta` / `thinking_end` | 推理块生命周期 | `contentIndex`, `delta`, `partial` |
-| `toolcall_start` / `toolcall_delta` / `toolcall_end` | 工具调用块生命周期 | `contentIndex`, `delta` / `toolCall`, `partial` |
+| `text_start` / `text_delta` / `text_end` | 文本块生命周期 | `content_index`, `delta`, `partial` |
+| `thinking_start` / `thinking_delta` / `thinking_end` | 推理块生命周期 | `content_index`, `delta`, `partial` |
+| `toolcall_start` / `toolcall_delta` / `toolcall_end` | 工具调用块生命周期 | `content_index`, `delta` / `tool_call`, `partial` |
 | `done` | 流正常结束 | `message`（完整 `AssistantMessage`） |
 | `error` | 流异常结束 | `reason`, `error` |
 
@@ -200,7 +200,7 @@ async def main():
         Tool(
             name="get_weather",
             description="获取指定城市的天气",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {
                     "city": {"type": "string", "description": "城市名称"}
@@ -228,8 +228,8 @@ async def main():
     context.messages.append(msg)  # assistant 消息
     context.messages.append({
         "role": "toolResult",
-        "toolCallId": msg["content"][0]["id"],
-        "toolName": "get_weather",
+        "tool_call_id": msg["content"][0]["id"],
+        "tool_name": "get_weather",
         "content": [{"type": "text", "text": "北京今天晴，25°C"}],
     })
 
@@ -299,16 +299,16 @@ async for event in await models.stream(model, context, options):
 | 参数 | 类型 | 说明 |
 |------|------|------|
 | `temperature` | `float` | 采样温度 |
-| `maxTokens` | `int` | 最大输出 Token 数 |
-| `thinkingBudget` | `int` | 推理 Token 预算（仅推理模型） |
-| `thinkingEnabled` | `bool` | 是否启用推理 |
-| `apiKey` | `str` | 本次请求使用的 API Key（覆盖默认） |
+| `max_tokens` | `int` | 最大输出 Token 数 |
+| `thinking_budget` | `int` | 推理 Token 预算（仅推理模型） |
+| `thinking_enabled` | `bool` | 是否启用推理 |
+| `api_key` | `str` | 本次请求使用的 API Key（覆盖默认） |
 | `headers` | `dict` | 额外的 HTTP 请求头 |
 
 ```python
 options = {
     "temperature": 0.7,
-    "maxTokens": 2000,
+    "max_tokens": 2000,
     "headers": {"X-Custom-Header": "value"},
 }
 msg = await models.complete(model, context, options)
@@ -357,10 +357,8 @@ models.add_provider(
                 name="Claude Sonnet 4",
                 input=["text"],
                 output=["text"],
-                maxTokens=16384,
-                reasoning=False,
-                supportsToolCalling=True,
-                supportsImages=False,
+                max_tokens=16384,
+                capabilities=ModelCapabilities(tools=True),
             ),
         ],
     )
@@ -395,6 +393,33 @@ model = models.get_model("openrouter", "anthropic/claude-sonnet-4")
 - **`Provider`** — 封装 provider 配置（base URL、认证、模型列表、API 类型）
 - **`EventStream`** — 基于 `asyncio.Queue` 的生产者-消费者异步事件流
 - **`api/`** — 将不同 API 协议（Completions / Responses）统一转为 SDK 事件
+
+### 类型组织（`pi_ai.types`）
+
+所有公共类型定义在 `pi_ai/types/` 包（原 `pi_ai/_types.py`，现为兼容 re-export）：
+
+```
+pi_ai/types/
+├── common.py     # 基础枚举 / 协议（StopReason、AsyncHTTPClient ...）
+├── content.py    # ContentBlock（Text / Image / ToolCall / Thinking / Code）
+├── message.py    # Message（System / User / Assistant / ToolResult / Agent）
+├── tool.py       # Tool（含 before_execute / after_execute 生命周期钩子）
+├── model.py      # Model / ModelCapabilities / ModelCost
+├── context.py    # Context（含 state / memory / trace_id）+ MemoryStore
+├── stream.py     # 流事件（BaseEvent + 12 种事件）+ StreamOptions
+├── image.py      # 图片生成类型
+├── compat.py     # Provider 兼容配置（Compat）
+└── trace.py      # 可观测性（Trace / TraceSpan）
+```
+
+扩展要点：
+
+- `Message` 联合含 `AgentMessage`（planner / observation / memory 等通用 role），
+  Agent 层可携带任意 Agent role；转换函数对未知 role 安全跳过。
+- `ContentBlock` 继承 `BaseContent`，新增类型（如 `CodeContent`）即可插件化扩展。
+- `ToolCall` 含 `raw_arguments`（流式原始 JSON）与 `arguments`（解析后 dict / None）。
+- `Tool` 支持 `before_execute` / `after_execute` 生命周期钩子（默认 None）。
+- `Context` 可注入 `state` / `memory`（`MemoryStore`）/ `trace_id`。
 
 ---
 

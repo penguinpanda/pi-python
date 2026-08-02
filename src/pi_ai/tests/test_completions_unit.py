@@ -7,7 +7,7 @@ from pi_ai.api.completions import _map_stop_reason
 class TestMapStopReason:
     @pytest.mark.parametrize('raw,expected', [
         ('stop', 'stop'), ('end', 'stop'), ('length', 'length'),
-        ('tool_calls', 'toolUse'), ('function_call', 'toolUse'),
+        ('tool_calls', 'tool_call'), ('function_call', 'tool_call'),
         ('content_filter', 'error'), ('network_error', 'error'),
         ('some_unknown_reason', 'error'),
     ])
@@ -91,8 +91,8 @@ def _mock_client(chunks):
 def _empty_usage_dict():
     """与 _shared.empty_usage() 一致的完整空 Usage（含 cost）。"""
     return {
-        "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 0,
-        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0},
+        "input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total_tokens": 0,
+        "cost": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0},
     }
 
 
@@ -160,7 +160,7 @@ class TestCompletionsStream:
         assert msg["content"] == [
             {"type": "text", "text": "Hello world"},
         ]
-        assert msg["stopReason"] == "stop"
+        assert msg["stop_reason"] == "stop"
         assert msg["model"] == "deepseek-chat"
         assert msg["provider"] == "deepseek"
         assert msg["api"] == "openai-completions"
@@ -231,11 +231,12 @@ class TestCompletionsStream:
         assert tool_deltas[1]["delta"] == '"Beijing"}'
 
         msg = events[-1]["message"]
-        assert msg["stopReason"] == "toolUse"
+        assert msg["stop_reason"] == "tool_call"
         assert msg["content"] == [{
             "type": "toolCall",
             "id": "call_1",
             "name": "get_weather",
+            "raw_arguments": '{"city":"Beijing"}',
             "arguments": {"city": "Beijing"},
         }]
 
@@ -255,9 +256,9 @@ class TestCompletionsStream:
         events, stream = await _collect_events(model, context, client)
         msg = await stream.result()
         assert msg["usage"] == {
-            "input": 10, "output": 5, "cacheRead": 3, "cacheWrite": 0,
-            "totalTokens": 15,
-            "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0},
+            "input": 10, "output": 5, "cache_read": 3, "cache_write": 0,
+            "total_tokens": 15,
+            "cost": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0},
         }
 
     @pytest.mark.asyncio
@@ -266,14 +267,14 @@ class TestCompletionsStream:
         tool = Tool(
             name="get_weather",
             description="Get weather",
-            inputSchema={"type": "object", "properties": {}},
+            input_schema={"type": "object", "properties": {}},
         )
         context = Context(
             messages=[{"role": "user", "content": "Hi"}],
             tools=[tool],
-            systemPrompt="You are helpful",
+            system_prompt="You are helpful",
         )
-        options = {"temperature": 0.5, "maxTokens": 100}
+        options = {"temperature": 0.5, "max_tokens": 100}
         client = _mock_client([_chunk(content="Hi", finish_reason="stop")])
         with patch("pi_ai.api.completions._create_client", return_value=client):
             stream = await chat_completions_stream(
@@ -332,13 +333,13 @@ class TestCompletionsStream:
         assert events[-1]["reason"] == "error"
         err = events[-1]["error"]
         assert err["role"] == "assistant"
-        assert err["errorMessage"] == "boom"
-        assert err["stopReason"] == "error"
+        assert err["error_message"] == "boom"
+        assert err["stop_reason"] == "error"
         assert err["content"] == []
 
         # result() 返回携带错误的 AssistantMessage。
         msg = await stream.result()
-        assert msg["errorMessage"] == "boom"
+        assert msg["error_message"] == "boom"
 
     @pytest.mark.asyncio
     async def test_cancelled_error(self):

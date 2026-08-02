@@ -161,7 +161,7 @@ class AgentTool:
     input_schema: dict[str, Any]       # JSON Schema (给 LLM 选择参数)
     label: str                         # UI 显示标签
     execute: Callable[..., Awaitable[AgentToolResult]]
-        # 签名: (toolCallId, params, signal?, onUpdate?) → AgentToolResult
+        # 签名: (tool_call_id, params, signal?, on_update?) → AgentToolResult
     execution_mode: ToolExecutionMode = "sequential"
 ```
 
@@ -189,7 +189,7 @@ class AgentToolResult:
 
 阶段 2: 执行
   ├─ emit tool_execution_start
-  ├─ tool.execute(toolCallId, params, signal, onUpdate)
+  ├─ tool.execute(tool_call_id, params, signal, on_update)
   └─ try/except → 异常转 is_error=True
 
 阶段 3: 完成
@@ -200,7 +200,7 @@ class AgentToolResult:
   └─ 构造 ToolResultMessage → 追加到上下文
 ```
 
-**截断保护**：`stopReason="length"` 时，LLM 返回的工具调用参数可能不完整 → 不实际执行工具，直接生成错误 `ToolResultMessage`。
+**截断保护**：`stop_reason="length"` 时，LLM 返回的工具调用参数可能不完整 → 不实际执行工具，直接生成错误 `ToolResultMessage`。
 
 ---
 
@@ -232,8 +232,8 @@ class AgentToolResult:
 | `transform_context` | `(messages) → messages` | 预处理消息列表（如压缩、摘要） |
 | `convert_to_llm` | `(messages) → LLM Message[]` | 消息格式转换（唯一转换点） |
 | `get_api_key` | `(provider_id) → str \| None` | 动态获取 API Key |
-| `before_tool_call` | `(toolCallId, toolName, args, context) → BeforeToolCallResult \| None` | 工具执行前检查（可 block） |
-| `after_tool_call` | `(toolCallId, toolName, result, isError, context) → AfterToolCallResult \| None` | 工具执行后处理（可覆盖） |
+| `before_tool_call` | `(tool_call_id, tool_name, args, context) → BeforeToolCallResult \| None` | 工具执行前检查（可 block） |
+| `after_tool_call` | `(tool_call_id, tool_name, result, is_error, context) → AfterToolCallResult \| None` | 工具执行后处理（可覆盖） |
 | `prepare_next_turn` | `(context) → AgentLoopTurnUpdate \| None` | 准备下一轮（可动态添加工具/消息） |
 | `should_stop_after_turn` | `(context) → bool` | 判断是否提前终止循环 |
 | `tool_execution` | `"sequential"` | 工具执行模式（当前仅 sequential） |

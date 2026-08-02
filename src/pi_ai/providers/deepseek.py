@@ -37,7 +37,7 @@ DeepSeek Provider。
            Provider
 """
 
-from .._types import Model, ModelCost
+from .._types import Model, ModelCapabilities, ModelCost
 from ..auth import env_api_key_auth
 from ..provider import create_provider, Provider
 
@@ -69,16 +69,14 @@ DEEPSEEK_MODELS: list[Model] = [
         name="DeepSeek Chat",
         input=["text"],
         output=["text"],
-        maxTokens=65536,            # 64K output # 最大输出 Token 数
-        reasoning=False,             # 模型不会生成推理过程。
-        supportsToolCalling=True,   # 支持 Function Calling
-        supportsImages=False,       # 不支持图片输入
+        max_tokens=65536,            # 64K output # 最大输出 Token 数
+        capabilities=ModelCapabilities(tools=True),   # 支持 Function Calling
 
         # 价格（每百万 Token）。
         #
         # 单位由 Provider 自行约定，
         # 一般与官方 API 定价一致。
-        cost=ModelCost(input=0.27, output=1.10, cacheRead=0.07, cacheWrite=0.27),
+        cost=ModelCost(input=0.27, output=1.10, cache_read=0.07, cache_write=0.27),
     ),
 
     # DeepSeek Reasoner
@@ -96,11 +94,9 @@ DEEPSEEK_MODELS: list[Model] = [
         name="DeepSeek Reasoner",
         input=["text"],
         output=["text"],
-        maxTokens=65536,
-        reasoning=True, # 模型会生成推理过程。
-        supportsToolCalling=False,
-        supportsImages=False,
-        cost=ModelCost(input=0.55, output=2.19, cacheRead=0.14, cacheWrite=0.55),
+        max_tokens=65536,
+        capabilities=ModelCapabilities(reasoning=True), # 模型会生成推理过程。
+        cost=ModelCost(input=0.55, output=2.19, cache_read=0.14, cache_write=0.55),
     ),
 
     # DeepSeek V4 Flash
@@ -117,16 +113,14 @@ DEEPSEEK_MODELS: list[Model] = [
         name="DeepSeek V4 Flash",
         input=["text"],
         output=["text"],
-        maxTokens=384000,           # 最大输出 Token 数
-        reasoning=True,             # 模型会生成推理过程。
-        supportsToolCalling=True,   # 支持 Function Calling
-        supportsImages=False,       # 不支持图片输入
+        max_tokens=384000,           # 最大输出 Token 数
+        capabilities=ModelCapabilities(reasoning=True, tools=True),  # 支持 Function Calling
 
         # 价格（每百万 Token）。
         #
         # 单位由 Provider 自行约定，
         # 一般与官方 API 定价一致。
-        cost=ModelCost(input=0.27, output=1.10, cacheRead=0.07, cacheWrite=0.27),
+        cost=ModelCost(input=0.27, output=1.10, cache_read=0.07, cache_write=0.27),
     ),
 ]
 

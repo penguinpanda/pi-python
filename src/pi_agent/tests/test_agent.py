@@ -8,6 +8,7 @@ import pytest
 from pi_ai._types import (
     AssistantMessage,
     Model,
+    ModelCapabilities,
     TextContent,
     UserMessage,
 )
@@ -34,7 +35,7 @@ def _make_model() -> Model:
         provider="test",
         api="openai-completions",
         name="Test",
-        supportsToolCalling=True,
+        capabilities=ModelCapabilities(tools=True),
     )
 
 
@@ -320,7 +321,7 @@ class TestAgentState:
 
     @pytest.mark.asyncio
     async def test_error_response_sets_error_message(self):
-        """LLM 返回 error stopReason → agent_end 事件 + state.error_message。"""
+        """LLM 返回 error stop_reason → agent_end 事件 + state.error_message。"""
         core = _make_faux([
             faux_assistant_message([], stop_reason="error", error_message="Boom!"),
         ])

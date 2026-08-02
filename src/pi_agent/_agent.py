@@ -357,8 +357,8 @@ class Agent:
 
         elif event_type == "turn_end":
             msg = event["message"]
-            if msg.get("stopReason") == "error":
-                self._state.error_message = msg.get("errorMessage", "Unknown error")
+            if msg.get("stop_reason") == "error":
+                self._state.error_message = msg.get("error_message", "Unknown error")
 
         elif event_type == "agent_end":
             self._state.streaming_message = None

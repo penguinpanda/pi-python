@@ -23,6 +23,7 @@ from pi_ai._types import (
     AssistantMessage,
     Context,
     Model,
+    ModelCapabilities,
     StreamOptions,
     Tool,
 )
@@ -84,7 +85,7 @@ class TestFauxHelpers:
         msg = faux_assistant_message("hi")
         assert msg["role"] == "assistant"
         assert msg["content"] == [{"type": "text", "text": "hi"}]
-        assert msg["stopReason"] == "stop"
+        assert msg["stop_reason"] == "stop"
         assert msg["provider"] == "faux"
         assert msg["model"] == "faux-1"
 
@@ -119,12 +120,12 @@ class TestFauxProviderFactory:
     def test_custom_models(self):
         models = [
             Model(id="faux-fast", provider="faux", api="openai-completions", name="Faux Fast"),
-            Model(id="faux-thinker", provider="faux", api="openai-completions", name="Faux Thinker", reasoning=True),
+            Model(id="faux-thinker", provider="faux", api="openai-completions", name="Faux Thinker", capabilities=ModelCapabilities(reasoning=True)),
         ]
         faux = faux_provider(models=models)
         assert [m.id for m in faux.models] == ["faux-fast", "faux-thinker"]
         assert faux.get_model("faux-thinker") is not None
-        assert faux.get_model("faux-thinker").reasoning is True  # type: ignore[union-attr]
+        assert faux.get_model("faux-thinker").capabilities.reasoning is True  # type: ignore[union-attr]
 
 
 # ---------------------------------------------------------------------------
@@ -139,14 +140,14 @@ class TestBasicResponses:
     async def test_complete_returns_scripted_text_and_usage(self):
         faux = faux_provider()
         faux.set_responses([faux_assistant_message("hello world")])
-        ctx = Context(systemPrompt="Be concise.", messages=[{"role": "user", "content": "hi there"}])
+        ctx = Context(system_prompt="Be concise.", messages=[{"role": "user", "content": "hi there"}])
 
         msg = await faux.provider.complete(faux.models[0], ctx)
 
         assert msg["content"] == [{"type": "text", "text": "hello world"}]
         assert msg["usage"]["input"] > 0
         assert msg["usage"]["output"] > 0
-        assert msg["usage"]["totalTokens"] == msg["usage"]["input"] + msg["usage"]["output"]
+        assert msg["usage"]["total_tokens"] == msg["usage"]["input"] + msg["usage"]["output"]
         assert msg["usage"]["cost"]["total"] == 0
         assert faux.call_count == 1
 
@@ -160,7 +161,7 @@ class TestBasicResponses:
                     faux_tool_call("echo", {"text": "hi"}, tool_call_id="call-1"),
                     faux_text("done"),
                 ],
-                stop_reason="toolUse",
+                stop_reason="tool_call",
             )
         ])
 
@@ -168,10 +169,10 @@ class TestBasicResponses:
 
         assert msg["content"] == [
             {"type": "thinking", "thinking": "think"},
-            {"type": "toolCall", "id": "call-1", "name": "echo", "arguments": {"text": "hi"}},
+            {"type": "toolCall", "id": "call-1", "name": "echo", "raw_arguments": '{"text": "hi"}', "arguments": {"text": "hi"}},
             {"type": "text", "text": "done"},
         ]
-        assert msg["stopReason"] == "toolUse"
+        assert msg["stop_reason"] == "tool_call"
 
     @pytest.mark.asyncio
     async def test_rewrites_api_provider_model(self):
@@ -209,8 +210,8 @@ class TestResponseQueue:
 
         assert first["content"] == [{"type": "text", "text": "first"}]
         assert second["content"] == [{"type": "text", "text": "second"}]
-        assert exhausted["stopReason"] == "error"
-        assert exhausted["errorMessage"] == "No more faux responses queued"
+        assert exhausted["stop_reason"] == "error"
+        assert exhausted["error_message"] == "No more faux responses queued"
         assert faux.get_pending_response_count() == 0
         assert faux.call_count == 3
 
@@ -259,13 +260,13 @@ class TestResponseFactory:
     @pytest.mark.asyncio
     async def test_model_aware_factory(self):
         models = [
-            Model(id="faux-fast", provider="faux", api="openai-completions", name="Faux Fast", reasoning=False),
-            Model(id="faux-thinker", provider="faux", api="openai-completions", name="Faux Thinker", reasoning=True),
+            Model(id="faux-fast", provider="faux", api="openai-completions", name="Faux Fast", capabilities=ModelCapabilities()),
+            Model(id="faux-thinker", provider="faux", api="openai-completions", name="Faux Thinker", capabilities=ModelCapabilities(reasoning=True)),
         ]
         faux = faux_provider(models=models)
 
         async def factory(context, options, state, model):
-            return faux_assistant_message(f"{model.id}:{model.reasoning}")
+            return faux_assistant_message(f"{model.id}:{model.capabilities.reasoning}")
 
         faux.set_responses([factory, factory])
 
@@ -288,8 +289,8 @@ class TestResponseFactory:
 
         assert len(events) == 1
         assert events[0]["type"] == "error"
-        assert events[0]["error"]["stopReason"] == "error"
-        assert events[0]["error"]["errorMessage"] == "boom"
+        assert events[0]["error"]["stop_reason"] == "error"
+        assert events[0]["error"]["error_message"] == "boom"
 
     @pytest.mark.asyncio
     async def test_pending_stop_reason_rejected(self):
@@ -300,8 +301,8 @@ class TestResponseFactory:
 
         assert not any(e["type"] == "done" for e in events)
         assert events[-1]["type"] == "error"
-        assert events[-1]["error"]["stopReason"] == "error"
-        assert events[-1]["error"]["errorMessage"] == "Faux response ended without a stop reason"
+        assert events[-1]["error"]["stop_reason"] == "error"
+        assert events[-1]["error"]["error_message"] == "Faux response ended without a stop reason"
 
 
 # ---------------------------------------------------------------------------
@@ -320,27 +321,27 @@ class TestUsageEstimation:
         tool = Tool(
             name="echo",
             description="Echo back text",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {"text": {"type": "string"}},
                 "required": ["text"],
             },
         )
         context = Context(
-            systemPrompt="sys",
+            system_prompt="sys",
             messages=[
                 {
                     "role": "user",
                     "content": [
                         {"type": "text", "text": "hello"},
-                        {"type": "image", "url": None, "data": "abcd", "mimeType": "image/png"},
+                        {"type": "image", "url": None, "data": "abcd", "mime_type": "image/png"},
                     ],
                 },
                 faux_assistant_message("prior"),
                 {
                     "role": "toolResult",
-                    "toolCallId": "tool-1",
-                    "toolName": "echo",
+                    "tool_call_id": "tool-1",
+                    "tool_name": "echo",
                     "content": [{"type": "text", "text": "tool out"}],
                 },
             ],
@@ -352,7 +353,7 @@ class TestUsageEstimation:
         tool_dict = {
             "name": "echo",
             "description": "Echo back text",
-            "inputSchema": tool.inputSchema,
+            "input_schema": tool.input_schema,
         }
         expected_prompt = "\n\n".join([
             "system:sys",
@@ -366,9 +367,9 @@ class TestUsageEstimation:
 
         assert msg["usage"]["input"] == expected_input
         assert msg["usage"]["output"] == expected_output
-        assert msg["usage"]["cacheRead"] == 0
-        assert msg["usage"]["cacheWrite"] == 0
-        assert msg["usage"]["totalTokens"] == expected_input + expected_output
+        assert msg["usage"]["cache_read"] == 0
+        assert msg["usage"]["cache_write"] == 0
+        assert msg["usage"]["total_tokens"] == expected_input + expected_output
 
 
 # ---------------------------------------------------------------------------
@@ -394,7 +395,7 @@ class TestStreamingEvents:
 
         msg = events[-1]["message"]
         assert msg["content"] == [{"type": "text", "text": "hello world"}]
-        assert msg["stopReason"] == "stop"
+        assert msg["stop_reason"] == "stop"
 
     @pytest.mark.asyncio
     async def test_thinking_deltas(self):
@@ -413,7 +414,7 @@ class TestStreamingEvents:
         faux.set_responses([
             faux_assistant_message(
                 faux_tool_call("echo", {"text": "hi"}, tool_call_id="call-1"),
-                stop_reason="toolUse",
+                stop_reason="tool_call",
             )
         ])
 
@@ -424,9 +425,9 @@ class TestStreamingEvents:
         assert "".join(e["delta"] for e in tool_deltas) == '{"text": "hi"}'
 
         msg = events[-1]["message"]
-        assert msg["stopReason"] == "toolUse"
+        assert msg["stop_reason"] == "tool_call"
         assert msg["content"] == [
-            {"type": "toolCall", "id": "call-1", "name": "echo", "arguments": {"text": "hi"}}
+            {"type": "toolCall", "id": "call-1", "name": "echo", "raw_arguments": '{"text": "hi"}', "arguments": {"text": "hi"}}
         ]
 
     @pytest.mark.asyncio
@@ -438,7 +439,7 @@ class TestStreamingEvents:
 
         assert events[-1]["type"] == "error"
         assert events[-1]["reason"] == "error"
-        assert events[-1]["error"]["errorMessage"] == "oops"
+        assert events[-1]["error"]["error_message"] == "oops"
 
     @pytest.mark.asyncio
     async def test_abort_via_signal(self):
@@ -458,8 +459,8 @@ class TestStreamingEvents:
 
         assert events[-1]["type"] == "error"
         assert events[-1]["reason"] == "aborted"
-        assert events[-1]["error"]["stopReason"] == "aborted"
-        assert events[-1]["error"]["errorMessage"] == "Request was aborted"
+        assert events[-1]["error"]["stop_reason"] == "aborted"
+        assert events[-1]["error"]["error_message"] == "Request was aborted"
 
 
 # ---------------------------------------------------------------------------

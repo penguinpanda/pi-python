@@ -118,7 +118,7 @@ uv run python -m pi_coding_agent --no-session -p "what is 2+2?"
 
 ## 支持的模型
 
-| Provider | 模型 ID | API 类型 | Thinking | Tool Calling | 图片输入 | maxTokens |
+| Provider | 模型 ID | API 类型 | Thinking | Tool Calling | 图片输入 | max_tokens |
 |----------|---------|----------|:--------:|:------------:|:--------:|:---------:|
 | OpenAI | `gpt-4o` | Responses | ✗ | ✓ | ✓ | 16,384 |
 | OpenAI | `gpt-4o-mini` | Responses | ✗ | ✓ | ✓ | 16,384 |

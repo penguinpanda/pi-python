@@ -50,16 +50,17 @@ from pi_ai import Context as LlmContext
 # ---------------------------------------------------------------------------
 # AgentMessage
 # ---------------------------------------------------------------------------
-# 最小核心直接复用 pi_ai 的 Message 联合类型。
+# Agent 层的"消息"即 pi_ai.Message 联合类型（含系统/用户/助手/工具结果，
+# 以及 pi_ai 的 AgentMessage 通用扩展 role）。
 # TypeScript 版通过 Declaration Merging 扩展 CustomAgentMessages，
-# Python 不支持声明合并，后续可用泛型 TypeVar 或注册机制扩展。
+# Python 不支持声明合并，用 pi_ai.types.AgentMessage 承载通用 Agent role。
 AgentMessage = Message
 
 # ---------------------------------------------------------------------------
 # StreamFn（依赖注入抽象）
 # ---------------------------------------------------------------------------
 # LLM 调用的统一签名。
-# 不抛异常 —— 错误通过事件流中的 stopReason="error" 编码。
+# 不抛异常 —— 错误通过事件流中的 stop_reason="error" 编码。
 # 通过依赖注入解耦具体 provider。
 StreamFn = Callable[
     [Model, LlmContext, Union[StreamOptions, None]],
@@ -93,8 +94,12 @@ AgentToolUpdateCallback = Callable[[AgentToolResult], None]
 class AgentTool:
     """Agent 工具定义。
 
-    inputSchema 为 JSON Schema dict，用于 LLM 的工具选择。
-    execute 回调接收 (toolCallId, params, signal?, onUpdate?) → AgentToolResult。
+    input_schema 为 JSON Schema dict，用于 LLM 的工具选择。
+    execute 回调接收 (tool_call_id, params, signal?, on_update?) → AgentToolResult。
+
+    生命周期钩子（可选）：
+    - before_execute(args, context) → dict | None：执行前调用，返回 dict 替换参数
+    - after_execute(result) → AgentToolResult | None：执行后调用，返回新值替换结果
     """
     name: str
     description: str
@@ -102,6 +107,16 @@ class AgentTool:
     label: str
     execute: Callable[..., Awaitable[AgentToolResult]]
     execution_mode: ToolExecutionMode = "sequential"
+
+    # ---- 生命周期钩子（可选，默认 None 不改变现有行为）----
+
+    # 执行前钩子：收到参数 dict 与执行上下文。
+    # 返回 None 表示放行；返回 dict 可替换传给 execute 的参数。
+    before_execute: Callable[[dict[str, Any], Any], Awaitable[Any]] | None = None
+
+    # 执行后钩子：收到 execute 的返回值。
+    # 返回 None 保持原结果；返回新值则替换最终结果。
+    after_execute: Callable[[Any], Awaitable[Any]] | None = None
 
 
 # ---------------------------------------------------------------------------

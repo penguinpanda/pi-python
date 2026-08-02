@@ -9,7 +9,7 @@ Unit tests for providers — openai_provider() / deepseek_provider() 工厂。
     • 模型列表及能力元数据
 """
 
-from pi_ai._types import Model, ModelCost
+from pi_ai._types import Model, ModelCapabilities, ModelCost
 from pi_ai.auth import EnvApiKeyAuth
 from pi_ai.providers import (
     DEEPSEEK_MODELS,
@@ -57,14 +57,14 @@ class TestOpenAIProvider:
         gpt4o = by_id["gpt-4o"]
         assert gpt4o.api == "openai-responses"
         assert "image" in gpt4o.input
-        assert gpt4o.supportsImages is True
-        assert gpt4o.supportsToolCalling is True
-        assert gpt4o.reasoning is False
+        assert gpt4o.capabilities.images is True
+        assert gpt4o.capabilities.tools is True
+        assert gpt4o.capabilities.reasoning is False
 
         o4_mini = by_id["o4-mini"]
-        assert o4_mini.reasoning is True
-        assert o4_mini.supportsToolCalling is True
-        assert o4_mini.supportsImages is False
+        assert o4_mini.capabilities.reasoning is True
+        assert o4_mini.capabilities.tools is True
+        assert o4_mini.capabilities.images is False
 
 
 class TestDeepSeekProvider:
@@ -95,19 +95,19 @@ class TestDeepSeekProvider:
 
         chat = by_id["deepseek-chat"]
         assert chat.api == "openai-completions"
-        assert chat.supportsToolCalling is True
-        assert chat.reasoning is False
+        assert chat.capabilities.tools is True
+        assert chat.capabilities.reasoning is False
 
         reasoner = by_id["deepseek-reasoner"]
         assert reasoner.api == "openai-completions"
-        assert reasoner.reasoning is True
-        assert reasoner.supportsToolCalling is False
+        assert reasoner.capabilities.reasoning is True
+        assert reasoner.capabilities.tools is False
 
         v4_flash = by_id["deepseek-v4-flash"]
         assert v4_flash.api == "openai-completions"
-        assert v4_flash.reasoning is True
-        assert v4_flash.supportsToolCalling is True
-        assert v4_flash.maxTokens == 384000
+        assert v4_flash.capabilities.reasoning is True
+        assert v4_flash.capabilities.tools is True
+        assert v4_flash.max_tokens == 384000
 
 
 class TestModelConstants:
@@ -144,23 +144,26 @@ class TestModelCapabilities:
     def test_capabilities_all(self):
         m = Model(
             id="x", provider="p", api="a",
-            reasoning=True, supportsToolCalling=True, supportsImages=True,
+            capabilities=ModelCapabilities(reasoning=True, tools=True, images=True),
         )
-        assert m.capabilities() == ["thinking", "tools", "images"]
+        assert m.capabilities.reasoning is True
+        assert m.capabilities.tools is True
+        assert m.capabilities.images is True
 
     def test_capabilities_none(self):
-        m = Model(
-            id="x", provider="p", api="a",
-            reasoning=False, supportsToolCalling=False, supportsImages=False,
-        )
-        assert m.capabilities() == []
+        m = Model(id="x", provider="p", api="a")
+        assert m.capabilities.reasoning is False
+        assert m.capabilities.tools is False
+        assert m.capabilities.images is False
 
     def test_capabilities_partial(self):
         m = Model(
             id="x", provider="p", api="a",
-            reasoning=True, supportsToolCalling=False, supportsImages=True,
+            capabilities=ModelCapabilities(reasoning=True, images=True),
         )
-        assert m.capabilities() == ["thinking", "images"]
+        assert m.capabilities.reasoning is True
+        assert m.capabilities.images is True
+        assert m.capabilities.tools is False
 
 
 class TestOllamaProvider:
@@ -198,16 +201,16 @@ class TestOllamaProvider:
         vision = by_id["llama3.2-vision:latest"]
         assert vision.api == "openai-completions"
         assert "image" in vision.input
-        assert vision.supportsImages is True
-        assert vision.reasoning is False
+        assert vision.capabilities.images is True
+        assert vision.capabilities.reasoning is False
 
         r1 = by_id["deepseek-r1:14b"]
-        assert r1.reasoning is True
-        assert r1.supportsToolCalling is False
+        assert r1.capabilities.reasoning is True
+        assert r1.capabilities.tools is False
 
         qwen3 = by_id["qwen3:30b"]
-        assert qwen3.reasoning is True
-        assert qwen3.supportsToolCalling is True
+        assert qwen3.capabilities.reasoning is True
+        assert qwen3.capabilities.tools is True
 
     def test_all_models_are_local_and_free(self):
         for model in OLLAMA_MODELS:
@@ -224,20 +227,20 @@ class TestOllamaDiscovery:
         assert [m.id for m in models] == ["qwen3:30b", "brand-new:latest"]
         # 已知模型保留静态元数据
         known = models[0]
-        assert known.reasoning is True
-        assert known.supportsToolCalling is True
+        assert known.capabilities.reasoning is True
+        assert known.capabilities.tools is True
         # 未知模型合成默认元数据
         unknown = models[1]
         assert unknown.provider == "ollama"
         assert unknown.api == "openai-completions"
-        assert unknown.supportsToolCalling is True
+        assert unknown.capabilities.tools is True
         assert unknown.cost == ModelCost()
 
     def test_merge_order_follows_api_tags(self):
         models = _merge_ollama_models(["deepseek-r1:14b", "qwen3:30b"])
         assert [m.id for m in models] == ["deepseek-r1:14b", "qwen3:30b"]
         # 复用静态对象元数据
-        assert models[1].reasoning is True
+        assert models[1].capabilities.reasoning is True
 
     def test_provider_accepts_discovered_models(self):
         discovered = _merge_ollama_models(["qwen3:30b", "brand-new:latest"])
