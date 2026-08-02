@@ -86,12 +86,25 @@ class Usage(TypedDict):
     reasoning: NotRequired[int]       # 推理 token（output 的子集）
 
 
-class AssistantMessageDiagnostic(TypedDict, total=False):
-    """助手消息诊断条目（替代裸 Any 的类型化结构）。"""
+class DiagnosticErrorInfo(TypedDict, total=False):
+    """诊断错误信息（对齐 TS `DiagnosticErrorInfo`）。"""
 
-    type: str                        # 诊断类型（如 safety_filter）
-    message: str                     # 诊断说明
-    metadata: dict[str, Any]         # 附加信息
+    name: str                 # 错误类型名（如 ProviderError）
+    message: str              # 错误消息
+    stack: str                # 堆栈（可用时）
+    code: str | int           # 错误码（如 HTTP 429）
+
+
+class AssistantMessageDiagnostic(TypedDict, total=False):
+    """助手消息诊断条目（对齐 TS `AssistantMessageDiagnostic`）。
+
+    记录 provider / runtime 失败与恢复信息，供调试定位。
+    """
+
+    type: str                 # 诊断类型（如 provider_error / retry_exhausted）
+    timestamp: int            # 诊断时间戳（Unix 毫秒）
+    error: DiagnosticErrorInfo  # 规范化错误信息
+    details: dict[str, Any]   # 附加信息
 
 
 class AssistantMessage(BaseMessage):
@@ -198,6 +211,7 @@ __all__ = [
     "Message",
     "Cost",
     "Usage",
+    "DiagnosticErrorInfo",
     "AssistantMessageDiagnostic",
     "ToolDetails",
 ]

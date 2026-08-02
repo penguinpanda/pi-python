@@ -78,6 +78,10 @@ from ._shared import (
 )
 from .simple_options import clamp_max_tokens_to_context
 from .transform_messages import normalize_tool_call_id, transform_messages
+from ..utils.prompt_cache import (
+    clamp_openai_prompt_cache_key,
+    resolve_cache_retention,
+)
 
 
 def _create_client(
@@ -256,6 +260,27 @@ async def chat_completions_stream(
                 context,
                 requested if requested is not None else model.max_tokens,
             )
+
+            # 提示缓存（Prompt Cache，对齐 TS buildParams）：
+            #   prompt_cache_key：官方 OpenAI 且非 none，或 long 且支持长缓存时发送
+            #     （session_id 截断到 64 字符）
+            #   prompt_cache_retention：long 且支持长缓存时发送 "24h"
+            cache_retention = resolve_cache_retention(
+                opts.get("cache_retention"), opts.get("env")
+            )
+            supports_long = (
+                model.compat.get("supportsLongCacheRetention", True)
+                if model.compat
+                else True
+            )
+            if (
+                "api.openai.com" in base_url and cache_retention != "none"
+            ) or (cache_retention == "long" and supports_long):
+                kwargs["prompt_cache_key"] = clamp_openai_prompt_cache_key(
+                    opts.get("session_id")
+                )
+            if cache_retention == "long" and supports_long:
+                kwargs["prompt_cache_retention"] = "24h"
 
             # 发起流式请求。
             #

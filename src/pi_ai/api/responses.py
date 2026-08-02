@@ -98,6 +98,10 @@ from .transform_messages import (
     short_hash,
     transform_messages,
 )
+from ..utils.prompt_cache import (
+    clamp_openai_prompt_cache_key,
+    resolve_cache_retention,
+)
 
 
 def encode_text_signature_v1(id_: str, phase: str | None = None) -> str:
@@ -583,6 +587,24 @@ async def responses_stream(
                 context,
                 requested if requested is not None else model.max_tokens,
             )
+
+            # 提示缓存（Prompt Cache，对齐 TS openai-responses.ts）：
+            #   prompt_cache_key：cache_retention != none 时发送（session_id 截断 64 字符）
+            #   prompt_cache_retention：long 且支持长缓存时发送 "24h"
+            cache_retention = resolve_cache_retention(
+                opts.get("cache_retention"), opts.get("env")
+            )
+            supports_long = (
+                model.compat.get("supportsLongCacheRetention", True)
+                if model.compat
+                else True
+            )
+            if cache_retention != "none":
+                kwargs["prompt_cache_key"] = clamp_openai_prompt_cache_key(
+                    opts.get("session_id")
+                )
+            if cache_retention == "long" and supports_long:
+                kwargs["prompt_cache_retention"] = "24h"
 
             # 发起流式请求。
             #

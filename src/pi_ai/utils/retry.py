@@ -33,6 +33,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
 from .._types import AssistantMessage
+from .diagnostics import append_assistant_message_diagnostic, create_assistant_message_diagnostic
 
 # ============================================================================
 # 错误分类
@@ -280,7 +281,16 @@ async def retry_assistant_call(
             return result
 
         # 预算耗尽或不可重试 → 快速失败
+        # 附加 retry_exhausted 诊断，记录放弃时的尝试次数（供调试定位）。
         if attempt >= policy.max_retries or not is_retryable_error(error_message):
+            append_assistant_message_diagnostic(
+                result,
+                create_assistant_message_diagnostic(
+                    "retry_exhausted",
+                    error_message,
+                    {"attempts": attempt, "max_retries": policy.max_retries},
+                ),
+            )
             await _await_notify(_notify_finished(callbacks, False, attempt, error_message))
             return result
 

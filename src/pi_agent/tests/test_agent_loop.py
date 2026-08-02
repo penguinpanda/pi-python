@@ -256,6 +256,97 @@ class TestToolCallLoop:
         assert tool_end[0]["is_error"] is True
 
 
+class TestToolArgumentValidation:
+    """工具参数 schema 校验（_execute_tool_calls 阶段1）。"""
+
+    @pytest.mark.asyncio
+    async def test_invalid_arguments_produce_error_result(self):
+        """参数不符合 schema → 校验失败 → is_error 结果（不执行工具）。"""
+        executed: list[dict] = []
+
+        async def _execute(tool_call_id, params, signal=None, on_update=None):
+            executed.append(params)
+            return AgentToolResult(content=[TextContent(type="text", text="ok")])
+
+        tool = AgentTool(
+            name="add",
+            description="Add two integers",
+            input_schema={
+                "type": "object",
+                "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
+                "required": ["a", "b"],
+            },
+            label="add",
+            execute=_execute,
+        )
+        prompts = [UserMessage(role="user", content="Add 1 and 2")]
+        context = AgentContext(system_prompt="test", messages=[], tools=[tool])
+
+        # Turn 1: 缺少 b，且 a 为字符串 "1"（integer 可转换，但 b 缺失 → 失败）
+        tc_final = _make_llm_tool_response("add", {"a": "1"})
+        text_final = _make_llm_text_response("done")
+        stream_fn = _make_counting_stream_fn([tc_final, text_final])
+
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+        )
+
+        result, events = await _collect_events(prompts, context, config, stream_fn)
+
+        tool_end = _find_events(events, "tool_execution_end")
+        assert len(tool_end) == 1
+        assert tool_end[0]["is_error"] is True
+        assert tool_end[0]["tool_name"] == "add"
+        # 工具不应被执行
+        assert executed == []
+        # 错误详情标记 invalid_arguments
+        assert tool_end[0]["result"].details["error"] == "invalid_arguments"
+        # 错误结果回给 LLM（后续文本回复正常完成）
+        roles = [m.get("role") for m in result]
+        assert "toolResult" in roles
+
+    @pytest.mark.asyncio
+    async def test_valid_arguments_coerced_before_execute(self):
+        """参数通过校验时，转换后的参数传给 execute。"""
+        received: list[dict] = []
+
+        async def _execute(tool_call_id, params, signal=None, on_update=None):
+            received.append(dict(params))
+            return AgentToolResult(content=[TextContent(type="text", text="ok")])
+
+        tool = AgentTool(
+            name="add",
+            description="Add two integers",
+            input_schema={
+                "type": "object",
+                "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
+                "required": ["a", "b"],
+            },
+            label="add",
+            execute=_execute,
+        )
+        prompts = [UserMessage(role="user", content="Add 1 and 2")]
+        context = AgentContext(system_prompt="test", messages=[], tools=[tool])
+
+        # LLM 返回字符串 "1"/"2" → 校验后转换为 int
+        tc_final = _make_llm_tool_response("add", {"a": "1", "b": "2"})
+        text_final = _make_llm_text_response("done")
+        stream_fn = _make_counting_stream_fn([tc_final, text_final])
+
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+        )
+
+        result, events = await _collect_events(prompts, context, config, stream_fn)
+
+        tool_end = _find_events(events, "tool_execution_end")
+        assert len(tool_end) == 1
+        assert tool_end[0]["is_error"] is False
+        assert received == [{"a": 1, "b": 2}]
+
+
 class TestLengthTruncation:
     """stop_reason="length" 截断保护。"""
 
@@ -635,3 +726,57 @@ class TestToolLifecycle:
             b["text"] for b in tr_messages[0]["content"] if b["type"] == "text"
         )
         assert text == "post-processed"
+
+
+class TestPromptCacheWiring:
+    """AgentLoopConfig.session_id / cache_retention 透传到 stream options。"""
+
+    @pytest.mark.asyncio
+    async def test_session_id_and_retention_flow_to_options(self):
+        captured: dict = {}
+
+        core = _make_faux([_make_llm_text_response("ok")])
+        original_stream = core.stream
+
+        async def capturing_stream(model, context, options=None):
+            captured["session_id"] = options.get("session_id") if options else None
+            captured["cache_retention"] = options.get("cache_retention") if options else None
+            return await original_stream(model, context, options)
+
+        prompts = [UserMessage(role="user", content="Hello")]
+        context = AgentContext(system_prompt="You are helpful.", messages=[])
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+            session_id="session-abc",
+            cache_retention="long",
+        )
+
+        await _collect_events(prompts, context, config, capturing_stream)
+
+        assert captured["session_id"] == "session-abc"
+        assert captured["cache_retention"] == "long"
+
+    @pytest.mark.asyncio
+    async def test_no_session_id_leaves_options_unset(self):
+        captured: dict = {}
+
+        core = _make_faux([_make_llm_text_response("ok")])
+        original_stream = core.stream
+
+        async def capturing_stream(model, context, options=None):
+            captured["session_id"] = options.get("session_id") if options else None
+            captured["cache_retention"] = options.get("cache_retention") if options else None
+            return await original_stream(model, context, options)
+
+        prompts = [UserMessage(role="user", content="Hello")]
+        context = AgentContext(system_prompt="You are helpful.", messages=[])
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+        )
+
+        await _collect_events(prompts, context, config, capturing_stream)
+
+        assert captured["session_id"] is None
+        assert captured["cache_retention"] is None

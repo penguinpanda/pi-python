@@ -34,6 +34,7 @@ from typing import Any, Literal, TypedDict, Union
 from pi_ai._types import (
     AssistantMessage,
     AssistantMessageEvent,
+    CacheRetention,
     ImageContent,
     Message,
     Model,
@@ -362,6 +363,10 @@ class AgentLoopConfig:
 
     # 配置
     tool_execution: ToolExecutionMode = "sequential"
+
+    # 提示缓存与会话标识（透传给 StreamOptions）
+    session_id: str | None = None
+    cache_retention: CacheRetention | None = None
 
     # 重试策略。None 表示使用默认策略（enabled=True, max_retries=3）。
     # 显式传入 RetryPolicy(enabled=False) 可关闭重试。

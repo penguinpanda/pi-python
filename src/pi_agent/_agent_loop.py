@@ -240,6 +240,7 @@ from pi_ai.utils.retry import (
     RetryPolicy,
     retry_assistant_call,
 )
+from pi_ai.utils.validation import ValidationError, validate_arguments
 
 from ._types import (
     AfterToolCallResult,
@@ -703,6 +704,12 @@ async def _stream_assistant_response(
     if api_key is not None:
         options["api_key"] = api_key
 
+    # 提示缓存：会话标识与保留策略透传给 provider（用于 prompt_cache_key）。
+    if config.session_id is not None:
+        options["session_id"] = config.session_id
+    if config.cache_retention is not None:
+        options["cache_retention"] = config.cache_retention
+
     # retry_policy 为 None 时使用默认策略（enabled=True, max_retries=3）。
     # 显式传入 RetryPolicy(enabled=False) 可关闭重试。
     retry_policy = config.retry_policy
@@ -979,6 +986,27 @@ async def _execute_tool_calls(
             error_result = AgentToolResult(
                 content=[TextContent(type="text", text=f"Tool '{tc_name}' not found.")],
                 details={"error": "tool_not_found"},
+            )
+            await _emit_tool_lifecycle(
+                emit, tc_id, tc_name, args, error_result, is_error=True
+            )
+            tr_msg = _make_tool_result_message(tc_id, tc_name, error_result, is_error=True)
+            tool_result_messages.append(tr_msg)
+            all_terminate = all_terminate and error_result.terminate
+            continue
+
+        # 参数校验：按 input_schema 校验并返回转换后的参数
+        # （对齐 TS validateToolCall：失败返回错误 ToolResult 让 LLM 自纠）。
+        try:
+            args = validate_arguments(tc_name, tool_def.input_schema, args)
+        except ValidationError as exc:
+            error_result = AgentToolResult(
+                content=[TextContent(type="text", text=str(exc))],
+                details={
+                    "error": "invalid_arguments",
+                    "message": str(exc),
+                    "tool_call_id": tc_id,
+                },
             )
             await _emit_tool_lifecycle(
                 emit, tc_id, tc_name, args, error_result, is_error=True

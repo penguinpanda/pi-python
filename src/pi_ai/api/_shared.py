@@ -64,6 +64,7 @@ from .._types import (
     UserMessage,
     now_ms,
 )
+from ..utils.diagnostics import create_assistant_message_diagnostic
 
 
 def to_openai_messages(
@@ -356,6 +357,9 @@ def build_error_message(
         usage=empty_usage(),
         stop_reason="error",
         error_message=str(error),
+        # 结构化诊断：provider 错误定位（对齐 TS 各 provider 的
+        # createAssistantMessageDiagnostic / appendAssistantMessageDiagnostic）。
+        diagnostics=[create_assistant_message_diagnostic("provider_error", error)],
         timestamp=now_ms(),
     )
 

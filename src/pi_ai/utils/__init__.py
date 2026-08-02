@@ -1,6 +1,12 @@
 """pi_ai.utils — 内部工具函数包。"""
 
 from ._event_stream import AssistantMessageEventStream, EventStream
+from .diagnostics import (
+    append_assistant_message_diagnostic,
+    create_assistant_message_diagnostic,
+    extract_diagnostic_error,
+    format_thrown_value,
+)
 from .estimate import (
     CHARS_PER_TOKEN,
     ESTIMATED_IMAGE_CHARS,
@@ -25,6 +31,13 @@ from .retry import (
     is_retryable_error,
     retry_assistant_call,
 )
+from .validation import (
+    ValidationError,
+    coerce_with_json_schema,
+    validate_arguments,
+    validate_tool_arguments,
+    validate_tool_call,
+)
 
 __all__ = [
     "AssistantMessageEventStream",
@@ -34,6 +47,17 @@ __all__ = [
     "compute_backoff_delay",
     "is_retryable_error",
     "retry_assistant_call",
+    # Diagnostics
+    "format_thrown_value",
+    "extract_diagnostic_error",
+    "create_assistant_message_diagnostic",
+    "append_assistant_message_diagnostic",
+    # Tool 参数校验
+    "ValidationError",
+    "coerce_with_json_schema",
+    "validate_arguments",
+    "validate_tool_arguments",
+    "validate_tool_call",
     # Token / Context
     "ContextUsageEstimate",
     "CHARS_PER_TOKEN",

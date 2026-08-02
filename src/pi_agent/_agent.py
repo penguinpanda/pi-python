@@ -18,6 +18,7 @@ from collections.abc import Callable
 from typing import Any
 
 from pi_ai._types import (
+    CacheRetention,
     ImageContent,
     Message,
     Model,
@@ -88,6 +89,9 @@ class AgentOptions:
         ) = None,
         should_stop_after_turn: Callable[[AgentContext], bool] | None = None,
         tool_execution: ToolExecutionMode = "sequential",
+        # 提示缓存与会话标识（透传给 StreamOptions）
+        session_id: str | None = None,
+        cache_retention: CacheRetention | None = None,
         # 重试策略。None = 默认启用（enabled=True, max_retries=3, base_delay_ms=2000）；
         # 传入 RetryPolicy(enabled=False) 可关闭重试。
         retry_policy: RetryPolicy | None = None,
@@ -106,6 +110,8 @@ class AgentOptions:
         self.prepare_next_turn = prepare_next_turn
         self.should_stop_after_turn = should_stop_after_turn
         self.tool_execution = tool_execution
+        self.session_id = session_id
+        self.cache_retention = cache_retention
         self.retry_policy = retry_policy
 
 
@@ -150,6 +156,8 @@ class Agent:
         self.prepare_next_turn = opts.prepare_next_turn
         self.should_stop_after_turn = opts.should_stop_after_turn
         self.tool_execution: ToolExecutionMode = opts.tool_execution
+        self.session_id: str | None = opts.session_id
+        self.cache_retention: CacheRetention | None = opts.cache_retention
         self.retry_policy: RetryPolicy | None = opts.retry_policy
 
         # -- 运行时 --
@@ -325,6 +333,8 @@ class Agent:
             before_tool_call=self.before_tool_call,
             after_tool_call=self.after_tool_call,
             tool_execution=self.tool_execution,
+            session_id=self.session_id,
+            cache_retention=self.cache_retention,
             retry_policy=self.retry_policy,
         )
 

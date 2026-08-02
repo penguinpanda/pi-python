@@ -82,6 +82,8 @@ async def _async_main(args: list[str] | None = None) -> int:
     agent = Agent(AgentOptions(
         system_prompt=system_prompt,
         model=model,
+        # 会话标识透传给 provider，启用提示缓存（prompt_cache_key）
+        session_id=session_manager.session_id,
     ))
 
     # 创建 AgentSession
