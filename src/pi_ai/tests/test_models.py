@@ -23,15 +23,16 @@ class TestModelsRegistry:
     def test_create_default_models(self):
         models = create_default_models()
         providers = models.get_providers()
-        assert len(providers) == 2
+        assert len(providers) == 3
         assert models.get_provider("openai") is not None
         assert models.get_provider("deepseek") is not None
+        assert models.get_provider("ollama") is not None
 
     def test_get_models_all(self):
         models = create_default_models()
         all_models = models.get_models()
-        # gpt-4o, gpt-4o-mini, o4-mini, deepseek-chat, deepseek-reasoner, deepseek-v4-flash
-        assert len(all_models) == 6
+        # gpt-4o, gpt-4o-mini, o4-mini, deepseek-chat, deepseek-reasoner, deepseek-v4-flash, + 7 ollama
+        assert len(all_models) == 13
 
     def test_get_models_by_provider(self):
         models = create_default_models()

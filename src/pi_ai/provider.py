@@ -64,7 +64,7 @@ Provider 本身不负责：
 """
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Awaitable, Callable, Literal
 
 from ._event_stream import AssistantMessageEventStream
 from ._types import (
@@ -87,6 +87,21 @@ from .auth import EnvApiKeyAuth, InMemoryCredentialStore, resolve_api_key
 #     Responses API
 
 ApiKind = Literal["completions", "responses"]
+
+# 自定义流函数类型。
+#
+# 当 Provider 设置了 _stream_fn 时，
+# stream() 会直接调用它，
+# 跳过：
+#
+#     - API Key 解析
+#     - API 类型分发（completions / responses）
+#
+# 通常用于测试（例如 Faux Provider）。
+StreamFunction = Callable[
+    [Model, Context, StreamOptions | None],
+    Awaitable[AssistantMessageEventStream],
+]
 
 @dataclass(slots=True)
 class Provider:
@@ -170,6 +185,14 @@ class Provider:
     # 默认使用内存实现。
     _credential_store: InMemoryCredentialStore = field(default_factory=InMemoryCredentialStore)
 
+    # 自定义流函数（可选）。
+    #
+    # 设置后，stream() 会直接调用它，
+    # 跳过 API Key 解析与 API 类型分发。
+    #
+    # 主要用于测试（例如 Faux Provider）。
+    _stream_fn: StreamFunction | None = None
+
     def get_models(self) -> list[Model]:
         """
         返回 Provider 支持的所有模型。
@@ -221,6 +244,18 @@ class Provider:
         AssistantMessageEventStream
         """
 
+        # 自定义流函数。
+        #
+        # 如果设置了 _stream_fn（例如 Faux Provider），
+        # 直接调用它，跳过：
+        #
+        #     - API Key 解析
+        #     - API 类型分发（completions / responses）
+        #
+        # 这样 Faux Provider 完全不需要认证与网络。
+        if self._stream_fn is not None:
+            return await self._stream_fn(model, context, options)
+
         # 解析 API Key。
         #
         # 优先级：
@@ -262,6 +297,13 @@ class Provider:
         elif self._api_kind == "completions":
             return await chat_completions_stream(model, context, api_key, base_url, options)
 
+        # 未知 API 类型。
+        #
+        # 正常情况不会发生（_api_kind 是字面量类型），
+        # 防御性处理，避免隐式返回 None。
+        else:
+            raise ValueError(f"Unknown API kind: {self._api_kind}")
+
     async def complete(
             self,
             model: Model,
@@ -298,6 +340,7 @@ def create_provider(
         models: list[Model],
         api_kind: ApiKind = "completions",
         base_url: str | None = None,
+        stream_fn: StreamFunction | None = None,
 ) -> Provider:
     """
     创建 Provider。
@@ -314,6 +357,15 @@ def create_provider(
         表示 Provider 不需要 API Key，
         例如本地服务（Ollama）。
 
+    stream_fn：
+
+        可选的自定义流函数。
+
+        设置后，stream() 会直接调用它，
+        跳过认证与 API 类型分发。
+
+        主要用于测试（例如 Faux Provider）。
+
     主要用于：
 
     Provider 注册。
@@ -325,5 +377,6 @@ def create_provider(
         auth=auth,
         models=models,
         _api_kind=api_kind,
-        base_url=base_url
+        base_url=base_url,
+        _stream_fn=stream_fn,
     )

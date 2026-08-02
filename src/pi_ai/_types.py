@@ -84,7 +84,7 @@ AssistantMessage
 """
 
 from dataclasses import dataclass, field
-from typing import Literal, TypedDict, Union, NotRequired
+from typing import Any, Literal, TypedDict, Union, NotRequired
 
 # =========================================================
 # Content Block（消息内容块）
@@ -408,6 +408,13 @@ class StreamOptions(TypedDict, total=False):
     thinkingBudget: int | None
     thinkingEnabled: bool | None
     headers: dict[str, str | None]
+
+    # 可选的中止信号（asyncio.Event）。
+    #
+    # 支持流式中止的 Provider（例如 Faux Provider）
+    # 会在流式输出过程中检查它，
+    # 一旦被 set 即以 aborted 结束。
+    signal: NotRequired[Any]
 
 
 # =========================================================

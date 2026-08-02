@@ -37,20 +37,27 @@ from .models import Models
 from .provider import Provider, create_provider
 from .providers import (
     DEEPSEEK_MODELS,
+    FAUX_MODEL,
     OLLAMA_MODELS,
     OPENAI_MODELS,
     deepseek_provider,
+    faux_assistant_message,
+    faux_provider,
+    faux_text,
+    faux_thinking,
+    faux_tool_call,
     ollama_provider,
     openai_provider,
 )
+from .providers.all import create_default_models
 
 
-def create_default_models() -> Models:
-    """ 创建一个预加载了OpenAI和DeepSeek的Models实例。 """
-    models = Models()
-    models.add_provider(openai_provider())
-    models.add_provider(deepseek_provider())
-    return models
+# def create_default_models() -> Models:
+#     """ 创建一个预加载了OpenAI和DeepSeek的Models实例。 """
+#     models = Models()
+#     models.add_provider(openai_provider())
+#     models.add_provider(deepseek_provider())
+#     return models
 
 __all__ = [
     # Core registry
@@ -65,11 +72,19 @@ __all__ = [
     "openai_provider",
     "deepseek_provider",
     "ollama_provider",
+    "faux_provider",
 
     # Model lists
     "OPENAI_MODELS",
     "DEEPSEEK_MODELS",
     "OLLAMA_MODELS",
+    "FAUX_MODEL",
+
+    # Faux helpers
+    "faux_assistant_message",
+    "faux_text",
+    "faux_thinking",
+    "faux_tool_call",
 
     # Types
     "Model",
