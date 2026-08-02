@@ -6,18 +6,19 @@ from pi_ai.api.completions import _map_stop_reason
 
 class TestMapStopReason:
     @pytest.mark.parametrize('raw,expected', [
-        ('stop', 'end'), ('length', 'length'), ('tool_calls', 'toolCall'),
-        ('content_filter', 'refusal'), ('function_call', 'toolCall'),
-        ('some_unknown_reason', 'some_unknown_reason'),
+        ('stop', 'stop'), ('end', 'stop'), ('length', 'length'),
+        ('tool_calls', 'toolUse'), ('function_call', 'toolUse'),
+        ('content_filter', 'error'), ('network_error', 'error'),
+        ('some_unknown_reason', 'error'),
     ])
     def test_mapping(self, raw, expected):
         assert _map_stop_reason(raw) == expected
 
     def test_empty_string(self):
-        assert _map_stop_reason('') == ''
+        assert _map_stop_reason('') == 'stop'
 
-    def test_none_equivalent(self):
-        assert _map_stop_reason('None') == 'None'
+    def test_none_string(self):
+        assert _map_stop_reason('None') == 'error'
 
 
 # ===========================================================================
@@ -158,7 +159,7 @@ class TestCompletionsStream:
             {"type": "text", "text": "Hello"},
             {"type": "text", "text": " world"},
         ]
-        assert msg["stopReason"] == "end"
+        assert msg["stopReason"] == "stop"
         assert msg["model"] == "deepseek-chat"
         assert msg["provider"] == "deepseek"
         assert msg["api"] == "openai-completions"
@@ -231,7 +232,7 @@ class TestCompletionsStream:
         assert tool_deltas[1]["argsDelta"] == '"Beijing"}'
 
         msg = events[-1]["message"]
-        assert msg["stopReason"] == "toolCall"
+        assert msg["stopReason"] == "toolUse"
         assert msg["content"] == [{
             "type": "toolCall",
             "toolCallId": "call_1",

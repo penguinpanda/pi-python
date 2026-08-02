@@ -76,7 +76,7 @@ def _make_llm_tool_response(
     """创建工具调用 LLM 响应的 AssistantMessage。"""
     return faux_assistant_message(
         [faux_tool_call(tool_name, args, tool_call_id=tool_call_id)],
-        stop_reason="toolCall",
+        stop_reason="toolUse",
     )
 
 

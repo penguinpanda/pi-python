@@ -539,7 +539,7 @@ async def _run_loop(
         messages.append(assistant_msg)
 
         # 检查错误/中止
-        stop_reason = assistant_msg.get("stopReason", "end")
+        stop_reason = assistant_msg.get("stopReason", "stop")
         if stop_reason in ("error", "aborted"):
             await emit({
                 "type": "turn_end",
@@ -704,7 +704,7 @@ async def _stream_assistant_response(
 
     # 6. 迭代事件流，累积 partial message
     partial_content: list = []
-    final_stop_reason = "end"
+    final_stop_reason = "stop"
     final_error_message: str | None = None
     _final_msg: AssistantMessage | None = None  # DoneEvent/ErrorEvent 的完整消息
 
@@ -773,7 +773,7 @@ async def _stream_assistant_response(
             elif event_type == "done":
                 done_event = cast(DoneEvent, event)
                 _final_msg = done_event["message"]
-                final_stop_reason = _final_msg.get("stopReason", "end")
+                final_stop_reason = _final_msg.get("stopReason", "stop")
                 final_error_message = _final_msg.get("errorMessage")
                 break
 
@@ -795,7 +795,7 @@ async def _stream_assistant_response(
         if _final_msg is None:
             _final_msg = await response.result()
             if _final_msg is not None:
-                final_stop_reason = _final_msg.get("stopReason", "end")
+                final_stop_reason = _final_msg.get("stopReason", "stop")
                 final_error_message = _final_msg.get("errorMessage")
     finally:
         # 构建最终消息：优先使用 DoneEvent/ErrorEvent 的完整消息

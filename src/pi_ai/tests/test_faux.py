@@ -85,7 +85,7 @@ class TestFauxHelpers:
         msg = faux_assistant_message("hi")
         assert msg["role"] == "assistant"
         assert msg["content"] == [{"type": "text", "text": "hi"}]
-        assert msg["stopReason"] == "end"
+        assert msg["stopReason"] == "stop"
         assert msg["provider"] == "faux"
         assert msg["model"] == "faux-1"
 
@@ -161,7 +161,7 @@ class TestBasicResponses:
                     faux_tool_call("echo", {"text": "hi"}, tool_call_id="call-1"),
                     faux_text("done"),
                 ],
-                stop_reason="toolCall",
+                stop_reason="toolUse",
             )
         ])
 
@@ -172,7 +172,7 @@ class TestBasicResponses:
             {"type": "toolCall", "toolCallId": "call-1", "toolName": "echo", "args": '{"text": "hi"}'},
             {"type": "text", "text": "done"},
         ]
-        assert msg["stopReason"] == "toolCall"
+        assert msg["stopReason"] == "toolUse"
 
     @pytest.mark.asyncio
     async def test_rewrites_api_provider_model(self):
@@ -395,7 +395,7 @@ class TestStreamingEvents:
 
         msg = events[-1]["message"]
         assert msg["content"] == [{"type": "text", "text": "hello world"}]
-        assert msg["stopReason"] == "end"
+        assert msg["stopReason"] == "stop"
 
     @pytest.mark.asyncio
     async def test_thinking_deltas(self):
@@ -414,7 +414,7 @@ class TestStreamingEvents:
         faux.set_responses([
             faux_assistant_message(
                 faux_tool_call("echo", {"text": "hi"}, tool_call_id="call-1"),
-                stop_reason="toolCall",
+                stop_reason="toolUse",
             )
         ])
 
@@ -427,7 +427,7 @@ class TestStreamingEvents:
         assert tool_deltas[0]["toolName"] == "echo"
 
         msg = events[-1]["message"]
-        assert msg["stopReason"] == "toolCall"
+        assert msg["stopReason"] == "toolUse"
         assert msg["content"] == [
             {"type": "toolCall", "toolCallId": "call-1", "toolName": "echo", "args": '{"text": "hi"}'}
         ]

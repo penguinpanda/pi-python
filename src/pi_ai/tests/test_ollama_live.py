@@ -54,7 +54,7 @@ class TestOllamaLive:
             Context(messages=[{"role": "user", "content": "Say exactly: ok"}]),
         )
 
-        assert result["stopReason"] == "end"
+        assert result["stopReason"] == "stop"
         assert _extract_text(result).strip() == "ok"
 
     async def test_stream_yields_deltas(self):

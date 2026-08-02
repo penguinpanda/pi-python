@@ -44,7 +44,7 @@ Provider 不需要关心 OpenAI SDK 的数据结构，
 """
 
 import asyncio
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from openai import AsyncOpenAI
@@ -54,6 +54,7 @@ from .._types import (
     AssistantMessage,
     Context,
     Model,
+    StopReason,
     StreamOptions,
     TextContent,
     Usage,
@@ -241,7 +242,7 @@ async def chat_completions_stream(
             usage: Usage = empty_usage()
 
             # 停止标识。
-            stop_reason = "end"
+            stop_reason: StopReason = "stop"
 
             # 持续读取 OpenAI Streaming Chunk。
             #
@@ -337,7 +338,15 @@ async def chat_completions_stream(
                 errorMessage=None,
                 timestamp=0,
             )
-            stream.push({"type": "done", "message": msg})
+            # reason 取映射后的 stopReason。
+            #
+            # content_filter 等映射为 "error" 的罕见情况
+            # 仍以 done 事件结束（保持既有行为）。
+            stream.push({
+                "type": "done",
+                "reason": cast(Any, msg["stopReason"]),
+                "message": msg,
+            })
             # stream.end(msg)
 
         except asyncio.CancelledError:
@@ -360,32 +369,32 @@ async def chat_completions_stream(
     return stream
 
 
-def _map_stop_reason(reason: str) -> str:
+def _map_stop_reason(reason: str) -> StopReason:
     """
     将 OpenAI Finish Reason
 
     转换为 SDK 内部 Stop Reason。
 
-    这样：
+    与 TS mapStopReason() 对齐：
 
-    不同 Provider
-
-    可以统一使用：
-
-        end
-
-        toolCall
-
-        refusal
-
-    而不用关心各家 API 的命名。
+        stop / end          → stop
+        length              → length
+        tool_calls          → toolUse
+        function_call       → toolUse
+        content_filter      → error
+        network_error       → error
+        空                   → stop（等价 TS 的 null）
+        其他                 → error
     """
-    
+    if not reason:
+        return "stop"
     mapping = {
-        "stop": "end",
+        "stop": "stop",
+        "end": "stop",
         "length": "length",
-        "tool_calls": "toolCall",
-        "content_filter": "refusal",
-        "function_call": "toolCall",
+        "tool_calls": "toolUse",
+        "function_call": "toolUse",
+        "content_filter": "error",
+        "network_error": "error",
     }
-    return mapping.get(reason, reason)
+    return mapping.get(reason, "error")

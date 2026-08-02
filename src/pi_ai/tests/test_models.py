@@ -280,7 +280,7 @@ class TestModelsComplete:
         )
 
         fake_stream = AssistantMessageEventStream()
-        fake_stream.push({"type": "done", "message": expected_msg})
+        fake_stream.push({"type": "done", "reason": "stop", "message": expected_msg})
 
         provider = models.get_provider("deepseek")
         with patch.object(type(provider), "stream", new=AsyncMock(return_value=fake_stream)):

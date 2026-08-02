@@ -113,13 +113,13 @@ class TestAssistantMessageEventStream:
             provider="deepseek",
             model="deepseek-chat",
             usage={"input": 10, "output": 5, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 15},
-            stopReason="end",
+            stopReason="stop",
             errorMessage=None,
             timestamp=0,
         )
 
         stream.push({"type": "delta", "text": "Hello"})
-        stream.push({"type": "done", "message": msg})
+        stream.push({"type": "done", "reason": "stop", "message": msg})
 
         events = [e async for e in stream]
         assert len(events) == 2
@@ -127,7 +127,7 @@ class TestAssistantMessageEventStream:
         assert events[1]["type"] == "done"
 
         result = await stream.result()
-        assert result["stopReason"] == "end"
+        assert result["stopReason"] == "stop"
 
     @pytest.mark.asyncio
     async def test_error_event(self):
@@ -144,7 +144,7 @@ class TestAssistantMessageEventStream:
             timestamp=0,
         )
 
-        stream.push({"type": "error", "reason": "auth", "error": err_msg})
+        stream.push({"type": "error", "reason": "error", "error": err_msg})
 
         events = [e async for e in stream]
         assert len(events) == 1

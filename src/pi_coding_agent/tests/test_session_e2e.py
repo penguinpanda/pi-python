@@ -162,7 +162,7 @@ class TestToolCallLoop:
         core.set_responses([
             faux_assistant_message(
                 [faux_tool_call("read", {"path": "notes.txt"}, tool_call_id="tc-1")],
-                stop_reason="toolCall",
+                stop_reason="toolUse",
             ),
             faux_assistant_message("Read complete. The file contains: hello world"),
         ])

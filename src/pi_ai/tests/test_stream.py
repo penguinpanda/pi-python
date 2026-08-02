@@ -41,7 +41,7 @@ async def test_deepseek_chat_stream():
     assert events[-1]["type"] == "done"
     msg = events[-1]["message"]
     assert msg["role"] == "assistant"
-    assert msg["stopReason"] in ("end", "length")
+    assert msg["stopReason"] in ("stop", "length")
 
 
 @pytest.mark.asyncio

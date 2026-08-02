@@ -217,6 +217,49 @@ ContentBlock = Union[
 #
 # =========================================================
 
+# =========================================================
+# 标准化枚举类型（与 TS types.ts 对齐）
+# =========================================================
+
+
+# 标准化思考深度
+ThinkingLevel = Literal[
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+]
+
+# 模型级思考开关（"off" 表示关闭）
+ModelThinkingLevel = Literal["off"] | ThinkingLevel
+
+# 流式响应终止原因
+StopReason = Literal[
+    "pending",
+    "stop",
+    "length",
+    "toolUse",
+    "error",
+    "aborted",
+]
+
+# 传输协议选择
+Transport = Literal[
+    "sse",
+    "websocket",
+    "websocket-cached",
+    "auto",
+]
+
+# 提示缓存保留策略
+CacheRetention = Literal[
+    "none",
+    "short",
+    "long",
+]
+
 
 class SystemMessage(TypedDict):
     """System Prompt"""
@@ -257,7 +300,7 @@ class _AssistantMessageBase(TypedDict):
     api: str                                # 使用哪个 API
     provider: str                           # Provider 名称
     model: str                              # 模型名称
-    stopReason: NotRequired[str]            # 停止原因
+    stopReason: NotRequired[StopReason]     # 停止原因
     errorMessage: NotRequired[str | None]   # 错误信息
     timestamp: NotRequired[int]             # 时间戳
 
@@ -423,6 +466,15 @@ class StreamOptions(TypedDict, total=False):
     thinkingEnabled: bool | None
     headers: dict[str, str | None]
 
+    # 最大重试次数（provider 层客户端重试上限）。
+    maxRetries: int
+
+    # 最大重试延迟（毫秒）。
+    #
+    # 当服务器要求等待超过该值时直接失败，
+    # 交由上层重试逻辑处理。
+    maxRetryDelayMs: int
+
     # 可选的中止信号（asyncio.Event）。
     #
     # 支持流式中止的 Provider（例如 Faux Provider）
@@ -474,6 +526,8 @@ class DoneEvent(TypedDict):
     """流结束"""
 
     type: Literal["done"]
+    # 成功终止原因（与 TS 对齐，仅限成功终止值）
+    reason: Literal["stop", "length", "toolUse"]
     message: AssistantMessage
 
 
@@ -481,7 +535,8 @@ class ErrorEvent(TypedDict):
     """流异常结束"""
 
     type: Literal["error"]
-    reason: str
+    # 异常终止原因（与 TS 对齐，仅限异常终止值）
+    reason: Literal["aborted", "error"]
     error: AssistantMessage
 
 
@@ -510,6 +565,11 @@ __all__ = [
     "Model",
     "KnownApi",
     "KnownProvider",
+    "ThinkingLevel",
+    "ModelThinkingLevel",
+    "StopReason",
+    "Transport",
+    "CacheRetention",
     "Context",
     "StreamOptions",
     "DeltaEvent",

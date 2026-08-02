@@ -54,6 +54,7 @@ from .._types import (
     ErrorEvent,
     Message,
     Model,
+    StopReason,
     StreamOptions,
     TextContent,
     ThinkingContent,
@@ -142,7 +143,7 @@ def _normalize_content(
 def faux_assistant_message(
     content: str | ContentBlock | list[ContentBlock],
     *,
-    stop_reason: str = "end",
+    stop_reason: StopReason = "stop",
     error_message: str | None = None,
     usage: Usage | None = None,
     model_id: str = DEFAULT_MODEL_ID,
@@ -432,7 +433,7 @@ class FauxCore:
         opts: StreamOptions | None,
     ) -> None:
         """将脚本化消息拆分为增量事件输出。"""
-        stop_reason = message.get("stopReason", "end")
+        stop_reason = message.get("stopReason", "stop")
 
         if stop_reason == "pending":
             raise RuntimeError("Faux response ended without a stop reason")
@@ -473,7 +474,9 @@ class FauxCore:
             stream.end(message)
             return
 
-        stream.push(DoneEvent(type="done", message=message))
+        # 走到这里时 stop_reason 已排除 pending / error / aborted，
+        # 即限定为 stop / length / toolUse。
+        stream.push(DoneEvent(type="done", reason=cast(Any, stop_reason), message=message))
         stream.end(message)
 
     async def stream(

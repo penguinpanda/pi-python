@@ -139,7 +139,7 @@ msg = await models.complete(model, context)
 #         {"type": "toolCall", "tool": {...}},       # 工具调用
 #     ],
 #     "usage": {"input": 100, "output": 50, ...},
-#     "stopReason": "end",
+#     "stopReason": "stop",
 # }
 ```
 

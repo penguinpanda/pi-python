@@ -188,7 +188,7 @@ class TestResponsesStream:
         msg = collected[-1]["message"]
         assert msg["role"] == "assistant"
         assert msg["content"] == [{"type": "text", "text": "Hello world"}]
-        assert msg["stopReason"] == "end"
+        assert msg["stopReason"] == "stop"
 
     @pytest.mark.asyncio
     async def test_thinking_events(self):

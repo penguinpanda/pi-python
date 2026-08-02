@@ -56,7 +56,7 @@ Responses API 返回的是"事件(Event)"，
 """
 
 import asyncio
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from openai import AsyncOpenAI
@@ -66,6 +66,7 @@ from .._types import (
     AssistantMessage,
     Context,
     Model,
+    StopReason,
     StreamOptions,
     TextContent,
     ThinkingContent,
@@ -360,7 +361,7 @@ async def responses_stream(
 
             # Token 使用统计。
             usage: Usage = empty_usage()
-            stop_reason = "end"
+            stop_reason: StopReason = "stop"
 
             # 当前 Tool Call ID。
             current_call_id: str | None = None
@@ -494,7 +495,13 @@ async def responses_stream(
                 errorMessage=None,
                 timestamp=0,
             )
-            stream.push({"type": "done", "message": msg})
+            # reason 与 stopReason 一致；Responses API 无独立 error 映射，
+            # 未知情况仍以 done 事件结束（保持既有行为）。
+            stream.push({
+                "type": "done",
+                "reason": cast(Any, stop_reason),
+                "message": msg,
+            })
             # stream.end(msg)
 
         except asyncio.CancelledError:

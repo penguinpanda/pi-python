@@ -43,7 +43,7 @@ async def run_print_mode(session: AgentSession, message: str) -> int:
                             text_parts.append(block.get("text", ""))
                     final_text = "".join(text_parts)
 
-                    stop_reason = msg.get("stopReason", "end")
+                    stop_reason = msg.get("stopReason", "stop")
                     if stop_reason in ("error", "aborted"):
                         has_error = True
                     break

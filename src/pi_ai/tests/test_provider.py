@@ -68,7 +68,7 @@ class TestProviderStreamDispatch:
 
         # Create a real stream to return from the mock
         fake_stream = AssistantMessageEventStream()
-        fake_stream.push({"type": "done", "message": AssistantMessage(
+        fake_stream.push({"type": "done", "reason": "stop", "message": AssistantMessage(
             role="assistant", content=[], api=model.api,
             provider=model.provider, model=model.id,
             usage={"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 0},
@@ -96,7 +96,7 @@ class TestProviderStreamDispatch:
         ])
 
         fake_stream = AssistantMessageEventStream()
-        fake_stream.push({"type": "done", "message": AssistantMessage(
+        fake_stream.push({"type": "done", "reason": "stop", "message": AssistantMessage(
             role="assistant", content=[], api=model.api,
             provider=model.provider, model=model.id,
             usage={"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 0},
@@ -123,7 +123,7 @@ class TestProviderStreamDispatch:
         ])
 
         fake_stream = AssistantMessageEventStream()
-        fake_stream.push({"type": "done", "message": AssistantMessage(
+        fake_stream.push({"type": "done", "reason": "stop", "message": AssistantMessage(
             role="assistant", content=[], api=model.api,
             provider=model.provider, model=model.id,
             usage={"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 0},
@@ -148,7 +148,7 @@ class TestProviderStreamDispatch:
         ])
 
         fake_stream = AssistantMessageEventStream()
-        fake_stream.push({"type": "done", "message": AssistantMessage(
+        fake_stream.push({"type": "done", "reason": "stop", "message": AssistantMessage(
             role="assistant", content=[], api=model.api,
             provider=model.provider, model=model.id,
             usage={"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 0},
@@ -171,7 +171,7 @@ class TestProviderStreamDispatch:
         ])
 
         fake_stream = AssistantMessageEventStream()
-        fake_stream.push({"type": "done", "message": AssistantMessage(
+        fake_stream.push({"type": "done", "reason": "stop", "message": AssistantMessage(
             role="assistant", content=[], api=model.api,
             provider=model.provider, model=model.id,
             usage={"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 0},
@@ -205,7 +205,7 @@ class TestProviderStreamDispatch:
         ])
 
         fake_stream = AssistantMessageEventStream()
-        fake_stream.push({"type": "done", "message": AssistantMessage(
+        fake_stream.push({"type": "done", "reason": "stop", "message": AssistantMessage(
             role="assistant", content=[], api=model.api,
             provider=model.provider, model=model.id,
             usage={"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 0},
@@ -250,7 +250,7 @@ class TestProviderComplete:
         )
 
         fake_stream = AssistantMessageEventStream()
-        fake_stream.push({"type": "done", "message": expected_msg})
+        fake_stream.push({"type": "done", "reason": "stop", "message": expected_msg})
 
         with patch("pi_ai.provider.resolve_api_key", new=AsyncMock(return_value="sk-test")):
             with patch("pi_ai.provider.chat_completions_stream", new=AsyncMock(return_value=fake_stream)):
@@ -271,7 +271,7 @@ class TestProviderComplete:
         options = {"temperature": 0.5, "maxTokens": 100}
 
         fake_stream = AssistantMessageEventStream()
-        fake_stream.push({"type": "done", "message": AssistantMessage(
+        fake_stream.push({"type": "done", "reason": "stop", "message": AssistantMessage(
             role="assistant", content=[], api=model.api,
             provider=model.provider, model=model.id,
             usage={"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 0},
@@ -336,13 +336,13 @@ class TestProviderStreamFn:
 
         async def stream_fn(model, context, options):
             stream = AssistantMessageEventStream()
-            stream.push({"type": "done", "message": AssistantMessage(
+            stream.push({"type": "done", "reason": "stop", "message": AssistantMessage(
                 role="assistant",
                 content=[{"type": "text", "text": "faux"}],
                 api=model.api,
                 provider=model.provider,
                 model=model.id,
-                stopReason="end",
+                stopReason="stop",
             )})
             stream.end()
             return stream
@@ -374,10 +374,10 @@ class TestProviderStreamFn:
             received["context"] = context
             received["options"] = options
             stream = AssistantMessageEventStream()
-            stream.push({"type": "done", "message": AssistantMessage(
+            stream.push({"type": "done", "reason": "stop", "message": AssistantMessage(
                 role="assistant", content=[], api=model.api,
                 provider=model.provider, model=model.id,
-                stopReason="end",
+                stopReason="stop",
             )})
             stream.end()
             return stream
