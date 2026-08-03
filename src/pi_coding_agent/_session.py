@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from pi_agent import Agent, AgentEvent, AgentMessage, AgentTool
 from pi_ai import Model
+from pi_ai.types.common import ModelThinkingLevel, ThinkingLevel
 from pi_ai.utils.estimate import calculate_context_tokens
 from pi_ai.utils.overflow import is_context_overflow
 from pi_ai.utils.retry import (
@@ -27,6 +29,15 @@ from pi_ai.utils.retry import (
 )
 
 from ._session_manager import SessionManager
+from .model_resolver import ScopedModel
+from .model_runtime import ModelRuntime
+from .model_utils import (
+    DEFAULT_THINKING_LEVEL,
+    THINKING_LEVELS,
+    clamp_thinking_level,
+    get_supported_thinking_levels,
+    models_are_equal,
+)
 from .compaction import (
     DEFAULT_COMPACTION_SETTINGS,
     CompactionPreparation,
@@ -37,6 +48,15 @@ from .compaction import (
     should_compact,
 )
 from .tools import create_all_tools
+
+
+@dataclass(slots=True)
+class ModelCycleResult:
+    """cycleModel 的结果。"""
+
+    model: Model
+    thinking_level: ThinkingLevel
+    is_scoped: bool
 
 
 class AgentSession:
@@ -58,11 +78,17 @@ class AgentSession:
         turn_retry_policy: RetryPolicy | None = None,
         # 自动压缩设置。None = 默认（enabled=True）。
         compaction_settings: CompactionSettings | None = None,
+        # 模型运行时（Phase 1：setModel/cycleModel/可用模型列表）。
+        model_runtime: ModelRuntime | None = None,
+        # --models 循环列表（scope 模式优先于全量可用列表）。
+        scoped_models: list[ScopedModel] | None = None,
     ):
         self._agent = agent
         self._session_manager = session_manager
         self._cwd = cwd
         self._model = model
+        self._model_runtime = model_runtime
+        self._scoped_models = list(scoped_models or [])
         self._listeners: list[Callable[[AgentEvent], None]] = []
         self._pending_writes: set[asyncio.Task[object]] = set()
         self._turn_retry_policy = turn_retry_policy
@@ -89,6 +115,213 @@ class AgentSession:
     # ------------------------------------------------------------------
     # 公共 API
     # ------------------------------------------------------------------
+
+    @property
+    def model(self) -> Model | None:
+        return self._model
+
+    @property
+    def thinking_level(self) -> ThinkingLevel:
+        return self._agent.state.thinking_level
+
+    def get_available_models(self) -> list[Model]:
+        """获取可循环的模型列表（scope 优先，否则运行时可用快照）。"""
+        if self._scoped_models:
+            return [scoped.model for scoped in self._scoped_models]
+        if self._model_runtime is not None:
+            return self._model_runtime.get_available_snapshot()
+        return []
+
+    async def set_model(self, model: Model) -> None:
+        """切换模型：校验认证 → 更新 agent state → 记录会话 → 重算思考级别。"""
+        runtime = self._model_runtime
+        if runtime is not None:
+            check = await runtime.check_auth(model.provider)
+            if check is None:
+                raise RuntimeError(f"No API key for {model.provider}/{model.id}")
+
+        previous_model = self._model
+        thinking_level = self._get_thinking_level_for_model_switch()
+        self._agent.state.model = model
+        await self._session_manager.append_model_change(model.provider, model.id)
+        self._model = model
+        self.set_thinking_level(thinking_level)
+        if not models_are_equal(previous_model, model):
+            self._emit({
+                "type": "model_changed",
+                "model": model,
+                "previousModel": previous_model,
+            })
+
+    async def cycle_model(self, direction: int = 1) -> ModelCycleResult | None:
+        """循环切换模型（正数向前 / 负数向后）。"""
+        if self._scoped_models:
+            return await self._cycle_scoped_model(direction)
+        return await self._cycle_available_model(direction)
+
+    async def _cycle_scoped_model(
+        self, direction: int
+    ) -> ModelCycleResult | None:
+        runtime = self._model_runtime
+        if runtime is None:
+            return None
+        checks = await asyncio.gather(
+            *(runtime.check_auth(scoped.model.provider) for scoped in self._scoped_models)
+        )
+        scoped = [
+            scoped
+            for scoped, check in zip(self._scoped_models, checks)
+            if check is not None
+        ]
+        if len(scoped) <= 1:
+            return None
+
+        current_index = next(
+            (
+                index
+                for index, entry in enumerate(scoped)
+                if models_are_equal(entry.model, self._model)
+            ),
+            -1,
+        )
+        if current_index == -1:
+            current_index = 0
+        length = len(scoped)
+        next_index = (
+            (current_index + 1) % length
+            if direction >= 0
+            else (current_index - 1 + length) % length
+        )
+        next_scoped = scoped[next_index]
+        thinking_level = self._get_thinking_level_for_model_switch(
+            next_scoped.thinking_level
+        )
+        previous_model = self._model
+        self._agent.state.model = next_scoped.model
+        await self._session_manager.append_model_change(
+            next_scoped.model.provider, next_scoped.model.id
+        )
+        self._model = next_scoped.model
+        self.set_thinking_level(thinking_level)
+        if not models_are_equal(previous_model, next_scoped.model):
+            self._emit({
+                "type": "model_changed",
+                "model": next_scoped.model,
+                "previousModel": previous_model,
+            })
+        return ModelCycleResult(next_scoped.model, self.thinking_level, True)
+
+    async def _cycle_available_model(
+        self, direction: int
+    ) -> ModelCycleResult | None:
+        runtime = self._model_runtime
+        if runtime is None:
+            return None
+        available = await runtime.get_available()
+        if len(available) <= 1:
+            return None
+
+        current_index = next(
+            (
+                index
+                for index, model in enumerate(available)
+                if models_are_equal(model, self._model)
+            ),
+            -1,
+        )
+        if current_index == -1:
+            current_index = 0
+        length = len(available)
+        next_index = (
+            (current_index + 1) % length
+            if direction >= 0
+            else (current_index - 1 + length) % length
+        )
+        next_model = available[next_index]
+        thinking_level = self._get_thinking_level_for_model_switch()
+        previous_model = self._model
+        self._agent.state.model = next_model
+        await self._session_manager.append_model_change(
+            next_model.provider, next_model.id
+        )
+        self._model = next_model
+        self.set_thinking_level(thinking_level)
+        if not models_are_equal(previous_model, next_model):
+            self._emit({
+                "type": "model_changed",
+                "model": next_model,
+                "previousModel": previous_model,
+            })
+        return ModelCycleResult(next_model, self.thinking_level, False)
+
+    # ------------------------------------------------------------------
+    # 思考级别管理
+    # ------------------------------------------------------------------
+
+    def get_available_thinking_levels(self) -> list[ModelThinkingLevel]:
+        if self._model is None:
+            return list(THINKING_LEVELS)
+        return get_supported_thinking_levels(self._model)
+
+    def supports_thinking(self) -> bool:
+        return bool(self._model is not None and self._model.reasoning)
+
+    def set_thinking_level(self, level: ModelThinkingLevel) -> None:
+        """设置思考级别（按模型能力收敛；仅在变化时持久化）。"""
+        available = self.get_available_thinking_levels()
+        effective = (
+            level
+            if level in available
+            else self._clamp_thinking_level(level, available)
+        )
+        previous = self._agent.state.thinking_level
+        if effective == previous:
+            return
+        self._agent.state.thinking_level = effective
+        self._persist_thinking_level_change(effective)
+        self._emit({
+            "type": "thinking_level_changed",
+            "level": effective,
+            "previousLevel": previous,
+        })
+
+    def cycle_thinking_level(self) -> ModelThinkingLevel | None:
+        if not self.supports_thinking():
+            return None
+        levels = self.get_available_thinking_levels()
+        current_index = (
+            levels.index(self.thinking_level)
+            if self.thinking_level in levels
+            else -1
+        )
+        next_index = (current_index + 1) % len(levels)
+        next_level = levels[next_index]
+        self.set_thinking_level(next_level)
+        return next_level
+
+    def _get_thinking_level_for_model_switch(
+        self, explicit_level: ModelThinkingLevel | None = None
+    ) -> ThinkingLevel:
+        if explicit_level is not None:
+            return explicit_level
+        if not self.supports_thinking():
+            return DEFAULT_THINKING_LEVEL
+        return self.thinking_level
+
+    def _clamp_thinking_level(
+        self, level: ModelThinkingLevel, _available_levels: list[ModelThinkingLevel]
+    ) -> ThinkingLevel:
+        if self._model is None:
+            return "off"
+        return clamp_thinking_level(self._model, level)
+
+    def _persist_thinking_level_change(self, level: ModelThinkingLevel) -> None:
+        """后台持久化思考级别变更（仅在运行中的事件循环内执行）。"""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        asyncio.create_task(self._session_manager.append_thinking_level_change(level))
 
     async def prompt(self, text: str) -> None:
         """发送用户消息，触发完整的 Agent 循环 + 工具执行。

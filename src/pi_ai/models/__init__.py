@@ -121,7 +121,12 @@ class Models:
 
     所有网络请求都会转发给对应 Provider。
     """
-    def __init__(self, *, models_store: ModelsStore | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        models_store: ModelsStore | None = None,
+        credentials=None,
+    ) -> None:
         
         # 已注册的 Provider
         #
@@ -143,7 +148,10 @@ class Models:
         #
         # Provider 获取 API Key 时，
         # 会统一从这里读取。
-        self._credentials = InMemoryCredentialStore()
+        #
+        # credentials 可注入外部实现（例如 coding-agent 的 AuthStorage），
+        # 满足 CredentialStore 接口（read/list/modify/delete）即可。
+        self._credentials = credentials or InMemoryCredentialStore()
 
         # 模型目录持久化（ModelsStore）。
         self._models_store = models_store or InMemoryModelsStore()

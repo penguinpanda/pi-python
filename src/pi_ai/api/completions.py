@@ -90,6 +90,7 @@ def _create_client(
     base_url: str,
     timeout: float = 120.0,
     max_retries: int = 2,
+    headers: dict[str, str] | None = None,
 ) -> AsyncOpenAI:
     """
     创建 AsyncOpenAI 客户端。
@@ -116,12 +117,15 @@ def _create_client(
     都可以通过 base_url 指定。
     """
     
-    return AsyncOpenAI(
+    kwargs: dict[str, Any] = dict(
         api_key=api_key,
         base_url=base_url.rstrip("/"),
         timeout=httpx.Timeout(timeout),
         max_retries=max_retries,
     )
+    if headers:
+        kwargs["default_headers"] = headers
+    return AsyncOpenAI(**kwargs)
 
 
 async def chat_completions_stream(
@@ -208,6 +212,7 @@ async def chat_completions_stream(
                 base_url,
                 timeout=timeout_ms / 1000.0 if timeout_ms else 120.0,
                 max_retries=opts.get("max_retries", 2),
+                headers=opts.get("headers"),
             )
 
             # 跨 Provider 消息规范化。

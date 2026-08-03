@@ -25,9 +25,11 @@ from pi_ai import now_ms
 from ._types import (
     CURRENT_SESSION_VERSION,
     CompactionEntry,
+    ModelChangeEntry,
     SessionEntry,
     SessionHeader,
     SessionMessageEntry,
+    ThinkingLevelChangeEntry,
 )
 
 # ---------------------------------------------------------------------------
@@ -227,9 +229,49 @@ class SessionManager:
 
         return entry_id
 
+    async def append_model_change(self, provider: str, model_id: str) -> str:
+        """追加一条模型切换条目到 JSONL，返回 entryId。"""
+        entry_id = uuid.uuid4().hex[:16]
+        entry: ModelChangeEntry = {
+            "type": "model_change",
+            "id": entry_id,
+            "parentId": self._leaf_parent_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "provider": provider,
+            "model_id": model_id,
+        }
+        self._entries.append(entry)
+        self._leaf_parent_id = entry_id
+        if self._session_path:
+            _append_jsonl_line_sync_append(self._session_path, entry)
+        return entry_id
+
+    async def append_thinking_level_change(self, thinking_level: str) -> str:
+        """追加一条思考级别切换条目到 JSONL，返回 entryId。"""
+        entry_id = uuid.uuid4().hex[:16]
+        entry: ThinkingLevelChangeEntry = {
+            "type": "thinking_level_change",
+            "id": entry_id,
+            "parentId": self._leaf_parent_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "thinking_level": thinking_level,
+        }
+        self._entries.append(entry)
+        self._leaf_parent_id = entry_id
+        if self._session_path:
+            _append_jsonl_line_sync_append(self._session_path, entry)
+        return entry_id
+
     def get_entries(self) -> list[SessionEntry]:
         """返回所有条目（用于测试/检查）。"""
         return list(self._entries)
+
+    def get_last_model_change(self) -> tuple[str, str] | None:
+        """返回最后一条模型切换的 (provider, model_id)；无则 None。"""
+        for entry in reversed(self._entries):
+            if entry.get("type") == "model_change":
+                return entry.get("provider", ""), entry.get("model_id", "")
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -268,6 +310,10 @@ def _read_jsonl_sync(
             elif entry_type == "message":
                 entries.append(obj)  # type: ignore[arg-type]
             elif entry_type == "compaction":
+                entries.append(obj)  # type: ignore[arg-type]
+            elif entry_type == "model_change":
+                entries.append(obj)  # type: ignore[arg-type]
+            elif entry_type == "thinking_level_change":
                 entries.append(obj)  # type: ignore[arg-type]
 
     if header is None:

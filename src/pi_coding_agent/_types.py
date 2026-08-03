@@ -52,8 +52,32 @@ class CompactionEntry(TypedDict):
     tokensBefore: int
 
 
-# 会话条目联合（消息 + 压缩）。
-SessionEntry = SessionMessageEntry | CompactionEntry
+class ModelChangeEntry(TypedDict):
+    """JSONL 模型切换条目 —— 记录 setModel/cycleModel 历史。"""
+    type: Literal["model_change"]
+    id: str
+    parentId: str | None
+    timestamp: str
+    provider: str
+    model_id: str
+
+
+class ThinkingLevelChangeEntry(TypedDict):
+    """JSONL 思考级别切换条目。"""
+    type: Literal["thinking_level_change"]
+    id: str
+    parentId: str | None
+    timestamp: str
+    thinking_level: str
+
+
+# 会话条目联合（消息 + 压缩 + 模型/思考级别变更）。
+SessionEntry = (
+    SessionMessageEntry
+    | CompactionEntry
+    | ModelChangeEntry
+    | ThinkingLevelChangeEntry
+)
 
 
 # ---------------------------------------------------------------------------

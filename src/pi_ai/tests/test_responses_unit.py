@@ -537,7 +537,14 @@ class TestResponsesStream:
 
         captured: dict[str, object] = {}
 
-        def _spy(api_key: str, base_url: str = "", *, timeout: float = 180.0, max_retries: int = 2):
+        def _spy(
+            api_key: str,
+            base_url: str = "",
+            *,
+            timeout: float = 180.0,
+            max_retries: int = 2,
+            headers=None,
+        ):
             captured["timeout"] = timeout
             captured["max_retries"] = max_retries
             return client
@@ -560,7 +567,14 @@ class TestResponsesStream:
 
         captured: dict[str, object] = {}
 
-        def _spy(api_key: str, base_url: str = "", *, timeout: float = 180.0, max_retries: int = 2):
+        def _spy(
+            api_key: str,
+            base_url: str = "",
+            *,
+            timeout: float = 180.0,
+            max_retries: int = 2,
+            headers=None,
+        ):
             captured["timeout"] = timeout
             captured["max_retries"] = max_retries
             return client

@@ -15,14 +15,21 @@ from pathlib import Path
 
 from pi_agent import Agent, AgentOptions
 from pi_agent import set_default_stream_fn as set_agent_stream_fn
-from pi_ai import create_default_models
-from pi_ai.auth.credential_store import FileCredentialStore
+from pi_ai import Model
 from pi_ai.auth.oauth import builtin_oauth_providers
 
 from ._config import get_agent_dir, get_sessions_dir, load_settings
 from ._print_mode import run_print_mode
 from ._session import AgentSession
 from ._session_manager import SessionManager
+from .auth_storage import AuthStorage
+from .model_resolver import (
+    ScopedModel,
+    find_initial_model,
+    resolve_model_scope,
+    restore_model_from_session,
+)
+from .model_runtime import ModelRuntime
 
 
 def main(args: list[str] | None = None) -> int:
@@ -53,19 +60,13 @@ async def _async_main(args: list[str] | None = None) -> int:
     # 加载配置
     settings = load_settings(cwd)
 
-    # 创建 Models + 设置默认流函数
-    models = create_default_models()
-    set_agent_stream_fn(models.stream)
-
-    # Ollama 运行时动态发现：用实际安装的模型替换静态列表（失败则保留静态）
-    await _refresh_ollama_provider(models)
+    # 创建 ModelRuntime（组合 provider + models.json + auth.json）
+    runtime = await _create_runtime()
+    set_agent_stream_fn(runtime.stream)
 
     # --list-models: 列出所有可用模型后直接退出（支持 --provider 过滤）
     if parsed.list_models:
-        return _print_models(models, provider_id=parsed.provider)
-
-    # 解析模型
-    model = _resolve_model(models, parsed, settings)
+        return _print_models(runtime, provider_id=parsed.provider)
 
     # 会话管理
     session_manager: SessionManager
@@ -79,6 +80,12 @@ async def _async_main(args: list[str] | None = None) -> int:
     else:
         # 全新会话
         session_manager = SessionManager.create(cwd)
+
+    # 解析模型（含 --models 循环列表；继续会话时优先恢复）
+    is_continuing = bool(parsed.continue_session or parsed.session)
+    model, scoped_models = await _resolve_initial_model(
+        runtime, parsed, settings, session_manager, is_continuing
+    )
 
     # 系统提示
     system_prompt = parsed.system_prompt or "You are a helpful coding assistant."
@@ -99,6 +106,8 @@ async def _async_main(args: list[str] | None = None) -> int:
         session_manager=session_manager,
         cwd=cwd,
         model=model,
+        model_runtime=runtime,
+        scoped_models=scoped_models,
     )
 
     # 运行 print 模式
@@ -115,9 +124,9 @@ async def _async_main(args: list[str] | None = None) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _auth_store() -> FileCredentialStore:
+def _auth_store() -> AuthStorage:
     """凭证存储：~/.pi/agent/auth.json（跟随现有配置目录约定）。"""
-    return FileCredentialStore(get_agent_dir() / "auth.json")
+    return AuthStorage.create(get_agent_dir() / "auth.json")
 
 
 class _CliAuthInteraction:
@@ -215,7 +224,8 @@ async def _auth_login(provider_id: str | None) -> int:
         return credential
 
     await store.modify(_pid, _set)
-    print(f"\nCredentials saved to {store._path}")
+    path = getattr(store, "path", None) or getattr(store, "_path", None)
+    print(f"\nCredentials saved to {path}")
     return 0
 
 
@@ -246,6 +256,8 @@ def _create_parser() -> argparse.ArgumentParser:
     # 模型选择
     p.add_argument("--model", type=str, help="Model ID (e.g., deepseek-chat, gpt-4o)")
     p.add_argument("--provider", type=str, help="Provider ID (e.g., deepseek, openai, ollama, faux)")
+    p.add_argument("--models", type=str,
+                   help="Comma-separated model scope list for cycling (e.g., 'deepseek-chat,openai/gpt-4o')")
     p.add_argument("--list-models", action="store_true",
                    help="List all available models and exit")
 
@@ -273,7 +285,7 @@ def _create_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _print_models(models, provider_id: str | None = None) -> int:
+def _print_models(runtime: ModelRuntime, provider_id: str | None = None) -> int:
     """列出 Provider 及其模型与能力。
 
     provider_id 非空时只列该 Provider；不存在则返回 1。
@@ -282,13 +294,13 @@ def _print_models(models, provider_id: str | None = None) -> int:
         0: 成功；1: provider 不存在
     """
     if provider_id is not None:
-        provider = models.get_provider(provider_id)
+        provider = runtime.get_provider(provider_id)
         if provider is None:
             print(f"Unknown provider: {provider_id}", file=sys.stderr)
             return 1
         providers = [provider]
     else:
-        providers = models.get_providers()
+        providers = runtime.get_providers()
 
     for provider in providers:
         print(f"{provider.name} ({provider.id}):")
@@ -302,45 +314,60 @@ def _print_models(models, provider_id: str | None = None) -> int:
     return 0
 
 
-async def _refresh_ollama_provider(models) -> None:
-    """尝试用 Ollama /api/tags 动态发现模型并替换 ollama provider。
+async def _create_runtime() -> ModelRuntime:
+    """创建 ModelRuntime：内置 providers + models.json + auth.json。
 
-    经 Models.refresh() 统一编排；失败保留静态/上次列表，不报错。
+    create-time 网络刷新（Ollama 动态发现等）失败不致命：
+    错误由 Models.refresh 收集，保留静态/上次缓存列表。
     """
-    await models.refresh()
+    from pi_ai import create_default_models
+
+    providers = create_default_models().get_providers()
+    runtime = await ModelRuntime.create(
+        providers=providers,
+        auth_path=str(get_agent_dir() / "auth.json"),
+        models_path=str(get_agent_dir() / "models.json"),
+        allow_model_network=True,
+        model_refresh_timeout_ms=15000,
+    )
+    return runtime
 
 
-def _resolve_model(models, parsed, settings: dict):
-    """解析模型：CLI > 配置 > 所有 provider 中搜索 > 第一个可用。"""
-    from pi_ai import Model
+async def _resolve_initial_model(
+    runtime: ModelRuntime,
+    parsed,
+    settings: dict,
+    session_manager: SessionManager,
+    is_continuing: bool,
+) -> tuple[Model, list[ScopedModel]]:
+    """解析初始模型 + --models 循环列表。返回 (model, scoped_models)。"""
+    scoped_models: list[ScopedModel] = []
+    if parsed.models:
+        patterns = [part.strip() for part in parsed.models.split(",") if part.strip()]
+        scoped_models = await resolve_model_scope(patterns, runtime)
 
-    provider_id: str | None = parsed.provider or settings.get("defaultProvider")
-    model_id: str | None = parsed.model or settings.get("defaultModel")
+    # 继续会话：优先恢复会话记录的最后模型。
+    if is_continuing:
+        saved = session_manager.get_last_model_change()
+        if saved is not None:
+            restored, _fallback = await restore_model_from_session(
+                saved[0], saved[1], None, False, runtime
+            )
+            if restored is not None:
+                return restored, scoped_models
 
-    # 1. provider + model 都指定了 → 精确查找
-    if provider_id and model_id:
-        model = models.get_model(provider_id, model_id)
-        if model:
-            return model
-
-    # 2. 只指定了 model → 跨所有 provider 搜索
-    if model_id:
-        model = models.get_model_by_id(model_id)
-        if model:
-            return model
-
-    # 3. 只指定了 provider → 返回该 provider 的第一个模型
-    if provider_id:
-        provider_models = models.get_models(provider_id)
-        if provider_models:
-            return provider_models[0]
-
-    # 4. 回退到第一个可用模型
-    all_models = models.get_models()
-    if all_models:
-        return all_models[0]
-
-    raise RuntimeError("No models available. Check your provider configuration.")
+    result = await find_initial_model(
+        cli_provider=parsed.provider,
+        cli_model=parsed.model,
+        scoped_models=scoped_models,
+        is_continuing=is_continuing,
+        default_provider=settings.get("defaultProvider"),
+        default_model_id=settings.get("defaultModel"),
+        model_runtime=runtime,
+    )
+    if result.model is None:
+        raise RuntimeError("No models available. Check your provider configuration.")
+    return result.model, scoped_models
 
 
 def _read_stdin() -> str | None:

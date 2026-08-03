@@ -20,6 +20,17 @@ from ._session_manager import SessionManager
 from ._cli import main
 from ._print_mode import run_print_mode
 from ._config import get_agent_dir, get_sessions_dir, load_settings
+from .auth_storage import AuthStorage, FileAuthStorageBackend
+from .model_config import ModelConfig, ModelOverride, ProviderOverride
+from .model_registry import ModelRegistry
+from .model_runtime import ModelRuntime
+from .model_utils import (
+    DEFAULT_THINKING_LEVEL,
+    THINKING_LEVELS,
+    clamp_thinking_level,
+    get_supported_thinking_levels,
+)
+from .resolve_config_value import resolve_config_value
 from .tools import (
     create_all_tools,
     create_coding_tools,
@@ -46,6 +57,19 @@ __all__ = [
     "get_agent_dir",
     "get_sessions_dir",
     "load_settings",
+    # Model runtime (Phase 1)
+    "ModelRuntime",
+    "ModelConfig",
+    "ModelOverride",
+    "ProviderOverride",
+    "ModelRegistry",
+    "AuthStorage",
+    "FileAuthStorageBackend",
+    "THINKING_LEVELS",
+    "DEFAULT_THINKING_LEVEL",
+    "get_supported_thinking_levels",
+    "clamp_thinking_level",
+    "resolve_config_value",
     # Tools
     "create_all_tools",
     "create_coding_tools",
