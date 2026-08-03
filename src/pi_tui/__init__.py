@@ -1,0 +1,53 @@
+"""pi-tui — 终端 UI 框架（对齐 TS @earendil-works/pi-tui）。
+
+与 pi_ai / pi_agent 平级的可复用框架包：主题、快捷键、基础组件、
+选择器与剪贴板图片处理。应用层（AgentSession 绑定）位于
+pi_coding_agent.modes.interactive。
+"""
+
+from .clipboard_image import ClipboardImage
+from .components import (
+    MessageEntry,
+    PiChatContainer,
+    PiEditor,
+    PiFooter,
+    PiHeader,
+    PiStatusBar,
+    message_to_entries,
+)
+from .keybindings import DEFAULT_APP_KEYBINDINGS, Keybinding, KeybindingsManager
+from .selectors import ModelSelector, SessionPicker
+from .theme import (
+    BUILTIN_THEMES,
+    COLOR_KEYS,
+    DARK_THEME,
+    LIGHT_THEME,
+    Theme,
+    ThemeError,
+    ThemeLoader,
+    validate_theme_colors,
+)
+
+__all__ = [
+    "ClipboardImage",
+    "MessageEntry",
+    "PiChatContainer",
+    "PiEditor",
+    "PiFooter",
+    "PiHeader",
+    "PiStatusBar",
+    "message_to_entries",
+    "DEFAULT_APP_KEYBINDINGS",
+    "Keybinding",
+    "KeybindingsManager",
+    "ModelSelector",
+    "SessionPicker",
+    "BUILTIN_THEMES",
+    "COLOR_KEYS",
+    "DARK_THEME",
+    "LIGHT_THEME",
+    "Theme",
+    "ThemeError",
+    "ThemeLoader",
+    "validate_theme_colors",
+]

@@ -32,6 +32,8 @@ from .model_utils import (
 )
 from .resolve_config_value import resolve_config_value
 from .rpc import RpcClient, RpcMessageHandler, RpcUiContext, run_rpc_mode
+from .modes.interactive import PiTuiApp, SlashCommandRegistry, SlashContext, run_tui_mode
+from pi_tui import Keybinding, KeybindingsManager, Theme, ThemeLoader
 from .tools import (
     create_all_tools,
     create_coding_tools,
@@ -76,6 +78,15 @@ __all__ = [
     "RpcMessageHandler",
     "RpcUiContext",
     "run_rpc_mode",
+    # TUI mode (Phase 3)
+    "PiTuiApp",
+    "run_tui_mode",
+    "Keybinding",
+    "KeybindingsManager",
+    "SlashCommandRegistry",
+    "SlashContext",
+    "Theme",
+    "ThemeLoader",
     # Tools
     "create_all_tools",
     "create_coding_tools",

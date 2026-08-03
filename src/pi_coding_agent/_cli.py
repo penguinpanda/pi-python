@@ -21,6 +21,7 @@ from pi_ai.auth.oauth import builtin_oauth_providers
 from ._config import get_agent_dir, get_sessions_dir, load_settings
 from ._print_mode import run_print_mode
 from .rpc import run_rpc_mode
+from .modes.interactive import run_tui_mode
 from ._session import AgentSession
 from ._session_manager import SessionManager
 from .auth_storage import AuthStorage
@@ -116,16 +117,33 @@ async def _async_main(args: list[str] | None = None) -> int:
 
     session = build_session(session_manager, model, scoped_models)
 
+    async def session_factory() -> AgentSession:
+        fresh_manager = SessionManager.create(cwd)
+        fresh_model, fresh_scoped = await _resolve_initial_model(
+            runtime, parsed, settings, fresh_manager, is_continuing=False
+        )
+        return build_session(fresh_manager, fresh_model, fresh_scoped)
+
+    async def resume_factory(path: str) -> AgentSession:
+        restored_manager = SessionManager.open(path, cwd_override=cwd)
+        restored_model, restored_scoped = await _resolve_initial_model(
+            runtime, parsed, settings, restored_manager, is_continuing=True
+        )
+        return build_session(restored_manager, restored_model, restored_scoped)
+
     # RPC 模式：stdin/stdout JSONL 无头协议。
     if parsed.mode == "rpc":
-        async def session_factory() -> AgentSession:
-            fresh_manager = SessionManager.create(cwd)
-            fresh_model, fresh_scoped = await _resolve_initial_model(
-                runtime, parsed, settings, fresh_manager, is_continuing=False
-            )
-            return build_session(fresh_manager, fresh_model, fresh_scoped)
-
         return await run_rpc_mode(session, runtime, session_factory=session_factory)
+
+    # TUI 模式：Textual 交互界面。
+    if parsed.mode == "tui":
+        return await run_tui_mode(
+            session,
+            runtime,
+            session_factory=session_factory,
+            resume_factory=resume_factory,
+            settings=settings,
+        )
 
     # 运行 print 模式
     message = parsed.message or _read_stdin()
@@ -271,9 +289,9 @@ def _create_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--mode",
-        choices=["print", "rpc"],
+        choices=["print", "rpc", "tui"],
         default=None,
-        help="Run mode: print (default) or rpc (stdin/stdout JSONL)",
+        help="Run mode: print (default), rpc (stdin/stdout JSONL), or tui (Textual)",
     )
 
     # 模型选择

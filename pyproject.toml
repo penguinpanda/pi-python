@@ -25,6 +25,9 @@ dependencies = [
     "openai>=1.0",
     "httpx>=0.25",
     "python-dotenv>=1.2.2",
+    "filelock>=3.12",
+    "textual>=0.80",
+    "pillow>=10.0",
 ]
 
 [project.scripts]
@@ -38,7 +41,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/pi_ai", "src/pi_agent", "src/pi_coding_agent"]
+packages = ["src/pi_ai", "src/pi_agent", "src/pi_coding_agent", "src/pi_tui"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
