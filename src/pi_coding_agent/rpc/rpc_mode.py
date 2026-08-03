@@ -21,7 +21,6 @@ from pi_ai.models.models_store import model_to_dict
 
 from .._session import AgentSession
 from ..model_runtime import ModelRuntime
-from ..tools._bash import _run_command
 from .jsonl import serialize_json_line
 from .rpc_types import error_response, success_response
 
@@ -495,10 +494,21 @@ class RpcMessageHandler:
         if not isinstance(command, str) or not command.strip():
             return error_response(command_id, "bash", "Command is required")
         try:
-            result = await _run_command(command, self.session.cwd, timeout=120)
+            from pi_agent import PythonExecutionEnv, ShellExecOptions
+
+            env = PythonExecutionEnv(cwd=self.session.cwd)
+            ok, result = await env.exec(
+                command, ShellExecOptions(timeout=120)
+            )
+            if not ok:
+                return error_response(command_id, "bash", str(result))
         except Exception as exc:
             return error_response(command_id, "bash", str(exc))
-        return success_response(command_id, "bash", result)
+        return success_response(command_id, "bash", {
+            "output": (result.stdout or "") + (result.stderr or ""),
+            "exit_code": result.exit_code,
+            "canceled": False,
+        })
 
     async def _handle_abort_bash(self, _cmd: dict, command_id: str | None) -> dict:
         # 当前 bash 同步执行（无跟踪进程），no-op 成功。

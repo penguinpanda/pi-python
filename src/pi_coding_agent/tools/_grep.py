@@ -10,7 +10,7 @@ from pathlib import Path
 from pi_agent import AgentTool, AgentToolResult
 from pi_ai import TextContent
 
-from ._read import _resolve_path
+from ._path_utils import resolve_cwd_path
 
 DEFAULT_MAX_RESULTS = 100
 
@@ -54,7 +54,7 @@ def create_grep_tool(cwd: str) -> AgentTool:
         max_results = params.get("max_results", DEFAULT_MAX_RESULTS)
 
         try:
-            target = _resolve_path(base, search_path)
+            target = resolve_cwd_path(base, search_path)
         except ValueError as e:
             return AgentToolResult(
                 content=[TextContent(type="text", text=f"Error: {e}")],

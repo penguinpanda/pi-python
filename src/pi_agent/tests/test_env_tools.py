@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 
 import pytest
 
@@ -82,8 +83,11 @@ class TestExecutionEnv:
         env = PythonExecutionEnv(str(tmp_path))
         if not await _shell_available(env):
             pytest.skip("No bash shell available")
+        command = (
+            "ping -n 10 127.0.0.1 > nul" if os.name == "nt" else "sleep 10"
+        )
         result = await env.exec(
-            "sleep 10",
+            command,
             ShellExecOptions(timeout=0.2),
         )
         assert result[0] is False
@@ -227,8 +231,11 @@ class TestBashTool:
         if not await _shell_available(env):
             pytest.skip("No bash shell available")
         tool = create_bash_tool()
+        command = (
+            "ping -n 10 127.0.0.1 > nul" if os.name == "nt" else "sleep 10"
+        )
         with pytest.raises(ValueError, match="timed out"):
-            await tool.execute("t1", {"command": "sleep 10", "timeout": 0.2}, None, None, _tool_context(env))
+            await tool.execute("t1", {"command": command, "timeout": 0.2}, None, None, _tool_context(env))
 
 
 class TestFileMutationQueue:

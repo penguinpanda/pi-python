@@ -27,7 +27,7 @@ from pi_coding_agent._print_mode import run_print_mode
 from pi_coding_agent._print_mode import run_print_mode_json
 from pi_coding_agent._session import AgentSession
 from pi_coding_agent._session_manager import SessionManager
-from pi_coding_agent.tools._read import create_read_tool
+from pi_coding_agent.tools import create_read_tool
 
 
 # ============================================================================

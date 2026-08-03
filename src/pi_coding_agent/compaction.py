@@ -22,9 +22,15 @@ from dataclasses import dataclass
 from typing import Any
 
 from pi_agent import AgentMessage
+from pi_agent.compaction import CompactionSettings, DEFAULT_COMPACTION_SETTINGS
+from pi_agent.compaction_utils import (
+    estimate_context_tokens,
+    estimate_tokens,
+    get_assistant_usage,
+    should_compact,
+)
 from pi_ai import Context, Model, Usage
 from pi_ai.api._shared import empty_usage
-from pi_ai.utils.estimate import ContextUsageEstimate, calculate_context_tokens
 from pi_ai.utils.retry import RetryPolicy, retry_assistant_call
 
 # ---------------------------------------------------------------------------
@@ -36,102 +42,16 @@ ESTIMATED_IMAGE_CHARS = 4800
 TOOL_RESULT_MAX_CHARS = 2000
 
 # ---------------------------------------------------------------------------
-# 压缩设置
+# 压缩设置 / Token 估算：复用 pi_agent 的单一实现（CompactionSettings、
+# estimate_tokens / estimate_context_tokens / should_compact / get_assistant_usage
+# 从 pi_agent.compaction / pi_agent.compaction_utils 导入并原样再导出）。
 # ---------------------------------------------------------------------------
-
-
-@dataclass(slots=True)
-class CompactionSettings:
-    """压缩阈值与保留设置（对齐 TS CompactionSettings）。"""
-
-    # 是否启用自动压缩决策。
-    enabled: bool = True
-    # 为摘要提示与输出预留的 token 数。
-    reserve_tokens: int = 16384
-    # 压缩后近似保留的近期上下文 token 数。
-    keep_recent_tokens: int = 20000
-
-
-DEFAULT_COMPACTION_SETTINGS = CompactionSettings()
-
-# ---------------------------------------------------------------------------
-# Token 估算（AgentMessage 版）
-# ---------------------------------------------------------------------------
-
-
-def get_assistant_usage(message: AgentMessage) -> Usage | None:
-    """从 assistant 消息提取有效 usage。
-
-    跳过 aborted / error / 全零 usage 的消息（无有效用量数据）。
-    """
-    if message.get("role") == "assistant":
-        if (
-            message.get("stop_reason") not in ("aborted", "error")
-            and message.get("usage") is not None
-            and calculate_context_tokens(message["usage"]) > 0
-        ):
-            return message["usage"]
-    return None
-
-
-def _estimate_text_and_image_content_chars(content: str | list[Any]) -> int:
-    """文本 + 图片内容字符数（图片按固定估算值）。"""
-    if isinstance(content, str):
-        return len(content)
-    chars = 0
-    for block in content:
-        if not isinstance(block, dict):
-            continue
-        btype = block.get("type")
-        if btype == "text" and block.get("text"):
-            chars += len(block["text"])
-        elif btype == "image":
-            chars += ESTIMATED_IMAGE_CHARS
-    return chars
-
-
-def estimate_tokens(message: AgentMessage) -> int:
-    """估算单条 AgentMessage 的 token 数（chars/4 启发式，保守偏高）。"""
-    role = message.get("role")
-
-    if role in ("user", "toolResult"):
-        return math.ceil(
-            _estimate_text_and_image_content_chars(message.get("content") or "") / CHARS_PER_TOKEN
-        )
-
-    if role == "assistant":
-        chars = 0
-        for block in message.get("content") or []:
-            if not isinstance(block, dict):
-                continue
-            btype = block.get("type")
-            if btype == "text":
-                chars += len(block.get("text", ""))
-            elif btype == "thinking":
-                chars += len(block.get("thinking", ""))
-            elif btype == "toolCall":
-                chars += len(block.get("name", "")) + len(
-                    json.dumps(block.get("arguments") or {}, ensure_ascii=False)
-                )
-        return math.ceil(chars / CHARS_PER_TOKEN)
-
-    # custom / compactionSummary / branchSummary / agent 扩展角色 / system。
-    content = message.get("content")
-    if isinstance(content, str):
-        return math.ceil(len(content) / CHARS_PER_TOKEN)
-    if isinstance(content, list):
-        return math.ceil(_estimate_text_and_image_content_chars(content) / CHARS_PER_TOKEN)
-    # compactionSummary / branchSummary 用 summary 字段。
-    summary = message.get("summary")
-    if isinstance(summary, str):
-        return math.ceil(len(summary) / CHARS_PER_TOKEN)
-    return 0
 
 
 def _get_last_assistant_usage_info(
     messages: list[AgentMessage],
 ) -> tuple[Usage, int] | None:
-    """从后往前找最后一条有效 assistant usage。"""
+    """从后往前找最后一条有效 assistant usage（消息版，供 get_last_assistant_usage）。"""
     for i in range(len(messages) - 1, -1, -1):
         usage = get_assistant_usage(messages[i])
         if usage is not None:
@@ -139,46 +59,10 @@ def _get_last_assistant_usage_info(
     return None
 
 
-def estimate_context_tokens(messages: list[AgentMessage]) -> ContextUsageEstimate:
-    """估算消息列表上下文 token（有 usage 时以其为准 + 尾部估算）。"""
-    usage_info = _get_last_assistant_usage_info(messages)
-
-    if usage_info is None:
-        estimated = 0
-        for message in messages:
-            estimated += estimate_tokens(message)
-        return ContextUsageEstimate(
-            tokens=estimated,
-            usage_tokens=0,
-            trailing_tokens=estimated,
-            last_usage_index=None,
-        )
-
-    usage, index = usage_info
-    usage_tokens = calculate_context_tokens(usage)
-    trailing_tokens = 0
-    for i in range(index + 1, len(messages)):
-        trailing_tokens += estimate_tokens(messages[i])
-
-    return ContextUsageEstimate(
-        tokens=usage_tokens + trailing_tokens,
-        usage_tokens=usage_tokens,
-        trailing_tokens=trailing_tokens,
-        last_usage_index=index,
-    )
-
-
 def get_last_assistant_usage(messages: list[AgentMessage]) -> Usage | None:
-    """返回消息列表中最后一条有效 assistant usage。"""
+    """返回消息列表中最后一条有效 assistant usage（pi_agent 的版本按会话条目查找）。"""
     info = _get_last_assistant_usage_info(messages)
     return info[0] if info is not None else None
-
-
-def should_compact(context_tokens: int, context_window: int, settings: CompactionSettings) -> bool:
-    """判断是否应触发压缩：估算 token 超过 窗口 - 预留。"""
-    if not settings.enabled:
-        return False
-    return context_tokens > context_window - settings.reserve_tokens
 
 
 # ---------------------------------------------------------------------------

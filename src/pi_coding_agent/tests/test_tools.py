@@ -1,17 +1,26 @@
-"""工具单元测试。"""
+"""工具单元测试。
 
+read / write / edit / bash 复用 pi_agent 实现（绑定本地 ExecutionEnv）；
+grep / find / ls 为 coding-agent 特有实现。
+"""
+
+import asyncio
 import tempfile
 from pathlib import Path
 
 import pytest
 
-from pi_coding_agent.tools._read import create_read_tool
-from pi_coding_agent.tools._write import create_write_tool
-from pi_coding_agent.tools._edit import create_edit_tool
-from pi_coding_agent.tools._bash import create_bash_tool
-from pi_coding_agent.tools._grep import create_grep_tool
-from pi_coding_agent.tools._find import create_find_tool
-from pi_coding_agent.tools._ls import create_ls_tool
+from pi_coding_agent.tools import (
+    create_all_tools,
+    create_bash_tool,
+    create_edit_tool,
+    create_find_tool,
+    create_grep_tool,
+    create_ls_tool,
+    create_read_tool,
+    create_write_tool,
+    filter_tools_by_names,
+)
 
 
 class TestReadTool:
@@ -23,9 +32,9 @@ class TestReadTool:
             file_path.write_text("line1\nline2\nline3\n")
 
             tool = create_read_tool(tmpdir)
-            import asyncio
             result = asyncio.run(tool.execute("tc1", {"path": "test.txt"}))
-            assert result.content[0]["text"].endswith("line1\nline2\nline3\n")
+            text = result.content[0]["text"].replace("\r\n", "\n")
+            assert text.endswith("line1\nline2\nline3\n")
 
     def test_read_with_offset(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -33,11 +42,10 @@ class TestReadTool:
             file_path.write_text("line1\nline2\nline3\nline4\n")
 
             tool = create_read_tool(tmpdir)
-            import asyncio
             result = asyncio.run(tool.execute("tc1", {"path": "test.txt", "offset": 2}))
             text = result.content[0]["text"]
             assert "line2" in text
-            assert "line1" not in text or "[Lines 2" in text
+            assert "line1" not in text
 
     def test_read_with_limit(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -46,17 +54,15 @@ class TestReadTool:
             file_path.write_text("\n".join(lines))
 
             tool = create_read_tool(tmpdir)
-            import asyncio
             result = asyncio.run(tool.execute("tc1", {"path": "big.txt", "limit": 5}))
             text = result.content[0]["text"]
             # 应只返回 5 行
             assert text.count("\n") <= 6  # 5 lines + header
 
     def test_read_nonexistent_file(self):
-        tool = create_read_tool("/tmp")
-        import asyncio
-        result = asyncio.run(tool.execute("tc1", {"path": "nonexistent.txt"}))
-        assert "Error" in result.content[0]["text"]
+        tool = create_read_tool(str(Path(tempfile.gettempdir())))
+        with pytest.raises(Exception):
+            asyncio.run(tool.execute("tc1", {"path": "nonexistent.txt"}))
 
 
 class TestWriteTool:
@@ -65,11 +71,10 @@ class TestWriteTool:
     def test_write_new_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tool = create_write_tool(tmpdir)
-            import asyncio
             result = asyncio.run(tool.execute(
                 "tc1", {"path": "output.txt", "content": "hello world"}
             ))
-            assert "File written" in result.content[0]["text"]
+            assert "Successfully wrote" in result.content[0]["text"]
             assert (Path(tmpdir) / "output.txt").read_text() == "hello world"
 
     def test_write_overwrite_file(self):
@@ -78,11 +83,10 @@ class TestWriteTool:
             file_path.write_text("old content")
 
             tool = create_write_tool(tmpdir)
-            import asyncio
             result = asyncio.run(tool.execute(
                 "tc1", {"path": "existing.txt", "content": "new content"}
             ))
-            assert "File written" in result.content[0]["text"]
+            assert "Successfully wrote" in result.content[0]["text"]
             assert file_path.read_text() == "new content"
 
 
@@ -94,28 +98,24 @@ class TestEditTool:
             file_path = Path(tmpdir) / "code.py"
             file_path.write_text("def hello():\n    return 'old'\n")
 
-            diff = (
-                "--- a/code.py\n"
-                "+++ b/code.py\n"
-                "@@ -1,2 +1,2 @@\n"
-                " def hello():\n"
-                "-    return 'old'\n"
-                "+    return 'new'\n"
-            )
-
             tool = create_edit_tool(tmpdir)
-            import asyncio
-            result = asyncio.run(tool.execute("tc1", {"path": "code.py", "diff": diff}))
-            assert "File edited" in result.content[0]["text"]
+            result = asyncio.run(tool.execute(
+                "tc1",
+                {
+                    "path": "code.py",
+                    "edits": [{"oldText": "    return 'old'", "newText": "    return 'new'"}],
+                },
+            ))
+            assert "Successfully replaced" in result.content[0]["text"]
             assert "return 'new'" in file_path.read_text()
 
     def test_edit_nonexistent_file(self):
-        tool = create_edit_tool("/tmp")
-        import asyncio
-        result = asyncio.run(tool.execute(
-            "tc1", {"path": "nonexistent.py", "diff": "dummy"}
-        ))
-        assert "Error" in result.content[0]["text"]
+        tool = create_edit_tool(str(Path(tempfile.gettempdir())))
+        with pytest.raises(Exception):
+            asyncio.run(tool.execute(
+                "tc1",
+                {"path": "nonexistent.py", "edits": [{"oldText": "a", "newText": "b"}]},
+            ))
 
 
 class TestBashTool:
@@ -124,23 +124,14 @@ class TestBashTool:
     def test_bash_echo(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tool = create_bash_tool(tmpdir)
-            import asyncio
             result = asyncio.run(tool.execute("tc1", {"command": "echo hello"}))
             assert "hello" in result.content[0]["text"]
 
     def test_bash_exit_code(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            import sys
-            if sys.platform == "win32":
-                command = "cmd /c exit 1"
-            else:
-                command = "exit 1"
-
             tool = create_bash_tool(tmpdir)
-            import asyncio
-            result = asyncio.run(tool.execute("tc1", {"command": command}))
-            rc = result.details.get("exit_code", 0)
-            assert rc != 0 or "exit code" in result.content[0]["text"].lower()
+            with pytest.raises(ValueError, match="exited with code"):
+                asyncio.run(tool.execute("tc1", {"command": "exit 1"}))
 
 
 class TestGrepTool:
@@ -152,7 +143,6 @@ class TestGrepTool:
             file_path.write_text("def foo():\n    pass\n\ndef bar():\n    pass\n")
 
             tool = create_grep_tool(tmpdir)
-            import asyncio
             result = asyncio.run(tool.execute("tc1", {"pattern": "def ", "path": "."}))
             assert "def foo" in result.content[0]["text"]
             assert "def bar" in result.content[0]["text"]
@@ -163,7 +153,6 @@ class TestGrepTool:
             file_path.write_text("hello world\n")
 
             tool = create_grep_tool(tmpdir)
-            import asyncio
             result = asyncio.run(tool.execute("tc1", {"pattern": "xyz123", "path": "."}))
             assert "No matches found" in result.content[0]["text"]
 
@@ -178,7 +167,6 @@ class TestFindTool:
             (Path(tmpdir) / "c.py").write_text("")
 
             tool = create_find_tool(tmpdir)
-            import asyncio
             result = asyncio.run(tool.execute("tc1", {"pattern": "*.py", "path": "."}))
             assert "a.py" in result.content[0]["text"]
             assert "c.py" in result.content[0]["text"]
@@ -195,7 +183,6 @@ class TestLsTool:
             (Path(tmpdir) / "subdir").mkdir()
 
             tool = create_ls_tool(tmpdir)
-            import asyncio
             result = asyncio.run(tool.execute("tc1", {"path": "."}))
             assert "file1.txt" in result.content[0]["text"]
             assert "file2.txt" in result.content[0]["text"]
@@ -206,6 +193,17 @@ class TestLsTool:
     def test_ls_empty_directory(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tool = create_ls_tool(tmpdir)
-            import asyncio
             result = asyncio.run(tool.execute("tc1", {"path": "."}))
             assert "empty" in result.content[0]["text"].lower()
+
+
+class TestFilterTools:
+    def test_include(self, tmp_path):
+        tools = create_all_tools(str(tmp_path))
+        filtered = filter_tools_by_names(tools, include=["read", "grep"])
+        assert {tool.name for tool in filtered} == {"read", "grep"}
+
+    def test_exclude(self, tmp_path):
+        tools = create_all_tools(str(tmp_path))
+        filtered = filter_tools_by_names(tools, exclude=["bash"])
+        assert all(tool.name != "bash" for tool in filtered)

@@ -527,11 +527,16 @@ class PythonExecutionEnv:
             bash_on_path = shutil.which("bash")
             if bash_on_path:
                 return (True, bash_on_path)
+            # 无 bash 时回退到 cmd（Windows 自带），保证 bash 工具在未安装
+            # Git for Windows 的机器上仍可用。
+            cmd_on_path = shutil.which("cmd")
+            if cmd_on_path:
+                return (True, cmd_on_path)
             return (
                 False,
                 ExecutionError(
                     "shell_unavailable",
-                    "No bash shell found. Install Git for Windows or configure an explicit shell_path.",
+                    "No shell found. Install Git for Windows or configure an explicit shell_path.",
                 ),
             )
         if os.path.exists("/bin/bash"):
@@ -589,10 +594,17 @@ class PythonExecutionEnv:
         if os.name == "nt":
             creationflags = getattr(subprocess_mod, "CREATE_NEW_PROCESS_GROUP", 0)
 
+        # cmd 用 /c，其它 shell 用 -c。
+        shell_flag = (
+            "/c"
+            if os.name == "nt" and os.path.basename(shell).lower() in ("cmd", "cmd.exe")
+            else "-c"
+        )
+
         try:
             process = await asyncio.create_subprocess_exec(
                 shell,
-                "-c",
+                shell_flag,
                 command,
                 cwd=cwd,
                 env=env,

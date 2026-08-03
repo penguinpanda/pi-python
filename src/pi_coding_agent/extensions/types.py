@@ -339,14 +339,21 @@ class ExtensionAPI:
         return action() if action is not None else []
 
     async def exec(self, command: str, args: list[str] | None = None, options: dict | None = None):
-        from ..tools._bash import _run_command
+        from pi_agent import PythonExecutionEnv, ShellExecOptions
 
         full = command if not args else f"{command} {shlex.join(args)}"
-        return await _run_command(
+        env = PythonExecutionEnv(cwd=(options or {}).get("cwd") or self._cwd)
+        ok, result = await env.exec(
             full,
-            (options or {}).get("cwd") or self._cwd,
-            timeout=int((options or {}).get("timeout") or 120),
+            ShellExecOptions(timeout=int((options or {}).get("timeout") or 120)),
         )
+        if not ok:
+            raise result
+        return {
+            "output": (result.stdout or "") + (result.stderr or ""),
+            "exit_code": result.exit_code,
+            "canceled": False,
+        }
 
 
 __all__ = [

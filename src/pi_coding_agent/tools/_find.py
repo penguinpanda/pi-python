@@ -10,7 +10,7 @@ from pi_agent import AgentTool, AgentToolResult
 from pi_ai import TextContent
 
 from ._grep import _is_ignored_dir
-from ._read import _resolve_path
+from ._path_utils import resolve_cwd_path
 
 DEFAULT_MAX_RESULTS = 200
 
@@ -49,7 +49,7 @@ def create_find_tool(cwd: str) -> AgentTool:
         max_results = params.get("max_results", DEFAULT_MAX_RESULTS)
 
         try:
-            search_path = _resolve_path(base, search_path_str)
+            search_path = resolve_cwd_path(base, search_path_str)
         except ValueError as e:
             return AgentToolResult(
                 content=[TextContent(type="text", text=f"Error: {e}")],

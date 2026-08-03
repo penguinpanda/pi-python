@@ -11,6 +11,7 @@ import math
 from typing import Any
 
 from pi_ai.types import AgentMessage, Usage
+from pi_ai.utils.estimate import ContextUsageEstimate
 
 from .session.types import SessionTreeEntry
 
@@ -193,6 +194,15 @@ def estimate_tokens(message: AgentMessage) -> int:
         return math.ceil(estimate_text_and_image_content_chars(message.get("content") or "") / 4)
     if role in ("branchSummary", "compactionSummary"):
         return math.ceil(len(message.get("summary", "")) / 4)
+    # 其余角色（system / agent 扩展角色）：优先按 content，其次按 summary 字段。
+    content = message.get("content")
+    if isinstance(content, str):
+        return math.ceil(len(content) / 4)
+    if isinstance(content, list):
+        return math.ceil(estimate_text_and_image_content_chars(content) / 4)
+    summary = message.get("summary")
+    if isinstance(summary, str):
+        return math.ceil(len(summary) / 4)
     return 0
 
 
@@ -234,20 +244,6 @@ def get_last_assistant_usage_info(messages: list[AgentMessage]) -> tuple[Usage, 
         if usage:
             return usage, index
     return None
-
-
-class ContextUsageEstimate:
-    def __init__(
-        self,
-        tokens: int,
-        usage_tokens: int,
-        trailing_tokens: int,
-        last_usage_index: int | None,
-    ) -> None:
-        self.tokens = tokens
-        self.usage_tokens = usage_tokens
-        self.trailing_tokens = trailing_tokens
-        self.last_usage_index = last_usage_index
 
 
 def estimate_context_tokens(messages: list[AgentMessage]) -> ContextUsageEstimate:

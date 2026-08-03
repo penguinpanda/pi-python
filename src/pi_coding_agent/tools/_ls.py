@@ -12,7 +12,7 @@ from pi_agent import AgentTool, AgentToolResult
 from pi_ai import TextContent
 
 from ._grep import _is_ignored_dir
-from ._read import _resolve_path
+from ._path_utils import resolve_cwd_path
 
 TOOL_SCHEMA = {
     "type": "object",
@@ -39,7 +39,7 @@ def create_ls_tool(cwd: str) -> AgentTool:
         target_str = params.get("path", ".")
 
         try:
-            target = _resolve_path(base, target_str)
+            target = resolve_cwd_path(base, target_str)
         except ValueError as e:
             return AgentToolResult(
                 content=[TextContent(type="text", text=f"Error: {e}")],

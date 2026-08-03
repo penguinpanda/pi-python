@@ -23,7 +23,7 @@ from .extensions import ExtensionLoader, ExtensionRunner
 from ._print_mode import run_print_mode, run_print_mode_json
 from .file_processor import process_at_files
 from .first_time_setup import run_first_time_setup_sync
-from .operations import filter_tools_by_names
+from .tools import filter_tools_by_names
 from .rpc import run_rpc_mode
 from .modes.interactive import run_tui_mode
 from ._session import AgentSession

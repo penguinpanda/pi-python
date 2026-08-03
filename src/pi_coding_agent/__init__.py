@@ -40,13 +40,6 @@ from .extensions import (
 from .export_html import export_session_to_html
 from .file_processor import process_at_files
 from .first_time_setup import run_first_time_setup, run_first_time_setup_sync
-from .operations import (
-    LocalOperations,
-    OutputAccumulator,
-    filter_tools_by_names,
-    run_tool_with_updates,
-    wrap_tool,
-)
 from .trust import TrustManager, project_has_local_resources, resolve_project_trusted
 from .auth_storage import AuthStorage, FileAuthStorageBackend
 from .model_config import ModelConfig, ModelOverride, ProviderOverride
@@ -157,11 +150,6 @@ __all__ = [
     "project_has_local_resources",
     "resolve_project_trusted",
     "process_at_files",
-    "LocalOperations",
-    "wrap_tool",
-    "filter_tools_by_names",
-    "OutputAccumulator",
-    "run_tool_with_updates",
     "run_first_time_setup",
     "run_first_time_setup_sync",
     # Tools
