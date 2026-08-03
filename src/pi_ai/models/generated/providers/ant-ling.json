@@ -1,0 +1,114 @@
+{
+  "Ling-2.6-1T": {
+    "id": "Ling-2.6-1T",
+    "provider": "ant-ling",
+    "api": "openai-completions",
+    "name": "Ling 2.6 1T",
+    "input": [
+      "text"
+    ],
+    "output": [],
+    "cost": {
+      "input": 0.06,
+      "output": 0.25,
+      "cache_read": 0.0,
+      "cache_write": 0.0,
+      "tiers": []
+    },
+    "max_tokens": 65536,
+    "base_url": "https://api.ant-ling.com/v1",
+    "context_window": 262144,
+    "headers": null,
+    "compat": {
+      "supportsStore": false,
+      "supportsDeveloperRole": false,
+      "supportsReasoningEffort": false,
+      "maxTokensField": "max_tokens",
+      "thinkingFormat": "ant-ling",
+      "supportsLongCacheRetention": false
+    },
+    "thinking_level_map": null,
+    "capabilities": {
+      "reasoning": false,
+      "tools": true,
+      "images": false
+    }
+  },
+  "Ling-2.6-flash": {
+    "id": "Ling-2.6-flash",
+    "provider": "ant-ling",
+    "api": "openai-completions",
+    "name": "Ling 2.6 Flash",
+    "input": [
+      "text"
+    ],
+    "output": [],
+    "cost": {
+      "input": 0.01,
+      "output": 0.02,
+      "cache_read": 0.0,
+      "cache_write": 0.0,
+      "tiers": []
+    },
+    "max_tokens": 65536,
+    "base_url": "https://api.ant-ling.com/v1",
+    "context_window": 262144,
+    "headers": null,
+    "compat": {
+      "supportsStore": false,
+      "supportsDeveloperRole": false,
+      "supportsReasoningEffort": false,
+      "maxTokensField": "max_tokens",
+      "thinkingFormat": "ant-ling",
+      "supportsLongCacheRetention": false
+    },
+    "thinking_level_map": null,
+    "capabilities": {
+      "reasoning": false,
+      "tools": true,
+      "images": false
+    }
+  },
+  "Ring-2.6-1T": {
+    "id": "Ring-2.6-1T",
+    "provider": "ant-ling",
+    "api": "openai-completions",
+    "name": "Ring 2.6 1T",
+    "input": [
+      "text"
+    ],
+    "output": [],
+    "cost": {
+      "input": 0.06,
+      "output": 0.25,
+      "cache_read": 0.0,
+      "cache_write": 0.0,
+      "tiers": []
+    },
+    "max_tokens": 65536,
+    "base_url": "https://api.ant-ling.com/v1",
+    "context_window": 262144,
+    "headers": null,
+    "compat": {
+      "supportsStore": false,
+      "supportsDeveloperRole": false,
+      "supportsReasoningEffort": false,
+      "maxTokensField": "max_tokens",
+      "thinkingFormat": "ant-ling",
+      "supportsLongCacheRetention": false
+    },
+    "thinking_level_map": {
+      "off": null,
+      "minimal": null,
+      "low": null,
+      "medium": null,
+      "high": "high",
+      "xhigh": "xhigh"
+    },
+    "capabilities": {
+      "reasoning": true,
+      "tools": true,
+      "images": false
+    }
+  }
+}

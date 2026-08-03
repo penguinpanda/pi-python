@@ -1,6 +1,7 @@
-"""pi_ai.types.trace — 可观测性（Trace / TraceSpan）。
+"""pi_ai.types.trace — 可观测性类型（Trace / TraceSpan）。
 
-类型先行：本模块只定义数据结构，不提供运行时实现。
+类型先行：本模块只定义数据结构，不提供运行时实现
+（运行时在 pi_ai.trace，如 TraceTracer / TraceSpanHandle）。
 
 用途：
 

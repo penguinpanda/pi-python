@@ -1,0 +1,31 @@
+{
+  "mistral-medium-3.5": {
+    "id": "mistral-medium-3.5",
+    "provider": "mistral",
+    "api": "mistral-conversations",
+    "name": "Mistral Medium 3.5",
+    "input": [
+      "text",
+      "image"
+    ],
+    "output": [],
+    "cost": {
+      "input": 1.5,
+      "output": 7.5,
+      "cache_read": 0.0,
+      "cache_write": 0.0,
+      "tiers": []
+    },
+    "max_tokens": 262144,
+    "base_url": "https://api.mistral.ai",
+    "context_window": 262144,
+    "headers": null,
+    "compat": null,
+    "thinking_level_map": null,
+    "capabilities": {
+      "reasoning": true,
+      "tools": true,
+      "images": true
+    }
+  }
+}
