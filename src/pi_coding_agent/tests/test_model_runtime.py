@@ -129,7 +129,7 @@ class TestModelsJsonComposition:
                 "openai": {
                   "apiKey": "sk-x",
                   "modelOverrides": {
-                    "gpt-4o": { "reasoning": true, "maxTokens": 4096 }
+                    "gpt-5-chat-latest": { "reasoning": true, "maxTokens": 4096 }
                   }
                 }
               }
@@ -139,7 +139,7 @@ class TestModelsJsonComposition:
         )
         config = await ModelConfig.load(path)
         runtime = await _make_runtime(providers=[openai_provider()], config=config)
-        model = runtime.get_model("openai", "gpt-4o")
+        model = runtime.get_model("openai", "gpt-5-chat-latest")
         assert model is not None
         assert model.reasoning is True
         assert model.max_tokens == 4096
@@ -260,7 +260,7 @@ class TestModelRegistry:
         assert any(model.provider == "openai" for model in available)
         assert any(model.provider == "faux" for model in available)
 
-        model = registry.find("openai", "gpt-4o")
+        model = registry.find("openai", "gpt-5-chat-latest")
         assert model is not None
         assert registry.has_configured_auth(model)
 

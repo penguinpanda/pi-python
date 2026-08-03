@@ -33,8 +33,8 @@ VALID_THINKING_LEVELS: list[ModelThinkingLevel] = [
 
 # 各内置 provider 的默认模型 ID。
 default_model_per_provider: dict[str, str] = {
-    "openai": "gpt-4o",
-    "deepseek": "deepseek-chat",
+    "openai": "gpt-5-chat-latest",
+    "deepseek": "deepseek-v4-flash",
     "faux": "faux-1",
 }
 

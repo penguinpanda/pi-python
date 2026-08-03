@@ -36,8 +36,8 @@ class TestFindExactMatch:
     async def test_canonical_and_bare_id(self):
         runtime = await _make_runtime()
         models = runtime.get_models()
-        assert find_exact_model_reference_match("openai/gpt-4o", models) is not None
-        assert find_exact_model_reference_match("gpt-4o", models) is not None
+        assert find_exact_model_reference_match("openai/gpt-5-chat-latest", models) is not None
+        assert find_exact_model_reference_match("gpt-5-chat-latest", models) is not None
 
     async def test_ambiguous_bare_id_returns_none(self):
         runtime = await _make_runtime(
@@ -54,14 +54,14 @@ class TestParseModelPattern:
     async def test_thinking_level_suffix(self):
         runtime = await _make_runtime()
         models = runtime.get_models()
-        result = parse_model_pattern("gpt-4o:high", models)
+        result = parse_model_pattern("gpt-5.6-luna:high", models)
         assert result.model is not None
         assert result.thinking_level == "high"
 
     async def test_invalid_thinking_level_warns_in_scope_mode(self):
         runtime = await _make_runtime()
         models = runtime.get_models()
-        result = parse_model_pattern("gpt-4o:bogus", models)
+        result = parse_model_pattern("gpt-5.6-luna:bogus", models)
         assert result.model is not None
         assert result.thinking_level is None
         assert result.warning is not None
@@ -70,7 +70,7 @@ class TestParseModelPattern:
         runtime = await _make_runtime()
         models = runtime.get_models()
         result = parse_model_pattern(
-            "gpt-4o:bogus", models, allow_invalid_thinking_level_fallback=False
+            "gpt-5.6-luna:bogus", models, allow_invalid_thinking_level_fallback=False
         )
         assert result.model is None
 
@@ -80,7 +80,7 @@ class TestResolveCliModel:
         runtime = await _make_runtime()
         result = resolve_cli_model(
             cli_provider="openai",
-            cli_model="gpt-4o",
+            cli_model="gpt-5-chat-latest",
             model_runtime=runtime,
         )
         assert result.error is None
@@ -101,7 +101,7 @@ class TestResolveCliModel:
         runtime = await _make_runtime()
         result = resolve_cli_model(
             cli_provider="nope",
-            cli_model="gpt-4o",
+            cli_model="gpt-5-chat-latest",
             model_runtime=runtime,
         )
         assert result.error is not None
@@ -124,9 +124,9 @@ class TestResolveModelScope:
     async def test_glob_scope(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "sk-x")
         runtime = await _make_runtime()
-        scoped = await resolve_model_scope(["*4o*"], runtime)
+        scoped = await resolve_model_scope(["*5.6*"], runtime)
         assert len(scoped) >= 1
-        assert all("4o" in entry.model.id for entry in scoped)
+        assert all("5.6" in entry.model.id for entry in scoped)
 
     async def test_explicit_list(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-x")
@@ -149,13 +149,13 @@ class TestFindInitialModel:
         runtime = await _make_runtime()
         result = await find_initial_model(
             cli_provider="openai",
-            cli_model="gpt-4o",
+            cli_model="gpt-5-chat-latest",
             scoped_models=[],
             is_continuing=False,
             model_runtime=runtime,
         )
         assert result.model.provider == "openai"
-        assert result.model.id == "gpt-4o"
+        assert result.model.id == "gpt-5-chat-latest"
 
     async def test_falls_back_to_first_available(self):
         runtime = await _make_runtime()

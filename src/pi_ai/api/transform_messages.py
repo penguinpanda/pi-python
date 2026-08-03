@@ -47,7 +47,7 @@
 import re
 from typing import Any, Callable
 
-from .._types import AssistantMessage, Message, Model, ToolCall, now_ms
+from ..types import AssistantMessage, Message, Model, ToolCall, now_ms
 
 # ------------------------------------------------------
 # 图片降级占位文本

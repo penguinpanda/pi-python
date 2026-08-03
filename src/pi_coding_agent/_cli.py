@@ -401,10 +401,10 @@ def _create_parser() -> argparse.ArgumentParser:
     )
 
     # 模型选择
-    p.add_argument("--model", type=str, help="Model ID (e.g., deepseek-chat, gpt-4o)")
+    p.add_argument("--model", type=str, help="Model ID (e.g., deepseek-v4-flash, gpt-5-chat-latest)")
     p.add_argument("--provider", type=str, help="Provider ID (e.g., deepseek, openai, ollama, faux)")
     p.add_argument("--models", type=str,
-                   help="Comma-separated model scope list for cycling (e.g., 'deepseek-chat,openai/gpt-4o')")
+                   help="Comma-separated model scope list for cycling (e.g., 'deepseek-v4-flash,openai/gpt-5-chat-latest')")
     p.add_argument("--list-models", action="store_true",
                    help="List all available models and exit")
 
@@ -457,6 +457,8 @@ def _print_models(runtime: ModelRuntime, provider_id: str | None = None) -> int:
                 labels.append("thinking")
             if "image" in m.input:
                 labels.append("images")
+            if m.deprecated:
+                labels.append("deprecated")
             print(f"  {m.id:<40} {m.name}  [{', '.join(labels) or 'text'}]")
     return 0
 

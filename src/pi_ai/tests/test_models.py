@@ -32,36 +32,39 @@ class TestModelsRegistry:
     def test_get_models_all(self):
         models = create_default_models()
         all_models = models.get_models()
-        # gpt-4o, gpt-4o-mini, o4-mini, deepseek-chat, deepseek-reasoner, deepseek-v4-flash, + 7 ollama + 1 faux
-        assert len(all_models) == 14
+        # 4 openai (GPT-5 系列) + 4 deepseek + 7 ollama + 1 faux
+        assert len(all_models) == 16
 
     def test_get_models_by_provider(self):
         models = create_default_models()
         openai_models = models.get_models("openai")
-        assert len(openai_models) == 3
-        assert any(m.id == "gpt-4o" for m in openai_models)
+        assert len(openai_models) == 4
+        assert any(m.id == "gpt-5-chat-latest" for m in openai_models)
 
         deepseek_models = models.get_models("deepseek")
-        assert len(deepseek_models) == 3
+        assert len(deepseek_models) == 4
         assert any(m.id == "deepseek-chat" for m in deepseek_models)
         assert any(m.id == "deepseek-v4-flash" for m in deepseek_models)
+        assert any(m.id == "deepseek-v4-pro" for m in deepseek_models)
 
     def test_get_model_specific(self):
         models = create_default_models()
-        gpt4o = models.get_model("openai", "gpt-4o")
-        assert gpt4o is not None
-        assert gpt4o.id == "gpt-4o"
-        assert gpt4o.provider == "openai"
-        assert gpt4o.api == "openai-responses"
+        gpt5 = models.get_model("openai", "gpt-5-chat-latest")
+        assert gpt5 is not None
+        assert gpt5.id == "gpt-5-chat-latest"
+        assert gpt5.provider == "openai"
+        assert gpt5.api == "openai-responses"
+        assert gpt5.context_window == 128000
 
         ds_chat = models.get_model("deepseek", "deepseek-chat")
         assert ds_chat is not None
         assert ds_chat.api == "openai-completions"
+        assert ds_chat.deprecated is True
 
     def test_get_model_missing(self):
         models = create_default_models()
         assert models.get_model("openai", "nonexistent") is None
-        assert models.get_model("unknown", "gpt-4o") is None
+        assert models.get_model("unknown", "gpt-5-chat-latest") is None
 
     def test_get_model_by_id_across_providers(self):
         models = create_default_models()

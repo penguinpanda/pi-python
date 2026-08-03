@@ -10,7 +10,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from .._types import Tool
+from ..types import Tool
 
 
 @dataclass(slots=True)

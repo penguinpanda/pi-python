@@ -7,7 +7,7 @@ strict/grammar 开关、缓存语义等）。
 
 from typing import Any
 
-from .._types import Model
+from ..types import Model
 
 
 def compat_value(model: Model, key: str, default: Any = None) -> Any:

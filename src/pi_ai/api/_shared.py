@@ -51,7 +51,7 @@ OpenAI API 类型
 import json
 from typing import Any, cast
 
-from .._types import (
+from ..types import (
     AssistantMessage,
     ContentBlock,
     Message,

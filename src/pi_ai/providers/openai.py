@@ -37,7 +37,7 @@ OpenAI Provider。
             Provider
 """
 
-from .._types import Model, ModelCost
+from ..types import Model, ModelCost, ModelCostTier
 from ..auth import env_api_key_auth
 from ..provider import create_provider, Provider
 
@@ -61,9 +61,9 @@ from ..provider import create_provider, Provider
 OPENAI_MODELS: list[Model] = [
 
     # ------------------------------------------------------
-    # GPT-4o
+    # GPT-5 Chat Latest
     #
-    # OpenAI 通用多模态模型。
+    # OpenAI 通用对话模型（最新别名）。
     #
     # 特点：
     #
@@ -73,60 +73,132 @@ OPENAI_MODELS: list[Model] = [
     # • 不输出 Thinking
     # ------------------------------------------------------
     Model(
-        id="gpt-4o",
+        id="gpt-5-chat-latest",
         provider="openai",
         api="openai-responses",
-        name="GPT-4o",
+        name="GPT-5 Chat Latest",
         input=["text", "image"],
         output=["text"],
         max_tokens=16384,
-        cost=ModelCost(input=2.50, output=10.00, cache_read=1.25, cache_write=2.50),
+        context_window=128000,
+        cost=ModelCost(input=1.25, output=10.00, cache_read=0.125, cache_write=0.0),
     ),
 
     # ------------------------------------------------------
-    # GPT-4o Mini
+    # GPT-5.6 Luna
     #
-    # GPT-4o 的轻量版本。
-    #
-    # 特点：
-    #
-    # • 更低成本
-    # • 更快速度
-    # • 支持图片
-    # • 支持 Tool Calling
-    # ------------------------------------------------------
-    Model(
-        id="gpt-4o-mini",
-        provider="openai",
-        api="openai-responses",
-        name="GPT-4o Mini",
-        input=["text", "image"],
-        output=["text"],
-        max_tokens=16384,
-        cost=ModelCost(input=0.15, output=0.60, cache_read=0.075, cache_write=0.15),
-    ),
-
-    # ------------------------------------------------------
-    # o4-mini
-    #
-    # OpenAI 推理模型。
+    # 经济型多模态推理模型。
     #
     # 特点：
     #
     # • 支持 Thinking
     # • 支持 Tool Calling
-    # • 当前仅支持文本输入
+    # • 支持图片输入
+    # • 输入超 272K 时价格翻倍
     # ------------------------------------------------------
     Model(
-        id="o4-mini",
+        id="gpt-5.6-luna",
         provider="openai",
         api="openai-responses",
-        name="o4 Mini",
-        input=["text"],
+        name="GPT-5.6 Luna",
+        input=["text", "image"],
         output=["text"],
-        max_tokens=100000,
+        max_tokens=128000,
+        context_window=272000,
         reasoning=True,
-        cost=ModelCost(input=1.10, output=4.40, cache_read=0.275, cache_write=1.10),
+        cost=ModelCost(
+            input=0.20,
+            output=1.20,
+            cache_read=0.02,
+            cache_write=0.25,
+            tiers=[
+                ModelCostTier(
+                    input=0.40,
+                    output=1.80,
+                    cache_read=0.04,
+                    cache_write=0.50,
+                    input_tokens_above=272000,
+                )
+            ],
+        ),
+    ),
+
+    # ------------------------------------------------------
+    # GPT-5.6 Sol
+    #
+    # 旗舰推理模型。
+    #
+    # 特点：
+    #
+    # • 支持 Thinking
+    # • 支持 Tool Calling
+    # • 支持图片输入
+    # • 输入超 272K 时价格翻倍
+    # ------------------------------------------------------
+    Model(
+        id="gpt-5.6-sol",
+        provider="openai",
+        api="openai-responses",
+        name="GPT-5.6 Sol",
+        input=["text", "image"],
+        output=["text"],
+        max_tokens=128000,
+        context_window=272000,
+        reasoning=True,
+        cost=ModelCost(
+            input=5.00,
+            output=30.00,
+            cache_read=0.50,
+            cache_write=6.25,
+            tiers=[
+                ModelCostTier(
+                    input=10.00,
+                    output=45.00,
+                    cache_read=1.00,
+                    cache_write=12.50,
+                    input_tokens_above=272000,
+                )
+            ],
+        ),
+    ),
+
+    # ------------------------------------------------------
+    # GPT-5.6 Terra
+    #
+    # 中高端多模态推理模型。
+    #
+    # 特点：
+    #
+    # • 支持 Thinking
+    # • 支持 Tool Calling
+    # • 支持图片输入
+    # • 输入超 272K 时价格翻倍
+    # ------------------------------------------------------
+    Model(
+        id="gpt-5.6-terra",
+        provider="openai",
+        api="openai-responses",
+        name="GPT-5.6 Terra",
+        input=["text", "image"],
+        output=["text"],
+        max_tokens=128000,
+        context_window=272000,
+        reasoning=True,
+        cost=ModelCost(
+            input=2.00,
+            output=12.00,
+            cache_read=0.20,
+            cache_write=2.50,
+            tiers=[
+                ModelCostTier(
+                    input=4.00,
+                    output=18.00,
+                    cache_read=0.40,
+                    cache_write=5.00,
+                    input_tokens_above=272000,
+                )
+            ],
+        ),
     ),
 ]
 

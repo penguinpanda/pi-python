@@ -12,7 +12,7 @@ from typing import Any, AsyncIterator
 
 import httpx
 
-from .._types import (
+from ..types import (
     AssistantMessage,
     AssistantMessageEvent,
     Context,

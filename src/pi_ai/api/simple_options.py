@@ -10,7 +10,7 @@ buildBaseOptions 的其余字段由各 API 文件（completions.py / responses.p
 
 from __future__ import annotations
 
-from .._types import Context, Model
+from ..types import Context, Model
 from ..utils.estimate import estimate_context_tokens
 
 # 为模型回复预留的上下文 token 数。

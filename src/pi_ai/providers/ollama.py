@@ -45,7 +45,7 @@ Ollama 是本地模型运行时，
 
 import httpx
 
-from .._types import Model, ModelCost
+from ..types import Model, ModelCost
 from ..provider import create_provider, Provider, RefreshModelsContext
 
 
@@ -89,6 +89,7 @@ OLLAMA_MODELS: list[Model] = [
         input=["text"],
         output=["text"],
         max_tokens=8192,
+        context_window=131072,
         reasoning=True,
         cost=ModelCost(),  # 本地运行，无费用
     ),
@@ -102,6 +103,7 @@ OLLAMA_MODELS: list[Model] = [
         input=["text"],
         output=["text"],
         max_tokens=8192,
+        context_window=131072,
         reasoning=True,
         cost=ModelCost(),
     ),
@@ -115,6 +117,7 @@ OLLAMA_MODELS: list[Model] = [
         input=["text"],
         output=["text"],
         max_tokens=8192,
+        context_window=131072,
         reasoning=True,
         cost=ModelCost(),
     ),
@@ -135,6 +138,7 @@ OLLAMA_MODELS: list[Model] = [
         input=["text"],
         output=["text"],
         max_tokens=32768,
+        context_window=131072,
         reasoning=True,
         cost=ModelCost(),
     ),
@@ -155,6 +159,7 @@ OLLAMA_MODELS: list[Model] = [
         input=["text", "image"],
         output=["text"],
         max_tokens=4096,
+        context_window=131072,
         cost=ModelCost(),
     ),
 
@@ -167,6 +172,7 @@ OLLAMA_MODELS: list[Model] = [
         input=["text"],
         output=["text"],
         max_tokens=8192,
+        context_window=131072,
         cost=ModelCost(),
     ),
 
@@ -186,6 +192,7 @@ OLLAMA_MODELS: list[Model] = [
         input=["text"],
         output=["text"],
         max_tokens=8192,
+        context_window=65536,
         reasoning=True,
         cost=ModelCost(),
     ),

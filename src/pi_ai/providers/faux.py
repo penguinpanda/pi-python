@@ -45,7 +45,7 @@ import time
 from typing import Any, Awaitable, Callable, Sequence, cast
 
 from ..utils._event_stream import AssistantMessageEventStream
-from .._types import (
+from ..types import (
     AssistantMessage,
     ContentBlock,
     Context,

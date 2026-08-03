@@ -77,7 +77,7 @@ async def test_openai_chat_stream():
     from pi_ai import create_default_models, Context
 
     models = create_default_models()
-    model = models.get_model("openai", "gpt-4o-mini")
+    model = models.get_model("openai", "gpt-5-chat-latest")
     assert model is not None
 
     context = Context(

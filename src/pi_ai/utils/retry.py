@@ -32,7 +32,7 @@ import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
-from .._types import AssistantMessage
+from ..types import AssistantMessage
 from .diagnostics import append_assistant_message_diagnostic, create_assistant_message_diagnostic
 
 # ============================================================================

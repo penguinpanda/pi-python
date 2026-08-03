@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-from .._types import Model
+from ..types import Model
 
 
 @dataclass(slots=True)
@@ -127,12 +127,13 @@ def model_to_dict(model: Model) -> dict[str, Any]:
             dict(model.thinking_level_map) if model.thinking_level_map else None
         ),
         "reasoning": model.reasoning,
+        "deprecated": model.deprecated,
     }
 
 
 def model_from_dict(data: dict[str, Any]) -> Model:
     """字典 → Model（model_to_dict 的逆操作）。"""
-    from .._types import ModelCost, ModelCostTier, ModelCostRates
+    from ..types import ModelCost, ModelCostTier, ModelCostRates
 
     cost_data = data.get("cost") or {}
     tiers = [
@@ -166,6 +167,7 @@ def model_from_dict(data: dict[str, Any]) -> Model:
         compat=data.get("compat"),
         thinking_level_map=data.get("thinking_level_map"),
         reasoning=bool(data.get("reasoning", False)),
+        deprecated=bool(data.get("deprecated", False)),
     )
 
 

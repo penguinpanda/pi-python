@@ -10,7 +10,7 @@ import asyncio
 
 from typing import AsyncIterable, Awaitable, Callable
 
-from .._types import (
+from ..types import (
     AssistantMessage,
     AssistantMessageEvent,
     Context,

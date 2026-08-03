@@ -63,7 +63,7 @@ import httpx
 from openai import AsyncOpenAI
 
 from ..utils._event_stream import AssistantMessageEventStream
-from .._types import (
+from ..types import (
     AssistantMessage,
     ContentBlock,
     Context,

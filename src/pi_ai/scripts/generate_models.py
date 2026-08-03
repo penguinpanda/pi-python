@@ -154,10 +154,11 @@ def _generated_init_template(generated_at: str, provider_ids: list[str]) -> str:
     ids_repr = ", ".join(repr(p) for p in provider_ids)
     return f'''"""自动生成的模型目录（由 src/pi_ai/scripts/generate_models.py 生成，勿手改）。"""
 
+import json
 from pathlib import Path
 
 from ..models_store import model_from_dict
-from ..._types import Model
+from ...types import Model
 
 GENERATED_AT = {generated_at!r}
 MODEL_PROVIDERS: list[str] = [{ids_repr}]
@@ -166,7 +167,6 @@ MODEL_PROVIDERS: list[str] = [{ids_repr}]
 def load_generated_models() -> dict[str, list[Model]]:
     """读取 providers/*.json，返回 {{provider_id: [Model, ...]}}。"""
     data_dir = Path(__file__).parent / "providers"
-    import json
 
     result: dict[str, list[Model]] = {{}}
     for provider_id in MODEL_PROVIDERS:

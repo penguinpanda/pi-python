@@ -13,7 +13,7 @@ from typing import Any
 
 import httpx
 
-from .._types import (
+from ..types import (
     AssistantImages,
     ImagesContext,
     ImagesModel,

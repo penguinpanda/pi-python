@@ -93,6 +93,7 @@ class Model:
     compat: ModelCompat | None = None                   # 各 API 的兼容配置
     thinking_level_map: ThinkingLevelMap | None = None  # pi 思考级别 -> provider 值映射
     reasoning: bool = False                             # 是否支持推理（Thinking）
+    deprecated: bool = False                            # 已下架/停售标记（保留以兼容旧会话）
 
 
 __all__ = [

@@ -88,7 +88,7 @@ class TestSetModel:
         from pi_ai.providers.openai import openai_provider
 
         runtime.register_native_provider(openai_provider())
-        unknown = runtime.get_model("openai", "gpt-4o")
+        unknown = runtime.get_model("openai", "gpt-5-chat-latest")
         assert unknown is not None
         with pytest.raises(RuntimeError, match="No API key"):
             await session.set_model(unknown)

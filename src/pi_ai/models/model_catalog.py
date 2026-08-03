@@ -7,7 +7,7 @@ flattenModelCatalog 把按 api 分组的原始模型表
 
 from typing import Any, TypeAlias
 
-from .._types import Model
+from ..types import Model
 
 # provider → api → {modelId: Model}
 ModelGroups: TypeAlias = dict[str, dict[str, dict[str, Model]]]

@@ -30,7 +30,7 @@ import inspect
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
-from .._types import (
+from ..types import (
     AssistantMessage,
     Context,
     Model,

@@ -4,7 +4,7 @@
 后续可并入 src/pi_ai/scripts/generate_models.py 的生成体系。
 """
 
-from .._types import ImagesModel
+from ..types import ImagesModel
 
 OPENROUTER_IMAGE_MODELS: list[ImagesModel] = [
     ImagesModel(

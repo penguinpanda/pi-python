@@ -21,7 +21,7 @@ import math
 from dataclasses import dataclass
 from typing import cast
 
-from .._types import (
+from ..types import (
     AssistantMessage,
     Context,
     ImageContent,

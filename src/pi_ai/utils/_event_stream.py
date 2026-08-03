@@ -363,7 +363,7 @@ class EventStream(Generic[T, R]):
 # AssistantMessage 专用事件流
 # ==========================================================
 
-from .._types import AssistantMessage, AssistantMessageEvent, ErrorEvent
+from ..types import AssistantMessage, AssistantMessageEvent, ErrorEvent
 
 
 class AssistantMessageEventStream(

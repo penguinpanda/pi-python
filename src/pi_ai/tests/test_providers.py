@@ -48,20 +48,28 @@ class TestOpenAIProvider:
     def test_model_list(self):
         provider = openai_provider()
         models = provider.get_models()
-        assert _model_ids(models) == ["gpt-4o", "gpt-4o-mini", "o4-mini"]
+        assert _model_ids(models) == [
+            "gpt-5-chat-latest",
+            "gpt-5.6-luna",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+        ]
 
     def test_model_metadata(self):
         provider = openai_provider()
         by_id = {m.id: m for m in provider.get_models()}
 
-        gpt4o = by_id["gpt-4o"]
-        assert gpt4o.api == "openai-responses"
-        assert "image" in gpt4o.input
-        assert gpt4o.reasoning is False
+        gpt5_chat = by_id["gpt-5-chat-latest"]
+        assert gpt5_chat.api == "openai-responses"
+        assert "image" in gpt5_chat.input
+        assert gpt5_chat.reasoning is False
+        assert gpt5_chat.context_window == 128000
 
-        o4_mini = by_id["o4-mini"]
-        assert o4_mini.reasoning is True
-        assert "image" not in o4_mini.input
+        luna = by_id["gpt-5.6-luna"]
+        assert luna.reasoning is True
+        assert "image" in luna.input
+        assert luna.context_window == 272000
+        assert luna.cost.tiers[0].input_tokens_above == 272000
 
 
 class TestDeepSeekProvider:
@@ -84,7 +92,12 @@ class TestDeepSeekProvider:
     def test_model_list(self):
         provider = deepseek_provider()
         models = provider.get_models()
-        assert _model_ids(models) == ["deepseek-chat", "deepseek-reasoner", "deepseek-v4-flash"]
+        assert _model_ids(models) == [
+            "deepseek-chat",
+            "deepseek-reasoner",
+            "deepseek-v4-flash",
+            "deepseek-v4-pro",
+        ]
 
     def test_model_metadata(self):
         provider = deepseek_provider()
@@ -93,26 +106,51 @@ class TestDeepSeekProvider:
         chat = by_id["deepseek-chat"]
         assert chat.api == "openai-completions"
         assert chat.reasoning is False
+        assert chat.deprecated is True
 
         reasoner = by_id["deepseek-reasoner"]
         assert reasoner.api == "openai-completions"
         assert reasoner.reasoning is True
+        assert reasoner.deprecated is True
 
         v4_flash = by_id["deepseek-v4-flash"]
         assert v4_flash.api == "openai-completions"
         assert v4_flash.reasoning is True
         assert v4_flash.max_tokens == 384000
+        assert v4_flash.context_window == 1000000
+        assert v4_flash.cost.input == 0.14
+        assert v4_flash.cost.output == 0.28
+        assert v4_flash.cost.cache_read == 0.0028
+        assert v4_flash.cost.cache_write == 0.0
+
+        v4_pro = by_id["deepseek-v4-pro"]
+        assert v4_pro.api == "openai-completions"
+        assert v4_pro.reasoning is True
+        assert v4_pro.max_tokens == 384000
+        assert v4_pro.context_window == 1000000
+        assert v4_pro.cost.input == 0.435
+        assert v4_pro.cost.output == 0.87
+        assert v4_pro.cost.cache_read == 0.003625
+        assert v4_pro.cost.cache_write == 0.0
 
 
 class TestModelConstants:
     """OPENAI_MODELS / DEEPSEEK_MODELS / OLLAMA_MODELS 常量。"""
 
     def test_openai_models_constant(self):
-        assert _model_ids(OPENAI_MODELS) == ["gpt-4o", "gpt-4o-mini", "o4-mini"]
+        assert _model_ids(OPENAI_MODELS) == [
+            "gpt-5-chat-latest",
+            "gpt-5.6-luna",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+        ]
 
     def test_deepseek_models_constant(self):
         assert _model_ids(DEEPSEEK_MODELS) == [
-            "deepseek-chat", "deepseek-reasoner", "deepseek-v4-flash",
+            "deepseek-chat",
+            "deepseek-reasoner",
+            "deepseek-v4-flash",
+            "deepseek-v4-pro",
         ]
 
     def test_ollama_models_constant(self):

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 
-from .._types import AssistantMessage
+from ..types import AssistantMessage
 
 # ------------------------------------------------------------------
 # 各 provider 的上下文溢出错误模式。
