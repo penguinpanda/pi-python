@@ -137,7 +137,7 @@ class TestAgentPrompt:
         ))
 
         received: list[AgentEvent] = []
-        agent.subscribe(lambda e: received.append(e))
+        agent.subscribe(lambda e, signal: received.append(e))
 
         await agent.prompt("Hi")
 
@@ -155,7 +155,7 @@ class TestAgentPrompt:
         ))
 
         received: list[AgentEvent] = []
-        unsub = agent.subscribe(lambda e: received.append(e))
+        unsub = agent.subscribe(lambda e, signal: received.append(e))
         unsub()
 
         await agent.prompt("Hi")
@@ -217,7 +217,7 @@ class TestAgentAbort:
         ))
 
         received: list[AgentEvent] = []
-        agent.subscribe(lambda e: received.append(e))
+        agent.subscribe(lambda e, signal: received.append(e))
 
         # 在后台启动 prompt，稍后 abort
         async def _run_and_abort():
@@ -332,7 +332,7 @@ class TestAgentState:
         ))
 
         called: list[str] = []
-        agent.subscribe(lambda e: called.append(e["type"]))
+        agent.subscribe(lambda e, signal: called.append(e["type"]))
 
         await agent.prompt("Hi")
 
@@ -571,3 +571,131 @@ class TestAgentContinueQueues:
         ))
         with pytest.raises(RuntimeError, match="No messages to continue from"):
             await agent.continue_()
+
+
+class TestAsyncListeners:
+    """1.3：async 监听器 + AbortSignal 传播。"""
+
+    @pytest.mark.asyncio
+    async def test_async_listener_awaited_in_subscription_order(self):
+        """监听器按订阅顺序 await（async 监听器先完成后才调用下一个）。"""
+        stream_fn = _make_faux_stream_fn("Hello!")
+        agent = Agent(AgentOptions(
+            model=_make_model(),
+            stream_fn=stream_fn,
+        ))
+
+        order: list[str] = []
+
+        async def _first(event, signal):
+            if event["type"] == "agent_end":
+                await asyncio.sleep(0.01)
+                order.append("first")
+
+        def _second(event, signal):
+            if event["type"] == "agent_end":
+                order.append("second")
+
+        agent.subscribe(_first)
+        agent.subscribe(_second)
+
+        await agent.prompt("Hi")
+
+        assert order == ["first", "second"]
+
+    @pytest.mark.asyncio
+    async def test_listener_receives_abort_signal(self):
+        """监听器收到当前运行的 abort signal（运行中非 None）。"""
+        stream_fn = _make_faux_stream_fn("Hello!")
+        agent = Agent(AgentOptions(
+            model=_make_model(),
+            stream_fn=stream_fn,
+        ))
+
+        seen: list[asyncio.Event | None] = []
+
+        def _record(event, signal):
+            if event["type"] == "agent_start":
+                seen.append(signal)
+
+        agent.subscribe(_record)
+        await agent.prompt("Hi")
+
+        assert len(seen) == 1
+        assert seen[0] is not None
+        assert isinstance(seen[0], asyncio.Event)
+
+    @pytest.mark.asyncio
+    async def test_signal_same_object_across_events(self):
+        """同一运行内所有事件共享同一个 signal 对象。"""
+        stream_fn = _make_faux_stream_fn("Hello!")
+        agent = Agent(AgentOptions(
+            model=_make_model(),
+            stream_fn=stream_fn,
+        ))
+
+        signals: list[asyncio.Event] = []
+
+        def _record(event, signal):
+            if event["type"] in ("agent_start", "agent_end") and signal is not None:
+                signals.append(signal)
+
+        agent.subscribe(_record)
+        await agent.prompt("Hi")
+
+        assert len(signals) == 2
+        assert signals[0] is signals[1]
+
+    @pytest.mark.asyncio
+    async def test_signal_set_after_abort(self):
+        """abort 后 agent_end 监听器看到的 signal 已置位。"""
+        core = faux_provider(tokens_per_second=200)
+        core.set_responses([faux_assistant_message("A" * 300)])
+
+        agent = Agent(AgentOptions(
+            model=_make_model(),
+            stream_fn=core.stream,
+        ))
+
+        agent_end_signal_state: list[bool] = []
+
+        def _record(event, signal):
+            if event["type"] == "agent_end" and signal is not None:
+                agent_end_signal_state.append(signal.is_set())
+
+        agent.subscribe(_record)
+
+        async def _run_and_abort():
+            await asyncio.sleep(0.05)
+            agent.abort()
+
+        await asyncio.wait_for(
+            asyncio.gather(agent.prompt("Hi"), _run_and_abort()),
+            timeout=2.0,
+        )
+
+        assert agent_end_signal_state == [True]
+
+    @pytest.mark.asyncio
+    async def test_wait_for_idle_waits_for_listener_settlement(self):
+        """wait_for_idle 等待 agent_end 监听器 settle（而非仅 _active）。"""
+        stream_fn = _make_faux_stream_fn("Hello!")
+        agent = Agent(AgentOptions(
+            model=_make_model(),
+            stream_fn=stream_fn,
+        ))
+
+        listener_done = asyncio.Event()
+
+        async def _slow_listener(event, signal):
+            if event["type"] == "agent_end":
+                await asyncio.sleep(0.05)
+                listener_done.set()
+
+        agent.subscribe(_slow_listener)
+
+        task = asyncio.create_task(agent.prompt("Hi"))
+        await agent.wait_for_idle()
+        await task
+
+        assert listener_done.is_set()

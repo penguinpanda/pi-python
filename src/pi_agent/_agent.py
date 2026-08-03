@@ -7,14 +7,14 @@ Agent 有状态包装类
 - 互斥运行：同一 Agent 实例同时最多一个活跃运行
 - 状态管理：维护 AgentState，通过 _process_event 归约事件 → 状态
 - 生命周期管理：管理 abort signal + isStreaming 标志
-- 事件订阅：subscribe() 注册监听器，按订阅顺序调用
+- 事件订阅：subscribe() 注册监听器，按订阅顺序 await，并传递当前运行的 abort signal
 - 桥接：AgentOptions → AgentLoopConfig → run_agent_loop()
 """
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from pi_ai._types import (
@@ -45,6 +45,9 @@ from ._types import (
     ThinkingLevel,
     ToolExecutionMode,
 )
+
+# 监听器签名：async (event, signal) → None；同步监听器返回 None 也支持
+AgentListener = Callable[[AgentEvent, asyncio.Event | None], Awaitable[None] | None]
 
 # ---------------------------------------------------------------------------
 # PendingMessageQueue（1.2 双消息队列的前置实现，1.1 双重嵌套循环的输入源）
@@ -210,7 +213,9 @@ class Agent:
         # -- 运行时 --
         self._active: bool = False
         self._abort: asyncio.Event | None = None
-        self._listeners: list[Callable[[AgentEvent], None]] = []
+        self._settled = asyncio.Event()
+        self._settled.set()  # 初始空闲
+        self._listeners: list[AgentListener] = []
 
     # ------------------------------------------------------------------
     # 公共 API
@@ -280,11 +285,14 @@ class Agent:
             self._abort.set()
 
     def subscribe(
-        self, listener: Callable[[AgentEvent], None]
+        self,
+        listener: AgentListener,
     ) -> Callable[[], None]:
         """订阅生命周期事件。返回取消订阅函数。
 
-        监听器按订阅顺序同步调用。
+        监听器按订阅顺序 await；每个监听器接收 (event, signal)，
+        signal 为当前运行的取消信号（asyncio.Event，运行中非 None）。
+        同步监听器（返回 None）同样支持。
         """
         self._listeners.append(listener)
 
@@ -297,9 +305,13 @@ class Agent:
         return _unsubscribe
 
     async def wait_for_idle(self) -> None:
-        """等待当前运行结束（含所有事件监听器完成）。"""
-        while self._active:
-            await asyncio.sleep(0.01)
+        """等待当前运行结束（含所有事件监听器 settle）。
+
+        运行结束（finally）时置位 _settled；agent_end 监听器在运行体内被
+        await，因此置位时所有监听器均已 settle。
+        """
+        if not self._settled.is_set():
+            await self._settled.wait()
 
     # ------------------------------------------------------------------
     # 双消息队列 API（1.2 前置：steer / follow-up）
@@ -368,6 +380,7 @@ class Agent:
         """执行一次完整的 prompt → agent loop 生命周期。"""
         self._active = True
         self._abort = asyncio.Event()
+        self._settled.clear()
         self._state.is_streaming = True
         self._state.streaming_message = None
         self._state.error_message = None
@@ -403,11 +416,13 @@ class Agent:
             self._state.is_streaming = False
             self._active = False
             self._abort = None
+            self._settled.set()
 
     async def _run_continue(self) -> None:
         """从当前上下文继续。"""
         self._active = True
         self._abort = asyncio.Event()
+        self._settled.clear()
         self._state.is_streaming = True
         self._state.streaming_message = None
         self._state.error_message = None
@@ -438,6 +453,7 @@ class Agent:
             self._state.is_streaming = False
             self._active = False
             self._abort = None
+            self._settled.set()
 
     # ------------------------------------------------------------------
     # 内部：桥接
@@ -526,9 +542,11 @@ class Agent:
         elif event_type == "agent_end":
             self._state.streaming_message = None
 
-        # 扇出给订阅者（同步调用）
+        # 扇出给订阅者：按订阅顺序 await，传递当前运行的 abort signal
         for listener in self._listeners:
-            listener(event)
+            result = listener(event, self._abort)
+            if result is not None:
+                await result
 
 
 # ============================================================================

@@ -367,10 +367,15 @@ class AgentSession:
     # 内部：事件桥接
     # ------------------------------------------------------------------
 
-    def _handle_agent_event(self, event: AgentEvent) -> None:
+    def _handle_agent_event(
+        self,
+        event: AgentEvent,
+        signal: asyncio.Event | None = None,
+    ) -> None:
         """Agent 事件 → 持久化到 SessionManager + 转发给外部监听器。
 
         在 message_end 时自动写入 JSONL。
+        signal 为 Agent 当前运行的 abort signal（1.3 监听器协议），当前忽略。
         """
         event_type = event.get("type")
 
