@@ -358,7 +358,6 @@ models.add_provider(
                 input=["text"],
                 output=["text"],
                 max_tokens=16384,
-                capabilities=ModelCapabilities(tools=True),
             ),
         ],
     )
@@ -404,7 +403,7 @@ pi_ai/types/
 ├── content.py    # ContentBlock（Text / Image / ToolCall / Thinking / Code）
 ├── message.py    # Message（System / User / Assistant / ToolResult / Agent）
 ├── tool.py       # Tool（含 before_execute / after_execute 生命周期钩子）
-├── model.py      # Model / ModelCapabilities / ModelCost
+├── model.py      # Model / ModelCost
 ├── context.py    # Context（含 state / memory / trace_id）+ MemoryStore
 ├── stream.py     # 流事件（BaseEvent + 12 种事件）+ StreamOptions
 ├── image.py      # 图片生成类型
