@@ -21,6 +21,25 @@ from ._agent_loop import (
     run_agent_loop,
     run_agent_loop_continue,
 )
+from ._harness import AgentHarness, AgentHarnessSession
+from ._harness_types import (
+    AbortResult,
+    AgentHarnessError,
+    AgentHarnessOptions,
+    AgentHarnessResources,
+    AgentHarnessStreamOptions,
+    AgentHarnessStreamOptionsPatch,
+    BeforeAgentStartResult,
+    CompactResult,
+    ContextResult,
+    NavigateTreeResult,
+    PromptTemplate,
+    SessionBeforeCompactResult,
+    SessionBeforeTreeResult,
+    Skill,
+    ToolCallResult,
+    ToolResultPatch,
+)
 from ._stream_fn import get_default_stream_fn, set_default_stream_fn
 from ._types import (
     AfterToolCallContext,
@@ -49,6 +68,25 @@ __all__ = [
     "run_agent_loop_continue",
     "agent_loop",
     "agent_loop_continue",
+    # Harness
+    "AgentHarness",
+    "AgentHarnessSession",
+    "AgentHarnessError",
+    "AgentHarnessOptions",
+    "AgentHarnessResources",
+    "AgentHarnessStreamOptions",
+    "AgentHarnessStreamOptionsPatch",
+    "Skill",
+    "PromptTemplate",
+    "AbortResult",
+    "BeforeAgentStartResult",
+    "CompactResult",
+    "ContextResult",
+    "NavigateTreeResult",
+    "SessionBeforeCompactResult",
+    "SessionBeforeTreeResult",
+    "ToolCallResult",
+    "ToolResultPatch",
     # Stream
     "set_default_stream_fn",
     "get_default_stream_fn",

@@ -1,0 +1,603 @@
+"""_harness.py 模块测试（Phase 2：AgentHarness 骨架）。"""
+
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+from pi_ai._types import Model, TextContent, UserMessage
+from pi_ai.providers.faux import FauxCore, faux_assistant_message, faux_provider, faux_tool_call
+
+from pi_agent._harness_types import (
+    AgentHarnessError,
+    AgentHarnessOptions,
+    AgentHarnessResources,
+    AgentHarnessStreamOptionsPatch,
+    BeforeAgentStartResult,
+    BeforeProviderRequestResult,
+    CompactResult,
+    ContextResult,
+    PromptTemplate,
+    SessionBeforeCompactResult,
+    Skill,
+    ToolCallResult,
+    ToolResultPatch,
+)
+from pi_agent._harness import AgentHarness
+from pi_agent._types import AgentTool, AgentToolResult, StreamFn
+
+
+# ============================================================================
+# 辅助
+# ============================================================================
+
+
+def _make_model(model_id: str = "test-model") -> Model:
+    return Model(
+        id=model_id,
+        provider="test",
+        api="openai-completions",
+        name=f"Test {model_id}",
+    )
+
+
+def _make_faux(responses: list) -> FauxCore:
+    core = faux_provider()
+    core.set_responses(responses)
+    return core
+
+
+def _make_stream_fn(responses: list) -> StreamFn:
+    return _make_faux(responses).stream
+
+
+def _text_response(text: str):
+    return faux_assistant_message(text)
+
+
+def _tool_response(tool_name: str, args: dict | None = None, tool_call_id: str = "tc-1"):
+    return faux_assistant_message(
+        [faux_tool_call(tool_name, args or {}, tool_call_id=tool_call_id)],
+        stop_reason="tool_call",
+    )
+
+
+def _make_harness_tool(
+    name: str,
+    result_text: str = "ok",
+    *,
+    execute_override=None,
+) -> AgentTool:
+    """harness 工具：execute 接收 context 作第 5 参（对齐 TS AgentHarnessTool）。"""
+    async def _execute(tool_call_id, params, signal=None, on_update=None, context=None):
+        if execute_override is not None:
+            return await execute_override(tool_call_id, params, signal, on_update, context)
+        return AgentToolResult(content=[TextContent(type="text", text=result_text)])
+
+    return AgentTool(
+        name=name,
+        description=f"Tool: {name}",
+        input_schema={"type": "object", "properties": {}},
+        label=name,
+        execute=_execute,
+    )
+
+
+def _session_text(harness: AgentHarness) -> str:
+    """把会话消息内容拼接为纯文本（content 可能是 str 或块列表）。"""
+    parts: list[str] = []
+    for message in harness._session.messages:
+        content = message.get("content")
+        if isinstance(content, str):
+            parts.append(content)
+        elif isinstance(content, list):
+            parts.append(
+                "".join(
+                    str(block.get("text", ""))
+                    for block in content
+                    if isinstance(block, dict)
+                )
+            )
+    return "\n".join(parts)
+
+
+def _make_harness(
+    *,
+    responses: list | None = None,
+    tools: list[AgentTool] | None = None,
+    **kwargs,
+) -> AgentHarness:
+    responses = responses if responses is not None else [_text_response("Hello!")]
+    options = AgentHarnessOptions(
+        model=_make_model(),
+        stream_fn=_make_stream_fn(responses),
+        tools=tools,
+        **kwargs,
+    )
+    return AgentHarness(options)
+
+
+# ============================================================================
+# 2.1 prompt / skill / template
+# ============================================================================
+
+
+class TestHarnessPrompt:
+    @pytest.mark.asyncio
+    async def test_basic_prompt(self):
+        harness = _make_harness()
+        result = await harness.prompt("Hi")
+
+        assert result.get("role") == "assistant"
+        roles = [m.get("role") for m in harness._session.messages]
+        assert roles.count("user") == 1
+        assert roles.count("assistant") == 1
+
+    @pytest.mark.asyncio
+    async def test_subscriber_receives_events_and_settled(self):
+        harness = _make_harness()
+        received: list[str] = []
+        harness.subscribe(lambda e, signal: received.append(e["type"]))
+
+        await harness.prompt("Hi")
+
+        assert "agent_start" in received
+        assert "agent_end" in received
+        assert "settled" in received
+        assert "save_point" in received
+
+    @pytest.mark.asyncio
+    async def test_prompt_while_busy_raises(self):
+        core = faux_provider(tokens_per_second=200)
+        core.set_responses([faux_assistant_message("A" * 200)])
+        harness = AgentHarness(AgentHarnessOptions(
+            model=_make_model(),
+            stream_fn=core.stream,
+        ))
+
+        first = asyncio.create_task(harness.prompt("Q1"))
+        await asyncio.sleep(0.05)
+
+        with pytest.raises(AgentHarnessError, match="busy"):
+            await harness.prompt("Q2")
+
+        await harness.abort()
+        try:
+            await asyncio.wait_for(first, timeout=2.0)
+        except asyncio.CancelledError:
+            pass
+
+    @pytest.mark.asyncio
+    async def test_wait_for_idle(self):
+        core = faux_provider(tokens_per_second=200)
+        core.set_responses([faux_assistant_message("A" * 100)])
+        harness = AgentHarness(AgentHarnessOptions(
+            model=_make_model(),
+            stream_fn=core.stream,
+        ))
+
+        task = asyncio.create_task(harness.prompt("Hi"))
+        await harness.wait_for_idle()
+        await task
+
+        assert harness._phase == "idle"
+
+
+class TestHarnessSkillTemplate:
+    @pytest.mark.asyncio
+    async def test_skill_invocation(self):
+        skill = Skill(name="docs", description="Docs skill", content="Read docs", file_path="/tmp/docs/SKILL.md")
+        harness = _make_harness(resources=AgentHarnessResources(skills=[skill]))
+
+        await harness.skill("docs")
+
+        text = _session_text(harness)
+        assert "docs" in text and "Read docs" in text
+
+    @pytest.mark.asyncio
+    async def test_unknown_skill(self):
+        harness = _make_harness()
+        with pytest.raises(AgentHarnessError, match="Unknown skill"):
+            await harness.skill("nope")
+
+    @pytest.mark.asyncio
+    async def test_prompt_from_template(self):
+        template = PromptTemplate(name="greet", content="Hi $1! $ARGUMENTS")
+        harness = _make_harness(resources=AgentHarnessResources(prompt_templates=[template]))
+
+        await harness.prompt_from_template("greet", ["World"])
+
+        assert "Hi World! World" in _session_text(harness)
+
+    @pytest.mark.asyncio
+    async def test_unknown_template(self):
+        harness = _make_harness()
+        with pytest.raises(AgentHarnessError, match="Unknown prompt template"):
+            await harness.prompt_from_template("nope", [])
+
+
+# ============================================================================
+# 2.3 双事件系统
+# ============================================================================
+
+
+class TestHarnessDualEvents:
+    @pytest.mark.asyncio
+    async def test_on_context_transforms_messages(self):
+        llm_inputs: list[list] = []
+        core = _make_faux([_text_response("Hello!")])
+        original = core.stream
+
+        async def _capturing_stream(model, context, options=None):
+            llm_inputs.append(list(context.messages))
+            return await original(model, context, options)
+
+        harness = AgentHarness(AgentHarnessOptions(
+            model=_make_model(),
+            stream_fn=_capturing_stream,
+        ))
+
+        async def _context_hook(event):
+            return ContextResult(messages=list(event["messages"]) + [
+                {"role": "user", "content": "injected-by-context"}
+            ])
+
+        harness.on("context", _context_hook)
+        await harness.prompt("Hi")
+
+        # transform_context 只影响 LLM 输入，不写入会话
+        assert len(llm_inputs) == 1
+        llm_text = "\n".join(
+            str(m.get("content"))
+            for m in llm_inputs[0]
+        )
+        assert "injected-by-context" in llm_text
+
+    @pytest.mark.asyncio
+    async def test_on_tool_call_blocks(self):
+        executed: list[str] = []
+
+        async def _execute(tool_call_id, params, signal=None, on_update=None, context=None):
+            executed.append(tool_call_id)
+            return AgentToolResult(content=[TextContent(type="text", text="ran")])
+
+        tool = _make_harness_tool("search", execute_override=_execute)
+        harness = _make_harness(
+            tools=[tool],
+            responses=[_tool_response("search"), _text_response("done")],
+        )
+
+        def _tool_call_hook(event):
+            return ToolCallResult(block=True, reason="not allowed")
+
+        harness.on("tool_call", _tool_call_hook)
+        await harness.prompt("Search")
+
+        assert executed == []
+        # 被 block 的工具结果以错误形式回给 LLM，随后文本轮正常完成
+        tool_results = [m for m in harness._session.messages if m.get("role") == "toolResult"]
+        assert len(tool_results) == 1
+        assert tool_results[0]["is_error"] is True
+
+    @pytest.mark.asyncio
+    async def test_on_tool_result_patches(self):
+        tool = _make_harness_tool("search", "original")
+        harness = _make_harness(
+            tools=[tool],
+            responses=[_tool_response("search"), _text_response("done")],
+        )
+
+        def _tool_result_hook(event):
+            return ToolResultPatch(content=[TextContent(type="text", text="patched")])
+
+        harness.on("tool_result", _tool_result_hook)
+        await harness.prompt("Search")
+
+        tool_results = [m for m in harness._session.messages if m.get("role") == "toolResult"]
+        assert tool_results[0]["content"][0]["text"] == "patched"
+
+    @pytest.mark.asyncio
+    async def test_on_before_agent_start_injects_messages(self):
+        harness = _make_harness()
+
+        def _before_start(event):
+            return BeforeAgentStartResult(
+                messages=[{"role": "user", "content": "extra-context"}],
+                system_prompt="Custom system prompt",
+            )
+
+        harness.on("before_agent_start", _before_start)
+        await harness.prompt("Hi")
+
+        assert "extra-context" in _session_text(harness)
+
+    @pytest.mark.asyncio
+    async def test_on_before_provider_request_patches_options(self):
+        captured: list[dict] = []
+        core = _make_faux([_text_response("ok")])
+        original = core.stream
+
+        async def _capturing_stream(model, context, options=None):
+            captured.append(dict(options or {}))
+            return await original(model, context, options)
+
+        harness = AgentHarness(AgentHarnessOptions(
+            model=_make_model(),
+            stream_fn=_capturing_stream,
+        ))
+
+        def _provider_hook(event):
+            return BeforeProviderRequestResult(stream_options=AgentHarnessStreamOptionsPatch(max_retries=5))
+
+        harness.on("before_provider_request", _provider_hook)
+        await harness.prompt("Hi")
+
+        assert captured[0]["max_retries"] == 5
+
+    @pytest.mark.asyncio
+    async def test_next_turn_emits_queue_update(self):
+        harness = _make_harness()
+        received: list[dict] = []
+        harness.subscribe(lambda e, signal: received.append(e) if e["type"] == "queue_update" else None)
+
+        await harness.next_turn("later")
+
+        assert len(received) == 1
+        assert len(received[0]["next_turn"]) == 1
+
+
+# ============================================================================
+# 2.4 Save-point
+# ============================================================================
+
+
+class TestHarnessSavePoint:
+    @pytest.mark.asyncio
+    async def test_set_model_during_run_applies_next_turn(self):
+        tool_ready = asyncio.Event()
+        seen_models: list[str] = []
+
+        async def _tool_execute(tool_call_id, params, signal=None, on_update=None, context=None):
+            await tool_ready.wait()
+            return AgentToolResult(content=[TextContent(type="text", text="done")])
+
+        tool = _make_harness_tool("finish", execute_override=_tool_execute)
+        core = _make_faux([_tool_response("finish"), _text_response("final answer")])
+        original = core.stream
+
+        async def _capturing_stream(model, context, options=None):
+            seen_models.append(model.id)
+            return await original(model, context, options)
+
+        harness = AgentHarness(AgentHarnessOptions(
+            model=_make_model("model-a"),
+            stream_fn=_capturing_stream,
+            tools=[tool],
+        ))
+
+        # 第一轮流式输出后工具执行；工具等待测试任务切换模型
+        async def _run():
+            await harness.prompt("Go")
+
+        run_task = asyncio.create_task(_run())
+        await asyncio.sleep(0.05)
+        await harness.set_model(_make_model("model-b"))
+        tool_ready.set()
+        await asyncio.wait_for(run_task, timeout=5.0)
+
+        # 第一轮 LLM 调用用 model-a，prepare_next_turn 后第二轮用 model-b
+        assert seen_models[0] == "model-a"
+        assert seen_models[-1] == "model-b"
+
+    @pytest.mark.asyncio
+    async def test_save_point_event_reports_pending_mutations(self):
+        tool_ready = asyncio.Event()
+
+        async def _tool_execute(tool_call_id, params, signal=None, on_update=None, context=None):
+            await tool_ready.wait()
+            return AgentToolResult(content=[TextContent(type="text", text="done")])
+
+        tool = _make_harness_tool("finish", execute_override=_tool_execute)
+        harness = _make_harness(
+            tools=[tool],
+            responses=[_tool_response("finish"), _text_response("final")],
+        )
+
+        save_points: list[dict] = []
+        harness.subscribe(
+            lambda e, signal: save_points.append(e) if e["type"] == "save_point" else None
+        )
+
+        async def _run():
+            await harness.prompt("Go")
+
+        run_task = asyncio.create_task(_run())
+        await asyncio.sleep(0.05)
+        await harness.set_thinking_level("low")  # 运行中变更 → pending
+        tool_ready.set()
+        await asyncio.wait_for(run_task, timeout=5.0)
+
+        assert any(sp["had_pending_mutations"] for sp in save_points)
+
+    @pytest.mark.asyncio
+    async def test_append_message_during_run_flushed_at_end(self):
+        tool_ready = asyncio.Event()
+
+        async def _tool_execute(tool_call_id, params, signal=None, on_update=None, context=None):
+            await tool_ready.wait()
+            return AgentToolResult(content=[TextContent(type="text", text="done")])
+
+        tool = _make_harness_tool("finish", execute_override=_tool_execute)
+        harness = _make_harness(
+            tools=[tool],
+            responses=[_tool_response("finish"), _text_response("final")],
+        )
+
+        run_task = asyncio.create_task(harness.prompt("Go"))
+        await asyncio.sleep(0.05)
+        await harness.append_message(UserMessage(role="user", content="queued-append"))
+        tool_ready.set()
+        await asyncio.wait_for(run_task, timeout=5.0)
+
+        assert "queued-append" in _session_text(harness)
+
+
+# ============================================================================
+# steer / follow_up / next_turn
+# ============================================================================
+
+
+class TestHarnessQueues:
+    @pytest.mark.asyncio
+    async def test_steer_during_run_injected(self):
+        core = faux_provider(tokens_per_second=200)
+        core.set_responses([
+            faux_assistant_message("A" * 100),
+            faux_assistant_message("B" * 20),
+        ])
+        harness = AgentHarness(AgentHarnessOptions(
+            model=_make_model(),
+            stream_fn=core.stream,
+        ))
+
+        async def _steer_mid_run():
+            await asyncio.sleep(0.05)
+            await harness.steer("nudge")
+
+        await asyncio.gather(harness.prompt("Q"), _steer_mid_run())
+
+        text = _session_text(harness)
+        assert "nudge" in text
+        assert text.count("A" * 100) == 1
+
+    @pytest.mark.asyncio
+    async def test_follow_up_after_stop_injected(self):
+        core = faux_provider(tokens_per_second=200)
+        core.set_responses([
+            faux_assistant_message("A" * 50),
+            faux_assistant_message("B" * 20),
+        ])
+        harness = AgentHarness(AgentHarnessOptions(
+            model=_make_model(),
+            stream_fn=core.stream,
+        ))
+
+        async def _follow_up_mid_run():
+            await asyncio.sleep(0.05)
+            await harness.follow_up("one more")
+
+        await asyncio.gather(harness.prompt("Q"), _follow_up_mid_run())
+
+        assert "one more" in _session_text(harness)
+        # follow-up 追加一轮 → 两条 assistant
+        assert sum(1 for m in harness._session.messages if m.get("role") == "assistant") == 2
+
+    @pytest.mark.asyncio
+    async def test_next_turn_prepended(self):
+        harness = _make_harness()
+        await harness.next_turn("prepended")
+        await harness.prompt("main")
+
+        text = _session_text(harness)
+        assert text.index("prepended") < text.index("main")
+
+    @pytest.mark.asyncio
+    async def test_steer_while_idle_raises(self):
+        harness = _make_harness()
+        with pytest.raises(AgentHarnessError, match="Cannot steer while idle"):
+            await harness.steer("nope")
+
+
+# ============================================================================
+# compact / navigateTree 骨架
+# ============================================================================
+
+
+class TestHarnessCompactNavigate:
+    @pytest.mark.asyncio
+    async def test_compact_nothing_to_compact(self):
+        harness = _make_harness()
+        with pytest.raises(AgentHarnessError, match="Nothing to compact"):
+            await harness.compact()
+
+    @pytest.mark.asyncio
+    async def test_compact_hook_cancel(self):
+        harness = _make_harness()
+        harness.on("session_before_compact", lambda e: SessionBeforeCompactResult(cancel=True))
+
+        with pytest.raises(AgentHarnessError, match="cancelled"):
+            await harness.compact()
+
+    @pytest.mark.asyncio
+    async def test_compact_hook_provides_result(self):
+        harness = _make_harness()
+        provided = CompactResult(summary="from hook")
+        harness.on(
+            "session_before_compact",
+            lambda e: SessionBeforeCompactResult(compaction=provided),
+        )
+
+        result = await harness.compact()
+        assert result.summary == "from hook"
+
+    @pytest.mark.asyncio
+    async def test_navigate_tree_leaf_noop(self):
+        harness = _make_harness()
+        result = await harness.navigate_tree(harness._session.session_id)
+        assert result.cancelled is False
+
+    @pytest.mark.asyncio
+    async def test_navigate_tree_unknown_entry(self):
+        harness = _make_harness()
+        with pytest.raises(AgentHarnessError, match="not found"):
+            await harness.navigate_tree("missing-entry")
+
+
+# ============================================================================
+# abort / shutdown / 配置校验
+# ============================================================================
+
+
+class TestHarnessAbortShutdown:
+    @pytest.mark.asyncio
+    async def test_abort_clears_queues_and_stops_run(self):
+        core = faux_provider(tokens_per_second=100)
+        core.set_responses([faux_assistant_message("A" * 300)])
+        harness = AgentHarness(AgentHarnessOptions(
+            model=_make_model(),
+            stream_fn=core.stream,
+        ))
+
+        run_task = asyncio.create_task(harness.prompt("Q"))
+        await asyncio.sleep(0.05)
+        await harness.steer("stale")
+        await harness.follow_up("stale-fu")
+        result = await harness.abort()
+        await asyncio.wait_for(run_task, timeout=2.0)
+
+        assert len(result.cleared_steer) == 1
+        assert len(result.cleared_follow_up) == 1
+        assert harness._phase == "idle"
+
+    @pytest.mark.asyncio
+    async def test_shutdown_prevents_operations(self):
+        harness = _make_harness()
+        await harness.shutdown()
+
+        with pytest.raises(AgentHarnessError, match="shut down"):
+            await harness.prompt("Hi")
+        with pytest.raises(AgentHarnessError, match="shut down"):
+            harness.subscribe(lambda e, signal: None)
+
+    @pytest.mark.asyncio
+    async def test_set_tools_validates_unknown_names(self):
+        harness = _make_harness(tools=[_make_harness_tool("a")])
+        with pytest.raises(AgentHarnessError, match="Unknown tool"):
+            await harness.set_active_tools(["nope"])
+
+    @pytest.mark.asyncio
+    async def test_set_tools_duplicate_names(self):
+        tool = _make_harness_tool("dup")
+        harness = _make_harness()
+        with pytest.raises(AgentHarnessError, match="Duplicate"):
+            await harness.set_tools([tool, _make_harness_tool("dup")])

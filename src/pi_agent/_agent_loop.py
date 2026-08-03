@@ -667,12 +667,15 @@ async def _run_loop(
                     update = raw_update
                 if update is not None:
                     _update = cast(AgentLoopTurnUpdate, update)
-                    if _update.context is not None:
-                        context = _update.context
-                        messages = list(context.messages)
-                        tools = list(context.tools) if context.tools else []
-                    if _update.model is not None:
-                        current_model = _update.model
+                if _update.context is not None:
+                    context = _update.context
+                    messages = list(context.messages)
+                    tools = list(context.tools) if context.tools else []
+                if _update.model is not None:
+                    current_model = _update.model
+                    # 下一次 LLM 调用读取 config.model（_stream_assistant_response 不感知
+                    # 局部 current_model），此处同步以让 prepare_next_turn 的模型替换生效。
+                    config.model = current_model
 
             # -- should_stop_after_turn --
             if config.should_stop_after_turn is not None:
