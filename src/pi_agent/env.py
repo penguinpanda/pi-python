@@ -360,7 +360,12 @@ class PythonExecutionEnv:
         try:
             Path(resolved).parent.mkdir(parents=True, exist_ok=True)
             mode = "wb" if isinstance(content, bytes) else "w"
-            kwargs = {} if isinstance(content, bytes) else {"encoding": "utf-8"}
+            # read_text_file 按字节读取并保留原始行尾（\r\n / \r / \n），
+            # 因此文本写入同样禁用换行翻译（newline=""），避免 Windows 上
+            # 把内容里已有的 \r\n 再次翻译成 \r\r\n。
+            kwargs = (
+                {} if isinstance(content, bytes) else {"encoding": "utf-8", "newline": ""}
+            )
             await asyncio.to_thread(self._write_plain, resolved, content, mode, kwargs)
             return (True, None)
         except BaseException as error:
@@ -381,7 +386,9 @@ class PythonExecutionEnv:
         try:
             Path(resolved).parent.mkdir(parents=True, exist_ok=True)
             mode = "ab" if isinstance(content, bytes) else "a"
-            kwargs = {} if isinstance(content, bytes) else {"encoding": "utf-8"}
+            kwargs = (
+                {} if isinstance(content, bytes) else {"encoding": "utf-8", "newline": ""}
+            )
             await asyncio.to_thread(self._write_plain, resolved, content, mode, kwargs)
             return (True, None)
         except BaseException as error:
