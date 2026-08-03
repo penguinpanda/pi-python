@@ -11,7 +11,9 @@ TS 端基于 TypeBox（编译期 schema）+ 手写 coerce；Python 端用轻量
 子集：
 
     type / required / properties / items / enum /
-    additionalProperties / minLength / maxLength / minimum / maximum
+    additionalProperties / minLength / maxLength / minimum / maximum /
+    const / pattern / maxItems / minProperties / maxProperties /
+    multipleOf / uniqueItems / exclusiveMinimum / exclusiveMaximum / not
 
 行为对齐 TS：
 
@@ -280,10 +282,19 @@ def _check_schema(
             # 类型不匹配时不再深入（properties/items 无意义）
             return errors
 
+    # const
+    if "const" in schema and value != schema["const"]:
+        errors.append((path, f"Expected const {schema['const']!r}"))
+
     # enum
     enum = schema.get("enum")
     if isinstance(enum, list) and value not in enum:
         errors.append((path, f"Expected one of {enum}"))
+
+    # not：值满足嵌套 schema 时失败。
+    not_schema = schema.get("not")
+    if isinstance(not_schema, dict) and _check_schema(value, not_schema, path) == []:
+        errors.append((path, "Expected value to not match schema"))
 
     # object
     if isinstance(value, dict):
@@ -332,6 +343,25 @@ def _check_schema(
         min_items = schema.get("minItems")
         if isinstance(min_items, int) and len(value) < min_items:
             errors.append((path, f"Expected at least {min_items} items"))
+        max_items = schema.get("maxItems")
+        if isinstance(max_items, int) and len(value) > max_items:
+            errors.append((path, f"Expected at most {max_items} items"))
+        if schema.get("uniqueItems") is True:
+            seen: list[Any] = []
+            for item in value:
+                if item in seen:
+                    errors.append((path, "Expected unique items"))
+                    break
+                seen.append(item)
+
+    # object 尺寸约束
+    if isinstance(value, dict):
+        min_properties = schema.get("minProperties")
+        if isinstance(min_properties, int) and len(value) < min_properties:
+            errors.append((path, f"Expected at least {min_properties} properties"))
+        max_properties = schema.get("maxProperties")
+        if isinstance(max_properties, int) and len(value) > max_properties:
+            errors.append((path, f"Expected at most {max_properties} properties"))
 
     # string 约束
     if isinstance(value, str):
@@ -341,6 +371,12 @@ def _check_schema(
         max_length = schema.get("maxLength")
         if isinstance(max_length, int) and len(value) > max_length:
             errors.append((path, f"Expected at most {max_length} characters"))
+        pattern = schema.get("pattern")
+        if isinstance(pattern, str):
+            import re
+
+            if re.search(pattern, value) is None:
+                errors.append((path, f"Expected pattern {pattern!r}"))
 
     # number 约束
     if isinstance(value, (int, float)) and not isinstance(value, bool):
@@ -350,6 +386,16 @@ def _check_schema(
         maximum = schema.get("maximum")
         if isinstance(maximum, (int, float)) and value > maximum:
             errors.append((path, f"Expected <= {maximum}"))
+        exclusive_minimum = schema.get("exclusiveMinimum")
+        if isinstance(exclusive_minimum, (int, float)) and value <= exclusive_minimum:
+            errors.append((path, f"Expected > {exclusive_minimum}"))
+        exclusive_maximum = schema.get("exclusiveMaximum")
+        if isinstance(exclusive_maximum, (int, float)) and value >= exclusive_maximum:
+            errors.append((path, f"Expected < {exclusive_maximum}"))
+        multiple_of = schema.get("multipleOf")
+        if isinstance(multiple_of, (int, float)) and multiple_of > 0:
+            if value % multiple_of != 0:
+                errors.append((path, f"Expected multiple of {multiple_of}"))
 
     return errors
 

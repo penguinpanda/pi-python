@@ -368,3 +368,76 @@ class TestDictTools:
         message = str(exc_info.value)
         assert "Received arguments:" in message
         assert "{}" in message
+
+
+class TestExtendedKeywords:
+    """新增 JSON Schema 关键字校验。"""
+
+    def test_const(self):
+        schema = {"type": "object", "properties": {"x": {"type": "string", "const": "fixed"}}}
+        with pytest.raises(ValidationError, match="const"):
+            validate_arguments("t", schema, {"x": "other"})
+        assert validate_arguments("t", schema, {"x": "fixed"}) == {"x": "fixed"}
+
+    def test_pattern(self):
+        schema = {"type": "object", "properties": {"code": {"type": "string", "pattern": "^[a-z]+$"}}}
+        with pytest.raises(ValidationError, match="pattern"):
+            validate_arguments("t", schema, {"code": "ABC123"})
+        assert validate_arguments("t", schema, {"code": "abc"}) == {"code": "abc"}
+
+    def test_max_items(self):
+        schema = {"type": "object", "properties": {"list": {"type": "array", "maxItems": 2}}}
+        with pytest.raises(ValidationError, match="at most 2"):
+            validate_arguments("t", schema, {"list": [1, 2, 3]})
+        assert validate_arguments("t", schema, {"list": [1, 2]}) == {"list": [1, 2]}
+
+    def test_min_max_properties(self):
+        schema = {"type": "object", "minProperties": 1, "maxProperties": 2}
+        with pytest.raises(ValidationError, match="at least 1"):
+            validate_arguments("t", schema, {})
+        with pytest.raises(ValidationError, match="at most 2"):
+            validate_arguments("t", schema, {"a": 1, "b": 2, "c": 3})
+
+    def test_multiple_of(self):
+        schema = {"type": "object", "properties": {"n": {"type": "integer", "multipleOf": 5}}}
+        with pytest.raises(ValidationError, match="multiple of 5"):
+            validate_arguments("t", schema, {"n": 7})
+        assert validate_arguments("t", schema, {"n": 10}) == {"n": 10}
+
+    def test_unique_items(self):
+        schema = {"type": "object", "properties": {"ids": {"type": "array", "uniqueItems": True}}}
+        with pytest.raises(ValidationError, match="unique"):
+            validate_arguments("t", schema, {"ids": ["a", "a"]})
+        assert validate_arguments("t", schema, {"ids": ["a", "b"]}) == {"ids": ["a", "b"]}
+
+    def test_exclusive_bounds(self):
+        schema = {
+            "type": "object",
+            "properties": {"n": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 10}},
+        }
+        with pytest.raises(ValidationError, match="> 0"):
+            validate_arguments("t", schema, {"n": 0})
+        with pytest.raises(ValidationError, match="< 10"):
+            validate_arguments("t", schema, {"n": 10})
+        assert validate_arguments("t", schema, {"n": 5}) == {"n": 5}
+
+    def test_not(self):
+        schema = {"type": "object", "properties": {"name": {"not": {"enum": ["reserved"]}}}}
+        with pytest.raises(ValidationError, match="not match"):
+            validate_arguments("t", schema, {"name": "reserved"})
+        assert validate_arguments("t", schema, {"name": "ok"}) == {"name": "ok"}
+
+    def test_nested_paths_with_new_keywords(self):
+        schema = {
+            "type": "object",
+            "properties": {
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string", "pattern": "^[a-z]+$"},
+                    "uniqueItems": True,
+                }
+            },
+        }
+        with pytest.raises(ValidationError, match=r"tags\.1"):
+            validate_arguments("t", schema, {"tags": ["ok", "BAD"]})
+        assert validate_arguments("t", schema, {"tags": ["ok", "fine"]}) == {"tags": ["ok", "fine"]}
