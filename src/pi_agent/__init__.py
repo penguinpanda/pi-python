@@ -41,6 +41,37 @@ from ._harness_types import (
     ToolResultPatch,
 )
 from ._stream_fn import get_default_stream_fn, set_default_stream_fn
+from .branch_summarization import (
+    BranchSummaryError,
+    collect_entries_for_branch_summary,
+    generate_branch_summary,
+)
+from .compaction import (
+    CompactionError,
+    CompactionPreparation,
+    CompactionResult,
+    CompactionSettings,
+    DEFAULT_COMPACTION_SETTINGS,
+    compact,
+    prepare_compaction,
+)
+from .env import (
+    ExecutionError,
+    FileError,
+    FileInfo,
+    PythonExecutionEnv,
+    ShellExecOptions,
+    ShellResult,
+    err,
+    get_or_throw,
+    ok,
+)
+from .prompt_templates import (
+    format_prompt_template_invocation,
+    load_prompt_templates,
+    load_sourced_prompt_templates,
+    substitute_args,
+)
 from .session import (
     InMemorySessionStorage,
     InMemorySessionStore,
@@ -59,6 +90,7 @@ from .session import (
     create_jsonl_session_store,
     rebuild_session_search_index,
 )
+from .skills import format_skill_invocation, load_sourced_skills, load_skills
 from ._types import (
     AfterToolCallContext,
     AfterToolCallResult,
@@ -75,6 +107,22 @@ from ._types import (
     StreamFn,
     ThinkingLevel,
     ToolExecutionMode,
+)
+from .tools import (
+    BashToolOptions,
+    ExecutionToolContext,
+    ReadToolOptions,
+    create_bash_tool,
+    create_edit_tool,
+    create_read_tool,
+    create_write_tool,
+)
+from .truncate import (
+    DEFAULT_MAX_BYTES,
+    DEFAULT_MAX_LINES,
+    format_size,
+    truncate_head,
+    truncate_tail,
 )
 
 __all__ = [
@@ -111,6 +159,48 @@ __all__ = [
     "create_in_memory_session_repo",
     "create_jsonl_session_store",
     "create_jsonl_session_repo",
+    # Phase 4: 环境抽象
+    "PythonExecutionEnv",
+    "FileError",
+    "ExecutionError",
+    "FileInfo",
+    "ShellExecOptions",
+    "ShellResult",
+    "ok",
+    "err",
+    "get_or_throw",
+    "DEFAULT_MAX_LINES",
+    "DEFAULT_MAX_BYTES",
+    "format_size",
+    "truncate_head",
+    "truncate_tail",
+    # Phase 4: 内置工具
+    "create_read_tool",
+    "create_write_tool",
+    "create_edit_tool",
+    "create_bash_tool",
+    "ExecutionToolContext",
+    "ReadToolOptions",
+    "BashToolOptions",
+    # Phase 4: Skills / Templates
+    "load_skills",
+    "load_sourced_skills",
+    "format_skill_invocation",
+    "load_prompt_templates",
+    "load_sourced_prompt_templates",
+    "substitute_args",
+    "format_prompt_template_invocation",
+    # Phase 4: Compaction / 分支摘要
+    "CompactionSettings",
+    "DEFAULT_COMPACTION_SETTINGS",
+    "CompactionError",
+    "CompactionPreparation",
+    "CompactionResult",
+    "prepare_compaction",
+    "compact",
+    "BranchSummaryError",
+    "collect_entries_for_branch_summary",
+    "generate_branch_summary",
     "Skill",
     "PromptTemplate",
     "AbortResult",
