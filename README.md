@@ -16,7 +16,7 @@ pi-python/
 | 包 | 文档 | 说明 | 打包 |
 |---|------|------|:---:|
 | `pi_ai` | [README](src/pi_ai/README.md) | 统一 LLM API，Provider 抽象模式。支持 OpenAI (Responses API) 和 DeepSeek (Completions API) | ✓ |
-| `pi_agent` | [README](src/pi_agent/README.md) | 最小核心 Agent 循环。事件驱动、工具调用、循环钩子 | ✓ |
+| `pi_agent` | [README](src/pi_agent/readme.md) | 最小核心 Agent 循环。事件驱动、工具调用、循环钩子 | ✓ |
 | `pi_coding_agent` | [README](src/pi_coding_agent/README.md) | CLI 编码代理。7 个编码工具、会话持久化、双层配置 | ✓ |
 
 ### 架构
@@ -97,7 +97,7 @@ async def main():
 asyncio.run(main())
 ```
 
-详见 [src/pi_agent/README.md](src/pi_agent/README.md)。
+详见 [src/pi_agent/readme.md](src/pi_agent/readme.md)。
 
 ### pi_coding_agent — CLI 编码代理
 

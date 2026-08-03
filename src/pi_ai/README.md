@@ -2,11 +2,13 @@
 
 统一的 LLM API，Provider 抽象模式。
 
-基于 [pi-mono/packages/ai](https://github.com/earendil-works/pi-mono) 的 TypeScript 版本复刻，目前支持 **OpenAI**、**DeepSeek** 和 **Ollama** 三个 provider。
+基于 [pi-mono/packages/ai](https://github.com/earendil-works/pi-mono) 的 TypeScript 版本复刻，默认内置 **OpenAI**、**DeepSeek**、**Ollama** 与 **Faux** 四个 provider。
 
 ---
 
-## 支持的模型
+## 支持的模型（默认注册表）
+
+`create_default_models()` 预加载以下静态模型列表：
 
 | Provider | 模型 ID | API 类型 | Thinking | Tool Calling | 图片输入 | max_tokens |
 |----------|---------|----------|:--------:|:------------:|:--------:|:---------:|
@@ -23,9 +25,22 @@
 | Ollama | `llama3.2-vision:latest` | Completions | ✗ | ✓ | ✓ | 4,096 |
 | Ollama | `qwen2.5:7b-instruct-q8_0` | Completions | ✗ | ✓ | ✗ | 8,192 |
 | Ollama | `deepseek-r1:14b` | Completions | ✓ | ✗ | ✗ | 8,192 |
+| Faux | `faux-1` | Completions | ✗ | ✓ | ✗ | 16,384 |
 
-Ollama 模型列表对应本地 `ollama list` 的输出；新增或卸载模型后需要同步更新
-`OLLAMA_MODELS`（或改为运行时调用 `/api/tags` 动态生成）。
+### Ollama 动态发现
+
+静态目录对应 `ollama list` 的输出。`ollama_provider()` 支持运行时动态发现：
+
+- `discover_ollama_models()` 请求 `GET http://127.0.0.1:11434/api/tags`，把实际安装的模型与静态元数据合并；
+- 未知模型（新 pull 的）合成默认元数据；请求失败返回 `None` 并回退静态列表；
+- `Models.refresh()` 可统一触发各 provider 的刷新（`ollama_provider` 已内置 `fetch_models`），
+  结果可持久化到 `ModelsStore`（`InMemoryModelsStore` / `FileModelsStore`），失败时 best-effort 恢复缓存。
+
+### 自动生成的模型目录
+
+`models/generated/providers/*.json` 由 [scripts/generate_models.py](scripts/generate_models.py) 生成，包含
+`openai`、`openai-codex`、`azure-openai-responses`、`deepseek`、`mistral`、`ant-ling`、`openrouter`、
+`vercel-ai-gateway` 的远程目录；`load_generated_models()` 可加载，供后续扩展接入（默认注册表未启用）。
 
 ---
 
@@ -43,7 +58,7 @@ uv run pytest
 
 ### 认证
 
-通过环境变量设置 API Key：
+API Key 解析优先级：**请求级 `api_key`（StreamOptions） > CredentialStore > 环境变量**。
 
 ```bash
 # OpenAI
@@ -64,8 +79,7 @@ models.add_provider(ollama_provider())
 ```
 
 Ollama 默认地址为 `http://127.0.0.1:11434/v1`
-（不使用 `localhost`，避免 httpx 走 Windows 系统代理导致 503），
-如果修改了 `OLLAMA_HOST`，需要同步调整 Provider 的 `base_url`。
+（不使用 `localhost`，避免 httpx 走 Windows 系统代理导致 503）。
 
 也可以在代码中动态设置：
 
@@ -77,6 +91,17 @@ await models.set_api_key("openai", "sk-...")
 await models.set_api_key("deepseek", "sk-...")
 ```
 
+### OAuth 登录（CLI）
+
+内置三个 OAuth provider（device code / PKCE 流程），凭证保存到当前目录 `auth.json`：
+
+```bash
+pi-ai list                # 列出可用 OAuth provider
+pi-ai login openai-codex  # 或 github-copilot / openrouter；不带参数时交互选择
+```
+
+也可直接运行 `python -m pi_ai login openai-codex`。
+
 ### Hello World
 
 ```python
@@ -86,7 +111,7 @@ from pi_ai import create_default_models, Context
 
 async def main():
     # 创建模型管理器
-    # 预加载 OpenAI 和 DeepSeek 两个 provider
+    # 预加载 OpenAI、DeepSeek、Ollama 和 Faux 四个 provider
     models = create_default_models()
 
     # 获取一个模型（不会发送网络请求）
@@ -123,9 +148,23 @@ asyncio.run(main())
 
 ## 核心功能
 
-### 非流式调用（`complete`）
+### Models 注册表
 
-`complete()` 等待整个模型回复完成后一次性返回 `AssistantMessage`：
+`Models` 是整个 SDK 的统一入口（Facade），本身不实现任何模型接口，所有请求转发给对应 Provider：
+
+| 方法 | 说明 |
+|------|------|
+| `add_provider(provider)` / `remove_provider(id)` | 注册 / 移除 Provider（同 ID 覆盖） |
+| `get_provider(id)` / `get_providers()` | 查询 Provider |
+| `get_models(provider_id=None)` | 模型列表（可按 provider 过滤） |
+| `get_model(provider_id, model_id)` | 精确查找模型 |
+| `get_model_by_id(model_id)` | 跨所有 provider 按 ID 查找 |
+| `await refresh(options)` | 并发刷新支持动态发现的 provider，单点失败不阻断（`ModelsRefreshResult` 收集错误） |
+| `await stream(model, context, options)` | 流式调用，返回 `AssistantMessageEventStream` |
+| `await complete(model, context, options)` | 非流式调用，内部仍走 stream 并等待最终消息 |
+| `await set_api_key(provider_id, api_key)` | 写入 CredentialStore（优先于环境变量） |
+
+### 非流式调用（`complete`）
 
 ```python
 msg = await models.complete(model, context)
@@ -145,8 +184,6 @@ msg = await models.complete(model, context)
 
 ### 流式调用（`stream`）
 
-`stream()` 返回 `AssistantMessageEventStream`，支持 `async for` 逐事件消费：
-
 ```python
 async for event in await models.stream(model, context):
     match event["type"]:
@@ -157,7 +194,7 @@ async for event in await models.stream(model, context):
         case "thinking_delta":
             pass  # 推理过程（可选输出）
         case "done":
-            print(f"\n✅ done ({event['message']['usage']})")
+            print(f"\ndone ({event['message']['usage']})")
 ```
 
 事件类型一览（12 种）：
@@ -182,6 +219,64 @@ stream = await models.stream(model, context)
 # ... 可以同时消费事件 ...
 msg = await stream.result()  # 等到 done/error
 ```
+
+### 流选项（StreamOptions）
+
+`stream()` 和 `complete()` 都支持可选的第三个参数 `StreamOptions`：
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `temperature` | `float` | 采样温度 |
+| `max_tokens` | `int` | 最大输出 Token 数 |
+| `thinking_budget` | `int \| None` | 推理 Token 预算（仅推理模型） |
+| `thinking_enabled` | `bool \| None` | 是否启用推理 |
+| `api_key` | `str` | 本次请求使用的 API Key（覆盖默认） |
+| `base_url` | `str` | Provider 层解析后的 Base URL（回退 `model.base_url`） |
+| `headers` | `dict` | 额外的 HTTP 请求头 |
+| `max_retries` | `int` | Provider 层客户端重试上限 |
+| `max_retry_delay_ms` | `int` | 最大重试延迟（毫秒） |
+| `signal` | `asyncio.Event` | 流式中止信号 |
+| `http_client` | `AsyncHTTPClient` | 可注入的异步 HTTP 客户端 |
+| `transport` | `Transport` | 首选传输协议（`sse` / `websocket` / `auto` 等） |
+| `cache_retention` | `CacheRetention` | 提示缓存保留策略（默认 `short`） |
+| `session_id` | `str` | 会话标识（用于提示缓存 key） |
+| `timeout_ms` | `int` | HTTP 请求超时 |
+| `on_payload` / `on_response` | `Callable` | 请求发送前 / 响应接收后回调 |
+| `metadata` / `env` | `dict` | 附加元数据 / Provider 作用域环境变量 |
+
+```python
+options = {
+    "temperature": 0.7,
+    "max_tokens": 2000,
+    "headers": {"X-Custom-Header": "value"},
+}
+msg = await models.complete(model, context, options)
+```
+
+### 重试
+
+应用层重试工具（`pi_ai.utils.retry`）：
+
+- `RetryPolicy`：`enabled` / `max_retries`（默认 3）/ `base_delay_ms`（默认 2000）/ `max_delay_ms` / `jitter`；
+- `retry_assistant_call(produce, policy, signal, callbacks)` 包装单次 LLM 调用，退避期间支持中止；
+- `is_retryable_error()` 判断错误是否可重试；
+- `compute_backoff_delay()` 计算指数退避延迟。
+
+### 提示缓存
+
+`StreamOptions.session_id` + `cache_retention` 会解析为请求体参数：
+
+- `prompt_cache_key`（OpenAI 限制 64 字符，超长自动截断）；
+- `prompt_cache_retention`（`long` 时发送 `24h`）。
+
+相关实现见 `pi_ai.utils.prompt_cache`（`clamp_openai_prompt_cache_key` / `resolve_cache_retention`）。
+
+### Token 估算与上下文溢出
+
+`pi_ai.utils.estimate` / `overflow` 提供：
+
+- `estimate_context_tokens` / `estimate_message_tokens` / `estimate_tools_tokens` / `calculate_context_tokens`；
+- `is_context_overflow(message, context_window)` 与 `get_overflow_patterns()`（`OVERFLOW_PATTERNS` / `NON_OVERFLOW_PATTERNS`）。
 
 ---
 
@@ -245,6 +340,13 @@ async def main():
 asyncio.run(main())
 ```
 
+`Tool` 支持生命周期钩子与可选实现：
+
+- `handler`：可选的 Python 执行函数（None 表示仅定义、无实现）；
+- `before_execute(args, context)`：执行前钩子，返回 dict 替换传给 handler 的参数；
+- `after_execute(result)`：执行后钩子，返回新值替换最终结果；
+- `constrained_sampling`：`json_schema` / `grammar` 受约束采样配置。
+
 ---
 
 ## 推理模式（Thinking）
@@ -283,35 +385,11 @@ async for event in await models.stream(model, context):
 ```python
 # 关闭或限制 thinking
 options = {
-    "thinkingEnabled": False,
-    # "thinkingBudget": 2048,  # 限制 thinking token 数量
+    "thinking_enabled": False,
+    # "thinking_budget": 2048,  # 限制 thinking token 数量
 }
 async for event in await models.stream(model, context, options):
     ...
-```
-
----
-
-## 流选项（StreamOptions）
-
-`stream()` 和 `complete()` 都支持可选的第三个参数 `StreamOptions`：
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `temperature` | `float` | 采样温度 |
-| `max_tokens` | `int` | 最大输出 Token 数 |
-| `thinking_budget` | `int` | 推理 Token 预算（仅推理模型） |
-| `thinking_enabled` | `bool` | 是否启用推理 |
-| `api_key` | `str` | 本次请求使用的 API Key（覆盖默认） |
-| `headers` | `dict` | 额外的 HTTP 请求头 |
-
-```python
-options = {
-    "temperature": 0.7,
-    "max_tokens": 2000,
-    "headers": {"X-Custom-Header": "value"},
-}
-msg = await models.complete(model, context, options)
 ```
 
 ---
@@ -332,6 +410,65 @@ async for event in await models.stream(model, context):
 
 ---
 
+## API 注册表（自定义 API 协议）
+
+API 协议实现通过注册表按 `model.api` 分发（对齐 TS `apiProviderRegistry`），新增协议无需改动调度代码：
+
+```python
+from pi_ai import ApiProvider, register_api_provider
+
+register_api_provider(ApiProvider(
+    api="my-api",
+    stream=my_stream,             # (model, context, options) -> EventStream
+    streamSimple=my_stream_simple,
+))
+```
+
+内置注册：`openai-completions`、`openai-responses`、`pi-messages`。
+`pi-messages` 是 pi 自有线协议（`POST {baseUrl}/messages`，SSE 事件流）。
+
+---
+
+## 图片生成（Images）
+
+聊天 Provider 之外有平行的图片生成设施：
+
+```python
+from pi_ai.images import generate_images
+from pi_ai.types import ImagesModel, ImagesContext
+
+model = ImagesModel(id="some-image-model", api="openrouter-images", provider="openrouter")
+result = await generate_images(
+    model,
+    ImagesContext(input=[{"type": "text", "text": "a cat"}]),
+)
+```
+
+- 内置 `openrouter-images` API（走 Chat Completions 的 `modalities: ["image"]` 扩展）；
+- `generate_images` 永不 reject：失败返回 `stop_reason="error"` 的 `AssistantImages`；
+- 顶层入口 `pi_ai.images.generate_images(model, context, options)` 按 `model.api`
+  从图片 API 注册表分发；
+- `pi_ai.images_models` 提供与聊天侧平行的 Provider 集合
+  （`ImagesModels` / `create_images_provider` / `create_images_models`）。
+
+---
+
+## 可观测性（Trace）
+
+`pi_ai.trace` 提供运行时追踪器（类型定义在 `pi_ai.types.trace`）：
+
+```python
+from pi_ai.trace import TraceTracer, run_with_trace
+
+tracer = TraceTracer("my-agent")
+await run_with_trace(tracer, some_async_work())
+# tracer.trace 收集完整 Trace（含嵌套 span）
+```
+
+`trace_id` 可贯穿 `Context` → 请求 → 事件。
+
+---
+
 ## 自定义 Provider
 
 通过 `create_provider()` 可以接入任意兼容 OpenAI Chat Completions API 的服务：
@@ -346,9 +483,9 @@ models.add_provider(
     create_provider(
         id="openrouter",
         name="OpenRouter",
-        api_kind="openai-completions",
+        api_kind="completions",
         base_url="https://openrouter.ai/api/v1",
-        auth=env_api_key_auth("OPENROUTER_API_KEY"),
+        auth=env_api_key_auth("OpenRouter API key", ["OPENROUTER_API_KEY"]),
         models=[
             Model(
                 id="anthropic/claude-sonnet-4",
@@ -366,6 +503,12 @@ models.add_provider(
 model = models.get_model("openrouter", "anthropic/claude-sonnet-4")
 ```
 
+`create_provider` 还支持：
+
+- `stream_fn`：自定义流函数（跳过认证与 API 分发，用于测试）；
+- `fetch_models`：动态模型刷新实现（配合 `Models.refresh()`）；
+- `auth=None`：本地服务（如 Ollama）不需要 API Key。
+
 ---
 
 ## 架构概览
@@ -376,22 +519,24 @@ model = models.get_model("openrouter", "anthropic/claude-sonnet-4")
                   ┌────────┼────────┐
                   ▼                 ▼
            Provider(OpenAI)   Provider(DeepSeek)
-           api_kind=          api_kind=
-           responses          completions
+           api=responses      api=completions
                   │                 │
            resolve_api_key()  resolve_api_key()
                   │                 │
                   ▼                 ▼
+      API 注册表分发（按 model.api）
           responses_stream()  chat_completions_stream()
                   │                 │
                   ▼                 ▼
            AssistantMessageEventStream
 ```
 
-- **`Models`** — 注册表，管理所有 Provider，调度请求
+- **`Models`** — 注册表，管理所有 Provider，调度请求，管理凭证与模型目录
 - **`Provider`** — 封装 provider 配置（base URL、认证、模型列表、API 类型）
+- **`api/`** — 按 API 协议实现（Completions / Responses / pi-messages），经注册表按 `model.api` 分发
 - **`EventStream`** — 基于 `asyncio.Queue` 的生产者-消费者异步事件流
-- **`api/`** — 将不同 API 协议（Completions / Responses）统一转为 SDK 事件
+- **`auth/`** — API Key 凭证 + OAuth（openai-codex / github-copilot / openrouter）
+- **`models/`** — 模型注册表、持久化 ModelsStore、自动生成的模型目录
 
 ### 类型组织（`pi_ai.types`）
 
@@ -419,6 +564,15 @@ pi_ai/types/
 - `ToolCall` 含 `raw_arguments`（流式原始 JSON）与 `arguments`（解析后 dict / None）。
 - `Tool` 支持 `before_execute` / `after_execute` 生命周期钩子（默认 None）。
 - `Context` 可注入 `state` / `memory`（`MemoryStore`）/ `trace_id`。
+
+### 工具函数（`pi_ai.utils`）
+
+- **重试**：`RetryPolicy` / `retry_assistant_call` / `is_retryable_error`
+- **Token / 上下文**：`estimate_*` / `calculate_context_tokens` / `is_context_overflow`
+- **校验**：`validate_tool_arguments` / `validate_tool_call` / `coerce_with_json_schema`
+- **JSON**：`repair_json` / `parse_streaming_json` / `partial_json`
+- **诊断**：`create_assistant_message_diagnostic` / `append_assistant_message_diagnostic`
+- **其它**：`prompt_cache`（提示缓存参数）、`provider_env`、`uuid`（uuidv7）、`http_cache`
 
 ---
 

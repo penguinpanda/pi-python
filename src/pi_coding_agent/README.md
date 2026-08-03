@@ -2,7 +2,8 @@
 
 基于 [pi-mono/packages/coding-agent](https://github.com/earendil-works/pi-mono) 的 Python 最小核心复刻。
 
-在 `pi_agent` + `pi_ai` 之上构建的编码代理 CLI，提供文件读写、搜索、Shell 执行等编码工具。
+在 `pi_agent` + `pi_ai` 之上构建的编码代理 CLI，提供文件读写、搜索、Shell 执行等编码工具，
+JSONL 会话持久化、双层配置、自动上下文压缩与 OAuth 登录。
 
 ---
 
@@ -11,11 +12,13 @@
 ```
 CLI (_cli.py)
   ├─ pi_ai.create_default_models() → Models registry
+  ├─ Models.refresh() → Ollama /api/tags 动态发现
   ├─ pi_agent.set_default_stream_fn(models.stream)
-  ├─ pi_agent.Agent(AgentOptions(system_prompt, model))
+  ├─ pi_agent.Agent(AgentOptions(system_prompt, model, session_id))
   │   └─ Agent.state.tools ← create_all_tools(cwd)
   └─ pi_coding_agent.AgentSession(agent, session_manager, cwd, model)
       ├─ subscribe(agent events) → persistence + forwarding
+      ├─ 自动压缩（溢出恢复 / 阈值）+ turn 级重试
       └─ print_mode.run_print_mode(session, message)
           └─ subscribe → agent_end → extract final assistant text → stdout
 ```
@@ -34,6 +37,8 @@ uv sync
 
 ### 认证
 
+API Key 方式（环境变量）：
+
 ```bash
 # Windows PowerShell
 $env:OPENAI_API_KEY="sk-..."
@@ -42,6 +47,15 @@ $env:DEEPSEEK_API_KEY="sk-..."
 # Linux/macOS
 export OPENAI_API_KEY="sk-..."
 export DEEPSEEK_API_KEY="sk-..."
+```
+
+OAuth 方式（凭证保存到 `~/.pi/agent/auth.json`）：
+
+```bash
+pi login                # 交互选择 provider（openai-codex / github-copilot / openrouter）
+pi login openai-codex   # 指定 provider
+pi logout openai-codex  # 注销
+pi list                 # 查看登录状态
 ```
 
 ### CLI 用法
@@ -56,7 +70,7 @@ uv run python -m pi_coding_agent --model deepseek-v4-flash -p "explain this code
 # 指定 provider
 uv run python -m pi_coding_agent --provider openai --model gpt-4o -p "what is Python?"
 
-# 本地 Ollama（需 Ollama 已运行且模型已 pull）
+# 本地 Ollama（需 Ollama 已运行且模型已 pull；启动时自动 /api/tags 动态发现）
 uv run python -m pi_coding_agent --provider ollama --model qwen3:30b -p "what is Python?"
 
 # Faux Provider（离线验证管道，无脚本化响应时返回错误消息）
@@ -75,6 +89,9 @@ uv run python -m pi_coding_agent --no-session -p "..."
 # 从已有会话继续
 uv run python -m pi_coding_agent --session ~/.pi/agent/sessions/abc123.jsonl -p "continue"
 
+# 继续最近一次会话
+uv run python -m pi_coding_agent -c -p "continue"
+
 # 禁用所有工具
 uv run python -m pi_coding_agent --no-tools -p "what is 2+2?"
 
@@ -92,38 +109,43 @@ uv run python -m pi_coding_agent --version
 ```
 pi [-p] [--model MODEL] [--provider PROVIDER] [--list-models]
    [--system-prompt PROMPT] [--append-system-prompt PROMPT]
-   [--session PATH] [--no-session]
+   [--session PATH] [-c|--continue] [--no-session]
    [--tools WHITELIST] [--exclude-tools BLACKLIST] [--no-tools]
    [--version]
    [message]
+
+pi login [provider] | pi logout <provider> | pi list
 ```
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
-| `-p, --print` | flag | 单次 print 模式（非交互） |
+| `-p, --print` | flag | 单次 print 模式（非交互，有 message 时默认） |
 | `--model` | str | 模型 ID（如 `deepseek-chat`、`gpt-4o`） |
 | `--provider` | str | Provider ID（如 `deepseek`、`openai`、`ollama`、`faux`） |
 | `--list-models` | flag | 列出所有可用模型并退出（可配合 `--provider` 过滤） |
 | `--system-prompt` | str | 覆盖系统提示 |
 | `--append-system-prompt` | str | 追加到系统提示 |
 | `--session` | str | 已有会话 JSONL 文件路径 |
+| `-c, --continue` | flag | 继续最近一次会话（默认会话目录中最新的 `.jsonl`） |
 | `--no-session` | flag | 不持久化会话到磁盘 |
 | `--tools` | str | 工具白名单（未实现） |
 | `--exclude-tools` | str | 工具黑名单（未实现） |
 | `--no-tools` | flag | 禁用所有工具 |
 | `--version` | flag | 打印版本号 `pi 0.1.0 (minimal core)` |
+| `login` / `logout` / `list` | 子命令 | OAuth 登录 / 注销 / 查看登录状态 |
 | `message` | positional | 用户消息（可选，可通过 stdin pipe） |
 
 **模型解析优先级**：CLI 参数 > `settings.json` > 第一个可用模型
 
 **工作流程**：
 
-1. 解析参数 → 确定 `cwd`
+1. 解析参数 → 确定 `cwd`；`login` / `logout` / `list` 子命令在 argparse 之前拦截
 2. `load_settings(cwd)` — 双层合并配置
 3. `create_default_models()` — 创建模型注册表
-4. `set_agent_stream_fn(models.stream)` — 注册全局流函数
-5. 模型解析 → 会话管理（新建/打开/内存） → 创建 Agent + AgentSession
-6. `run_print_mode(session, message)` → 输出最终 assistant 文本 → 返回退出码
+4. `models.refresh()` — 尝试 Ollama `/api/tags` 动态发现（失败保留静态列表）
+5. `set_agent_stream_fn(models.stream)` — 注册全局流函数
+6. 模型解析 → 会话管理（新建/继续/打开/内存） → 创建 Agent + AgentSession
+7. `run_print_mode(session, message)` → 输出最终 assistant 文本 → 返回退出码
 
 ---
 
@@ -217,8 +239,8 @@ async def execute(tool_call_id: str, params: dict, **_kwargs) -> AgentToolResult
 | # | 工具 | LLM 名称 | 关键参数 | 特性 |
 |---|------|----------|----------|------|
 | 1 | **read** | `read` | `path`(必填), `offset`(1-based), `limit`(默认2000) | 行号标头 `[Lines X-Y of Z]`，路径遍历防护 |
-| 2 | **write** | `write` | `path`(必填), `content`(必填) | 自动创建父目录，返回字节数 |
-| 3 | **edit** | `edit` | `path`(必填), `diff`(unified diff, 必填) | 从后往前应用 hunks，手动 difflib 解析 |
+| 2 | **write** | `write` | `path`(必填), `content`(必填) | 自动创建父目录，返回写入字节数 |
+| 3 | **edit** | `edit` | `path`(必填), `diff`(unified diff, 必填) | 应用 unified diff，出错返回错误结果 |
 | 4 | **bash** | `bash` | `command`(必填), `timeout`(默认120s) | 平台感知 shell（win: `cmd /c`，其他: `bash -c`），输出截断 50KB |
 | 5 | **grep** | `grep` | `pattern`(必填, regex), `path`(默认`.`), `include`(glob), `max_results`(默认100) | 输出格式 `file:lineno:line`，自动忽略 `.git/`、`node_modules/` 等 |
 | 6 | **find** | `find` | `pattern`(必填, glob), `path`(默认`.`), `max_results`(默认200) | 支持 `**` 递归，仅文件 |
@@ -242,19 +264,21 @@ async def execute(tool_call_id: str, params: dict, **_kwargs) -> AgentToolResult
 
 ### JSONL 存储格式
 
-会话持久化为 JSONL 文件（`~/.pi/agent/sessions/{session_id}.jsonl`）：
+会话持久化为 JSONL 文件（`~/.pi/agent/sessions/{session_id}.jsonl`，版本 3）：
 
 ```
 {"type":"session","version":3,"id":"abc123...","timestamp":"...","cwd":"/path"}
 {"type":"message","id":"msg1","parentId":null,"timestamp":"...","message":{...}}
 {"type":"message","id":"msg2","parentId":"msg1","timestamp":"...","message":{...}}
+{"type":"compaction","id":"cmp1","parentId":"msg2","timestamp":"...","summary":"...","firstKeptEntryId":"msg1","tokensBefore":12345}
 ```
 
-首行 `SessionHeader` + 后续 `SessionMessageEntry`。
+首行 `SessionHeader` + 后续条目（`SessionMessageEntry` 或 `CompactionEntry`）。
 
 ### 单链表上下文重建
 
-`parentId` 从 root → leaf 形成单链。`build_context()` 从 leaf 回溯再反转，按时间顺序重建消息列表。
+`parentId` 从 root → leaf 形成单链。`build_context()` 从 leaf 回溯再反转，按时间顺序重建消息列表；
+遇到 `compaction` 条目时以 `compactionSummary` 消息替代其覆盖的旧历史，不再继续向下遍历。
 
 ### SessionManager
 
@@ -270,8 +294,9 @@ async def execute(tool_call_id: str, params: dict, **_kwargs) -> AgentToolResult
 | `.cwd` → `str` | 工作目录 |
 | `.is_persisted()` → `bool` | 是否持久化到磁盘 |
 | `await .append_message(msg) → str` | 追加消息 + 写入 JSONL，返回 entryId |
-| `.build_context()` → `list[AgentMessage]` | 沿 parentId 链重建消息 |
-| `.get_entries()` → `list[SessionMessageEntry]` | 返回所有条目 |
+| `await .append_compaction(summary, first_kept_entry_id, tokens_before, details?) → str` | 追加压缩条目 |
+| `.build_context()` → `list[AgentMessage]` | 沿 parentId 链重建消息（遇 compaction 停止回溯） |
+| `.get_entries()` → `list[SessionEntry]` | 返回所有条目（消息 + 压缩） |
 
 ### AgentSession
 
@@ -286,7 +311,9 @@ class AgentSession:
         cwd: str,
         model: Model,
         *,
-        tools_override: list[AgentTool] | None = None,  # 默认 create_all_tools(cwd)
+        tools_override: list[AgentTool] | None = None,   # 默认 create_all_tools(cwd)
+        turn_retry_policy: RetryPolicy | None = None,    # turn 级重试（默认启用，max_retries=3）
+        compaction_settings: CompactionSettings | None = None,  # 自动压缩设置（默认启用）
     )
 
     async def prompt(self, text: str) -> None
@@ -297,7 +324,19 @@ class AgentSession:
     async def dispose(self) -> None
 ```
 
-**事件桥接**：`AgentSession` 监听 agent 的 `message_end` 事件 → 自动 `session_manager.append_message(msg)`，同时转发给外部监听器。
+**事件桥接**：`AgentSession` 监听 agent 的 `message_end` 事件 → 自动 `session_manager.append_message(msg)`，
+同时转发给外部监听器（后台写入，`dispose()` 等待写完成）。
+
+**自动压缩**（`_check_compaction`，对齐 TS）：
+
+- Case 1（上下文溢出 `is_context_overflow`）：未完成响应（error）→ 移除错误消息 + 压缩 + 自动重试；
+  已完成响应（stop）→ 只压缩不重试；
+- Case 2（阈值 `should_compact`）：命中阈值 → 压缩（不重试）；
+- 压缩使用独立 LLM 调用生成摘要（缓存隔离），结果写入 `compaction` 条目并重建 agent 上下文；
+- 会话级事件：`compaction_start` / `compaction_end` 转发给外部监听器。
+
+**turn 级重试**：Agent 内部重试耗尽后，若本轮仍以可重试错误结束，自动移除错误消息并用
+`continue_()` 恢复状态机重跑（错误消息保留在 JSONL 历史中）。
 
 ---
 
@@ -333,6 +372,8 @@ class AgentSession:
 | `get_sessions_dir()` | `~/.pi/agent/sessions/` |
 | `get_settings_path()` | `~/.pi/agent/settings.json` |
 | `get_project_settings_path(cwd)` | `<cwd>/.pi/settings.json` |
+
+OAuth 凭证保存在 `~/.pi/agent/auth.json`（`pi login` / `logout` 管理）。
 
 ---
 
