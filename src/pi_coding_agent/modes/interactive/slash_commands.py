@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,6 +39,7 @@ class SlashContext:
         new_session: Callable[[], None] | None = None,
         open_model_selector: Callable[[], None] | None = None,
         copy_to_clipboard: Callable[[str], None] | None = None,
+        rebuild_session=None,
     ) -> None:
         self.session = session
         self.model_runtime = model_runtime
@@ -48,6 +50,8 @@ class SlashContext:
         self._new_session = new_session
         self._open_model_selector = open_model_selector
         self._copy_to_clipboard = copy_to_clipboard or (lambda _text: None)
+        # 会话重建：fork / clone / resume / import 用（宿主注入）。
+        self.rebuild_session = rebuild_session
 
     def notify(self, message: str) -> None:
         self._notify(message)
@@ -66,6 +70,18 @@ class SlashContext:
 
     def copy_to_clipboard(self, text: str) -> None:
         self._copy_to_clipboard(text)
+
+    @property
+    def auth_store(self):
+        runtime = self.model_runtime
+        return getattr(runtime, "auth_store", None) if runtime is not None else None
+
+    async def rebuild(self, manager):
+        """重建并替换会话（返回新 AgentSession）。"""
+        if self.rebuild_session is None:
+            raise RuntimeError("Session rebuild is not available in this mode")
+        result = self.rebuild_session(manager)
+        return await result if inspect.isawaitable(result) else result
 
 
 # ---------------------------------------------------------------------------
@@ -106,10 +122,7 @@ class SlashCommandRegistry:
         stripped = text.strip()
         if not stripped.startswith("/"):
             return None, ""
-        try:
-            parts = shlex.split(stripped[1:])
-        except ValueError:
-            parts = stripped[1:].split()
+        parts = _split_args(stripped[1:])
         if not parts:
             return "", ""
         return parts[0], " ".join(parts[1:])
@@ -230,11 +243,187 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
         path = export_session_to_html(context.session.session_manager, output)
         return f"Exported session to {path}"
 
-    def _not_implemented(name: str) -> Callable[[SlashContext, str], str]:
-        async def _handler(_context: SlashContext, _args: str) -> str:
-            return f"/{name} is not implemented yet"
+    async def _tree(context: SlashContext, args: str) -> str:
+        manager = context.session.session_manager
+        target = args.strip()
+        if target:
+            if manager.get_entry(target) is None:
+                return f"Entry not found: {target}"
+            await context.session.navigate_to(target)
+            return f"Navigated to {target}"
+        lines = _format_tree(manager.get_tree(), manager.get_leaf_id())
+        return "\n".join(lines) if lines else "(empty session)"
 
-        return _handler
+    async def _fork(context: SlashContext, args: str) -> str:
+        entry_id = args.strip()
+        if not entry_id:
+            return "Usage: /fork <entryId>"
+        manager = context.session.session_manager
+        if manager.get_entry(entry_id) is None:
+            return f"Entry not found: {entry_id}"
+        forked = manager.fork(entry_id)
+        new_session = await context.rebuild(forked)
+        context.session = new_session
+        return f"Forked at {entry_id} (session {new_session.session_id})"
+
+    async def _clone(context: SlashContext, _args: str) -> str:
+        leaf_id = context.session.session_manager.get_leaf_id()
+        if leaf_id is None:
+            return "No current entry to clone"
+        forked = context.session.session_manager.fork(leaf_id)
+        new_session = await context.rebuild(forked)
+        context.session = new_session
+        return f"Cloned to session {new_session.session_id}"
+
+    async def _settings(context: SlashContext, args: str) -> str:
+        import json
+
+        from ..._config import (
+            _deep_merge,
+            _load_json,
+            get_project_settings_path,
+            get_settings_path,
+            load_settings,
+        )
+
+        cwd = context.session.cwd
+        arg = args.strip()
+        if arg:
+            if "=" not in arg:
+                return "Usage: /settings [key=value]"
+            key, value = arg.split("=", 1)
+            try:
+                parsed = json.loads(value.strip())
+            except ValueError:
+                parsed = value.strip()
+            path = get_project_settings_path(cwd)
+            data = _load_json(path)
+            data[key.strip()] = parsed
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            return f"Saved {key.strip()} = {parsed} to {path}"
+        merged = load_settings(cwd)
+        return (
+            f"Settings (global: {get_settings_path()}, project: {get_project_settings_path(cwd)}):\n"
+            + json.dumps(merged, ensure_ascii=False, indent=2)
+        )
+
+    async def _scoped_models(context: SlashContext, args: str) -> str:
+        args_str = args.strip()
+        if args_str == "clear":
+            context.session.set_scoped_models([])
+            return "Scoped models cleared (all available are usable)"
+        if not args_str:
+            scoped = context.session.scoped_models
+            if not scoped:
+                return "No scoped models (all available are usable)"
+            return "Scoped models:\n" + "\n".join(
+                f"  {entry.model.provider}/{entry.model.id}" for entry in scoped
+            )
+        from ...model_resolver import resolve_model_scope
+
+        patterns = shlex.split(args_str)
+        scoped = await resolve_model_scope(patterns, context.model_runtime)
+        context.session.set_scoped_models(scoped)
+        return f"Scoped {len(scoped)} models"
+
+    async def _login(context: SlashContext, args: str) -> str:
+        from pi_ai.auth.oauth import builtin_oauth_providers
+
+        providers = builtin_oauth_providers()
+        available = ", ".join(provider_id for provider_id, _name, _flow in providers)
+        provider_id = args.strip() or None
+        if provider_id is None:
+            return f"Usage: /login <provider>. Available: {available}"
+        match = next(
+            (provider for provider in providers if provider[0] == provider_id), None
+        )
+        if match is None:
+            return f"Unknown provider: {provider_id}. Available: {available}"
+        _pid, _name, flow = match
+        if context.auth_store is None:
+            return "Auth store not available"
+        try:
+            credential = await flow.login(_TerminalAuthInteraction())
+        except Exception as exc:
+            return f"Login failed: {exc}"
+        async def _set(_current):
+            return credential
+
+        await context.auth_store.modify(_pid, _set)
+        return f"Logged in: {_name} ({_pid})"
+
+    async def _logout(context: SlashContext, args: str) -> str:
+        provider_id = args.strip()
+        if not provider_id:
+            return "Usage: /logout <provider>"
+        await context.model_runtime.logout(provider_id)
+        return f"Logged out: {provider_id}"
+
+    async def _share(context: SlashContext, _args: str) -> str:
+        import os
+
+        import httpx
+
+        token = os.environ.get("GITHUB_TOKEN")
+        if not token:
+            return "No GITHUB_TOKEN environment variable set"
+        text = _session_to_markdown(context.session)
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(
+                    "https://api.github.com/gists",
+                    headers={
+                        "Authorization": f"token {token}",
+                        "X-GitHub-Api-Version": "2022-11-28",
+                    },
+                    json={
+                        "description": f"pi session {context.session.session_id}",
+                        "public": False,
+                        "files": {
+                            f"session-{context.session.session_id}.md": {
+                                "content": text
+                            }
+                        },
+                    },
+                )
+        except Exception as exc:
+            return f"Failed to share: {exc}"
+        if response.status_code >= 300:
+            return f"Failed to share: HTTP {response.status_code}"
+        return f"Shared: {response.json().get('html_url')}"
+
+    async def _import_session(context: SlashContext, args: str) -> str:
+        path = args.strip()
+        if not path:
+            return "Usage: /import <session.jsonl>"
+        from ..._session_manager import SessionManager
+
+        manager = SessionManager.open(path, cwd_override=context.session.cwd)
+        new_session = await context.rebuild(manager)
+        context.session = new_session
+        return f"Imported {manager.session_id} ({len(manager.get_entries())} entries)"
+
+    async def _resume(context: SlashContext, args: str) -> str:
+        from ..._config import get_sessions_dir
+        from ..._session_manager import SessionManager
+
+        path = args.strip()
+        if path:
+            manager = SessionManager.open(path, cwd_override=context.session.cwd)
+            new_session = await context.rebuild(manager)
+            context.session = new_session
+            return f"Resumed {new_session.session_id}"
+        infos = SessionManager.list_sessions(get_sessions_dir())
+        if not infos:
+            return "No saved sessions"
+        lines = ["Saved sessions (use /resume <path>):"]
+        for info in infos[:10]:
+            lines.append(f"  {info.path}  ({info.session_id})")
+        return "\n".join(lines)
 
     builtins: list[tuple[str, Callable, str, str | None]] = [
         ("model", _model, "Select model (opens selector UI)", "<provider/model>"),
@@ -248,19 +437,107 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
         ("reload", _reload, "Reload keybindings, skills, prompts, and themes", ""),
         ("copy", _copy, "Copy last agent message to clipboard", ""),
         ("export", _export, "Export session (HTML/JSONL)", "[path]"),
-        ("tree", _not_implemented("tree"), "Navigate session tree", ""),
-        ("fork", _not_implemented("fork"), "Create a new fork from a previous message", ""),
-        ("clone", _not_implemented("clone"), "Duplicate the current session", ""),
-        ("settings", _not_implemented("settings"), "Open settings menu", ""),
-        ("scoped-models", _not_implemented("scoped-models"), "Enable/disable models for Ctrl+P cycling", ""),
-        ("login", _not_implemented("login"), "Configure provider authentication", "<provider>"),
-        ("logout", _not_implemented("logout"), "Remove provider authentication", ""),
-        ("share", _not_implemented("share"), "Share session as a secret GitHub gist", ""),
-        ("import", _not_implemented("import"), "Import and resume a session from a JSONL file", ""),
-        ("resume", _not_implemented("resume"), "Resume a different session", ""),
+        ("tree", _tree, "Navigate session tree", "<entryId>"),
+        ("fork", _fork, "Create a new fork from a previous message", "<entryId>"),
+        ("clone", _clone, "Duplicate the current session", ""),
+        ("settings", _settings, "Show or edit settings", "[key=value]"),
+        ("scoped-models", _scoped_models, "Enable/disable models for Ctrl+P cycling", "[pattern...]"),
+        ("login", _login, "Configure provider authentication", "<provider>"),
+        ("logout", _logout, "Remove provider authentication", "<provider>"),
+        ("share", _share, "Share session as a secret GitHub gist", ""),
+        ("import", _import_session, "Import and resume a session from a JSONL file", "<path>"),
+        ("resume", _resume, "Resume a different session", "[path]"),
     ]
     for name, handler, description, hint in builtins:
         registry.register(name, handler, description=description, argument_hint=hint)
+
+
+def _format_tree(nodes, leaf_id: str | None, depth: int = 0) -> list[str]:
+    """把会话树渲染为缩进文本（leaf 标记 >）。"""
+    lines: list[str] = []
+    for node in nodes:
+        marker = ">" if node.id == leaf_id else " "
+        label = f" [{node.label}]" if node.label else ""
+        entry_type = node.entry.get("type", "?") if node.entry is not None else "?"
+        lines.append(f"{'  ' * depth}{marker} {node.id[:8]} {entry_type}{label}")
+        lines.extend(_format_tree(node.children, leaf_id, depth + 1))
+    return lines
+
+
+def _split_args(args_string: str) -> list[str]:
+    """切分参数：支持引号；保留反斜杠（Windows 路径不被转义破坏）。"""
+    args: list[str] = []
+    current = ""
+    in_quote: str | None = None
+    for char in args_string:
+        if in_quote is not None:
+            if char == in_quote:
+                in_quote = None
+            else:
+                current += char
+        elif char in ('"', "'"):
+            in_quote = char
+        elif char.isspace():
+            if current:
+                args.append(current)
+                current = ""
+        else:
+            current += char
+    if current:
+        args.append(current)
+    return args
+
+
+def _session_to_markdown(session) -> str:
+    """把会话分支渲染为 Markdown（/share 用）。"""
+    lines: list[str] = [f"# pi session {session.session_id}", ""]
+    for entry in session.session_manager.get_branch():
+        if entry.get("type") != "message":
+            continue
+        message = entry.get("message") or {}
+        role = message.get("role", "agent")
+        content = message.get("content")
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            text = "\n".join(
+                block.get("text", "")
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
+        else:
+            text = ""
+        if text:
+            lines.append(f"**{role}**: {text}")
+            lines.append("")
+    return "\n".join(lines)
+
+
+class _TerminalAuthInteraction:
+    """OAuth 登录的终端交互适配。"""
+
+    signal = None
+
+    async def prompt(self, prompt) -> str:
+        if prompt.get("type") == "select":
+            options = prompt.get("options") or []
+            for index, option in enumerate(options, 1):
+                print(f"  {index}. {option.get('label', '')}")
+            while True:
+                raw = input(f"Enter number (1-{len(options)}): ").strip()
+                try:
+                    return options[int(raw) - 1]["id"]
+                except (ValueError, IndexError):
+                    print("Invalid selection.")
+        return input(f"{prompt.get('message', '')}: ")
+
+    def notify(self, event) -> None:
+        if event.get("type") == "auth_url":
+            print(f"\nOpen this URL in your browser:\n{event['url']}")
+        elif event.get("type") == "device_code":
+            print(f"\nOpen {event.get('verificationUri', '')} and enter: {event.get('userCode', '')}")
+        elif event.get("message"):
+            print(event["message"])
 
 
 __all__ = [

@@ -59,6 +59,25 @@ def _make_session(runtime: ModelRuntime, tmp_path: Path) -> AgentSession:
     )
 
 
+def _make_session_with_manager(
+    runtime: ModelRuntime, manager, tmp_path: Path
+) -> AgentSession:
+    model = runtime.get_model("faux", "faux-1")
+    assert model is not None
+    agent = Agent(AgentOptions(
+        system_prompt="You are a helpful coding assistant.",
+        model=model,
+        stream_fn=runtime.stream,
+    ))
+    return AgentSession(
+        agent=agent,
+        session_manager=manager,
+        cwd=str(tmp_path),
+        model=model,
+        model_runtime=runtime,
+    )
+
+
 async def _wait_until(
     condition,
     timeout: float = 5.0,
@@ -222,3 +241,52 @@ async def test_new_session_factory(tmp_path):
         app.action_new_session()
         await _wait_until(lambda: app._session is not original)
         assert app._session.session_id != original.session_id
+
+
+@pytest.mark.asyncio
+async def test_slash_tree_in_app(tmp_path):
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    from pi_ai._types import UserMessage
+
+    entry_id = await session.session_manager.append_message(
+        UserMessage(role="user", content="hi")
+    )
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "/tree"))
+        await _wait_until(
+            lambda: "message" in str(app._status.content),
+            pilot=pilot,
+            message="tree rendered in status",
+        )
+        assert entry_id[:8] in str(app._status.content)
+
+
+@pytest.mark.asyncio
+async def test_slash_fork_in_app(tmp_path):
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    from pi_ai._types import UserMessage
+
+    e1 = await session.session_manager.append_message(
+        UserMessage(role="user", content="a")
+    )
+    await session.session_manager.append_message(
+        UserMessage(role="user", content="b")
+    )
+
+    def rebuilder(manager):
+        return _make_session_with_manager(runtime, manager, tmp_path)
+
+    app = PiTuiApp(session, runtime, session_rebuilder=rebuilder)
+    async with app.run_test() as pilot:
+        app.on_pi_editor_submitted(
+            PiEditor.Submitted(app._editor, f"/fork {e1}")
+        )
+        await _wait_until(
+            lambda: app._session is not session,
+            pilot=pilot,
+            message="session replaced after fork",
+        )
+        assert app._session.session_manager.get_leaf_id() == e1

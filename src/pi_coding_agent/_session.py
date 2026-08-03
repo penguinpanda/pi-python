@@ -250,6 +250,14 @@ class AgentSession:
             return self._model_runtime.get_available_snapshot()
         return []
 
+    @property
+    def scoped_models(self) -> list[ScopedModel]:
+        return list(self._scoped_models)
+
+    def set_scoped_models(self, scoped_models: list[ScopedModel]) -> None:
+        """设置 Ctrl+P 循环的 scope 列表（空 = 全部可用）。"""
+        self._scoped_models = list(scoped_models)
+
     def steer(self, text: str) -> None:
         """入队一条 steering 消息（Agent 运行中注入）。"""
         self._agent.steer(UserMessage(role="user", content=text))

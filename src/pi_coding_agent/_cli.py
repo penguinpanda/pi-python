@@ -214,6 +214,7 @@ async def _async_main(args: list[str] | None = None) -> int:
             runtime,
             session_factory=session_factory,
             resume_factory=resume_factory,
+            session_rebuilder=rebuilder,
             settings=settings,
         )
 

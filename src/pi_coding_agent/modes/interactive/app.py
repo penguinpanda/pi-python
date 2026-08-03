@@ -119,6 +119,7 @@ class PiTuiApp(App):
         theme_name: str | None = "auto",
         session_factory: Callable[[], AgentSession] | None = None,
         resume_factory: Callable[[str], AgentSession] | None = None,
+        session_rebuilder=None,
         settings: dict | None = None,
     ) -> None:
         self._keybindings = keybindings_manager or KeybindingsManager()
@@ -139,6 +140,7 @@ class PiTuiApp(App):
         self._model_runtime = model_runtime
         self._session_factory = session_factory
         self._resume_factory = resume_factory
+        self._session_rebuilder = session_rebuilder
         self._unsubscribe: Callable[[], None] | None = None
         self._show_tools = True
         self._show_thinking = True
@@ -164,6 +166,7 @@ class PiTuiApp(App):
             open_model_selector=self._open_model_selector,
             copy_to_clipboard=_copy_text,
         )
+        self._slash_context.rebuild_session = self._apply_rebuilt_session
 
     # ------------------------------------------------------------------
     # 生命周期
@@ -416,6 +419,25 @@ class PiTuiApp(App):
         self._chat.clear_messages()
         self._update_footer()
         self._set_status("New session")
+
+    async def _apply_rebuilt_session(self, manager):
+        """按给定 SessionManager 重建会话并替换（fork/clone/resume/import 用）。"""
+        if self._session_rebuilder is None:
+            raise RuntimeError("Session rebuild is not available")
+        result = self._session_rebuilder(manager)
+        new_session = await result if inspect.isawaitable(result) else result
+        await self._replace_session(new_session)
+        return new_session
+
+    async def _replace_session(self, new_session: AgentSession) -> None:
+        self._session = new_session
+        self._slash_context.session = new_session
+        self._bind_session()
+        self._chat.clear_messages()
+        for message in new_session.get_messages():
+            self._chat.add_message_agent(message)
+        self._update_footer()
+        self._set_status(f"Session {new_session.session_id}")
 
     def action_resume_session(self) -> None:
         self._run_task(self._resume_session())

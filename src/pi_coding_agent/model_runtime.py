@@ -509,6 +509,10 @@ class ModelRuntime:
 
         self.rebuild_providers()
 
+    @property
+    def auth_store(self) -> AuthStorage:
+        return self._auth_store
+
     # ------------------------------------------------------------------
     # 工厂
     # ------------------------------------------------------------------
