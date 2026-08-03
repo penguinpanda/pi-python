@@ -59,7 +59,7 @@ class ModelChangeEntry(TypedDict):
     parentId: str | None
     timestamp: str
     provider: str
-    model_id: str
+    modelId: str
 
 
 class ThinkingLevelChangeEntry(TypedDict):
@@ -68,7 +68,79 @@ class ThinkingLevelChangeEntry(TypedDict):
     id: str
     parentId: str | None
     timestamp: str
-    thinking_level: str
+    thinkingLevel: str
+
+
+class BranchSummaryEntry(TypedDict, total=False):
+    """JSONL 分支摘要条目 —— 记录跨分支导航的上下文摘要。"""
+    type: Literal["branch_summary"]
+    id: str
+    parentId: str | None
+    timestamp: str
+    fromId: str
+    summary: str
+    details: object
+    usage: object
+    fromHook: bool
+
+
+class LabelEntry(TypedDict):
+    """JSONL 标签条目 —— 指向被标记的条目。"""
+    type: Literal["label"]
+    id: str
+    parentId: str | None
+    timestamp: str
+    targetId: str
+    label: str | None
+
+
+class SessionInfoEntry(TypedDict, total=False):
+    """JSONL 会话信息条目（名称等）。"""
+    type: Literal["session_info"]
+    id: str
+    parentId: str | None
+    timestamp: str
+    name: str
+
+
+class CustomEntry(TypedDict, total=False):
+    """JSONL 自定义条目 —— 状态持久化，不进入 LLM 上下文。"""
+    type: Literal["custom"]
+    id: str
+    parentId: str | None
+    timestamp: str
+    customType: str
+    data: object
+
+
+class CustomMessageEntry(TypedDict, total=False):
+    """JSONL 自定义消息条目。"""
+    type: Literal["custom_message"]
+    id: str
+    parentId: str | None
+    timestamp: str
+    customType: str
+    content: object
+    display: bool
+    details: object
+
+
+class LeafEntry(TypedDict):
+    """JSONL leaf 指针条目 —— 持久化当前分支叶节点。"""
+    type: Literal["leaf"]
+    id: str
+    parentId: str | None
+    timestamp: str
+    targetId: str | None
+
+
+class ActiveToolsChangeEntry(TypedDict):
+    """JSONL 工具集变更条目。"""
+    type: Literal["active_tools_change"]
+    id: str
+    parentId: str | None
+    timestamp: str
+    activeToolNames: list[str]
 
 
 # 会话条目联合（消息 + 压缩 + 模型/思考级别变更）。
@@ -77,6 +149,13 @@ SessionEntry = (
     | CompactionEntry
     | ModelChangeEntry
     | ThinkingLevelChangeEntry
+    | BranchSummaryEntry
+    | LabelEntry
+    | SessionInfoEntry
+    | CustomEntry
+    | CustomMessageEntry
+    | LeafEntry
+    | ActiveToolsChangeEntry
 )
 
 

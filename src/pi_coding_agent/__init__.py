@@ -16,7 +16,7 @@ pi-coding-agent  最小核心 CLI 编码代理
 
 from ._session import AgentSession
 from ._types import AgentSessionConfig, PrintModeOptions
-from ._session_manager import SessionManager
+from ._session_manager import SessionInfo, SessionManager, SessionTreeNode
 from ._cli import main
 from ._print_mode import run_print_mode
 from ._config import get_agent_dir, get_sessions_dir, load_settings
@@ -37,6 +37,17 @@ from .extensions import (
     ToolDefinition,
     UIContext,
 )
+from .export_html import export_session_to_html
+from .file_processor import process_at_files
+from .first_time_setup import run_first_time_setup, run_first_time_setup_sync
+from .operations import (
+    LocalOperations,
+    OutputAccumulator,
+    filter_tools_by_names,
+    run_tool_with_updates,
+    wrap_tool,
+)
+from .trust import TrustManager, project_has_local_resources, resolve_project_trusted
 from .auth_storage import AuthStorage, FileAuthStorageBackend
 from .model_config import ModelConfig, ModelOverride, ProviderOverride
 from .model_registry import ModelRegistry
@@ -78,6 +89,8 @@ __all__ = [
     "AgentSessionConfig",
     "PrintModeOptions",
     "SessionManager",
+    "SessionTreeNode",
+    "SessionInfo",
     # Modes
     "main",
     "run_print_mode",
@@ -138,6 +151,19 @@ __all__ = [
     "UIContext",
     "NoopUIContext",
     "EventBus",
+    # Infrastructure (Phase 7)
+    "export_session_to_html",
+    "TrustManager",
+    "project_has_local_resources",
+    "resolve_project_trusted",
+    "process_at_files",
+    "LocalOperations",
+    "wrap_tool",
+    "filter_tools_by_names",
+    "OutputAccumulator",
+    "run_tool_with_updates",
+    "run_first_time_setup",
+    "run_first_time_setup_sync",
     # Tools
     "create_all_tools",
     "create_coding_tools",

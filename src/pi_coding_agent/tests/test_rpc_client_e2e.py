@@ -91,9 +91,11 @@ async def test_rpc_roundtrip(tmp_path):
         assert state["sessionId"] != session_id
         assert state["messageCount"] == 0
 
-        # 未实现命令 → 客户端抛错
-        with pytest.raises(RuntimeError, match="not implemented"):
-            await client.export_html()
+        # export_html 导出独立 HTML 文件。
+        export_path = str(tmp_path / "exported.html")
+        result = await client.export_html(export_path)
+        assert result["path"] == export_path
+        assert (tmp_path / "exported.html").exists()
     finally:
         await client.stop()
 

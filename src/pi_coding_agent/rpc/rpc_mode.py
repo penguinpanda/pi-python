@@ -26,6 +26,36 @@ from .jsonl import serialize_json_line
 from .rpc_types import error_response, success_response
 
 
+def _content_text(content) -> str:
+    """内容块 → 纯文本（fork 消息 / 树条目用）。"""
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    return "".join(
+        block.get("text", "")
+        for block in content
+        if isinstance(block, dict) and block.get("type") == "text"
+    )
+
+
+def _entry_text(entry: dict) -> str:
+    if entry.get("type") != "message":
+        return ""
+    message = entry.get("message") or {}
+    return _content_text(message.get("content"))
+
+
+def _tree_node_to_dict(node) -> dict:
+    return {
+        "id": node.id,
+        "parentId": node.parent_id,
+        "entry": node.entry,
+        "label": node.label,
+        "children": [_tree_node_to_dict(child) for child in node.children],
+    }
+
+
 # ---------------------------------------------------------------------------
 # 扩展 UI 上下文（2.2）
 # ---------------------------------------------------------------------------
@@ -185,12 +215,15 @@ class RpcMessageHandler:
         *,
         ui_context: RpcUiContext | None = None,
         session_factory: Callable[[], AgentSession] | None = None,
+        session_rebuilder=None,
     ) -> None:
         self.session = session
         self.model_runtime = model_runtime
         self.ui_context = ui_context or RpcUiContext(emit=lambda _obj: None)
         # new_session 用：创建全新 AgentSession 的工厂（含新 SessionManager/Agent）。
         self.session_factory = session_factory
+        # fork/clone/switch_session 用：按给定 SessionManager 重建 AgentSession。
+        self.session_rebuilder = session_rebuilder
         self.created_sessions: list[AgentSession] = []
         # 后台 prompt 任务（命令循环不阻塞）。
         self._prompt_tasks: set[asyncio.Task] = set()
@@ -218,11 +251,11 @@ class RpcMessageHandler:
             "abort_bash": self._handle_abort_bash,
             "get_session_stats": self._handle_get_session_stats,
             "export_html": self._handle_export_html,
-            "switch_session": self._handle_not_implemented,
-            "fork": self._handle_not_implemented,
-            "clone": self._handle_not_implemented,
-            "get_fork_messages": self._handle_not_implemented,
-            "get_tree": self._handle_not_implemented,
+            "switch_session": self._handle_switch_session,
+            "fork": self._handle_fork,
+            "clone": self._handle_clone,
+            "get_fork_messages": self._handle_get_fork_messages,
+            "get_tree": self._handle_get_tree,
             "get_entries": self._handle_get_entries,
             "get_last_assistant_text": self._handle_get_last_assistant_text,
             "set_session_name": self._handle_set_session_name,
@@ -482,18 +515,104 @@ class RpcMessageHandler:
             command_id, "get_session_stats", self.session.get_session_stats()
         )
 
-    async def _handle_export_html(self, _cmd: dict, command_id: str | None) -> dict:
-        return error_response(
-            command_id, "export_html", "export_html is not implemented yet (Phase 7)"
+    async def _handle_export_html(self, cmd: dict, command_id: str | None) -> dict:
+        from pathlib import Path
+
+        from ..export_html import export_session_to_html
+
+        output_path = cmd.get("outputPath")
+        if not isinstance(output_path, str) or not output_path:
+            output_path = str(
+                Path(self.session.cwd) / f"session-{self.session.session_id}.html"
+            )
+        try:
+            path = export_session_to_html(
+                self.session.session_manager,
+                output_path,
+                system_prompt=self.session._agent.state.system_prompt,
+            )
+        except Exception as exc:
+            return error_response(command_id, "export_html", str(exc))
+        return success_response(command_id, "export_html", {"path": str(path)})
+
+    async def _rebuild_session(self, manager) -> AgentSession:
+        if self.session_rebuilder is None:
+            raise RuntimeError("Session rebuilder not configured")
+        result = self.session_rebuilder(manager)
+        return await result if inspect.isawaitable(result) else result
+
+    async def _handle_fork(self, cmd: dict, command_id: str | None) -> dict:
+        entry_id = cmd.get("entryId")
+        if not isinstance(entry_id, str):
+            return error_response(command_id, "fork", "entryId is required")
+        manager = self.session.session_manager
+        target = manager.get_entry(entry_id)
+        if target is None:
+            return error_response(command_id, "fork", f"Entry not found: {entry_id}")
+        forked = manager.fork(entry_id)
+        try:
+            new_session = await self._rebuild_session(forked)
+        except Exception as exc:
+            return error_response(command_id, "fork", str(exc))
+        self.created_sessions.append(new_session)
+        self.session = new_session
+        return success_response(
+            command_id,
+            "fork",
+            {"text": _entry_text(target), "cancelled": False},
         )
 
-    async def _handle_not_implemented(self, cmd: dict, command_id: str | None) -> dict:
-        command_type = cmd.get("type", "command")
-        return error_response(
+    async def _handle_clone(self, _cmd: dict, command_id: str | None) -> dict:
+        leaf_id = self.session.session_manager.get_leaf_id()
+        if leaf_id is None:
+            return error_response(command_id, "clone", "Cannot clone session: no current entry selected")
+        forked = self.session.session_manager.fork(leaf_id)
+        try:
+            new_session = await self._rebuild_session(forked)
+        except Exception as exc:
+            return error_response(command_id, "clone", str(exc))
+        self.created_sessions.append(new_session)
+        self.session = new_session
+        return success_response(command_id, "clone", {"cancelled": False})
+
+    async def _handle_switch_session(self, cmd: dict, command_id: str | None) -> dict:
+        session_path = cmd.get("sessionPath")
+        if not isinstance(session_path, str):
+            return error_response(command_id, "switch_session", "sessionPath is required")
+        try:
+            manager = self.session.session_manager.open(
+                session_path, cwd_override=self.session.cwd
+            )
+            new_session = await self._rebuild_session(manager)
+        except Exception as exc:
+            return error_response(command_id, "switch_session", str(exc))
+        self.created_sessions.append(new_session)
+        self.session = new_session
+        return success_response(command_id, "switch_session", {"cancelled": False})
+
+    async def _handle_get_tree(self, _cmd: dict, command_id: str | None) -> dict:
+        manager = self.session.session_manager
+        return success_response(
             command_id,
-            command_type,
-            f"{command_type} is not implemented yet (Phase 6 session DAG)",
+            "get_tree",
+            {
+                "tree": [_tree_node_to_dict(node) for node in manager.get_tree()],
+                "leafId": manager.get_leaf_id(),
+            },
         )
+
+    async def _handle_get_fork_messages(self, _cmd: dict, command_id: str | None) -> dict:
+        messages = []
+        for entry in self.session.session_manager.get_branch():
+            if entry.get("type") != "message":
+                continue
+            message = entry.get("message") or {}
+            if message.get("role") != "user":
+                continue
+            text = _content_text(message.get("content"))
+            if text:
+                messages.append({"entryId": entry.get("id"), "text": text})
+        return success_response(command_id, "get_fork_messages", {"messages": messages})
 
     async def _handle_get_entries(self, cmd: dict, command_id: str | None) -> dict:
         session_manager = self.session.session_manager
@@ -583,6 +702,7 @@ async def run_rpc_mode(
     model_runtime: ModelRuntime,
     *,
     session_factory: Callable[[], AgentSession] | None = None,
+    session_rebuilder=None,
     stdin=None,
     stdout=None,
 ) -> int:
@@ -595,7 +715,12 @@ async def run_rpc_mode(
     stdin_stream = stdin if stdin is not None else sys.stdin.buffer
     stdout_stream = stdout if stdout is not None else sys.stdout.buffer
 
-    handler = RpcMessageHandler(session, model_runtime, session_factory=session_factory)
+    handler = RpcMessageHandler(
+        session,
+        model_runtime,
+        session_factory=session_factory,
+        session_rebuilder=session_rebuilder,
+    )
     write_queue: asyncio.Queue[bytes] = asyncio.Queue()
 
     def output(obj: dict) -> None:

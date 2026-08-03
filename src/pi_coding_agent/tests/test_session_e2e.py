@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,7 @@ from pi_ai.providers.faux import (
 )
 
 from pi_coding_agent._print_mode import run_print_mode
+from pi_coding_agent._print_mode import run_print_mode_json
 from pi_coding_agent._session import AgentSession
 from pi_coding_agent._session_manager import SessionManager
 from pi_coding_agent.tools._read import create_read_tool
@@ -233,3 +235,22 @@ class TestPrintMode:
 
         capsys.readouterr()
         assert code == 1
+
+    async def test_json_print_mode(self, faux_env, tmp_path, capsys):
+        models, core = faux_env
+        core.set_responses([faux_assistant_message("json reply")])
+
+        mgr = SessionManager.in_memory(cwd=str(tmp_path))
+        session = _make_session(models, mgr, tmp_path)
+
+        code = await run_print_mode_json(session, "hi")
+
+        out = capsys.readouterr().out
+        lines = [line for line in out.splitlines() if line.strip()]
+        assert code == 0
+        assert len(lines) >= 2
+        last = json.loads(lines[-1])
+        assert last["type"] == "done"
+        assert any(
+            message.get("role") == "assistant" for message in last["messages"]
+        )

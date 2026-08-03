@@ -8,15 +8,17 @@ Print 模式 — 单次问答，输出 assistant 最终回复到 stdout。
 
 from __future__ import annotations
 
+import json
 import sys
 
 from pi_agent import AgentEvent
-from pi_ai import TextContent
 
 from ._session import AgentSession
 
 
-async def run_print_mode(session: AgentSession, message: str) -> int:
+async def run_print_mode(
+    session: AgentSession, message: str, images: list | None = None
+) -> int:
     """运行 Print 模式：发送消息 → 等待完成 → 提取文本 → 输出到 stdout。
 
     Returns:
@@ -51,7 +53,7 @@ async def run_print_mode(session: AgentSession, message: str) -> int:
     unsub = session.subscribe(on_event)
 
     try:
-        await session.prompt(message)
+        await session.prompt(message, images)
         await session.wait_for_idle()
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -65,3 +67,40 @@ async def run_print_mode(session: AgentSession, message: str) -> int:
     if has_error:
         return 1
     return 0
+
+
+async def run_print_mode_json(
+    session: AgentSession, message: str, images: list | None = None
+) -> int:
+    """Print 模式 JSON Lines 输出：逐条 agent 事件 + 结束摘要。"""
+    has_error = False
+
+    def on_event(event: AgentEvent) -> None:
+        print(json.dumps(event, ensure_ascii=False, default=str), flush=True)
+
+    unsub = session.subscribe(on_event)
+    try:
+        await session.prompt(message, images)
+        await session.wait_for_idle()
+    except Exception as exc:
+        print(json.dumps({"type": "error", "error": str(exc)}, ensure_ascii=False), flush=True)
+        return 1
+    finally:
+        unsub()
+        await session.dispose()
+
+    messages = session.get_messages()
+    for msg in reversed(messages):
+        if msg.get("role") == "assistant":
+            if msg.get("stop_reason") in ("error", "aborted"):
+                has_error = True
+            break
+    print(
+        json.dumps(
+            {"type": "done", "messages": messages},
+            ensure_ascii=False,
+            default=str,
+        ),
+        flush=True,
+    )
+    return 1 if has_error else 0

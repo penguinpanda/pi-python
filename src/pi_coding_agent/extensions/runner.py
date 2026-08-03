@@ -284,6 +284,33 @@ class ExtensionRunner:
                     )
         return current_text, "continue"
 
+    async def emit_project_trust(self, cwd: str) -> str | None:
+        """project_trust 事件：返回首个 yes/no 决定；undecided 继续。"""
+        context = self.create_context()
+        event = {"type": "project_trust", "cwd": cwd}
+        for extension in self.extensions:
+            for handler in list(extension.handlers.get("project_trust", [])):
+                try:
+                    result = handler(event, context)
+                    if inspect.isawaitable(result):
+                        result = await result
+                    if isinstance(result, dict) and result.get("trusted") in (
+                        "yes",
+                        "no",
+                        "undecided",
+                    ):
+                        if result["trusted"] != "undecided":
+                            return result["trusted"]
+                except Exception as exc:
+                    self.emit_error(
+                        ExtensionError(
+                            extension_path=extension.path,
+                            event="project_trust",
+                            error=str(exc),
+                        )
+                    )
+        return None
+
     # ------------------------------------------------------------------
     # 上下文
     # ------------------------------------------------------------------

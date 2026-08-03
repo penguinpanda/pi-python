@@ -20,7 +20,10 @@ from pi_ai.auth.oauth import builtin_oauth_providers
 
 from ._config import get_agent_dir, get_sessions_dir, load_settings
 from .extensions import ExtensionLoader, ExtensionRunner
-from ._print_mode import run_print_mode
+from ._print_mode import run_print_mode, run_print_mode_json
+from .file_processor import process_at_files
+from .first_time_setup import run_first_time_setup_sync
+from .operations import filter_tools_by_names
 from .rpc import run_rpc_mode
 from .modes.interactive import run_tui_mode
 from ._session import AgentSession
@@ -58,6 +61,10 @@ async def _async_main(args: list[str] | None = None) -> int:
     parsed = parser.parse_args(args)
 
     # --help / --version 已在 argparse 中处理
+
+    # 首次启动向导。
+    if parsed.setup:
+        return run_first_time_setup_sync(_auth_store())
 
     # 确定工作目录
     cwd = str(Path.cwd())
@@ -121,12 +128,35 @@ async def _async_main(args: list[str] | None = None) -> int:
         model_runtime=runtime,
     )
 
+    # 工具白名单 / 黑名单。
+    tools_include = (
+        [part.strip() for part in parsed.tools.split(",") if part.strip()]
+        if parsed.tools
+        else None
+    )
+    tools_exclude = (
+        [part.strip() for part in parsed.exclude_tools.split(",") if part.strip()]
+        if parsed.exclude_tools
+        else None
+    )
+
     # 创建 Agent
     def build_session(
         sm: SessionManager,
         session_model: Model,
         session_scoped: list[ScopedModel],
     ) -> AgentSession:
+        tools_override = None
+        if parsed.no_tools:
+            tools_override = []
+        elif tools_include is not None or tools_exclude:
+            from .tools import create_all_tools
+
+            tools_override = filter_tools_by_names(
+                create_all_tools(cwd),
+                include=tools_include,
+                exclude=tools_exclude,
+            )
         agent = Agent(AgentOptions(
             system_prompt=system_prompt,
             model=session_model,
@@ -143,6 +173,7 @@ async def _async_main(args: list[str] | None = None) -> int:
             skill_loader=skill_loader,
             template_loader=template_loader,
             extension_runner=extension_runner,
+            tools_override=tools_override,
         )
 
     session = build_session(session_manager, model, scoped_models)
@@ -161,9 +192,20 @@ async def _async_main(args: list[str] | None = None) -> int:
         )
         return build_session(restored_manager, restored_model, restored_scoped)
 
+    async def rebuilder(manager: SessionManager) -> AgentSession:
+        model, scoped = await _resolve_initial_model(
+            runtime, parsed, settings, manager, is_continuing=True
+        )
+        return build_session(manager, model, scoped)
+
     # RPC 模式：stdin/stdout JSONL 无头协议。
     if parsed.mode == "rpc":
-        return await run_rpc_mode(session, runtime, session_factory=session_factory)
+        return await run_rpc_mode(
+            session,
+            runtime,
+            session_factory=session_factory,
+            session_rebuilder=rebuilder,
+        )
 
     # TUI 模式：Textual 交互界面。
     if parsed.mode == "tui":
@@ -181,7 +223,14 @@ async def _async_main(args: list[str] | None = None) -> int:
         print("Error: No input message provided. Use -p 'message' or pipe via stdin.", file=sys.stderr)
         return 1
 
-    return await run_print_mode(session, message)
+    # @file 注入（文本 / 图片）。
+    images = None
+    if message.startswith("@"):
+        texts, images = await process_at_files([message], cwd)
+        message = "\n\n".join(texts)
+    if parsed.json:
+        return await run_print_mode_json(session, message, images)
+    return await run_print_mode(session, message, images)
 
 
 # ---------------------------------------------------------------------------
@@ -323,6 +372,16 @@ def _create_parser() -> argparse.ArgumentParser:
         default=None,
         help="Run mode: print (default), rpc (stdin/stdout JSONL), or tui (Textual)",
     )
+    p.add_argument(
+        "--setup",
+        action="store_true",
+        help="Run the first-time setup wizard",
+    )
+    p.add_argument(
+        "--json",
+        action="store_true",
+        help="Print mode: emit JSON Lines events to stdout",
+    )
 
     # 模型选择
     p.add_argument("--model", type=str, help="Model ID (e.g., deepseek-chat, gpt-4o)")
@@ -343,8 +402,8 @@ def _create_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-session", action="store_true", help="Don't persist session to disk")
 
     # 工具控制
-    p.add_argument("--tools", type=str, help="Comma-separated tool whitelist (not yet implemented)")
-    p.add_argument("--exclude-tools", type=str, help="Comma-separated tool blacklist (not yet implemented)")
+    p.add_argument("--tools", type=str, help="Comma-separated tool whitelist")
+    p.add_argument("--exclude-tools", type=str, help="Comma-separated tool blacklist")
     p.add_argument("--no-tools", action="store_true", help="Disable all tools")
 
     # 版本

@@ -363,6 +363,68 @@ class AgentSession:
             return None
         finally:
             self._is_compacting = False
+
+    async def navigate_to(
+        self,
+        entry_id: str,
+        *,
+        summarize: bool = True,
+        custom_instructions: str | None = None,
+    ) -> bool:
+        """导航到目标条目：生成分支摘要（可选）→ 移动 leaf → 重建上下文。"""
+        manager = self._session_manager
+        old_leaf = manager.get_leaf_id()
+        if old_leaf == entry_id:
+            return False
+        if manager.get_entry(entry_id) is None:
+            raise ValueError(f"Entry not found: {entry_id}")
+
+        summary: dict | None = None
+        if summarize and old_leaf is not None and self._model is not None:
+            from pi_agent.branch_summarization import (
+                collect_entries_for_branch_summary,
+                generate_branch_summary,
+            )
+
+            class _BranchSessionAdapter:
+                """branch_summarization 需要 async get_branch/get_entry。"""
+
+                def __init__(self, manager: SessionManager) -> None:
+                    self._manager = manager
+
+                async def get_branch(self, from_id: str | None = None):
+                    return self._manager.get_branch(from_id)
+
+                async def get_entry(self, entry_id: str):
+                    return self._manager.get_entry(entry_id)
+
+            try:
+                collected = await collect_entries_for_branch_summary(
+                    _BranchSessionAdapter(manager), old_leaf, entry_id
+                )
+                ok, result = await generate_branch_summary(
+                    collected["entries"],
+                    stream_fn=self._agent._resolve_stream_fn(),
+                    model=self._model,
+                    custom_instructions=custom_instructions,
+                )
+            except Exception as exc:
+                ok, result = False, exc
+            if ok and isinstance(result, dict):
+                summary = {
+                    "summary": result.get("summary", ""),
+                    "details": result,
+                    "fromHook": True,
+                }
+
+        await manager.move_to(entry_id, summary)
+        self._agent.state.messages = manager.build_context()
+        self._emit({
+            "type": "navigated",
+            "entryId": entry_id,
+            "fromEntryId": old_leaf,
+        })
+        return True
     async def set_model(self, model: Model) -> None:
         """切换模型：校验认证 → 更新 agent state → 记录会话 → 重算思考级别。"""
         runtime = self._model_runtime
@@ -554,7 +616,7 @@ class AgentSession:
             return
         asyncio.create_task(self._session_manager.append_thinking_level_change(level))
 
-    async def prompt(self, text: str) -> None:
+    async def prompt(self, text: str, images: list | None = None) -> None:
         """发送用户消息，触发完整的 Agent 循环 + 工具执行。
 
         阻塞直到 agent 完成本轮（但 wait_for_idle 可以等待事件监听器完成）。
@@ -577,7 +639,7 @@ class AgentSession:
                 text, _action = await self._extension_runner.emit_input(text)
             # 2. 扩展命令 /skill: 与 /template 展开
             expanded = self.expand_prompt(text)
-            await self._agent.prompt(expanded)
+            await self._agent.prompt(expanded, images)
             await self._check_compaction()
             await self._retry_failed_turn()
         finally:

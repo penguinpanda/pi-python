@@ -76,7 +76,7 @@ class TestSetModel:
         entries = session._session_manager.get_entries()
         assert entries[-1]["type"] == "model_change"
         assert entries[-1]["provider"] == "faux"
-        assert entries[-1]["model_id"] == "faux-2"
+        assert entries[-1]["modelId"] == "faux-2"
 
         assert any(event["type"] == "model_changed" for event in events)
         await session.dispose()

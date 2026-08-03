@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shlex
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 
 
@@ -220,6 +221,15 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
         context.copy_to_clipboard(text)
         return "Copied last assistant message"
 
+    async def _export(context: SlashContext, args: str) -> str:
+        from ...export_html import export_session_to_html
+
+        output = args.strip() or str(
+            Path(context.session.cwd) / f"session-{context.session.session_id}.html"
+        )
+        path = export_session_to_html(context.session.session_manager, output)
+        return f"Exported session to {path}"
+
     def _not_implemented(name: str) -> Callable[[SlashContext, str], str]:
         async def _handler(_context: SlashContext, _args: str) -> str:
             return f"/{name} is not implemented yet"
@@ -237,7 +247,7 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
         ("session", _session, "Show session info and stats", ""),
         ("reload", _reload, "Reload keybindings, skills, prompts, and themes", ""),
         ("copy", _copy, "Copy last agent message to clipboard", ""),
-        ("export", _not_implemented("export"), "Export session (HTML/JSONL)", "[path]"),
+        ("export", _export, "Export session (HTML/JSONL)", "[path]"),
         ("tree", _not_implemented("tree"), "Navigate session tree", ""),
         ("fork", _not_implemented("fork"), "Create a new fork from a previous message", ""),
         ("clone", _not_implemented("clone"), "Duplicate the current session", ""),

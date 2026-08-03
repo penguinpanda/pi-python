@@ -60,6 +60,23 @@ def _make_handler(runtime: ModelRuntime, tmp_path: Path, **kwargs) -> RpcMessage
     return RpcMessageHandler(session, runtime, **kwargs)
 
 
+def _rebuild_session(runtime: ModelRuntime, manager, tmp_path: Path) -> AgentSession:
+    model = runtime.get_model("faux", "faux-1")
+    assert model is not None
+    agent = Agent(AgentOptions(
+        system_prompt="You are a helpful coding assistant.",
+        model=model,
+        stream_fn=runtime.stream,
+    ))
+    return AgentSession(
+        agent=agent,
+        session_manager=manager,
+        cwd=str(tmp_path),
+        model=model,
+        model_runtime=runtime,
+    )
+
+
 class TestBasicCommands:
     async def test_get_state(self, tmp_path):
         runtime = _make_runtime()
@@ -341,13 +358,82 @@ class TestSessionCommands:
         assert response["success"] is True
         assert response["data"]["commands"] == []
 
-    async def test_not_implemented_commands(self, tmp_path):
+    async def test_export_html(self, tmp_path):
         runtime = _make_runtime()
         handler = _make_handler(runtime, tmp_path)
-        for command_type in ("export_html", "switch_session", "fork", "clone", "get_tree", "get_fork_messages"):
-            response = await handler.handle_command({"id": "1", "type": command_type})
-            assert response["success"] is False, command_type
-            assert "not implemented" in response["error"]
+        response = await handler.handle_command({
+            "id": "1",
+            "type": "export_html",
+            "outputPath": str(tmp_path / "session.html"),
+        })
+        assert response["success"] is True
+        assert (tmp_path / "session.html").exists()
+
+
+class TestDagCommands:
+    async def _make_dag_handler(self, tmp_path):
+        runtime = _make_runtime()
+        session = _make_session(runtime, tmp_path)
+        handler = RpcMessageHandler(
+            session,
+            runtime,
+            session_rebuilder=lambda manager: _rebuild_session(runtime, manager, tmp_path),
+        )
+        return handler, session
+
+    async def test_fork(self, tmp_path):
+        handler, session = await self._make_dag_handler(tmp_path)
+        await handler.handle_command({"id": "1", "type": "prompt", "message": "first"})
+        for _ in range(100):
+            if not handler._prompt_tasks:
+                break
+            await asyncio.sleep(0.01)
+        entries = session.session_manager.get_entries()
+        first_entry = entries[0]
+
+        response = await handler.handle_command({
+            "id": "2", "type": "fork", "entryId": first_entry["id"]
+        })
+        assert response["success"] is True
+        assert response["data"]["text"] == "first"
+        assert handler.session is not session
+        state = await handler.handle_command({"id": "3", "type": "get_state"})
+        assert state["data"]["sessionId"] != session.session_id
+
+    async def test_clone(self, tmp_path):
+        handler, session = await self._make_dag_handler(tmp_path)
+        await handler.handle_command({"id": "1", "type": "prompt", "message": "clone-me"})
+        for _ in range(100):
+            if not handler._prompt_tasks:
+                break
+            await asyncio.sleep(0.01)
+        response = await handler.handle_command({"id": "2", "type": "clone"})
+        assert response["success"] is True
+        assert response["data"]["cancelled"] is False
+
+    async def test_get_tree(self, tmp_path):
+        handler, _session = await self._make_dag_handler(tmp_path)
+        await handler.handle_command({"id": "1", "type": "prompt", "message": "tree me"})
+        for _ in range(100):
+            if not handler._prompt_tasks:
+                break
+            await asyncio.sleep(0.01)
+        response = await handler.handle_command({"id": "2", "type": "get_tree"})
+        assert response["success"] is True
+        assert response["data"]["leafId"] is not None
+        assert len(response["data"]["tree"]) >= 1
+
+    async def test_get_fork_messages(self, tmp_path):
+        handler, session = await self._make_dag_handler(tmp_path)
+        await handler.handle_command({"id": "1", "type": "prompt", "message": "fork target"})
+        for _ in range(100):
+            if not handler._prompt_tasks:
+                break
+            await asyncio.sleep(0.01)
+        response = await handler.handle_command({"id": "2", "type": "get_fork_messages"})
+        assert response["success"] is True
+        messages = response["data"]["messages"]
+        assert any(message["text"] == "fork target" for message in messages)
 
 
 class TestNewSession:
