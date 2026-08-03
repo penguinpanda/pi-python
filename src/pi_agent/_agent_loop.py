@@ -220,7 +220,8 @@ Tool:
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, cast
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, cast
 
 from pi_ai._types import (
     AssistantMessage,
@@ -240,16 +241,20 @@ from pi_ai.utils.retry import (
     RetryPolicy,
     retry_assistant_call,
 )
+from pi_ai.utils._event_stream import EventStream
 from pi_ai.utils.validation import ValidationError, validate_arguments
 
 from ._types import (
+    AfterToolCallContext,
     AfterToolCallResult,
     AgentContext,
     AgentEventSink,
     AgentLoopConfig,
     AgentLoopTurnUpdate,
     AgentMessage,
+    AgentTool,
     AgentToolResult,
+    BeforeToolCallContext,
     BeforeToolCallResult,
     StreamFn,
 )
@@ -450,6 +455,85 @@ async def run_agent_loop_continue(
     return result
 
 
+def agent_loop(
+    prompts: list[AgentMessage],
+    context: AgentContext,
+    config: AgentLoopConfig,
+    signal: asyncio.Event | None,
+    stream_fn: StreamFn,
+) -> EventStream[AgentEvent, list[AgentMessage]]:
+    """agentLoop() EventStream 包装（对齐 TS agent-loop.ts agentLoop()）。
+
+    返回 EventStream 而非 emit 回调；agent_end 事件即流结束事件，
+    await stream.result() 得到本次运行新增的 messages。
+    """
+    stream = _create_agent_stream()
+
+    async def _emit(event: AgentEvent) -> None:
+        stream.push(event)
+
+    async def _run() -> None:
+        try:
+            messages = await run_agent_loop(
+                prompts=prompts,
+                context=context,
+                config=config,
+                emit=_emit,
+                signal=signal,
+                stream_fn=stream_fn,
+            )
+        except BaseException as exc:
+            stream.error(exc)
+        else:
+            stream.end(messages)
+
+    asyncio.create_task(_run())
+    return stream
+
+
+def agent_loop_continue(
+    context: AgentContext,
+    config: AgentLoopConfig,
+    signal: asyncio.Event | None,
+    stream_fn: StreamFn,
+) -> EventStream[AgentEvent, list[AgentMessage]]:
+    """agentLoopContinue() EventStream 包装（对齐 TS agentLoopContinue()）。"""
+    if len(context.messages) == 0:
+        raise ValueError("Cannot continue: no messages in context")
+    if context.messages[-1].get("role") == "assistant":
+        raise ValueError("Cannot continue from message role: assistant")
+
+    stream = _create_agent_stream()
+
+    async def _emit(event: AgentEvent) -> None:
+        stream.push(event)
+
+    async def _run() -> None:
+        try:
+            messages = await run_agent_loop_continue(
+                context=context,
+                config=config,
+                emit=_emit,
+                signal=signal,
+                stream_fn=stream_fn,
+            )
+        except BaseException as exc:
+            stream.error(exc)
+        else:
+            stream.end(messages)
+
+    asyncio.create_task(_run())
+    return stream
+
+
+def _create_agent_stream() -> EventStream[AgentEvent, list[AgentMessage]]:
+    """agent_end 即流结束事件；其结果即 agent_end 携带的 messages。"""
+    return EventStream(
+        is_complete=lambda e: e["type"] == "agent_end",
+        extract_result=lambda e: e["messages"],  # type: ignore[return-value]
+    )
+
+
 # ============================================================================
 # 内部循环
 # ============================================================================
@@ -544,9 +628,15 @@ async def _run_loop(
                 if stop_reason == "length":
                     tool_results = _fail_tool_calls_from_truncated(tool_calls)
                 else:
+                    tool_context = AgentContext(
+                        system_prompt=context.system_prompt,
+                        messages=list(messages),
+                        tools=tools,
+                    )
                     result = await _execute_tool_calls(
                         tool_calls,
-                        tools,
+                        assistant_msg,
+                        tool_context,
                         config,
                         emit,
                         signal,
@@ -852,260 +942,367 @@ async def _stream_assistant_response(
 
 async def _execute_tool_calls(
     tool_calls: list[ToolCall],
-    tools: list,
+    assistant_msg: AssistantMessage,
+    context: AgentContext,
     config: AgentLoopConfig,
     emit: AgentEventSink,
     signal: asyncio.Event | None,
 ) -> dict:
-    """
-    执行 LLM 返回的所有工具调用。
+    """执行 LLM 返回的所有工具调用（1.4：支持并行）。
 
+    对齐 TS executeToolCalls()：
 
-    输入:
-
-    tool_calls:
-
-        AssistantMessage 中的 toolCall
-
-
-    例如:
-
-    [
-    {
-    type:"toolCall",
-    id:"call_1",
-    name:"search",
-    arguments:{"query":"python"}
-    }
-    ]
-
-
-    tools:
-
-        Agent 注册的工具列表
-
-
-    config:
-
-        Agent 生命周期 hook
-
-
-    emit:
-
-        事件输出
-
+    - config.tool_execution == "sequential" → 整批顺序执行
+    - 批次内任一工具的 execution_mode == "sequential" → 整批回退顺序执行
+    - 其余情况 → 顺序准备 + 并发执行 + 按 assistant 原始顺序输出消息
 
     返回:
-
-    {
-        messages:
-            [
-            ToolResultMessage
-            ],
-
-        terminate:
-            是否终止 Agent Loop
-    }
-
-
-    核心流程:
-
-
-    ToolCall
-
-    |
-    v
-
-    1. 准备阶段
-
-    查找工具
-    解析参数
-    before hook
-
-
-    |
-    v
-
-    2. 执行阶段
-
-    tool.execute()
-
-
-    |
-    v
-
-    3. 完成阶段
-
-    after hook
-
-
-    |
-    v
-
-    4. 输出阶段
-
-    event
-    ToolResultMessage
-
-
+        {"messages": [ToolResultMessage], "terminate": bool}
     """
+    has_sequential_tool = any(
+        (tool := _find_tool(context.tools or [], tc["name"])) is not None
+        and tool.execution_mode == "sequential"
+        for tc in tool_calls
+    )
+
+    if config.tool_execution == "sequential" or has_sequential_tool:
+        return await _execute_tool_calls_sequential(
+            tool_calls, assistant_msg, context, config, emit, signal
+        )
+    return await _execute_tool_calls_parallel(
+        tool_calls, assistant_msg, context, config, emit, signal
+    )
+
+
+async def _execute_tool_calls_sequential(
+    tool_calls: list[ToolCall],
+    assistant_msg: AssistantMessage,
+    context: AgentContext,
+    config: AgentLoopConfig,
+    emit: AgentEventSink,
+    signal: asyncio.Event | None,
+) -> dict:
+    """顺序执行：每个工具调用完成全部三阶段后才轮到下一个。"""
     all_terminate = True
     tool_result_messages: list[ToolResultMessage] = []
 
     for tc in tool_calls:
         _check_signal(signal)
 
-        tc_id: str = tc["id"]
-        tc_name: str = tc["name"]
-
-        # 参数已由事件协议解析为对象（ToolCall.arguments）；
-        # 方案 B：arguments 可能为 None（尚未解析）——按空参数处理。
-        args: dict = tc["arguments"] if tc["arguments"] is not None else {}
-
-        # === 阶段 1: 准备 ===
-        tool_def = _find_tool(tools, tc_name)
-        if tool_def is None:
-            # 工具未找到 → 立即错误
-            error_result = AgentToolResult(
-                content=[TextContent(type="text", text=f"Tool '{tc_name}' not found.")],
-                details={"error": "tool_not_found"},
-            )
+        prepared = await _prepare_tool_call(tc, assistant_msg, context, config, signal)
+        if isinstance(prepared, _ImmediateToolOutcome):
             await _emit_tool_lifecycle(
-                emit, tc_id, tc_name, args, error_result, is_error=True
+                emit, prepared.tc["id"], prepared.tc["name"], prepared.args,
+                prepared.result, prepared.is_error,
             )
-            tr_msg = _make_tool_result_message(tc_id, tc_name, error_result, is_error=True)
+            tr_msg = _make_tool_result_message(
+                prepared.tc["id"], prepared.tc["name"], prepared.result,
+                prepared.is_error,
+            )
             tool_result_messages.append(tr_msg)
-            all_terminate = all_terminate and error_result.terminate
+            all_terminate = all_terminate and prepared.result.terminate
             continue
 
-        # 参数校验：按 input_schema 校验并返回转换后的参数
-        # （对齐 TS validateToolCall：失败返回错误 ToolResult 让 LLM 自纠）。
-        try:
-            args = validate_arguments(tc_name, tool_def.input_schema, args)
-        except ValidationError as exc:
-            error_result = AgentToolResult(
-                content=[TextContent(type="text", text=str(exc))],
-                details={
-                    "error": "invalid_arguments",
-                    "message": str(exc),
-                    "tool_call_id": tc_id,
-                },
-            )
-            await _emit_tool_lifecycle(
-                emit, tc_id, tc_name, args, error_result, is_error=True
-            )
-            tr_msg = _make_tool_result_message(tc_id, tc_name, error_result, is_error=True)
-            tool_result_messages.append(tr_msg)
-            all_terminate = all_terminate and error_result.terminate
-            continue
-
-        # beforeToolCall 钩子
-        if config.before_tool_call is not None:
-            raw_before = config.before_tool_call(
-                tc_id, tc_name, args,
-                AgentContext(
-                    system_prompt="",
-                    messages=[],
-                    tools=tools,
-                ),
-            )
-            before_result: BeforeToolCallResult | None
-            if asyncio.iscoroutine(raw_before):
-                before_result = cast(BeforeToolCallResult | None, await raw_before)
-            else:
-                before_result = cast(BeforeToolCallResult | None, raw_before)
-            if before_result is not None and before_result.block:
-                block_msg = f"Tool '{tc_name}' blocked: {before_result.reason}"
-                blocked_result = AgentToolResult(
-                    content=[TextContent(type="text", text=block_msg)],
-                    details={"blocked": True, "reason": before_result.reason},
-                )
-                await _emit_tool_lifecycle(
-                    emit, tc_id, tc_name, args, blocked_result, is_error=True
-                )
-                tr_msg = _make_tool_result_message(
-                    tc_id, tc_name, blocked_result, is_error=True
-                )
-                tool_result_messages.append(tr_msg)
-                all_terminate = all_terminate and blocked_result.terminate
-                continue
-
-        # === 阶段 2: 执行 ===
-        is_error = False
-        try:
-            def _on_update(partial: AgentToolResult) -> None:
-                # 注意：这是同步回调，不能 await emit
-                pass  # 简化：最小核心不做流式 tool update
-
-            # Tool 生命周期：before_execute（可选，可替换参数）
-            if tool_def.before_execute is not None:
-                raw_before_tool = tool_def.before_execute(
-                    args, AgentContext(system_prompt="", messages=[], tools=tools),
-                )
-                if asyncio.iscoroutine(raw_before_tool):
-                    replaced = await raw_before_tool
-                else:
-                    replaced = raw_before_tool
-                if replaced is not None:
-                    args = replaced
-
-            await emit({
-                "type": "tool_execution_start",
-                "tool_call_id": tc_id,
-                "tool_name": tc_name,
-                "args": args,
-            })
-
-            result = await tool_def.execute(tc_id, args, signal, _on_update)
-
-            # Tool 生命周期：after_execute（可选，可替换结果）
-            if tool_def.after_execute is not None:
-                raw_after_tool = tool_def.after_execute(result)
-                if asyncio.iscoroutine(raw_after_tool):
-                    after_val = await raw_after_tool
-                else:
-                    after_val = raw_after_tool
-                if after_val is not None:
-                    result = after_val
-        except Exception as exc:
-            is_error = True
-            result = AgentToolResult(
-                content=[TextContent(type="text", text=str(exc))],
-                details={"error": str(exc), "exception_type": type(exc).__name__},
-            )
-
-        # === 阶段 3: afterToolCall ===
-        if config.after_tool_call is not None:
-            raw_after = config.after_tool_call(
-                tc_id, tc_name, result, is_error,
-                AgentContext(
-                    system_prompt="",
-                    messages=[],
-                    tools=tools,
-                ),
-            )
-            after_result: AfterToolCallResult | None
-            if asyncio.iscoroutine(raw_after):
-                after_result = cast(AfterToolCallResult | None, await raw_after)
-            else:
-                after_result = cast(AfterToolCallResult | None, raw_after)
-            if after_result is not None:
-                if after_result.content is not None:
-                    result.content = after_result.content
-                if after_result.details is not None:
-                    result.details = after_result.details
-                if after_result.is_error is not None:
-                    is_error = after_result.is_error
-                if after_result.terminate is not None:
-                    result.terminate = after_result.terminate
-
-        # === 阶段 4: 发出事件 + 构造 ToolResultMessage ===
-        await _emit_tool_lifecycle(emit, tc_id, tc_name, args, result, is_error)
-        tr_msg = _make_tool_result_message(tc_id, tc_name, result, is_error)
+        executed = await _execute_tool_call(prepared, emit, signal)
+        finalized = await _finalize_tool_call(prepared, executed, config)
+        await _emit_tool_lifecycle(
+            emit, finalized.tc["id"], finalized.tc["name"], executed.args,
+            finalized.result, finalized.is_error,
+        )
+        tr_msg = _make_tool_result_message(
+            finalized.tc["id"], finalized.tc["name"], finalized.result,
+            finalized.is_error,
+        )
         tool_result_messages.append(tr_msg)
-        all_terminate = all_terminate and result.terminate
+        all_terminate = all_terminate and finalized.result.terminate
 
     return {"messages": tool_result_messages, "terminate": all_terminate}
+
+
+async def _execute_tool_calls_parallel(
+    tool_calls: list[ToolCall],
+    assistant_msg: AssistantMessage,
+    context: AgentContext,
+    config: AgentLoopConfig,
+    emit: AgentEventSink,
+    signal: asyncio.Event | None,
+) -> dict:
+    """并行执行：顺序准备 → 并发执行 → 按原始顺序输出消息。
+
+    对齐 TS executeToolCallsParallel()：
+    - 立即结果（未找到/校验失败/block）在准备循环中当场发 tool_execution_end
+    - 已通过的工具并发执行，每个完成后立即发 tool_execution_end（完成顺序）
+    - ToolResultMessage 消息在所有工具结束后按 assistant 原始顺序发出
+    """
+    entries: list[tuple[int, _ImmediateToolOutcome | asyncio.Task]] = []
+    for index, tc in enumerate(tool_calls):
+        _check_signal(signal)
+
+        prepared = await _prepare_tool_call(tc, assistant_msg, context, config, signal)
+        if isinstance(prepared, _ImmediateToolOutcome):
+            await _emit_tool_lifecycle(
+                emit, prepared.tc["id"], prepared.tc["name"], prepared.args,
+                prepared.result, prepared.is_error,
+            )
+            entries.append((index, prepared))
+        else:
+            entries.append((
+                index,
+                asyncio.create_task(
+                    _execute_and_finalize(prepared, config, emit, signal)
+                ),
+            ))
+
+    ordered_results: list[_FinalizedToolOutcome | _ImmediateToolOutcome | None] = (
+        [None] * len(tool_calls)
+    )
+    for index, entry in entries:
+        if not isinstance(entry, asyncio.Task):
+            ordered_results[index] = entry
+
+    exec_tasks = [(i, t) for i, t in entries if isinstance(t, asyncio.Task)]
+    if exec_tasks:
+        done = await asyncio.gather(*(t for _, t in exec_tasks))
+        for (index, _), outcome in zip(exec_tasks, done):
+            ordered_results[index] = cast(_FinalizedToolOutcome, outcome)
+
+    tool_result_messages: list[ToolResultMessage] = []
+    all_terminate = True
+    for outcome in ordered_results:
+        finalized = cast(
+            _FinalizedToolOutcome | _ImmediateToolOutcome, outcome
+        )
+        tr_msg = _make_tool_result_message(
+            finalized.tc["id"], finalized.tc["name"], finalized.result,
+            finalized.is_error,
+        )
+        tool_result_messages.append(tr_msg)
+        all_terminate = all_terminate and finalized.result.terminate
+
+    return {
+        "messages": tool_result_messages,
+        "terminate": all_terminate and len(tool_result_messages) > 0,
+    }
+
+
+async def _prepare_tool_call(
+    tc: ToolCall,
+    assistant_msg: AssistantMessage,
+    context: AgentContext,
+    config: AgentLoopConfig,
+    signal: asyncio.Event | None,
+) -> _PreparedToolCall | _ImmediateToolOutcome:
+    """准备阶段：查找工具 → 校验参数 → beforeToolCall（对齐 TS prepareToolCall）。
+
+    立即失败（工具未找到 / 参数校验失败 / beforeToolCall block / 中止）时返回
+    _ImmediateToolOutcome；不发 tool_execution_start（保持 Python 现状）。
+    """
+    tc_id: str = tc["id"]
+    tc_name: str = tc["name"]
+    # 参数已由事件协议解析为对象（ToolCall.arguments）；
+    # 方案 B：arguments 可能为 None（尚未解析）——按空参数处理。
+    args: dict = tc["arguments"] if tc["arguments"] is not None else {}
+    tools = context.tools or []
+
+    tool_def = _find_tool(tools, tc_name)
+    if tool_def is None:
+        # 工具未找到 → 立即错误
+        error_result = AgentToolResult(
+            content=[TextContent(type="text", text=f"Tool '{tc_name}' not found.")],
+            details={"error": "tool_not_found"},
+        )
+        return _ImmediateToolOutcome(tc, args, error_result, is_error=True)
+
+    # 参数校验：按 input_schema 校验并返回转换后的参数
+    # （对齐 TS validateToolCall：失败返回错误 ToolResult 让 LLM 自纠）。
+    try:
+        args = validate_arguments(tc_name, tool_def.input_schema, args)
+    except ValidationError as exc:
+        error_result = AgentToolResult(
+            content=[TextContent(type="text", text=str(exc))],
+            details={
+                "error": "invalid_arguments",
+                "message": str(exc),
+                "tool_call_id": tc_id,
+            },
+        )
+        return _ImmediateToolOutcome(tc, args, error_result, is_error=True)
+
+    # beforeToolCall 钩子（1.5：接收专用 context 对象）
+    if config.before_tool_call is not None:
+        before_ctx = BeforeToolCallContext(
+            assistant_message=assistant_msg,
+            tool_call=tc,
+            args=args,
+            context=context,
+        )
+        raw_before = config.before_tool_call(before_ctx)
+        before_result: BeforeToolCallResult | None
+        if asyncio.iscoroutine(raw_before):
+            before_result = cast(BeforeToolCallResult | None, await raw_before)
+        else:
+            before_result = cast(BeforeToolCallResult | None, raw_before)
+        if before_result is not None and before_result.block:
+            block_msg = f"Tool '{tc_name}' blocked: {before_result.reason}"
+            blocked_result = AgentToolResult(
+                content=[TextContent(type="text", text=block_msg)],
+                details={"blocked": True, "reason": before_result.reason},
+            )
+            return _ImmediateToolOutcome(tc, args, blocked_result, is_error=True)
+
+    # 对齐 TS：beforeToolCall 之后检查中止
+    _check_signal(signal)
+
+    return _PreparedToolCall(tc, tool_def, args, assistant_msg, context)
+
+
+async def _execute_tool_call(
+    prepared: _PreparedToolCall,
+    emit: AgentEventSink,
+    signal: asyncio.Event | None,
+) -> _ExecutedToolOutcome:
+    """执行阶段：before_execute 替换参数 → tool_execution_start → execute → after_execute。"""
+    tc_id: str = prepared.tc["id"]
+    tc_name: str = prepared.tc["name"]
+    tool_def = prepared.tool
+    args: dict = prepared.args
+
+    # Tool 生命周期：before_execute（可选，可替换参数）
+    if tool_def.before_execute is not None:
+        raw_before_tool = tool_def.before_execute(args, prepared.context)
+        if asyncio.iscoroutine(raw_before_tool):
+            replaced = await raw_before_tool
+        else:
+            replaced = raw_before_tool
+        if replaced is not None:
+            args = replaced
+
+    await emit({
+        "type": "tool_execution_start",
+        "tool_call_id": tc_id,
+        "tool_name": tc_name,
+        "args": args,
+    })
+
+    try:
+        def _on_update(partial: AgentToolResult) -> None:
+            # 注意：这是同步回调，不能 await emit
+            pass  # 简化：最小核心不做流式 tool update
+
+        result = await tool_def.execute(tc_id, args, signal, _on_update)
+
+        # Tool 生命周期：after_execute（可选，可替换结果）
+        if tool_def.after_execute is not None:
+            raw_after_tool = tool_def.after_execute(result)
+            if asyncio.iscoroutine(raw_after_tool):
+                after_val = await raw_after_tool
+            else:
+                after_val = raw_after_tool
+            if after_val is not None:
+                result = after_val
+    except Exception as exc:
+        return _ExecutedToolOutcome(
+            prepared.tc,
+            args,
+            AgentToolResult(
+                content=[TextContent(type="text", text=str(exc))],
+                details={"error": str(exc), "exception_type": type(exc).__name__},
+            ),
+            is_error=True,
+        )
+
+    return _ExecutedToolOutcome(prepared.tc, args, result, is_error=False)
+
+
+async def _execute_and_finalize(
+    prepared: _PreparedToolCall,
+    config: AgentLoopConfig,
+    emit: AgentEventSink,
+    signal: asyncio.Event | None,
+) -> _FinalizedToolOutcome:
+    """并行路径的单个工具：执行 → finalize → 发 tool_execution_end（完成顺序）。"""
+    executed = await _execute_tool_call(prepared, emit, signal)
+    finalized = await _finalize_tool_call(prepared, executed, config)
+    await _emit_tool_lifecycle(
+        emit, finalized.tc["id"], finalized.tc["name"], executed.args,
+        finalized.result, finalized.is_error,
+    )
+    return finalized
+
+
+async def _finalize_tool_call(
+    prepared: _PreparedToolCall,
+    executed: _ExecutedToolOutcome,
+    config: AgentLoopConfig,
+) -> _FinalizedToolOutcome:
+    """完成阶段：afterToolCall 字段级覆盖（对齐 TS finalizeExecutedToolCall）。"""
+    result = executed.result
+    is_error = executed.is_error
+
+    if config.after_tool_call is not None:
+        after_ctx = AfterToolCallContext(
+            assistant_message=prepared.assistant_message,
+            tool_call=prepared.tc,
+            args=executed.args,
+            result=result,
+            is_error=is_error,
+            context=prepared.context,
+        )
+        raw_after = config.after_tool_call(after_ctx)
+        after_result: AfterToolCallResult | None
+        if asyncio.iscoroutine(raw_after):
+            after_result = cast(AfterToolCallResult | None, await raw_after)
+        else:
+            after_result = cast(AfterToolCallResult | None, raw_after)
+        if after_result is not None:
+            if after_result.content is not None:
+                result.content = after_result.content
+            if after_result.details is not None:
+                result.details = after_result.details
+            if after_result.usage is not None:
+                result.usage = after_result.usage
+            if after_result.is_error is not None:
+                is_error = after_result.is_error
+            if after_result.terminate is not None:
+                result.terminate = after_result.terminate
+
+    return _FinalizedToolOutcome(prepared.tc, result, is_error)
+
+
+@dataclass(slots=True)
+class _PreparedToolCall:
+    """准备阶段通过：携带执行与 finalize 所需的全部上下文。"""
+    tc: ToolCall
+    tool: AgentTool
+    args: dict
+    assistant_message: AssistantMessage
+    context: AgentContext
+
+
+@dataclass(slots=True)
+class _ImmediateToolOutcome:
+    """准备阶段直接失败（未找到/校验失败/block/中止）。"""
+    tc: ToolCall
+    args: dict
+    result: AgentToolResult
+    is_error: bool
+
+
+@dataclass(slots=True)
+class _ExecutedToolOutcome:
+    """执行阶段产物（afterToolCall 覆盖之前）。"""
+    tc: ToolCall
+    args: dict
+    result: AgentToolResult
+    is_error: bool
+
+
+@dataclass(slots=True)
+class _FinalizedToolOutcome:
+    """afterToolCall 已应用后的最终结果。"""
+    tc: ToolCall
+    result: AgentToolResult
+    is_error: bool
 
 
 # ============================================================================

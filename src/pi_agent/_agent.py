@@ -32,6 +32,7 @@ from pi_ai import RetryPolicy
 from ._agent_loop import run_agent_loop, run_agent_loop_continue
 from ._stream_fn import get_default_stream_fn
 from ._types import (
+    AfterToolCallContext,
     AfterToolCallResult,
     AgentContext,
     AgentEvent,
@@ -39,6 +40,7 @@ from ._types import (
     AgentMessage,
     AgentState,
     AgentTool,
+    BeforeToolCallContext,
     BeforeToolCallResult,
     QueueMode,
     StreamFn,
@@ -113,14 +115,14 @@ class AgentOptions:
         get_api_key: Callable[[str], str | None] | None = None,
         before_tool_call: (
             Callable[
-                [str, str, Any, AgentContext],
+                [BeforeToolCallContext],
                 BeforeToolCallResult | None,
             ]
             | None
         ) = None,
         after_tool_call: (
             Callable[
-                [str, str, AgentToolResult, bool, AgentContext],
+                [AfterToolCallContext],
                 AfterToolCallResult | None,
             ]
             | None
@@ -129,7 +131,7 @@ class AgentOptions:
             Callable[[AgentContext], Any] | None
         ) = None,
         should_stop_after_turn: Callable[[AgentContext], bool] | None = None,
-        tool_execution: ToolExecutionMode = "sequential",
+        tool_execution: ToolExecutionMode = "parallel",
         # 消息队列消费策略（1.2 前置；默认逐条消费）
         steering_mode: QueueMode = "one-at-a-time",
         follow_up_mode: QueueMode = "one-at-a-time",

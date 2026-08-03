@@ -40,6 +40,7 @@ from pi_ai._types import (
     Model,
     StreamOptions,
     TextContent,
+    ToolCall,
     ToolResultMessage,
     Usage,
 )
@@ -73,7 +74,11 @@ StreamFn = Callable[
 # AgentTool
 # ---------------------------------------------------------------------------
 
-ToolExecutionMode = Literal["sequential"]
+# 工具执行模式（对齐 TS ToolExecutionMode）：
+# - "sequential": 每个工具调用先准备、再执行、再完成，然后才轮到下一个
+# - "parallel": 所有工具顺序准备，允许的工具并发执行；tool_execution_end 按完成
+#   顺序发出，ToolResultMessage 消息随后按 assistant 原始顺序发出
+ToolExecutionMode = Literal["sequential", "parallel"]
 
 # 消息队列消费策略（对齐 TS QueueMode）：
 # - "all": 一次 drain 全部注入
@@ -113,7 +118,9 @@ class AgentTool:
     input_schema: dict[str, Any]
     label: str
     execute: Callable[..., Awaitable[AgentToolResult]]
-    execution_mode: ToolExecutionMode = "sequential"
+    # 单工具执行模式（对齐 TS executionMode，省略时按默认并行）。
+    # 批次内任一工具声明 "sequential" → 整批回退为顺序执行。
+    execution_mode: ToolExecutionMode = "parallel"
 
     # ---- 生命周期钩子（可选，默认 None 不改变现有行为）----
 
@@ -304,6 +311,26 @@ class AfterToolCallResult:
     terminate: bool | None = None
 
 
+@dataclass(slots=True)
+class BeforeToolCallContext:
+    """beforeToolCall 专用 context（对齐 TS BeforeToolCallContext）。"""
+    assistant_message: AssistantMessage  # 触发工具调用的 assistant 消息
+    tool_call: ToolCall                  # 原始 toolCall 块
+    args: Any                            # 校验后的参数
+    context: AgentContext                # 当前 Agent 上下文（含本轮 messages）
+
+
+@dataclass(slots=True)
+class AfterToolCallContext:
+    """afterToolCall 专用 context（对齐 TS AfterToolCallContext）。"""
+    assistant_message: AssistantMessage  # 触发工具调用的 assistant 消息
+    tool_call: ToolCall                  # 原始 toolCall 块
+    args: Any                            # 校验后的参数
+    result: AgentToolResult              # afterToolCall 覆盖前的执行结果
+    is_error: bool                       # 当前是否按错误处理
+    context: AgentContext                # 当前 Agent 上下文
+
+
 @dataclass
 class AgentLoopTurnUpdate:
     """prepareNextTurn 返回值，替换下一轮状态。"""
@@ -353,14 +380,14 @@ class AgentLoopConfig:
     ) = None
     before_tool_call: (
         Callable[
-            [str, str, Any, AgentContext],
+            [BeforeToolCallContext],
             BeforeToolCallResult | Awaitable[BeforeToolCallResult | None] | None,
         ]
         | None
     ) = None
     after_tool_call: (
         Callable[
-            [str, str, AgentToolResult, bool, AgentContext],
+            [AfterToolCallContext],
             AfterToolCallResult
             | Awaitable[AfterToolCallResult | None]
             | None,
@@ -378,7 +405,8 @@ class AgentLoopConfig:
     ) = None
 
     # 配置
-    tool_execution: ToolExecutionMode = "sequential"
+    # 默认并行（对齐 TS Agent.toolExecution 默认值）。
+    tool_execution: ToolExecutionMode = "parallel"
 
     # 提示缓存与会话标识（透传给 StreamOptions）
     session_id: str | None = None

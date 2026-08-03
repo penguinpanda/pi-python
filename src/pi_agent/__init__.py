@@ -15,9 +15,15 @@ pi-agent-core  最小核心 LLM Agent 循环
 """
 
 from ._agent import Agent, AgentOptions
-from ._agent_loop import run_agent_loop, run_agent_loop_continue
+from ._agent_loop import (
+    agent_loop,
+    agent_loop_continue,
+    run_agent_loop,
+    run_agent_loop_continue,
+)
 from ._stream_fn import get_default_stream_fn, set_default_stream_fn
 from ._types import (
+    AfterToolCallContext,
     AfterToolCallResult,
     AgentContext,
     AgentEvent,
@@ -26,6 +32,7 @@ from ._types import (
     AgentState,
     AgentTool,
     AgentToolResult,
+    BeforeToolCallContext,
     BeforeToolCallResult,
     QueueMode,
     StreamFn,
@@ -40,6 +47,8 @@ __all__ = [
     # Loop
     "run_agent_loop",
     "run_agent_loop_continue",
+    "agent_loop",
+    "agent_loop_continue",
     # Stream
     "set_default_stream_fn",
     "get_default_stream_fn",
@@ -57,4 +66,6 @@ __all__ = [
     "ToolExecutionMode",
     "BeforeToolCallResult",
     "AfterToolCallResult",
+    "BeforeToolCallContext",
+    "AfterToolCallContext",
 ]

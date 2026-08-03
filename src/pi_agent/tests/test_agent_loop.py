@@ -16,7 +16,12 @@ from pi_ai._types import (
 )
 from pi_ai.providers.faux import FauxCore, faux_assistant_message, faux_provider, faux_tool_call
 
-from pi_agent._agent_loop import run_agent_loop, run_agent_loop_continue
+from pi_agent._agent_loop import (
+    agent_loop,
+    agent_loop_continue,
+    run_agent_loop,
+    run_agent_loop_continue,
+)
 from pi_agent._types import (
     AgentContext,
     AgentEvent,
@@ -402,7 +407,7 @@ class TestHooks:
         text_final = _make_llm_text_response("ok")
         stream_fn = _make_counting_stream_fn([tc_final, text_final])
 
-        def _before(tc_id, tc_name, args, ctx):
+        def _before(ctx):
             from pi_agent._types import BeforeToolCallResult
             return BeforeToolCallResult(block=True, reason="not allowed")
 
@@ -440,7 +445,7 @@ class TestHooks:
         text_final = _make_llm_text_response("ok")
         stream_fn = _make_counting_stream_fn([tc_final, text_final])
 
-        def _after(tc_id, tc_name, result, is_error, ctx):
+        def _after(ctx):
             from pi_agent._types import AfterToolCallResult
             return AfterToolCallResult(
                 content=[TextContent(type="text", text="overridden!")],
@@ -940,3 +945,326 @@ class TestSteeringLoop:
         assert steering_msg in result
         assert len(_find_events(events, "turn_start")) == 2
         assert len(_find_events(events, "tool_execution_start")) == 1
+
+
+class TestToolCallContexts:
+    """1.5：beforeToolCall / afterToolCall 专用 context 对象。"""
+
+    @pytest.mark.asyncio
+    async def test_before_tool_call_receives_context(self):
+        """beforeToolCall 收到 BeforeToolCallContext（含 assistant 消息与 toolCall）。"""
+        tool = _make_tool("search", "results")
+        prompts = [UserMessage(role="user", content="Search")]
+        context = AgentContext(system_prompt="test", messages=[], tools=[tool])
+
+        tc_final = _make_llm_tool_response("search", {"q": "X"})
+        text_final = _make_llm_text_response("done")
+        stream_fn = _make_counting_stream_fn([tc_final, text_final])
+
+        received: list = []
+
+        def _before(hook_ctx):
+            received.append(hook_ctx)
+            return None
+
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+            before_tool_call=_before,
+        )
+
+        await _collect_events(prompts, context, config, stream_fn)
+
+        assert len(received) == 1
+        hook_ctx = received[0]
+        assert hook_ctx.tool_call["id"] == "tc-1"
+        assert hook_ctx.tool_call["name"] == "search"
+        assert hook_ctx.args == {"q": "X"}
+        # assistant_message 携带触发该调用的 toolCall 块
+        blocks = hook_ctx.assistant_message.get("content", [])
+        assert any(b.get("type") == "toolCall" for b in blocks)
+        # context 携带本轮 messages（user prompt + assistant 消息）
+        assert len(hook_ctx.context.messages) >= 2
+
+    @pytest.mark.asyncio
+    async def test_after_tool_call_receives_context(self):
+        """afterToolCall 收到 AfterToolCallContext（含 result 与 is_error）。"""
+        tool = _make_tool("search", "results")
+        prompts = [UserMessage(role="user", content="Search")]
+        context = AgentContext(system_prompt="test", messages=[], tools=[tool])
+
+        tc_final = _make_llm_tool_response("search", {"q": "X"})
+        text_final = _make_llm_text_response("done")
+        stream_fn = _make_counting_stream_fn([tc_final, text_final])
+
+        received: list = []
+
+        def _after(hook_ctx):
+            received.append(hook_ctx)
+            return None
+
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+            after_tool_call=_after,
+        )
+
+        await _collect_events(prompts, context, config, stream_fn)
+
+        assert len(received) == 1
+        hook_ctx = received[0]
+        assert hook_ctx.is_error is False
+        assert hook_ctx.result.content[0]["text"] == "results"
+        assert hook_ctx.tool_call["name"] == "search"
+        assert hook_ctx.assistant_message.get("role") == "assistant"
+        assert len(hook_ctx.context.messages) >= 2
+
+
+class TestParallelToolExecution:
+    """1.4：Parallel 工具执行。"""
+
+    @staticmethod
+    def _two_call_message() -> AssistantMessage:
+        """单条 assistant 消息携带两个 toolCall。"""
+        return faux_assistant_message(
+            [
+                faux_tool_call("a", {}, tool_call_id="tc-a"),
+                faux_tool_call("b", {}, tool_call_id="tc-b"),
+            ],
+            stop_reason="tool_call",
+        )
+
+    @pytest.mark.asyncio
+    async def test_parallel_executes_concurrently(self):
+        """parallel 模式：两个工具并发执行（屏障证明重叠）。"""
+        barrier = asyncio.Event()
+        started: list[int] = [0]
+
+        async def _slow_execute(tool_call_id, params, signal=None, on_update=None):
+            started[0] += 1
+            if started[0] == 2:
+                barrier.set()
+            await barrier.wait()
+            return AgentToolResult(
+                content=[TextContent(type="text", text="ok")],
+            )
+
+        tools = [
+            AgentTool(
+                name="a",
+                description="Tool: a",
+                input_schema={"type": "object", "properties": {}},
+                label="a",
+                execute=_slow_execute,
+            ),
+            AgentTool(
+                name="b",
+                description="Tool: b",
+                input_schema={"type": "object", "properties": {}},
+                label="b",
+                execute=_slow_execute,
+            ),
+        ]
+        prompts = [UserMessage(role="user", content="Run both")]
+        context = AgentContext(system_prompt="test", messages=[], tools=tools)
+        text_final = _make_llm_text_response("done")
+        stream_fn = _make_counting_stream_fn([self._two_call_message(), text_final])
+
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+            tool_execution="parallel",
+        )
+
+        result, events = await asyncio.wait_for(
+            _collect_events(prompts, context, config, stream_fn),
+            timeout=2.0,
+        )
+
+        # 两个工具都已启动（并发 → 任一工具等待前 started 已达 2；顺序会死锁超时）
+        assert started[0] == 2
+        assert len(_find_events(events, "tool_execution_start")) == 2
+        assert len(_find_events(events, "tool_execution_end")) == 2
+        # ToolResultMessage 按 assistant 原始顺序
+        trs = [m for m in result if m.get("role") == "toolResult"]
+        assert [t.get("tool_name") for t in trs] == ["a", "b"]
+        # 工具批次后文本轮正常完成
+        assert len(_find_events(events, "turn_start")) == 2
+
+    @pytest.mark.asyncio
+    async def test_sequential_tool_forces_batch_sequential(self):
+        """config=parallel 但批次内工具声明 sequential → 整批回退顺序执行。"""
+        a_done = asyncio.Event()
+        trace: list[str] = []
+
+        def _make_tool(name: str, text: str, execution_mode) -> AgentTool:
+            async def _execute(tool_call_id, params, signal=None, on_update=None):
+                trace.append(name + ":start")
+                if name == "a":
+                    await asyncio.sleep(0.05)
+                    a_done.set()
+                    trace.append(name + ":end")
+                else:
+                    trace.append(f"b:saw_a_done={a_done.is_set()}")
+                    trace.append(name + ":end")
+                return AgentToolResult(
+                    content=[TextContent(type="text", text=text)],
+                )
+
+            return AgentTool(
+                name=name,
+                description=f"Tool: {name}",
+                input_schema={"type": "object", "properties": {}},
+                label=name,
+                execute=_execute,
+                execution_mode=execution_mode,
+            )
+
+        tools = [
+            _make_tool("a", "A-result", "parallel"),
+            _make_tool("b", "B-result", "sequential"),
+        ]
+        prompts = [UserMessage(role="user", content="Run both")]
+        context = AgentContext(system_prompt="test", messages=[], tools=tools)
+        text_final = _make_llm_text_response("done")
+        stream_fn = _make_counting_stream_fn([self._two_call_message(), text_final])
+
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+            tool_execution="parallel",
+        )
+
+        result, events = await _collect_events(prompts, context, config, stream_fn)
+
+        # b 在 a 结束后才启动（顺序回退，无并发）
+        assert trace == [
+            "a:start", "a:end", "b:start", "b:saw_a_done=True", "b:end",
+        ]
+        assert len(_find_events(events, "tool_execution_end")) == 2
+
+    @pytest.mark.asyncio
+    async def test_config_sequential_forces_sequential(self):
+        """config="sequential" → 即使工具默认 parallel 也整批顺序执行。"""
+        a_done = asyncio.Event()
+        trace: list[str] = []
+
+        def _make_tool(name: str, text: str) -> AgentTool:
+            async def _execute(tool_call_id, params, signal=None, on_update=None):
+                trace.append(name + ":start")
+                if name == "a":
+                    await asyncio.sleep(0.05)
+                    a_done.set()
+                    trace.append(name + ":end")
+                else:
+                    trace.append(f"b:saw_a_done={a_done.is_set()}")
+                    trace.append(name + ":end")
+                return AgentToolResult(
+                    content=[TextContent(type="text", text=text)],
+                )
+
+            return AgentTool(
+                name=name,
+                description=f"Tool: {name}",
+                input_schema={"type": "object", "properties": {}},
+                label=name,
+                execute=_execute,
+            )
+
+        tools = [_make_tool("a", "A-result"), _make_tool("b", "B-result")]
+        prompts = [UserMessage(role="user", content="Run both")]
+        context = AgentContext(system_prompt="test", messages=[], tools=tools)
+        text_final = _make_llm_text_response("done")
+        stream_fn = _make_counting_stream_fn([self._two_call_message(), text_final])
+
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+            tool_execution="sequential",
+        )
+
+        await _collect_events(prompts, context, config, stream_fn)
+
+        assert trace == [
+            "a:start", "a:end", "b:start", "b:saw_a_done=True", "b:end",
+        ]
+
+
+class TestAgentLoopEventStream:
+    """1.6：agentLoop() / agentLoopContinue() EventStream 包装。"""
+
+    @pytest.mark.asyncio
+    async def test_agent_loop_stream_yields_events_and_result(self):
+        prompts = [UserMessage(role="user", content="Hi")]
+        context = AgentContext(system_prompt="test", messages=[])
+        final = _make_llm_text_response("Hello!")
+        stream_fn = _make_stream_fn(final)
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+        )
+
+        stream = agent_loop(prompts, context, config, None, stream_fn)
+
+        events: list[AgentEvent] = []
+        async for event in stream:
+            events.append(event)
+
+        types = [e["type"] for e in events]
+        assert "agent_start" in types
+        assert types[-1] == "agent_end"
+
+        messages = await stream.result()
+        assert [m.get("role") for m in messages] == ["user", "assistant"]
+
+    @pytest.mark.asyncio
+    async def test_agent_loop_continue_stream(self):
+        context = AgentContext(
+            system_prompt="test",
+            messages=[UserMessage(role="user", content="Hi")],
+        )
+        final = _make_llm_text_response("Hello!")
+        stream_fn = _make_stream_fn(final)
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+        )
+
+        stream = agent_loop_continue(context, config, None, stream_fn)
+
+        events: list[AgentEvent] = []
+        async for event in stream:
+            events.append(event)
+        assert events[-1]["type"] == "agent_end"
+
+        messages = await stream.result()
+        assert messages[-1].get("role") == "assistant"
+
+    @pytest.mark.asyncio
+    async def test_agent_loop_continue_validates_context(self):
+        """agentLoopContinue 对空 / assistant 结尾的 context 同步抛异常（对齐 TS）。"""
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+        )
+        stream_fn = _make_stream_fn(_make_llm_text_response("x"))
+
+        empty_ctx = AgentContext(system_prompt="test", messages=[])
+        with pytest.raises(ValueError, match="no messages"):
+            agent_loop_continue(empty_ctx, config, None, stream_fn)
+
+        assistant_last_ctx = AgentContext(
+            system_prompt="test",
+            messages=[
+                UserMessage(role="user", content="Q"),
+                {
+                    "role": "assistant",
+                    "content": [TextContent(type="text", text="A")],
+                    "api": "test",
+                    "provider": "test",
+                    "model": "test",
+                },
+            ],
+        )
+        with pytest.raises(ValueError, match="assistant"):
+            agent_loop_continue(assistant_last_ctx, config, None, stream_fn)

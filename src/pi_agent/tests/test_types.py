@@ -41,7 +41,7 @@ class TestAgentTool:
     def test_construct(self):
         tool = _make_tool()
         assert tool.name == "test_tool"
-        assert tool.execution_mode == "sequential"
+        assert tool.execution_mode == "parallel"
 
     def test_result_defaults(self):
         result = AgentToolResult(
@@ -165,7 +165,7 @@ class TestAgentLoopConfig:
             convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
         )
         assert config.model.id == "test-model"
-        assert config.tool_execution == "sequential"
+        assert config.tool_execution == "parallel"
         assert config.transform_context is None
 
     def test_all_hooks_default_to_none(self):
