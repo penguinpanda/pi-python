@@ -6,9 +6,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, NotRequired, Protocol, TypedDict, Union
+from typing import Any, Literal, NotRequired, Protocol, TypedDict
 
-from pi_ai._types import AgentMessage, ImageContent, TextContent, Usage
+from pi_ai.types import AgentMessage, ImageContent, TextContent, Usage
 
 
 # ---------------------------------------------------------------------------
@@ -122,19 +122,19 @@ class LeafEntry(_SessionTreeEntryBase):
     targetId: str | None
 
 
-SessionTreeEntry = Union[
-    MessageEntry,
-    ThinkingLevelChangeEntry,
-    ModelChangeEntry,
-    ActiveToolsChangeEntry,
-    CompactionEntry,
-    BranchSummaryEntry,
-    CustomEntry,
-    CustomMessageEntry,
-    LabelEntry,
-    SessionInfoEntry,
-    LeafEntry,
-]
+SessionTreeEntry = (
+    MessageEntry
+    | ThinkingLevelChangeEntry
+    | ModelChangeEntry
+    | ActiveToolsChangeEntry
+    | CompactionEntry
+    | BranchSummaryEntry
+    | CustomEntry
+    | CustomMessageEntry
+    | LabelEntry
+    | SessionInfoEntry
+    | LeafEntry
+)
 
 
 # ---------------------------------------------------------------------------

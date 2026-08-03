@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any, Generic, Protocol, TypeVar
 
@@ -56,8 +57,6 @@ def find_session_entry_matches(
     text: str,
 ) -> list[SessionSearchHit]:
     """在条目 JSON 中查找文本匹配（对齐 TS findSessionEntryMatches）。"""
-    import json
-
     normalized = text.strip().lower()
     if not normalized:
         return []

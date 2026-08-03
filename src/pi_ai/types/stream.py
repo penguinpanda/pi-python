@@ -21,7 +21,6 @@ from typing import (
     NotRequired,
     Protocol,
     TypedDict,
-    Union,
 )
 
 from .common import (
@@ -154,20 +153,20 @@ class ErrorEvent(BaseEvent):
     error: AssistantMessage
 
 
-AssistantMessageEvent = Union[
-    StartEvent,
-    TextStartEvent,
-    TextDeltaEvent,
-    TextEndEvent,
-    ThinkingStartEvent,
-    ThinkingDeltaEvent,
-    ThinkingEndEvent,
-    ToolCallStartEvent,
-    ToolCallDeltaEvent,
-    ToolCallEndEvent,
-    DoneEvent,
-    ErrorEvent,
-]
+AssistantMessageEvent = (
+    StartEvent
+    | TextStartEvent
+    | TextDeltaEvent
+    | TextEndEvent
+    | ThinkingStartEvent
+    | ThinkingDeltaEvent
+    | ThinkingEndEvent
+    | ToolCallStartEvent
+    | ToolCallDeltaEvent
+    | ToolCallEndEvent
+    | DoneEvent
+    | ErrorEvent
+)
 
 
 # =========================================================

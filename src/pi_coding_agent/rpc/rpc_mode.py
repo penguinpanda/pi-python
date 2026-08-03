@@ -438,7 +438,7 @@ class RpcMessageHandler:
             return error_response(
                 command_id, "set_steering_mode", "mode must be 'all' or 'one-at-a-time'"
             )
-        self.session.set_steering_mode(mode)
+        self.session.steering_mode = mode
         return success_response(command_id, "set_steering_mode")
 
     async def _handle_set_follow_up_mode(self, cmd: dict, command_id: str | None) -> dict:
@@ -447,7 +447,7 @@ class RpcMessageHandler:
             return error_response(
                 command_id, "set_follow_up_mode", "mode must be 'all' or 'one-at-a-time'"
             )
-        self.session.set_follow_up_mode(mode)
+        self.session.follow_up_mode = mode
         return success_response(command_id, "set_follow_up_mode")
 
     # ------------------------------------------------------------------

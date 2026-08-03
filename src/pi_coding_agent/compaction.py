@@ -661,7 +661,7 @@ async def complete_summarization(
     callbacks=None,
 ):
     """摘要 LLM 调用的统一入口（可选 retry 包裹）。"""
-    from pi_ai._types import AssistantMessage
+    from pi_ai.types import AssistantMessage
 
     # 摘要为独立请求：隔离路由，避免不可复用的 cache 写入。
     request_options = {**options, "cache_retention": "none", "session_id": uuid.uuid4().hex}

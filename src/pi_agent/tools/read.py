@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pi_ai._types import ImageContent, TextContent
+from pi_ai.types import ImageContent, TextContent
 
 from .._types import AgentTool, AgentToolResult
 from ..env import get_or_throw

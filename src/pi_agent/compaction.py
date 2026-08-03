@@ -11,7 +11,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from pi_ai._types import AgentMessage, Usage
+from pi_ai.types import AgentMessage, Usage
 from pi_ai.utils.retry import RetryPolicy, retry_assistant_call
 
 from .compaction_utils import (
@@ -235,7 +235,7 @@ async def complete_simple_with_retries(
     callbacks: Any = None,
 ):
     """摘要 LLM 调用（独立 session_id + cache_retention=none，可选 retry）。"""
-    from pi_ai._types import AssistantMessage
+    from pi_ai.types import AssistantMessage
 
     request_options = {
         **options,

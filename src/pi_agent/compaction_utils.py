@@ -10,7 +10,7 @@ import json
 import math
 from typing import Any
 
-from pi_ai._types import AgentMessage, Usage
+from pi_ai.types import AgentMessage, Usage
 
 from .session.types import SessionTreeEntry
 

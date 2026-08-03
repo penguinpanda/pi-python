@@ -223,7 +223,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
-from pi_ai._types import (
+from pi_ai.types import (
     AssistantMessage,
     DoneEvent,
     ErrorEvent,
@@ -1390,7 +1390,7 @@ async def _emit_tool_lifecycle(
 
 def _tools_to_pi_ai(tools: list) -> list:
     """将 AgentTool 列表转换为 pi_ai.Tool 列表。"""
-    from pi_ai._types import Tool as PiAiTool
+    from pi_ai.types import Tool as PiAiTool
 
     result: list[PiAiTool] = []
     for t in tools:

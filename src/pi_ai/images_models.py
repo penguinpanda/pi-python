@@ -9,7 +9,7 @@ import asyncio
 
 from typing import Any, Awaitable, Callable, Protocol
 
-from ._types import (
+from .types import (
     AssistantImages,
     ImagesContext,
     ImagesModel,

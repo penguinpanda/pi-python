@@ -1,6 +1,6 @@
 """图片生成顶级入口（对齐 TS images.ts）。"""
 
-from ._types import AssistantImages, ImagesContext, ImagesModel, ImagesOptions
+from .types import AssistantImages, ImagesContext, ImagesModel, ImagesOptions
 from .images_api_registry import get_images_api_provider
 from .providers.images import register_builtin_images_api_providers
 

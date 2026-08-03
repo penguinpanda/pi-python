@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass
 from typing import Literal
 
@@ -298,8 +299,6 @@ async def resolve_model_scope(
     model_runtime: ModelRuntime,
 ) -> list[ScopedModel]:
     """解析 --models 列表；警告打印到 stderr。"""
-    import sys
-
     result = await resolve_model_scope_with_diagnostics(patterns, model_runtime)
     for diagnostic in result.diagnostics:
         print(f"Warning: {diagnostic.message}", file=sys.stderr)

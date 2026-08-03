@@ -69,7 +69,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Literal, Protocol
 
 from .utils._event_stream import AssistantMessageEventStream
-from ._types import (
+from .types import (
     AssistantMessage,
     AsyncHTTPClient,
     Context,
@@ -88,7 +88,7 @@ from .models.models_store import (
     ProviderModelsStore,
     provider_models_store,
 )
-from ._types import now_ms
+from .types import now_ms
 
 # Provider 使用的 API 类型。
 #

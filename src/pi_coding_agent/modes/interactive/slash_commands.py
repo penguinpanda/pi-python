@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import inspect
+import json
+import os
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
@@ -285,8 +287,6 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
         return f"Cloned to session {new_session.session_id}"
 
     async def _settings(context: SlashContext, args: str) -> str:
-        import json
-
         from ..._config import (
             _deep_merge,
             _load_json,
@@ -373,8 +373,6 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
         return f"Logged out: {provider_id}"
 
     async def _share(context: SlashContext, _args: str) -> str:
-        import os
-
         import httpx
 
         token = os.environ.get("GITHUB_TOKEN")

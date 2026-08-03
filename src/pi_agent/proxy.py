@@ -28,7 +28,7 @@ from typing import Any
 
 import httpx
 
-from pi_ai._types import AssistantMessage, Context, Model, ToolCall, now_ms
+from pi_ai.types import AssistantMessage, Context, Model, ToolCall, now_ms
 from pi_ai.utils._event_stream import AssistantMessageEventStream
 from pi_ai.utils.partial_json import partial_json
 

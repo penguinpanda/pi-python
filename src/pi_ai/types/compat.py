@@ -1,6 +1,7 @@
 """pi_ai.types.compat — 兼容配置（Compat）与路由。
 
-Compat 字段为 provider 配置键
+Compat 字段为 provider 配置键。字段名使用 camelCase：这些键会作为
+JSON 请求字段直接发送给 provider，是上游 TS 生态的序列化格式约定。
 
 """
 

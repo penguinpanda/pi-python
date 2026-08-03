@@ -218,12 +218,6 @@ class AgentSession:
     def follow_up_mode(self, mode) -> None:
         self._agent.follow_up_mode = mode
 
-    def set_steering_mode(self, mode) -> None:
-        self.steering_mode = mode
-
-    def set_follow_up_mode(self, mode) -> None:
-        self.follow_up_mode = mode
-
     @property
     def auto_compaction_enabled(self) -> bool:
         return bool(self._compaction_settings.enabled)

@@ -6,7 +6,7 @@
 - AuthInteraction / AuthPrompt / AuthEvent：交互式登录回调。
 """
 
-from typing import Any, Literal, NotRequired, Protocol, TypedDict, Union
+from typing import Any, Literal, NotRequired, Protocol, TypedDict
 
 from .context import AuthContext
 
@@ -22,7 +22,7 @@ class OAuthCredential(TypedDict, total=False):
     # available_model_ids 等）直接以额外键存放。
 
 
-Credential = Union["OAuthCredential", Any]  # 实际为 OAuthCredential | ApiKeyCredential
+Credential = OAuthCredential | Any  # 实际为 OAuthCredential | ApiKeyCredential
 
 
 def credential_type(credential: Any) -> str | None:

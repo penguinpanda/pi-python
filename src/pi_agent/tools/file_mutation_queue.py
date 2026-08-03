@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Callable, TypeVar, Union
+from typing import Any, Callable, TypeVar
 
 from ..env import ExecutionEnv, get_or_throw
 

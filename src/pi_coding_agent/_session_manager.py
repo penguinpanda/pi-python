@@ -12,6 +12,7 @@ parentId 形成单链表。最小核心仅支持单链（无分支/树/压缩）
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import uuid
@@ -663,8 +664,6 @@ def _default_sessions_dir() -> Path:
 
 def _schedule_task(coroutine) -> None:
     """在运行中的事件循环里调度协程（无循环时跳过）。"""
-    import asyncio
-
     try:
         asyncio.get_running_loop()
     except RuntimeError:

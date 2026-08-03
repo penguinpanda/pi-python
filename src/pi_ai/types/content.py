@@ -12,7 +12,7 @@ ContentBlock 是消息内容的统一抽象：
 新增类型只需继承 BaseContent 并把 Literal 收窄为唯一 type。
 """
 
-from typing import Any, Literal, NotRequired, TypedDict, Union
+from typing import Any, Literal, NotRequired, TypedDict
 
 
 class BaseContent(TypedDict):
@@ -133,13 +133,7 @@ class CodeContent(BaseContent):
 
 
 # ContentBlock 可以是任意一种内容
-ContentBlock = Union[
-    TextContent,
-    ImageContent,
-    ToolCall,
-    ThinkingContent,
-    CodeContent,
-]
+ContentBlock = TextContent | ImageContent | ToolCall | ThinkingContent | CodeContent
 
 
 class TextSignatureV1(TypedDict):

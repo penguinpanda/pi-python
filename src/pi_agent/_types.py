@@ -26,12 +26,12 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Literal, TypedDict, Union
+from typing import Any, Literal, TypedDict
 
 # ---------------------------------------------------------------------------
 # 从 pi_ai 直接复用的类型
 # ---------------------------------------------------------------------------
-from pi_ai._types import (
+from pi_ai.types import (
     AssistantMessage,
     AssistantMessageEvent,
     CacheRetention,
@@ -66,7 +66,7 @@ AgentMessage = Message
 # 不抛异常 —— 错误通过事件流中的 stop_reason="error" 编码。
 # 通过依赖注入解耦具体 provider。
 StreamFn = Callable[
-    [Model, LlmContext, Union[StreamOptions, None]],
+    [Model, LlmContext, StreamOptions | None],
     Awaitable[AssistantMessageEventStream],
 ]
 
@@ -92,7 +92,7 @@ class AgentToolResult:
 
     content 中的 TextContent/ImageContent 会作为 toolResult 消息传给 LLM。
     """
-    content: list[Union[TextContent, ImageContent]]
+    content: list[TextContent | ImageContent]
     details: Any = None
     usage: Usage | None = None
     added_tool_names: list[str] | None = None
@@ -271,20 +271,20 @@ class AutoRetryEndEvent(TypedDict):
     final_error: str | None  # 最终错误（成功时为 None）
 
 
-AgentEvent = Union[
-    AgentStartEvent,
-    AgentEndEvent,
-    TurnStartEvent,
-    TurnEndEvent,
-    MessageStartEvent,
-    MessageUpdateEvent,
-    MessageEndEvent,
-    ToolExecutionStartEvent,
-    ToolExecutionUpdateEvent,
-    ToolExecutionEndEvent,
-    AutoRetryStartEvent,
-    AutoRetryEndEvent,
-]
+AgentEvent = (
+    AgentStartEvent
+    | AgentEndEvent
+    | TurnStartEvent
+    | TurnEndEvent
+    | MessageStartEvent
+    | MessageUpdateEvent
+    | MessageEndEvent
+    | ToolExecutionStartEvent
+    | ToolExecutionUpdateEvent
+    | ToolExecutionEndEvent
+    | AutoRetryStartEvent
+    | AutoRetryEndEvent
+)
 
 # 事件发射回调
 AgentEventSink = Callable[[AgentEvent], Awaitable[None]]
@@ -294,17 +294,17 @@ AgentEventSink = Callable[[AgentEvent], Awaitable[None]]
 # AgentLoopConfig（可注入钩子）
 # ---------------------------------------------------------------------------
 
-@dataclass
+@dataclass(slots=True)
 class BeforeToolCallResult:
     """beforeToolCall 返回值，block=True 阻止工具执行。"""
     block: bool = False
     reason: str = ""
 
 
-@dataclass
+@dataclass(slots=True)
 class AfterToolCallResult:
     """afterToolCall 返回值，字段级覆盖工具结果。"""
-    content: list[Union[TextContent, ImageContent]] | None = None
+    content: list[TextContent | ImageContent] | None = None
     details: Any = None
     is_error: bool | None = None
     usage: Usage | None = None
@@ -331,7 +331,7 @@ class AfterToolCallContext:
     context: AgentContext                # 当前 Agent 上下文
 
 
-@dataclass
+@dataclass(slots=True)
 class AgentLoopTurnUpdate:
     """prepareNextTurn 返回值，替换下一轮状态。"""
     context: AgentContext | None = None
@@ -339,7 +339,7 @@ class AgentLoopTurnUpdate:
     thinking_level: ThinkingLevel | None = None
 
 
-@dataclass
+@dataclass(slots=True)
 class AgentLoopConfig:
     """Agent 循环的所有可注入配置。
 

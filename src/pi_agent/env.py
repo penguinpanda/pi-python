@@ -15,17 +15,14 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Literal, Protocol, Tuple, TypeAlias, Union
+from typing import Any, Awaitable, Callable, Literal, Protocol, Tuple, TypeAlias
 
 
 # ---------------------------------------------------------------------------
 # Result / 错误
 # ---------------------------------------------------------------------------
 
-Result: TypeAlias = Union[
-    Tuple[Literal[True], Any],
-    Tuple[Literal[False], "FileError"],
-]
+Result: TypeAlias = Tuple[Literal[True], Any] | Tuple[Literal[False], "FileError"]
 
 
 def ok(value: Any) -> Tuple[Literal[True], Any]:

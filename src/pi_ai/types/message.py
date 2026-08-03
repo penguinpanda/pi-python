@@ -16,7 +16,7 @@
 Agent 层可通过 AgentMessage 携带任意 Agent role（planner/observation/memory...）。
 """
 
-from typing import Any, Literal, NotRequired, TypedDict, Union
+from typing import Any, Literal, NotRequired, TypedDict
 
 from .common import StopReason
 from .content import ContentBlock, ImageContent, TextContent, ToolCall
@@ -55,7 +55,7 @@ class UserMessage(BaseMessage):
     """
 
     role: Literal["user"]
-    content: str | list[Union[TextContent, ImageContent]]
+    content: str | list[TextContent | ImageContent]
     timestamp: int  # Unix 毫秒时间戳（必填，对齐 TS）
 
 
@@ -150,7 +150,7 @@ class ToolResultMessage(BaseMessage):
     role: Literal["toolResult"]
     tool_call_id: str
     tool_name: str
-    content: list[Union[TextContent, ImageContent]]
+    content: list[TextContent | ImageContent]
     is_error: bool                          # 是否执行失败
     timestamp: int                          # Unix 毫秒时间戳
     added_tool_names: NotRequired[list[str] | None]
@@ -192,13 +192,13 @@ class AgentMessage(BaseMessage):
 
 
 # 所有 Message 的联合类型
-Message = Union[
-    SystemMessage,
-    UserMessage,
-    AssistantMessage,
-    ToolResultMessage,
-    AgentMessage,
-]
+Message = (
+    SystemMessage
+    | UserMessage
+    | AssistantMessage
+    | ToolResultMessage
+    | AgentMessage
+)
 
 
 __all__ = [

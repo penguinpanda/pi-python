@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, cast
 
@@ -36,8 +37,6 @@ from .types import (
 
 
 def _encode_cwd(cwd: str) -> str:
-    import re
-
     return "--" + re.sub(r"[/\\:]", "-", re.sub(r"^[/\\]", "", cwd)) + "--"
 
 

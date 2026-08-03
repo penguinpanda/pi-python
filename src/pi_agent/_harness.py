@@ -19,7 +19,7 @@ import re
 from typing import Any, Awaitable, Callable, cast
 from uuid import uuid4
 
-from pi_ai._types import AssistantMessage, ImageContent, TextContent, UserMessage, now_ms
+from pi_ai.types import AssistantMessage, ImageContent, TextContent, UserMessage, now_ms
 
 from ._agent import _default_convert_to_llm
 from ._agent_loop import run_agent_loop

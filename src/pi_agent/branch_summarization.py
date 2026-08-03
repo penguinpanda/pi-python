@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from pi_ai._types import AgentMessage
+from pi_ai.types import AgentMessage
 
 from .compaction import SUMMARIZATION_SYSTEM_PROMPT, complete_simple_with_retries
 from .compaction_utils import (

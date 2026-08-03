@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from typing import Any, Callable
 
@@ -473,8 +474,6 @@ class ExtensionRunner:
         elif options.get("deliverAs") == "steer":
             session.steer(text)
         else:
-            import asyncio
-
             asyncio.create_task(self._send_prompt_text(session, text))
 
     async def _send_prompt_text(self, session, text: str) -> None:
@@ -489,8 +488,6 @@ class ExtensionRunner:
             self._abort_fn()
             return
         if self.session is not None:
-            import asyncio
-
             try:
                 asyncio.get_running_loop().create_task(self.session.abort())
             except RuntimeError:

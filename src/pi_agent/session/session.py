@@ -13,9 +13,10 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Callable, cast
 
-from pi_ai._types import AgentMessage, ImageContent, TextContent, Usage
+from pi_ai.types import AgentMessage, ImageContent, TextContent, Usage
 
 from .types import (
     ActiveToolsChangeEntry,
@@ -555,9 +556,7 @@ class Session:
         })
 
     async def append_session_name(self, name: str) -> str:
-        import re as _re
-
-        sanitized = _re.sub(r"[\r\n]+", " ", name).strip()
+        sanitized = re.sub(r"[\r\n]+", " ", name).strip()
         return await self._append_typed({
             "type": "session_info",
             "id": await self._create_entry_id(),

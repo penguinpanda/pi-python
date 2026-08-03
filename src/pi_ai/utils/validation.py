@@ -39,6 +39,7 @@ from __future__ import annotations
 import copy
 import json
 import math
+import re
 from typing import Any
 
 # =========================================================
@@ -373,8 +374,6 @@ def _check_schema(
             errors.append((path, f"Expected at most {max_length} characters"))
         pattern = schema.get("pattern")
         if isinstance(pattern, str):
-            import re
-
             if re.search(pattern, value) is None:
                 errors.append((path, f"Expected pattern {pattern!r}"))
 

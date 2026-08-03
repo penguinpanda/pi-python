@@ -5,7 +5,7 @@ pi-ai  统一管理不同模型的 API,返回一个一致的 AI 调用接口。
 """
 
 from .utils._event_stream import AssistantMessageEventStream, EventStream
-from ._types import (
+from .types import (
     AgentMessage,
     AnthropicMessagesCompat,
     AssistantImages,

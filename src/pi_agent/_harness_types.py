@@ -8,9 +8,9 @@ hook 结果与 AgentHarnessOptions。
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal, TypedDict, Union
+from typing import Any, Callable, Literal, TypedDict
 
-from pi_ai._types import ImageContent, Model, TextContent, Usage
+from pi_ai.types import ImageContent, Model, TextContent, Usage
 
 from ._types import AgentEvent, AgentMessage, AgentTool, QueueMode, StreamFn, ThinkingLevel
 
@@ -299,27 +299,27 @@ class ResourcesUpdateEvent(TypedDict):
     previous_resources: AgentHarnessResources
 
 
-HarnessOwnEvent = Union[
-    QueueUpdateEvent,
-    SavePointEvent,
-    AbortEvent,
-    SettledEvent,
-    BeforeAgentStartEvent,
-    ContextEvent,
-    BeforeProviderRequestEvent,
-    ToolCallEvent,
-    ToolResultEvent,
-    SessionBeforeCompactEvent,
-    SessionCompactEvent,
-    SessionBeforeTreeEvent,
-    SessionTreeEvent,
-    ModelUpdateEvent,
-    ThinkingLevelUpdateEvent,
-    ToolsUpdateEvent,
-    ResourcesUpdateEvent,
-]
+HarnessOwnEvent = (
+    QueueUpdateEvent
+    | SavePointEvent
+    | AbortEvent
+    | SettledEvent
+    | BeforeAgentStartEvent
+    | ContextEvent
+    | BeforeProviderRequestEvent
+    | ToolCallEvent
+    | ToolResultEvent
+    | SessionBeforeCompactEvent
+    | SessionCompactEvent
+    | SessionBeforeTreeEvent
+    | SessionTreeEvent
+    | ModelUpdateEvent
+    | ThinkingLevelUpdateEvent
+    | ToolsUpdateEvent
+    | ResourcesUpdateEvent
+)
 
-AgentHarnessEvent = Union[AgentEvent, HarnessOwnEvent]
+AgentHarnessEvent = AgentEvent | HarnessOwnEvent
 
 
 # ---------------------------------------------------------------------------
@@ -405,10 +405,7 @@ class NavigateTreeResult:
 # AgentHarnessOptions
 # ---------------------------------------------------------------------------
 
-AgentHarnessSystemPrompt = Union[
-    str,
-    Callable[[dict], str],
-]
+AgentHarnessSystemPrompt = str | Callable[[dict], str]
 
 
 @dataclass(slots=True)

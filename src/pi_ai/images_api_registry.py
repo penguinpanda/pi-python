@@ -2,7 +2,7 @@
 
 from typing import Any, Awaitable, Callable
 
-from ._types import AssistantImages, ImagesContext, ImagesModel, ImagesOptions
+from .types import AssistantImages, ImagesContext, ImagesModel, ImagesOptions
 
 ImagesApiFunction = Callable[
     [ImagesModel, ImagesContext, ImagesOptions | None],
