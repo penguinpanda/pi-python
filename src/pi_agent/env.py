@@ -309,7 +309,11 @@ class PythonExecutionEnv:
         if aborted:
             return aborted
         try:
-            return (True, await asyncio.to_thread(Path(resolved).read_text, encoding="utf-8"))
+            # Read as bytes first to preserve original line endings (\r\n, \r, \n).
+            # Path.read_text() would apply universal newline conversion,
+            # losing \r before \n.
+            data = await asyncio.to_thread(Path(resolved).read_bytes)
+            return (True, data.decode("utf-8"))
         except BaseException as error:
             return (False, to_file_error(error, resolved))
 
