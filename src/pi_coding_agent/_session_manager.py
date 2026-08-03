@@ -55,6 +55,7 @@ class SessionManager:
         self._session_id = session_id
         self._session_path = session_path  # None = 内存模式
         self._entries: list[SessionMessageEntry] = entries or []
+        self._session_name: str | None = None
         # 跟踪最新的 parentId（单链尾）
         self._leaf_parent_id: str | None = (
             self._entries[-1]["id"] if self._entries else None
@@ -130,6 +131,18 @@ class SessionManager:
     @property
     def session_id(self) -> str:
         return self._session_id
+
+    @property
+    def session_path(self) -> Path | None:
+        return self._session_path
+
+    @property
+    def session_name(self) -> str | None:
+        return self._session_name
+
+    def set_session_name(self, name: str) -> None:
+        """设置会话显示名（当前为进程内属性，不写入 JSONL）。"""
+        self._session_name = name
 
     @property
     def cwd(self) -> str:
@@ -272,6 +285,10 @@ class SessionManager:
             if entry.get("type") == "model_change":
                 return entry.get("provider", ""), entry.get("model_id", "")
         return None
+
+    def get_leaf_id(self) -> str | None:
+        """返回当前链尾条目 id（无条目时为 None）。"""
+        return self._leaf_parent_id
 
 
 # ---------------------------------------------------------------------------

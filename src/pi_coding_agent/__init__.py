@@ -31,6 +31,7 @@ from .model_utils import (
     get_supported_thinking_levels,
 )
 from .resolve_config_value import resolve_config_value
+from .rpc import RpcClient, RpcMessageHandler, RpcUiContext, run_rpc_mode
 from .tools import (
     create_all_tools,
     create_coding_tools,
@@ -70,6 +71,11 @@ __all__ = [
     "get_supported_thinking_levels",
     "clamp_thinking_level",
     "resolve_config_value",
+    # RPC mode (Phase 2)
+    "RpcClient",
+    "RpcMessageHandler",
+    "RpcUiContext",
+    "run_rpc_mode",
     # Tools
     "create_all_tools",
     "create_coding_tools",

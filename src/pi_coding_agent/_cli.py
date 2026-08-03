@@ -20,6 +20,7 @@ from pi_ai.auth.oauth import builtin_oauth_providers
 
 from ._config import get_agent_dir, get_sessions_dir, load_settings
 from ._print_mode import run_print_mode
+from .rpc import run_rpc_mode
 from ._session import AgentSession
 from ._session_manager import SessionManager
 from .auth_storage import AuthStorage
@@ -93,22 +94,38 @@ async def _async_main(args: list[str] | None = None) -> int:
         system_prompt += "\n" + parsed.append_system_prompt
 
     # 创建 Agent
-    agent = Agent(AgentOptions(
-        system_prompt=system_prompt,
-        model=model,
-        # 会话标识透传给 provider，启用提示缓存（prompt_cache_key）
-        session_id=session_manager.session_id,
-    ))
+    def build_session(
+        sm: SessionManager,
+        session_model: Model,
+        session_scoped: list[ScopedModel],
+    ) -> AgentSession:
+        agent = Agent(AgentOptions(
+            system_prompt=system_prompt,
+            model=session_model,
+            # 会话标识透传给 provider，启用提示缓存（prompt_cache_key）
+            session_id=sm.session_id,
+        ))
+        return AgentSession(
+            agent=agent,
+            session_manager=sm,
+            cwd=cwd,
+            model=session_model,
+            model_runtime=runtime,
+            scoped_models=session_scoped,
+        )
 
-    # 创建 AgentSession
-    session = AgentSession(
-        agent=agent,
-        session_manager=session_manager,
-        cwd=cwd,
-        model=model,
-        model_runtime=runtime,
-        scoped_models=scoped_models,
-    )
+    session = build_session(session_manager, model, scoped_models)
+
+    # RPC 模式：stdin/stdout JSONL 无头协议。
+    if parsed.mode == "rpc":
+        async def session_factory() -> AgentSession:
+            fresh_manager = SessionManager.create(cwd)
+            fresh_model, fresh_scoped = await _resolve_initial_model(
+                runtime, parsed, settings, fresh_manager, is_continuing=False
+            )
+            return build_session(fresh_manager, fresh_model, fresh_scoped)
+
+        return await run_rpc_mode(session, runtime, session_factory=session_factory)
 
     # 运行 print 模式
     message = parsed.message or _read_stdin()
@@ -251,6 +268,12 @@ def _create_parser() -> argparse.ArgumentParser:
         "-p", "--print",
         action="store_true",
         help="Single-shot print mode (default if message is provided)",
+    )
+    p.add_argument(
+        "--mode",
+        choices=["print", "rpc"],
+        default=None,
+        help="Run mode: print (default) or rpc (stdin/stdout JSONL)",
     )
 
     # 模型选择

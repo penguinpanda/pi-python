@@ -18,7 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from pi_agent import Agent, AgentEvent, AgentMessage, AgentTool
-from pi_ai import Model
+from pi_ai import Model, UserMessage
 from pi_ai.types.common import ModelThinkingLevel, ThinkingLevel
 from pi_ai.utils.estimate import calculate_context_tokens
 from pi_ai.utils.overflow import is_context_overflow
@@ -41,6 +41,7 @@ from .model_utils import (
 from .compaction import (
     DEFAULT_COMPACTION_SETTINGS,
     CompactionPreparation,
+    CompactionResult,
     CompactionSettings,
     compact,
     estimate_context_tokens,
@@ -95,6 +96,8 @@ class AgentSession:
         self._compaction_settings = compaction_settings or DEFAULT_COMPACTION_SETTINGS
         # 溢出恢复已尝试标记（每次 prompt 重置；单次压缩+重试保护）。
         self._overflow_recovery_attempted = False
+        # 压缩执行中标记（get_state / RPC 状态查询用）。
+        self._is_compacting = False
         # turn 级重试退避期间的中止信号（None 表示空闲）。
         self._abort: asyncio.Event | None = None
 
@@ -121,8 +124,97 @@ class AgentSession:
         return self._model
 
     @property
+    def cwd(self) -> str:
+        return self._cwd
+
+    @property
+    def session_manager(self) -> SessionManager:
+        return self._session_manager
+
+    @property
+    def session_id(self) -> str:
+        return self._session_manager.session_id
+
+    @property
+    def session_file(self) -> str | None:
+        """已持久化会话的文件路径；内存会话为 None。"""
+        if not self._session_manager.is_persisted():
+            return None
+        path = self._session_manager.session_path
+        return str(path) if path is not None else None
+
+    @property
+    def session_name(self) -> str | None:
+        return self._session_manager.session_name
+
+    def set_session_name(self, name: str) -> None:
+        self._session_manager.set_session_name(name)
+
+    @property
     def thinking_level(self) -> ThinkingLevel:
         return self._agent.state.thinking_level
+
+    @property
+    def is_streaming(self) -> bool:
+        return bool(self._agent.state.is_streaming)
+
+    @property
+    def is_compacting(self) -> bool:
+        return self._is_compacting
+
+    @property
+    def pending_message_count(self) -> int:
+        return int(self._agent.pending_message_count)
+
+    @property
+    def steering_mode(self):
+        return self._agent.steering_mode
+
+    @steering_mode.setter
+    def steering_mode(self, mode) -> None:
+        self._agent.steering_mode = mode
+
+    @property
+    def follow_up_mode(self):
+        return self._agent.follow_up_mode
+
+    @follow_up_mode.setter
+    def follow_up_mode(self, mode) -> None:
+        self._agent.follow_up_mode = mode
+
+    def set_steering_mode(self, mode) -> None:
+        self.steering_mode = mode
+
+    def set_follow_up_mode(self, mode) -> None:
+        self.follow_up_mode = mode
+
+    @property
+    def auto_compaction_enabled(self) -> bool:
+        return bool(self._compaction_settings.enabled)
+
+    def set_auto_compaction_enabled(self, enabled: bool) -> None:
+        self._compaction_settings.enabled = enabled
+
+    def set_auto_retry_enabled(self, enabled: bool) -> None:
+        current = self._turn_retry_policy
+        if current is None:
+            self._turn_retry_policy = RetryPolicy(
+                enabled=enabled,
+                max_retries=3,
+            )
+            return
+        self._turn_retry_policy = RetryPolicy(
+            enabled=enabled,
+            max_retries=current.max_retries,
+            base_delay_ms=current.base_delay_ms,
+            max_delay_ms=current.max_delay_ms,
+            jitter=current.jitter,
+        )
+
+    def abort_retry(self) -> None:
+        """中止 turn 级重试的退避等待（不影响当前运行）。"""
+        if self._abort is not None:
+            self._abort.set()
 
     def get_available_models(self) -> list[Model]:
         """获取可循环的模型列表（scope 优先，否则运行时可用快照）。"""
@@ -132,6 +224,119 @@ class AgentSession:
             return self._model_runtime.get_available_snapshot()
         return []
 
+    def steer(self, text: str) -> None:
+        """入队一条 steering 消息（Agent 运行中注入）。"""
+        self._agent.steer(UserMessage(role="user", content=text))
+
+    def follow_up(self, text: str) -> None:
+        """入队一条 follow-up 消息（Agent 即将停止时继续）。"""
+        self._agent.follow_up(UserMessage(role="user", content=text))
+
+    def get_last_assistant_text(self) -> str | None:
+        """返回最后一条 assistant 消息的纯文本。"""
+        for message in reversed(self.get_messages()):
+            if message.get("role") != "assistant":
+                continue
+            parts = [
+                block.get("text", "")
+                for block in message.get("content", [])
+                if isinstance(block, dict) and block.get("type") == "text"
+            ]
+            text = "".join(parts)
+            return text or None
+        return None
+
+    def get_session_stats(self) -> dict:
+        """汇总会话统计（对齐 TS SessionStats）。"""
+        messages = self.get_messages()
+        user_messages = 0
+        assistant_messages = 0
+        tool_calls = 0
+        tool_results = 0
+        tokens = {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0}
+        cost = 0.0
+        for message in messages:
+            role = message.get("role")
+            if role == "user":
+                user_messages += 1
+            elif role == "assistant":
+                assistant_messages += 1
+                for block in message.get("content", []):
+                    if isinstance(block, dict) and block.get("type") == "toolCall":
+                        tool_calls += 1
+                usage = message.get("usage")
+                if usage:
+                    for key in ("input", "output", "cache_read", "cache_write", "total_tokens"):
+                        tokens[key.replace("total_tokens", "total")] += usage.get(key, 0) or 0
+                    cost += (usage.get("cost") or {}).get("total", 0) or 0
+            elif role == "toolResult":
+                tool_results += 1
+        return {
+            "sessionFile": self.session_file,
+            "sessionId": self.session_id,
+            "userMessages": user_messages,
+            "assistantMessages": assistant_messages,
+            "toolCalls": tool_calls,
+            "toolResults": tool_results,
+            "totalMessages": len(messages),
+            "tokens": tokens,
+            "cost": cost,
+            "contextUsage": None,
+        }
+
+    async def compact(
+        self, custom_instructions: str | None = None
+    ) -> CompactionResult | None:
+        """手动压缩（RPC compact 命令）。
+
+        custom_instructions 预留（当前摘要提示词固定，与 TS 对齐后启用）。
+        """
+        if self._model is None:
+            return None
+        entries = self._session_manager.get_entries()
+        context_messages = self._agent.state.messages
+        preparation: CompactionPreparation | None = prepare_compaction(
+            entries, context_messages, self._compaction_settings
+        )
+        if preparation is None:
+            return None
+
+        self._emit({"type": "compaction_start", "reason": "manual"})
+        self._is_compacting = True
+        try:
+            result = await compact(
+                preparation,
+                self._model,
+                stream_fn=self._agent._resolve_stream_fn(),
+                thinking_level=self._agent.state.thinking_level,
+            )
+            await self._session_manager.append_compaction(
+                result.summary,
+                result.first_kept_entry_id,
+                result.tokens_before,
+                result.details,
+            )
+            self._agent.state.messages = self._session_manager.build_context()
+            self._emit({
+                "type": "compaction_end",
+                "reason": "manual",
+                "result": result,
+                "aborted": False,
+                "willRetry": False,
+            })
+            return result
+        except Exception as exc:
+            self._emit({
+                "type": "compaction_end",
+                "reason": "manual",
+                "result": None,
+                "aborted": False,
+                "willRetry": False,
+                "error": str(exc),
+            })
+            return None
+        finally:
+            self._is_compacting = False
     async def set_model(self, model: Model) -> None:
         """切换模型：校验认证 → 更新 agent state → 记录会话 → 重算思考级别。"""
         runtime = self._model_runtime
@@ -485,6 +690,7 @@ class AgentSession:
             return False
 
         self._emit({"type": "compaction_start", "reason": reason})
+        self._is_compacting = True
         try:
             result = await compact(
                 preparation,
@@ -502,6 +708,8 @@ class AgentSession:
                 "error": str(exc),
             })
             return False
+        finally:
+            self._is_compacting = False
 
         await self._session_manager.append_compaction(
             result.summary,

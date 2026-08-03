@@ -73,6 +73,10 @@ class PendingMessageQueue:
     def has_items(self) -> bool:
         return len(self._messages) > 0
 
+    def queued_count(self) -> int:
+        """当前队列中的消息数量。"""
+        return len(self._messages)
+
     def drain(self) -> list[AgentMessage]:
         if self.mode == "all":
             drained = self._messages
@@ -359,6 +363,11 @@ class Agent:
         """任一队列仍有待处理消息时返回 True。"""
         return self._steering_queue.has_items() or self._follow_up_queue.has_items()
 
+    @property
+    def pending_message_count(self) -> int:
+        """steering + follow-up 队列中的消息总数。"""
+        return self._steering_queue.queued_count() + self._follow_up_queue.queued_count()
+
     def reset(self) -> None:
         """清空 transcript、运行时状态和双消息队列。"""
         if self._active:
@@ -418,6 +427,7 @@ class Agent:
             self._state.is_streaming = False
             self._active = False
             self._abort = None
+            await self._process_event({"type": "agent_settled"})
             self._settled.set()
 
     async def _run_continue(self) -> None:
@@ -455,6 +465,7 @@ class Agent:
             self._state.is_streaming = False
             self._active = False
             self._abort = None
+            await self._process_event({"type": "agent_settled"})
             self._settled.set()
 
     # ------------------------------------------------------------------
