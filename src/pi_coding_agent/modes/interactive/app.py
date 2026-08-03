@@ -9,11 +9,12 @@ import sys
 from typing import Any, Callable
 
 from textual.app import App, ComposeResult
-from textual.binding import Binding
+from textual.binding import Binding, BindingsMap
 
 from ..._config import get_sessions_dir
 from ..._session import AgentSession
 from ...model_runtime import ModelRuntime
+from ...extensions import ExtensionRunner
 from ...extensions.registry import ExtensionRegistry
 from pi_tui.clipboard_image import ClipboardImage
 from pi_tui.components import (
@@ -121,12 +122,16 @@ class PiTuiApp(App):
         resume_factory: Callable[[str], AgentSession] | None = None,
         session_rebuilder=None,
         settings: dict | None = None,
+        extension_loader=None,
     ) -> None:
         self._keybindings = keybindings_manager or KeybindingsManager()
-        if settings:
-            self._keybindings.load_from_settings(settings)
+        self._settings = settings if settings is not None else {}
+        if self._settings:
+            self._keybindings.load_from_settings(self._settings)
         self._theme_loader = theme_loader or ThemeLoader()
+        self._theme_name = theme_name
         self._theme = self._theme_loader.resolve(theme_name)
+        self._extension_loader = extension_loader
 
         # 实例级 BINDINGS / CSS：必须在 super().__init__() 之前设置。
         self.BINDINGS = [
@@ -135,6 +140,9 @@ class PiTuiApp(App):
         ]
         self.CSS = _build_css(self._theme.colors)
         super().__init__()
+        # Textual 8 的运行时绑定来自 node._bindings（类级 BINDINGS 构建）；
+        # 实例级 self.BINDINGS 需显式重建映射，否则快捷键不会分发。
+        self._bindings = BindingsMap(self.BINDINGS)
 
         self._session = session
         self._model_runtime = model_runtime
@@ -165,6 +173,7 @@ class PiTuiApp(App):
             new_session=self._handle_new_session,
             open_model_selector=self._open_model_selector,
             copy_to_clipboard=_copy_text,
+            reload_all=self._reload_all,
         )
         self._slash_context.rebuild_session = self._apply_rebuilt_session
 
@@ -214,6 +223,10 @@ class PiTuiApp(App):
     @property
     def _status(self) -> PiStatusBar:
         return self.query_one("#pi-status", PiStatusBar)
+
+    @property
+    def _header(self) -> PiHeader:
+        return self.query_one("#pi-header", PiHeader)
 
     @property
     def _footer(self) -> PiFooter:
@@ -428,6 +441,88 @@ class PiTuiApp(App):
         new_session = await result if inspect.isawaitable(result) else result
         await self._replace_session(new_session)
         return new_session
+
+    async def _reload_all(self) -> str:
+        """/reload：重新加载技能、提示模板、扩展、快捷键与主题。"""
+        details: list[str] = []
+        session = self._session
+
+        # 1. 技能 / 提示模板（加载器原地重扫）。
+        skill_loader = session.skill_loader
+        if skill_loader is not None:
+            try:
+                result = skill_loader.reload()
+                details.append(f"{len(result.skills)} skills")
+            except Exception as exc:
+                details.append(f"skills failed: {exc}")
+        template_loader = session.template_loader
+        if template_loader is not None:
+            try:
+                templates = template_loader.reload()
+                details.append(f"{len(templates)} prompts")
+            except Exception as exc:
+                details.append(f"prompts failed: {exc}")
+
+        # 2. 扩展：重扫磁盘 → 新 runner → 替换会话绑定。
+        new_runner = None
+        if self._extension_loader is not None:
+            old_runner = session.extension_runner
+            if old_runner is not None:
+                try:
+                    await old_runner.shutdown_all()
+                except Exception:
+                    pass
+            try:
+                result = await self._extension_loader.load()
+                new_runner = ExtensionRunner(
+                    result.extensions,
+                    runtime=result.runtime,
+                    cwd=session.cwd,
+                    model_runtime=self._model_runtime,
+                )
+                session.set_extension_runner(new_runner)
+                details.append(f"{len(result.extensions)} extensions")
+            except Exception as exc:
+                details.append(f"extensions failed: {exc}")
+        elif session.extension_runner is not None:
+            # 无 loader（测试 / 嵌入场景）：保留现有 runner，仅重放注册。
+            new_runner = session.extension_runner
+
+        # 3. 快捷键 + 扩展命令：重建注册表与 BINDINGS。
+        try:
+            registry = SlashCommandRegistry()
+            register_builtin_commands(registry)
+            self._keybindings.reset()
+            self._keybindings.load_from_settings(self._settings)
+            if new_runner is not None:
+                ExtensionRegistry(
+                    new_runner,
+                    slash_registry=registry,
+                    keybindings_manager=self._keybindings,
+                ).apply()
+            self._slash_registry = registry
+            self._slash_context.slash_registry = registry
+            self.BINDINGS = [
+                Binding(binding.key, binding.action, binding.description)
+                for binding in self._keybindings.all_bindings()
+            ]
+            self._bindings = BindingsMap(self.BINDINGS)
+            self.refresh_bindings()
+            self._header.refresh_hints()
+            details.append("keybindings refreshed")
+        except Exception as exc:
+            details.append(f"keybindings failed: {exc}")
+
+        # 4. 主题：重新解析并刷新 CSS。
+        try:
+            self._theme = self._theme_loader.resolve(self._theme_name)
+            self.CSS = _build_css(self._theme.colors)
+            self.refresh_css()
+            details.append(f"theme {self._theme.name}")
+        except Exception as exc:
+            details.append(f"theme failed: {exc}")
+
+        return "Reloaded: " + "; ".join(details)
 
     async def _replace_session(self, new_session: AgentSession) -> None:
         self._session = new_session

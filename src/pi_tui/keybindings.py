@@ -74,6 +74,19 @@ class KeybindingsManager:
         }
         self._rebuild_index()
 
+    def reset(self) -> None:
+        """恢复默认绑定，清除扩展注册的绑定（settings 覆盖由 load_from_settings 重放）。"""
+        self._bindings = {}
+        self._alt_keys = {}
+        for action_id, binding in self._defaults.items():
+            self._bindings[action_id] = Keybinding(
+                key=binding.key,
+                action_id=binding.action_id,
+                action=binding.action,
+                description=binding.description,
+            )
+        self._rebuild_index()
+
     def set_user_bindings(self, user_bindings: dict[str, Any]) -> None:
         """应用 settings keybindings 覆盖（action_id → key/keys/None）。"""
         for action_id, value in user_bindings.items():

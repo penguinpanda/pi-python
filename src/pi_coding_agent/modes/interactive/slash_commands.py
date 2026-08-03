@@ -40,6 +40,7 @@ class SlashContext:
         open_model_selector: Callable[[], None] | None = None,
         copy_to_clipboard: Callable[[str], None] | None = None,
         rebuild_session=None,
+        reload_all: Callable[[], Any] | None = None,
     ) -> None:
         self.session = session
         self.model_runtime = model_runtime
@@ -52,6 +53,8 @@ class SlashContext:
         self._copy_to_clipboard = copy_to_clipboard or (lambda _text: None)
         # 会话重建：fork / clone / resume / import 用（宿主注入）。
         self.rebuild_session = rebuild_session
+        # 宿主级重载：/reload 用（TUI 注入）。
+        self.reload_all = reload_all
 
     def notify(self, message: str) -> None:
         self._notify(message)
@@ -81,6 +84,13 @@ class SlashContext:
         if self.rebuild_session is None:
             raise RuntimeError("Session rebuild is not available in this mode")
         result = self.rebuild_session(manager)
+        return await result if inspect.isawaitable(result) else result
+
+    async def reload(self) -> str:
+        """触发宿主级 reload（/reload 用）。"""
+        if self.reload_all is None:
+            return "Reload is not available in this mode"
+        result = self.reload_all()
         return await result if inspect.isawaitable(result) else result
 
 
@@ -224,8 +234,7 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
         )
 
     async def _reload(context: SlashContext, _args: str) -> str:
-        context.notify("Reloaded keybindings, skills, prompts, and themes")
-        return ""
+        return await context.reload()
 
     async def _copy(context: SlashContext, _args: str) -> str:
         text = context.session.get_last_assistant_text()

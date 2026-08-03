@@ -114,7 +114,7 @@ class PiHeader(Static):
         super().__init__("", **kwargs)
         self._keybindings = keybindings
 
-    def on_mount(self) -> None:
+    def refresh_hints(self) -> None:
         model_forward = self._keybindings.get_action_key("app.model.cycleForward")
         model_select = self._keybindings.get_action_key("app.model.select")
         exit_key = self._keybindings.get_action_key("app.exit")
@@ -124,6 +124,9 @@ class PiHeader(Static):
             f"select model {model_select or ''}  "
             f"exit {exit_key or ''}"
         )
+
+    def on_mount(self) -> None:
+        self.refresh_hints()
 
 
 class PiChatContainer(VerticalScroll):

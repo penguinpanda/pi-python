@@ -231,6 +231,7 @@ async def _async_main(args: list[str] | None = None) -> int:
             resume_factory=resume_factory,
             session_rebuilder=rebuilder,
             settings=settings,
+            extension_loader=extension_loader,
         )
 
     # 运行 print 模式

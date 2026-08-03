@@ -424,3 +424,29 @@ class TestBuiltinHandlers:
         assert session._model is not None
         assert session._model.id == "faux-1"
         assert "Switched to" in notifications[0]
+
+
+class TestReloadCommand:
+    async def test_reload_invokes_host_callback(self):
+        registry = _make_registry()
+        notifications: list[str] = []
+        reloaded: list[str] = []
+
+        async def reload_all() -> str:
+            reloaded.append("called")
+            return "Reloaded: 1 skills; keybindings refreshed"
+
+        context = SlashContext(
+            notify=notifications.append,
+            reload_all=reload_all,
+        )
+        await registry.execute("/reload", context)
+        assert reloaded == ["called"]
+        assert notifications[-1] == "Reloaded: 1 skills; keybindings refreshed"
+
+    async def test_reload_unavailable_without_host(self):
+        registry = _make_registry()
+        notifications: list[str] = []
+        context = SlashContext(notify=notifications.append)
+        await registry.execute("/reload", context)
+        assert "not available" in notifications[-1]

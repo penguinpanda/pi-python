@@ -113,13 +113,20 @@ async def test_bindings_wired(tmp_path):
     runtime = _make_runtime()
     session = _make_session(runtime, tmp_path)
     app = PiTuiApp(session, runtime)
-    async with app.run_test():
+    async with app.run_test() as pilot:
         assert app._keybindings.resolve("ctrl+p") == "app.model.cycleForward"
         assert app._keybindings.resolve("ctrl+d") == "app.exit"
         binding_actions = {binding.action for binding in app.BINDINGS}
         assert "cycle_model_forward" in binding_actions
         assert "select_model" in binding_actions
         assert "exit" in binding_actions
+        # 绑定真实可分发：ctrl+p 切换模型。
+        await pilot.press("ctrl+p")
+        await _wait_until(
+            lambda: session.model is not None and session.model.id == "faux-2",
+            pilot=pilot,
+            message="binding dispatched",
+        )
 
 
 @pytest.mark.asyncio
@@ -290,3 +297,123 @@ async def test_slash_fork_in_app(tmp_path):
             message="session replaced after fork",
         )
         assert app._session.session_manager.get_leaf_id() == e1
+
+
+@pytest.mark.asyncio
+async def test_slash_reload_reloads_resources(tmp_path):
+    import json as _json
+
+    from pi_coding_agent.extensions import ExtensionLoader, ExtensionRunner
+    from pi_coding_agent.prompt_templates import PromptTemplateLoader
+    from pi_coding_agent.skills import SkillLoader
+    from pi_tui.keybindings import KeybindingsManager
+    from pi_tui.theme import BUILTIN_THEMES, ThemeLoader
+
+    skills_dir = tmp_path / "skills"
+    prompts_dir = tmp_path / "prompts"
+    extensions_dir = tmp_path / "extensions"
+    themes_dir = tmp_path / "themes"
+    for directory in (skills_dir, prompts_dir, extensions_dir, themes_dir):
+        directory.mkdir(parents=True)
+
+    theme_colors = dict(BUILTIN_THEMES["dark"])
+    theme_colors["accent"] = "#111111"
+    (themes_dir / "custom.json").write_text(
+        _json.dumps(theme_colors), encoding="utf-8"
+    )
+
+    runtime = _make_runtime()
+    model = runtime.get_model("faux", "faux-1")
+    assert model is not None
+    agent = Agent(AgentOptions(
+        system_prompt="You are a helpful coding assistant.",
+        model=model,
+        stream_fn=runtime.stream,
+    ))
+    skill_loader = SkillLoader(global_dir=skills_dir)
+    template_loader = PromptTemplateLoader(global_dir=prompts_dir)
+    session = AgentSession(
+        agent=agent,
+        session_manager=SessionManager.in_memory(cwd=str(tmp_path)),
+        cwd=str(tmp_path),
+        model=model,
+        model_runtime=runtime,
+        skill_loader=skill_loader,
+        template_loader=template_loader,
+        extension_runner=ExtensionRunner(
+            [], cwd=str(tmp_path), model_runtime=runtime
+        ),
+    )
+    extension_loader = ExtensionLoader(
+        global_dir=extensions_dir, cwd=str(tmp_path)
+    )
+    settings: dict = {}
+    app = PiTuiApp(
+        session,
+        runtime,
+        keybindings_manager=KeybindingsManager(),
+        theme_loader=ThemeLoader(themes_dir),
+        theme_name="custom",
+        settings=settings,
+        extension_loader=extension_loader,
+    )
+
+    async with app.run_test() as pilot:
+        (skills_dir / "alpha").mkdir(parents=True, exist_ok=True)
+        (skills_dir / "alpha" / "SKILL.md").write_text(
+            "---\nname: alpha\ndescription: Alpha skill\n---\nBody",
+            encoding="utf-8",
+        )
+        (prompts_dir / "review.md").write_text(
+            "---\ndescription: Review\n---\nReview {{0}}",
+            encoding="utf-8",
+        )
+        (extensions_dir / "hello.py").write_text(
+            "def create_extension(api):\n"
+            '    api.register_command("hello", '
+            '{"description": "Hello", "handler": lambda ctx, args: "hi"})\n',
+            encoding="utf-8",
+        )
+        theme_colors["accent"] = "#abcdef"
+        (themes_dir / "custom.json").write_text(
+            _json.dumps(theme_colors), encoding="utf-8"
+        )
+        settings["keybindings"] = {"app.model.select": "ctrl+m"}
+
+        app._editor.text = "/reload"
+        app.on_pi_editor_submitted(
+            PiEditor.Submitted(app._editor, "/reload")
+        )
+        await _wait_until(
+            lambda: (
+                session.skill_loader is not None
+                and session.skill_loader.get("alpha") is not None
+                and session.template_loader is not None
+                and session.template_loader.get("review") is not None
+                and session.extension_runner is not None
+                and len(session.extension_runner.extensions) == 1
+            ),
+            pilot=pilot,
+            message="reload applied to loaders",
+        )
+        await _wait_until(
+            lambda: "Reloaded:" in str(app._status.content),
+            pilot=pilot,
+            message="reload status shown",
+        )
+
+        assert app._theme.colors["accent"] == "#abcdef"
+        assert app._keybindings.get_action_key("app.model.select") == "ctrl+m"
+        assert app._slash_registry.get("hello") is not None
+        assert any(
+            binding.key == "ctrl+m" and binding.action == "select_model"
+            for binding in app.BINDINGS
+        )
+
+        # 重载后的快捷键真实可分发（打开模型选择器）。
+        await pilot.press("ctrl+m")
+        await _wait_until(
+            lambda: isinstance(app.screen, ModelSelector),
+            pilot=pilot,
+            message="reloaded keybinding dispatches",
+        )

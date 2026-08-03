@@ -268,6 +268,12 @@ class AgentSession:
         """设置 Ctrl+P 循环的 scope 列表（空 = 全部可用）。"""
         self._scoped_models = list(scoped_models)
 
+    def set_extension_runner(self, runner) -> None:
+        """替换扩展运行器并立即绑定当前会话（/reload 用）。"""
+        self._extension_runner = runner
+        if runner is not None:
+            runner.bind_session(self)
+
     def steer(self, text: str) -> None:
         """入队一条 steering 消息（Agent 运行中注入）。"""
         self._agent.steer(UserMessage(role="user", content=text))
