@@ -479,3 +479,95 @@ class TestAgentMessageQueues:
         agent.follow_up(UserMessage(role="user", content="f"))
         agent.reset()
         assert agent.has_queued_messages() is False
+
+
+class TestAgentContinueQueues:
+    """1.2：continue() 队列排空路径（对齐 TS continue()）。"""
+
+    @pytest.mark.asyncio
+    async def test_continue_after_assistant_drains_steering(self):
+        """最后一条是 assistant + 有 steering → 作为 prompt 续跑。"""
+        stream_fn = _make_modeled_stream_fn(["A1", "A2"])
+        agent = Agent(AgentOptions(
+            model=_make_model(),
+            stream_fn=stream_fn,
+        ))
+        await agent.prompt("Q")
+        assert agent.state.messages[-1].get("role") == "assistant"
+
+        agent.steer(UserMessage(role="user", content="nudge"))
+        await agent.continue_()
+
+        roles = [m.get("role") for m in agent.state.messages]
+        assert roles.count("assistant") == 2
+        contents = [m.get("content") for m in agent.state.messages]
+        assert "nudge" in contents
+        assert agent.has_queued_messages() is False
+
+    @pytest.mark.asyncio
+    async def test_continue_after_assistant_drains_follow_up(self):
+        """最后一条是 assistant + 只有 follow-up → 作为 prompt 续跑。"""
+        stream_fn = _make_modeled_stream_fn(["A1", "A2"])
+        agent = Agent(AgentOptions(
+            model=_make_model(),
+            stream_fn=stream_fn,
+        ))
+        await agent.prompt("Q")
+
+        agent.follow_up(UserMessage(role="user", content="follow"))
+        await agent.continue_()
+
+        roles = [m.get("role") for m in agent.state.messages]
+        assert roles.count("assistant") == 2
+        contents = [m.get("content") for m in agent.state.messages]
+        assert "follow" in contents
+
+    @pytest.mark.asyncio
+    async def test_continue_steering_one_at_a_time(self):
+        """one-at-a-time：continue 只消费一条 steering，其余下一轮注入。"""
+        stream_fn = _make_modeled_stream_fn(["A1", "A2", "A3"])
+        agent = Agent(AgentOptions(
+            model=_make_model(),
+            stream_fn=stream_fn,
+        ))
+        await agent.prompt("Q")
+
+        agent.steer(UserMessage(role="user", content="s1"))
+        agent.steer(UserMessage(role="user", content="s2"))
+        await agent.continue_()
+
+        roles = [m.get("role") for m in agent.state.messages]
+        assert roles.count("assistant") == 3
+        contents = [m.get("content") for m in agent.state.messages]
+        assert "s1" in contents and "s2" in contents
+        assert agent.has_queued_messages() is False
+
+    @pytest.mark.asyncio
+    async def test_continue_steering_mode_all(self):
+        """all：continue 一次消费全部 steering。"""
+        stream_fn = _make_modeled_stream_fn(["A1", "A2"])
+        agent = Agent(AgentOptions(
+            model=_make_model(),
+            stream_fn=stream_fn,
+            steering_mode="all",
+        ))
+        await agent.prompt("Q")
+
+        agent.steer(UserMessage(role="user", content="s1"))
+        agent.steer(UserMessage(role="user", content="s2"))
+        await agent.continue_()
+
+        roles = [m.get("role") for m in agent.state.messages]
+        assert roles.count("assistant") == 2
+        contents = [m.get("content") for m in agent.state.messages]
+        assert "s1" in contents and "s2" in contents
+
+    @pytest.mark.asyncio
+    async def test_continue_empty_transcript_raises(self):
+        """无消息时 continue 抛异常（对齐 TS）。"""
+        agent = Agent(AgentOptions(
+            model=_make_model(),
+            stream_fn=_make_faux_stream_fn(),
+        ))
+        with pytest.raises(RuntimeError, match="No messages to continue from"):
+            await agent.continue_()

@@ -238,12 +238,35 @@ class Agent:
         await self._run_prompt(prompts)
 
     async def continue_(self) -> None:
-        """从当前 transcript 继续（最后一条消息必须非 assistant）。"""
+        """从当前 transcript 继续（对齐 TS continue()）。
+
+        最后一条消息为非 assistant 时直接续跑；为 assistant 时先消费队列：
+        1. steering 队列非空 → 作为 prompt 运行（跳过首次 steering 轮询，
+           避免与手动排空的消息重复注入）
+        2. 否则 follow-up 队列非空 → 作为 prompt 运行
+        3. 队列均为空 → 抛异常
+        """
         if self._active:
             raise RuntimeError("Agent is already running. Use abort() to stop.")
 
         messages = self._state._messages
-        if messages and messages[-1].get("role") == "assistant":
+        if not messages:
+            raise RuntimeError("No messages to continue from")
+
+        if messages[-1].get("role") == "assistant":
+            queued_steering = self._steering_queue.drain()
+            if queued_steering:
+                await self._run_prompt(
+                    queued_steering,
+                    skip_initial_steering_poll=True,
+                )
+                return
+
+            queued_follow_up = self._follow_up_queue.drain()
+            if queued_follow_up:
+                await self._run_prompt(queued_follow_up)
+                return
+
             raise RuntimeError(
                 "Cannot continue: last message is an assistant message. "
                 "Use prompt() instead."
@@ -336,7 +359,12 @@ class Agent:
     # 内部：运行生命周期
     # ------------------------------------------------------------------
 
-    async def _run_prompt(self, prompts: list[AgentMessage]) -> None:
+    async def _run_prompt(
+        self,
+        prompts: list[AgentMessage],
+        *,
+        skip_initial_steering_poll: bool = False,
+    ) -> None:
         """执行一次完整的 prompt → agent loop 生命周期。"""
         self._active = True
         self._abort = asyncio.Event()
@@ -354,7 +382,9 @@ class Agent:
             await run_agent_loop(
                 prompts=prompts,
                 context=context,
-                config=self._create_loop_config(),
+                config=self._create_loop_config(
+                    skip_initial_steering_poll=skip_initial_steering_poll,
+                ),
                 emit=self._process_event,
                 signal=self._abort,
                 stream_fn=self._resolve_stream_fn(),
@@ -413,8 +443,26 @@ class Agent:
     # 内部：桥接
     # ------------------------------------------------------------------
 
-    def _create_loop_config(self) -> AgentLoopConfig:
-        """将 Agent 公开属性桥接为 AgentLoopConfig。"""
+    def _create_loop_config(
+        self,
+        *,
+        skip_initial_steering_poll: bool = False,
+    ) -> AgentLoopConfig:
+        """将 Agent 公开属性桥接为 AgentLoopConfig。
+
+        skip_initial_steering_poll 对齐 TS runPromptMessages 的
+        skipInitialSteeringPoll：只跳过本次运行的首次 steering 轮询
+        （continue() 已手动排空队列并把消息作为 prompt 注入时使用）。
+        """
+        skip = skip_initial_steering_poll
+
+        async def _get_steering() -> list[AgentMessage]:
+            nonlocal skip
+            if skip:
+                skip = False
+                return []
+            return self._steering_queue.drain()
+
         return AgentLoopConfig(
             model=self._state.model,
             convert_to_llm=self.convert_to_llm,
@@ -428,13 +476,9 @@ class Agent:
             session_id=self.session_id,
             cache_retention=self.cache_retention,
             retry_policy=self.retry_policy,
-            get_steering_messages=self._get_steering_messages,
+            get_steering_messages=_get_steering,
             get_follow_up_messages=self._get_follow_up_messages,
         )
-
-    async def _get_steering_messages(self) -> list[AgentMessage]:
-        """AgentLoopConfig.get_steering_messages：消费 steering 队列。"""
-        return self._steering_queue.drain()
 
     async def _get_follow_up_messages(self) -> list[AgentMessage]:
         """AgentLoopConfig.get_follow_up_messages：消费 follow-up 队列。"""
