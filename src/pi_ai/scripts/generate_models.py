@@ -7,7 +7,8 @@ Python 不重新抓取上游，直接消费 TS 生成的 JSON 目录作为数据
 src/pi_ai/models/generated/。
 
 用法：
-    python scripts/generate_models.py --source <ts-data-dir|models.json> [--out <dir>]
+    python -m pi_ai.scripts.generate_models --source <ts-data-dir|models.json> [--out <dir>]
+    python src/pi_ai/scripts/generate_models.py --source <ts-data-dir|models.json>
 
 输入支持：
     - TS --json-only 产物目录（providers/<id>.json + models.json）
@@ -22,10 +23,19 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# 本文件位于 <repo>/src/pi_ai/scripts/ 或安装后的 pi_ai/scripts/。
+_HERE = Path(__file__).resolve().parent
+_SRC = _HERE.parents[1]
+
 # 允许从仓库任意位置直接运行（未安装时）。
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT / "src") not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT / "src"))
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
+
+# 仓库根（默认输出目录用）；安装到 site-packages 时退化为包目录。
+if (_SRC.parent / "src" / "pi_ai").is_dir():
+    REPO_ROOT = _SRC.parent
+else:
+    REPO_ROOT = _HERE.parent
 
 
 def _number(value) -> float:
@@ -146,7 +156,7 @@ def write_generated(
 
 def _generated_init_template(generated_at: str, provider_ids: list[str]) -> str:
     ids_repr = ", ".join(repr(p) for p in provider_ids)
-    return f'''"""自动生成的模型目录（由 scripts/generate_models.py 生成，勿手改）。"""
+    return f'''"""自动生成的模型目录（由 src/pi_ai/scripts/generate_models.py 生成，勿手改）。"""
 
 from pathlib import Path
 
@@ -182,7 +192,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--out",
         type=Path,
-        default=REPO_ROOT / "src" / "pi_ai" / "models" / "generated",
+        default=(
+            REPO_ROOT / "src" / "pi_ai" / "models" / "generated"
+            if (_SRC.parent / "src" / "pi_ai").is_dir()
+            else _HERE.parent / "models" / "generated"
+        ),
         help="输出目录（默认 src/pi_ai/models/generated）",
     )
     args = parser.parse_args(argv)

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pi_ai.models.models_store import model_from_dict
 
-from scripts.generate_models import (
+from pi_ai.scripts.generate_models import (
     convert_ts_model,
     load_ts_catalog,
     write_generated,

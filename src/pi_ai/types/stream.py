@@ -183,6 +183,8 @@ class StreamOptions(TypedDict, total=False):
     temperature: float
     max_tokens: int
     api_key: str
+    # Provider 层解析后的 Base URL（注册表分发时注入；None 时回退 model.base_url）
+    base_url: NotRequired[str]
     thinking_budget: int | None
     thinking_enabled: bool | None
     headers: dict[str, str | None]

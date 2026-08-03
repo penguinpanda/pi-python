@@ -38,6 +38,7 @@ Provider 本身不负责：
 这些工作分别由：
 
     api/
+        api_provider_registry.py（注册表）
         completions.py
         responses.py
 
@@ -56,11 +57,10 @@ Provider 本身不负责：
          resolve_api_key()
                 │
                 ▼
-      chat_completions_stream()
-
-或者
-
-      responses_stream()
+      按 model.api 查注册表
+                │
+                ▼
+     openai-completions / openai-responses / ...
 """
 
 import asyncio
@@ -78,8 +78,10 @@ from ._types import (
     StreamOptions,
 )
 
-from .api.completions import chat_completions_stream
-from .api.responses import responses_stream
+from .api.api_provider_registry import (
+    get_api_provider,
+    invoke_api_stream,
+)
 from .auth import EnvApiKeyAuth, InMemoryCredentialStore, resolve_api_key
 from .models.models_store import (
     ModelsStoreEntry,
@@ -97,6 +99,12 @@ from ._types import now_ms
 #     Responses API
 
 ApiKind = Literal["completions", "responses"]
+
+# _api_kind → 注册表 API 协议 ID（model.api 为空时的回退映射）。
+_API_KIND_IDS: dict[str, str] = {
+    "completions": "openai-completions",
+    "responses": "openai-responses",
+}
 
 
 @dataclass(slots=True)
@@ -326,26 +334,24 @@ class Provider:
                 api_key = await resolve_api_key(self.auth, self._credential_store, self.id)
         base_url = self.base_url or ""
 
-        # 根据 Provider 使用的 API 类型，
-        # 调度到不同实现。
+        # 注册表分发：优先按模型 API 协议（model.api），
+        # 模型未声明时回退 Provider._api_kind。
         #
-        # 不同 Provider 可以共享同一套 Models，
-        # 但底层 API 实现不同。
+        # 新增 API 协议无需改动本方法：
+        # register_api_provider() 注册后即可按 model.api 分发。
+        api_id = model.api or _API_KIND_IDS.get(self._api_kind, self._api_kind)
+        entry = get_api_provider(api_id)
+        if entry is None:
+            raise ValueError(
+                f"No API provider registered for api: {api_id} "
+                f"(provider api kind: {self._api_kind})"
+            )
 
-        # responses：适合构建复杂的 AI Agent，例如需要联网搜索、文件检索、自动执行代码或多步推理的智能应用。
-        if self._api_kind == "responses":
-            return await responses_stream(model, context, api_key, base_url, options)
-
-        # completions：适合简单的文本生成任务，如基础聊天机器人、内容总结、分类等。
-        elif self._api_kind == "completions":
-            return await chat_completions_stream(model, context, api_key, base_url, options)
-
-        # 未知 API 类型。
-        #
-        # 正常情况不会发生（_api_kind 是字面量类型），
-        # 防御性处理，避免隐式返回 None。
-        else:
-            raise ValueError(f"Unknown API kind: {self._api_kind}")
+        # 把已解析的凭证与 base_url 注入 options（对齐 TS withEnvApiKey）。
+        request_options = dict(options or {})
+        request_options["api_key"] = api_key
+        request_options["base_url"] = base_url
+        return await invoke_api_stream(entry.stream, model, context, request_options)
 
     async def complete(
             self,

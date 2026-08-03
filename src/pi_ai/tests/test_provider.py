@@ -1,11 +1,16 @@
 """
-Unit tests for Provider dispatch logic.
+Unit tests for Provider dispatch logic（注册表模式）。
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from pi_ai.api.api_provider_registry import (
+    ApiProvider,
+    register_api_provider,
+    reset_api_providers,
+)
 from pi_ai.utils._event_stream import AssistantMessageEventStream
 from pi_ai._types import (
     AssistantMessage,
@@ -48,147 +53,130 @@ def _make_provider(api_kind: str = "completions", base_url: str | None = None) -
     )
 
 
+def _context() -> Context:
+    return Context(messages=[
+        {"role": "user", "content": "Hi"}  # type: ignore[typeddict-unknown-key]
+    ])
+
+
+def _done_message(model: Model) -> AssistantMessage:
+    return AssistantMessage(
+        role="assistant",
+        content=[],
+        api=model.api,
+        provider=model.provider,
+        model=model.id,
+        usage={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total_tokens": 0},
+        stop_reason="stop",
+        error_message=None,
+        timestamp=0,
+    )
+
+
+def _stub_provider(api: str, record: list) -> ApiProvider:
+    """同步返回 EventStream 的注册表 stub。"""
+
+    def _stream(model: Model, context: Context, options=None):
+        record.append((model, context, options))
+        fake_stream = AssistantMessageEventStream()
+        fake_stream.push({"type": "done", "reason": "stop", "message": _done_message(model)})
+        fake_stream.end()
+        return fake_stream
+
+    return ApiProvider(api=api, stream=_stream, streamSimple=_stream)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_registry():
+    reset_api_providers()
+    yield
+    reset_api_providers()
+
+
 # ---------------------------------------------------------------------------
-# Provider.stream() dispatch
+# Provider.stream() 注册表分发
 # ---------------------------------------------------------------------------
 
 class TestProviderStreamDispatch:
-    """Provider.stream() correctly dispatches to Completions or Responses API."""
+    """Provider.stream() 按 model.api 从注册表分发。"""
 
     @pytest.mark.asyncio
     async def test_completions_dispatch(self):
-        """_api_kind='completions' → calls chat_completions_stream."""
+        """model.api='openai-completions' → 调用注册的 completions 实现。"""
+        record: list = []
+        register_api_provider(_stub_provider("openai-completions", record), source_id="test")
         provider = _make_provider(api_kind="completions", base_url="https://api.test.com")
         model = _make_model()
-        context = Context(messages=[
-            {"role": "user", "content": "Hi"}  # type: ignore[typeddict-unknown-key]
-        ])
-
-        # Create a real stream to return from the mock
-        fake_stream = AssistantMessageEventStream()
-        fake_stream.push({"type": "done", "reason": "stop", "message": AssistantMessage(
-            role="assistant", content=[], api=model.api,
-            provider=model.provider, model=model.id,
-            usage={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total_tokens": 0},
-            stop_reason="stop", error_message=None, timestamp=0,
-        )})
 
         with patch("pi_ai.provider.resolve_api_key", new=AsyncMock(return_value="sk-test")):
-            with patch("pi_ai.provider.chat_completions_stream", new=AsyncMock(return_value=fake_stream)) as mock_completions:
-                with patch("pi_ai.provider.responses_stream") as mock_responses:
-                    await provider.stream(model, context)
+            await provider.stream(model, _context())
 
-        # Verify correct API was called
-        mock_completions.assert_called_once_with(
-            model, context, "sk-test", "https://api.test.com", None
-        )
-        mock_responses.assert_not_called()
+        received_model, received_context, received_options = record[0]
+        assert received_model is model
+        assert received_options["api_key"] == "sk-test"
+        assert received_options["base_url"] == "https://api.test.com"
 
     @pytest.mark.asyncio
     async def test_responses_dispatch(self):
-        """_api_kind='responses' → calls responses_stream with base_url."""
+        """model.api='openai-responses' → 调用注册的 responses 实现。"""
+        record: list = []
+        register_api_provider(_stub_provider("openai-responses", record), source_id="test")
         provider = _make_provider(api_kind="responses", base_url="https://api.openai.com/v1")
         model = _make_model(api="openai-responses")
-        context = Context(messages=[
-            {"role": "user", "content": "Hi"}  # type: ignore[typeddict-unknown-key]
-        ])
-
-        fake_stream = AssistantMessageEventStream()
-        fake_stream.push({"type": "done", "reason": "stop", "message": AssistantMessage(
-            role="assistant", content=[], api=model.api,
-            provider=model.provider, model=model.id,
-            usage={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total_tokens": 0},
-            stop_reason="stop", error_message=None, timestamp=0,
-        )})
 
         with patch("pi_ai.provider.resolve_api_key", new=AsyncMock(return_value="sk-test")):
-            with patch("pi_ai.provider.responses_stream", new=AsyncMock(return_value=fake_stream)) as mock_responses:
-                with patch("pi_ai.provider.chat_completions_stream") as mock_completions:
-                    await provider.stream(model, context)
+            await provider.stream(model, _context())
 
-        mock_responses.assert_called_once_with(
-            model, context, "sk-test", "https://api.openai.com/v1", None
-        )
-        mock_completions.assert_not_called()
+        received_options = record[0][2]
+        assert received_options["api_key"] == "sk-test"
+        assert received_options["base_url"] == "https://api.openai.com/v1"
 
     @pytest.mark.asyncio
     async def test_responses_empty_base_url(self):
-        """When base_url is None/empty, empty string is passed to responses_stream."""
+        """base_url=None 时注入空字符串。"""
+        record: list = []
+        register_api_provider(_stub_provider("openai-responses", record), source_id="test")
         provider = _make_provider(api_kind="responses", base_url=None)
         model = _make_model(api="openai-responses")
-        context = Context(messages=[
-            {"role": "user", "content": "Hi"}  # type: ignore[typeddict-unknown-key]
-        ])
-
-        fake_stream = AssistantMessageEventStream()
-        fake_stream.push({"type": "done", "reason": "stop", "message": AssistantMessage(
-            role="assistant", content=[], api=model.api,
-            provider=model.provider, model=model.id,
-            usage={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total_tokens": 0},
-            stop_reason="stop", error_message=None, timestamp=0,
-        )})
 
         with patch("pi_ai.provider.resolve_api_key", new=AsyncMock(return_value="sk-test")):
-            with patch("pi_ai.provider.responses_stream", new=AsyncMock(return_value=fake_stream)) as mock_responses:
-                await provider.stream(model, context)
+            await provider.stream(model, _context())
 
-        # base_url should be "" when None
-        assert mock_responses.call_args[0][2] == "sk-test"  # api_key
-        assert mock_responses.call_args[0][3] == ""  # base_url
+        received_options = record[0][2]
+        assert received_options["api_key"] == "sk-test"
+        assert received_options["base_url"] == ""
 
     @pytest.mark.asyncio
     async def test_completions_default_empty_base_url(self):
-        """completions dispatch with no base_url set → passes empty string."""
+        """completions 无 base_url 时注入空字符串。"""
+        record: list = []
+        register_api_provider(_stub_provider("openai-completions", record), source_id="test")
         provider = _make_provider(api_kind="completions", base_url=None)
-        model = _make_model()
-        context = Context(messages=[
-            {"role": "user", "content": "Hi"}  # type: ignore[typeddict-unknown-key]
-        ])
-
-        fake_stream = AssistantMessageEventStream()
-        fake_stream.push({"type": "done", "reason": "stop", "message": AssistantMessage(
-            role="assistant", content=[], api=model.api,
-            provider=model.provider, model=model.id,
-            usage={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total_tokens": 0},
-            stop_reason="stop", error_message=None, timestamp=0,
-        )})
 
         with patch("pi_ai.provider.resolve_api_key", new=AsyncMock(return_value="sk-test")):
-            with patch("pi_ai.provider.chat_completions_stream", new=AsyncMock(return_value=fake_stream)) as mock_completions:
-                await provider.stream(model, context)
+            await provider.stream(_make_model(), _context())
 
-        assert mock_completions.call_args[0][3] == ""  # base_url
+        assert record[0][2]["base_url"] == ""
 
     @pytest.mark.asyncio
     async def test_api_key_option_overrides_default(self):
-        """StreamOptions.api_key overrides default resolution and skips resolve_api_key."""
+        """StreamOptions.api_key 覆盖默认解析并跳过 resolve_api_key。"""
+        record: list = []
+        register_api_provider(_stub_provider("openai-completions", record), source_id="test")
         provider = _make_provider(api_kind="completions")
-        model = _make_model()
-        context = Context(messages=[
-            {"role": "user", "content": "Hi"}  # type: ignore[typeddict-unknown-key]
-        ])
-
-        fake_stream = AssistantMessageEventStream()
-        fake_stream.push({"type": "done", "reason": "stop", "message": AssistantMessage(
-            role="assistant", content=[], api=model.api,
-            provider=model.provider, model=model.id,
-            usage={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total_tokens": 0},
-            stop_reason="stop", error_message=None, timestamp=0,
-        )})
-
         options = {"api_key": "sk-override"}
 
         with patch("pi_ai.provider.resolve_api_key") as mock_resolve:
-            with patch("pi_ai.provider.chat_completions_stream", new=AsyncMock(return_value=fake_stream)) as mock_completions:
-                await provider.stream(model, context, options)
+            await provider.stream(_make_model(), _context(), options)
 
-        # resolve_api_key should NOT be called when api_key is provided
         mock_resolve.assert_not_called()
-        assert mock_completions.call_args[0][2] == "sk-override"  # api_key arg
+        assert record[0][2]["api_key"] == "sk-override"
 
     @pytest.mark.asyncio
     async def test_no_auth_skips_key_resolution(self):
-        """auth=None（本地服务）跳过 resolve_api_key，传空 api_key。"""
+        """auth=None（本地服务）跳过 resolve_api_key，传占位 key。"""
+        record: list = []
+        register_api_provider(_stub_provider("openai-completions", record), source_id="test")
         provider = Provider(
             id="keyless",
             name="Keyless",
@@ -197,26 +185,22 @@ class TestProviderStreamDispatch:
             _api_kind="completions",
             base_url="http://localhost:11434/v1",
         )
-        model = _make_model(provider="keyless")
-        context = Context(messages=[
-            {"role": "user", "content": "Hi"}  # type: ignore[typeddict-unknown-key]
-        ])
-
-        fake_stream = AssistantMessageEventStream()
-        fake_stream.push({"type": "done", "reason": "stop", "message": AssistantMessage(
-            role="assistant", content=[], api=model.api,
-            provider=model.provider, model=model.id,
-            usage={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total_tokens": 0},
-            stop_reason="stop", error_message=None, timestamp=0,
-        )})
 
         with patch("pi_ai.provider.resolve_api_key") as mock_resolve:
-            with patch("pi_ai.provider.chat_completions_stream", new=AsyncMock(return_value=fake_stream)) as mock_completions:
-                await provider.stream(model, context)
+            await provider.stream(_make_model(provider="keyless"), _context())
 
         mock_resolve.assert_not_called()
-        assert mock_completions.call_args[0][2] == "ollama"  # api_key 占位值
-        assert mock_completions.call_args[0][3] == "http://localhost:11434/v1"
+        assert record[0][2]["api_key"] == "ollama"
+        assert record[0][2]["base_url"] == "http://localhost:11434/v1"
+
+    @pytest.mark.asyncio
+    async def test_unknown_api_raises(self):
+        """注册表无对应 API 协议时抛错。"""
+        provider = _make_provider(api_kind="completions")
+        model = _make_model(api="no-such-api")
+        with patch("pi_ai.provider.resolve_api_key", new=AsyncMock(return_value="sk-test")):
+            with pytest.raises(ValueError, match="No API provider registered"):
+                await provider.stream(model, _context())
 
 
 # ---------------------------------------------------------------------------
@@ -229,11 +213,10 @@ class TestProviderComplete:
     @pytest.mark.asyncio
     async def test_complete_returns_assistant_message(self):
         """complete() waits for stream.result() and returns AssistantMessage."""
+        record: list = []
+        register_api_provider(_stub_provider("openai-completions", record), source_id="test")
         provider = _make_provider(api_kind="completions")
         model = _make_model()
-        context = Context(messages=[
-            {"role": "user", "content": "Hi"}  # type: ignore[typeddict-unknown-key]
-        ])
 
         expected_msg = AssistantMessage(
             role="assistant",
@@ -250,9 +233,20 @@ class TestProviderComplete:
         fake_stream = AssistantMessageEventStream()
         fake_stream.push({"type": "done", "reason": "stop", "message": expected_msg})
 
+        def _stub_stream(model, context, options=None):
+            return fake_stream
+
+        register_api_provider(
+            ApiProvider(
+                api="openai-completions",
+                stream=_stub_stream,
+                streamSimple=_stub_stream,
+            ),
+            source_id="test",
+        )
+
         with patch("pi_ai.provider.resolve_api_key", new=AsyncMock(return_value="sk-test")):
-            with patch("pi_ai.provider.chat_completions_stream", new=AsyncMock(return_value=fake_stream)):
-                result = await provider.complete(model, context)
+            result = await provider.complete(model, _context())
 
         assert result == expected_msg
         assert result["role"] == "assistant"
@@ -261,28 +255,19 @@ class TestProviderComplete:
     @pytest.mark.asyncio
     async def test_complete_with_options(self):
         """complete() forwards StreamOptions to stream()."""
+        record: list = []
+        register_api_provider(_stub_provider("openai-completions", record), source_id="test")
         provider = _make_provider(api_kind="completions")
-        model = _make_model()
-        context = Context(messages=[
-            {"role": "user", "content": "Hi"}  # type: ignore[typeddict-unknown-key]
-        ])
         options = {"temperature": 0.5, "max_tokens": 100}
 
-        fake_stream = AssistantMessageEventStream()
-        fake_stream.push({"type": "done", "reason": "stop", "message": AssistantMessage(
-            role="assistant", content=[], api=model.api,
-            provider=model.provider, model=model.id,
-            usage={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total_tokens": 0},
-            stop_reason="stop", error_message=None, timestamp=0,
-        )})
-
         with patch("pi_ai.provider.resolve_api_key", new=AsyncMock(return_value="sk-test")):
-            with patch("pi_ai.provider.chat_completions_stream", new=AsyncMock(return_value=fake_stream)) as mock_completions:
-                await provider.complete(model, context, options)
+            await provider.complete(_make_model(), _context(), options)
 
-        mock_completions.assert_called_once_with(
-            model, context, "sk-test", "", options  # base_url defaults to ""
-        )
+        received_options = record[0][2]
+        assert received_options["temperature"] == 0.5
+        assert received_options["max_tokens"] == 100
+        assert received_options["api_key"] == "sk-test"
+        assert received_options["base_url"] == ""
 
 
 # ---------------------------------------------------------------------------
@@ -316,7 +301,7 @@ class TestCreateProvider:
 # ---------------------------------------------------------------------------
 
 class TestProviderStreamFn:
-    """设置 _stream_fn 时跳过 API Key 解析与 api_kind 分发。"""
+    """设置 _stream_fn 时跳过 API Key 解析与注册表分发。"""
 
     def test_create_provider_wires_stream_fn(self):
         async def stream_fn(model, context, options):
@@ -330,7 +315,7 @@ class TestProviderStreamFn:
 
     @pytest.mark.asyncio
     async def test_stream_fn_bypasses_key_and_dispatch(self):
-        """设置 _stream_fn 后：不调用 resolve_api_key，不进入 completions/responses。"""
+        """设置 _stream_fn 后：不调用 resolve_api_key，不进入注册表分发。"""
 
         async def stream_fn(model, context, options):
             stream = AssistantMessageEventStream()
@@ -347,19 +332,11 @@ class TestProviderStreamFn:
 
         provider = _make_provider(api_kind="completions")
         provider._stream_fn = stream_fn
-        model = _make_model()
-        context = Context(messages=[
-            {"role": "user", "content": "Hi"}  # type: ignore[typeddict-unknown-key]
-        ])
 
         with patch("pi_ai.provider.resolve_api_key") as mock_resolve:
-            with patch("pi_ai.provider.chat_completions_stream") as mock_completions:
-                with patch("pi_ai.provider.responses_stream") as mock_responses:
-                    result = await provider.complete(model, context)
+            result = await provider.complete(_make_model(), _context())
 
         mock_resolve.assert_not_called()
-        mock_completions.assert_not_called()
-        mock_responses.assert_not_called()
         assert result["content"] == [{"type": "text", "text": "faux"}]
 
     @pytest.mark.asyncio
@@ -382,16 +359,12 @@ class TestProviderStreamFn:
 
         provider = _make_provider(api_kind="completions")
         provider._stream_fn = stream_fn
-        model = _make_model()
-        context = Context(messages=[
-            {"role": "user", "content": "Hi"}  # type: ignore[typeddict-unknown-key]
-        ])
         options = {"api_key": "sk-test"}
 
         with patch("pi_ai.provider.resolve_api_key") as mock_resolve:
-            await provider.stream(model, context, options)
+            await provider.stream(_make_model(), _context(), options)
 
         mock_resolve.assert_not_called()
-        assert received["model"] is model
-        assert received["context"] is context
+        assert received["model"] == _make_model()
+        assert received["context"] == _context()
         assert received["options"] is options

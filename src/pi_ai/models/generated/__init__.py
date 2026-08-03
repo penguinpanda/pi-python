@@ -1,4 +1,4 @@
-"""自动生成的模型目录（由 scripts/generate_models.py 生成，勿手改）。"""
+"""自动生成的模型目录（由 src/pi_ai/scripts/generate_models.py 生成，勿手改）。"""
 
 from pathlib import Path
 

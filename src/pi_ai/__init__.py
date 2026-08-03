@@ -106,6 +106,16 @@ from .auth import (
     env_api_key_auth,
 )
 from .auth.resolve import ModelsError
+from .api.api_provider_registry import (
+    ApiProvider,
+    ApiStreamFunction,
+    get_api_provider,
+    get_api_providers,
+    register_api_provider,
+    register_builtin_api_providers,
+    reset_api_providers,
+    unregister_api_providers,
+)
 from .models import Models
 from .provider import Provider, create_provider
 from .providers import (
@@ -146,6 +156,16 @@ __all__ = [
     # Core registry
     "Models",
     "create_default_models",
+
+    # API 注册表（对齐 TS compat.ts apiProviderRegistry）
+    "ApiProvider",
+    "ApiStreamFunction",
+    "register_api_provider",
+    "get_api_provider",
+    "get_api_providers",
+    "unregister_api_providers",
+    "register_builtin_api_providers",
+    "reset_api_providers",
 
     # Retry
     "RetryPolicy",

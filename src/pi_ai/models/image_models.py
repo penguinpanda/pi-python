@@ -1,7 +1,7 @@
 """图片模型目录（对齐 TS image-models.ts / image-models.generated.ts）。
 
 当前唯一的图片 provider 是 OpenRouter；目录为静态数据，
-后续可并入 scripts/generate_models.py 的生成体系。
+后续可并入 src/pi_ai/scripts/generate_models.py 的生成体系。
 """
 
 from .._types import ImagesModel
