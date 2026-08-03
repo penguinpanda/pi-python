@@ -1,50 +1,16 @@
-"""Session 资源清理（对齐 TS session-resources.ts）。
+"""pi_agent.session_resources — 兼容 re-export（Deprecated）。
 
-全局注册表：各模块把清理函数注册进来，session close / reload / shutdown
-统一调用 cleanup_session_resources()；单个清理失败不影响其它清理。
+实现已迁移到 `pi_ai.session_resources`（对齐 TS packages/ai/src/session-resources.ts）。
+新代码请直接使用 `from pi_ai.session_resources import ...`。
 """
 
-from typing import Callable
+import warnings
 
-# 清理函数：session_id | None
-SessionResourceCleanup = Callable[[str | None], None]
+warnings.warn(
+    "pi_agent.session_resources is deprecated; use pi_ai.session_resources instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
-_cleanups: set[SessionResourceCleanup] = set()
-
-
-class CleanupError(Exception):
-    """资源清理聚合错误（Python <3.11 无 ExceptionGroup 时的替代）。"""
-
-    def __init__(self, errors: list[BaseException]) -> None:
-        super().__init__("Failed to cleanup session resources")
-        self.errors = errors
-
-
-def register_session_resource_cleanup(cleanup: SessionResourceCleanup) -> Callable[[], None]:
-    """注册清理函数；返回反注册函数。"""
-    _cleanups.add(cleanup)
-
-    def _unregister() -> None:
-        _cleanups.discard(cleanup)
-
-    return _unregister
-
-
-def cleanup_session_resources(session_id: str | None = None) -> None:
-    """执行全部已注册清理；收集错误后统一抛出。"""
-    errors: list[BaseException] = []
-    for cleanup in list(_cleanups):
-        try:
-            cleanup(session_id)
-        except BaseException as exc:  # noqa: BLE001 — 聚合而非中断
-            errors.append(exc)
-    if errors:
-        raise CleanupError(errors)
-
-
-__all__ = [
-    "SessionResourceCleanup",
-    "CleanupError",
-    "register_session_resource_cleanup",
-    "cleanup_session_resources",
-]
+from pi_ai.session_resources import *  # noqa: F401,F403
+from pi_ai.session_resources import __all__  # noqa: F401

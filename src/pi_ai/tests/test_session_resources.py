@@ -1,8 +1,8 @@
-"""Session 资源清理测试。"""
+"""pi_ai.session_resources（对齐 TS packages/ai/src/session-resources.ts）测试。"""
 
 import pytest
 
-from pi_agent.session_resources import (
+from pi_ai.session_resources import (
     CleanupError,
     cleanup_session_resources,
     register_session_resource_cleanup,
