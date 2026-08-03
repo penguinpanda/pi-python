@@ -19,6 +19,7 @@ from pi_ai import Model
 from pi_ai.auth.oauth import builtin_oauth_providers
 
 from ._config import get_agent_dir, get_sessions_dir, load_settings
+from .extensions import ExtensionLoader, ExtensionRunner
 from ._print_mode import run_print_mode
 from .rpc import run_rpc_mode
 from .modes.interactive import run_tui_mode
@@ -106,6 +107,20 @@ async def _async_main(args: list[str] | None = None) -> int:
         project_dir=Path(cwd) / ".pi" / "prompts",
     )
 
+    # Phase 5：扩展（项目 .pi/extensions + 全局 extensions）。
+    extension_loader = ExtensionLoader(
+        global_dir=get_agent_dir() / "extensions",
+        project_dir=Path(cwd) / ".pi" / "extensions",
+        cwd=cwd,
+    )
+    extension_result = await extension_loader.load()
+    extension_runner = ExtensionRunner(
+        extension_result.extensions,
+        runtime=extension_result.runtime,
+        cwd=cwd,
+        model_runtime=runtime,
+    )
+
     # 创建 Agent
     def build_session(
         sm: SessionManager,
@@ -127,6 +142,7 @@ async def _async_main(args: list[str] | None = None) -> int:
             scoped_models=session_scoped,
             skill_loader=skill_loader,
             template_loader=template_loader,
+            extension_runner=extension_runner,
         )
 
     session = build_session(session_manager, model, scoped_models)

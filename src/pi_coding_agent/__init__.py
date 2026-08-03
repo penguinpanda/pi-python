@@ -21,6 +21,22 @@ from ._cli import main
 from ._print_mode import run_print_mode
 from ._config import get_agent_dir, get_sessions_dir, load_settings
 from ._config import get_prompts_dir, get_skills_dir
+from .extensions import (
+    EventBus,
+    Extension,
+    ExtensionAPI,
+    ExtensionCommandContext,
+    ExtensionContext,
+    ExtensionFlag,
+    ExtensionLoader,
+    ExtensionRegistry,
+    ExtensionRunner,
+    ExtensionShortcut,
+    NoopUIContext,
+    RegisteredCommand,
+    ToolDefinition,
+    UIContext,
+)
 from .auth_storage import AuthStorage, FileAuthStorageBackend
 from .model_config import ModelConfig, ModelOverride, ProviderOverride
 from .model_registry import ModelRegistry
@@ -107,6 +123,21 @@ __all__ = [
     "PromptTemplate",
     "PromptTemplateLoader",
     "parse_command_args",
+    # Extensions (Phase 5)
+    "ExtensionLoader",
+    "ExtensionRunner",
+    "ExtensionRegistry",
+    "Extension",
+    "ExtensionAPI",
+    "ExtensionContext",
+    "ExtensionCommandContext",
+    "ExtensionFlag",
+    "ExtensionShortcut",
+    "RegisteredCommand",
+    "ToolDefinition",
+    "UIContext",
+    "NoopUIContext",
+    "EventBus",
     # Tools
     "create_all_tools",
     "create_coding_tools",

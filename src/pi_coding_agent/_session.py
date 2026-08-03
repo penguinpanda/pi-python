@@ -90,6 +90,8 @@ class AgentSession:
         # Phase 4：技能 / 提示模板加载器（/skill:name 与 /templateName 展开）。
         skill_loader: SkillLoader | None = None,
         template_loader: PromptTemplateLoader | None = None,
+        # Phase 5：扩展运行器（事件分发 / input 变换 / 注册项）。
+        extension_runner=None,
     ):
         self._agent = agent
         self._session_manager = session_manager
@@ -99,6 +101,9 @@ class AgentSession:
         self._scoped_models = list(scoped_models or [])
         self._skill_loader = skill_loader
         self._template_loader = template_loader
+        self._extension_runner = extension_runner
+        if extension_runner is not None:
+            extension_runner.bind_session(self)
         self._listeners: list[Callable[[AgentEvent], None]] = []
         self._pending_writes: set[asyncio.Task[object]] = set()
         self._turn_retry_policy = turn_retry_policy
@@ -139,6 +144,18 @@ class AgentSession:
     @property
     def session_manager(self) -> SessionManager:
         return self._session_manager
+
+    @property
+    def skill_loader(self) -> SkillLoader | None:
+        return self._skill_loader
+
+    @property
+    def template_loader(self) -> PromptTemplateLoader | None:
+        return self._template_loader
+
+    @property
+    def extension_runner(self):
+        return self._extension_runner
 
     @property
     def session_id(self) -> str:
@@ -555,7 +572,12 @@ class AgentSession:
             # 新提示随后由 agent.prompt 发送，因此不调用 continue_()。
             if self._last_assistant_message() is not None:
                 await self._check_compaction(skip_aborted_check=False)
-            await self._agent.prompt(self.expand_prompt(text))
+            # 1. input 事件（扩展可拦截/变换）
+            if self._extension_runner is not None:
+                text, _action = await self._extension_runner.emit_input(text)
+            # 2. 扩展命令 /skill: 与 /template 展开
+            expanded = self.expand_prompt(text)
+            await self._agent.prompt(expanded)
             await self._check_compaction()
             await self._retry_failed_turn()
         finally:
@@ -833,6 +855,11 @@ class AgentSession:
 
     async def dispose(self) -> None:
         """销毁会话：等待 pending writes → 取消订阅 + 中止运行。"""
+        if self._extension_runner is not None:
+            try:
+                await self._extension_runner.shutdown_all()
+            except Exception:
+                pass
         # 等待所有后台持久化写入完成
         if self._pending_writes:
             await asyncio.gather(*self._pending_writes, return_exceptions=True)
@@ -854,7 +881,7 @@ class AgentSession:
     # 内部：事件桥接
     # ------------------------------------------------------------------
 
-    def _handle_agent_event(
+    async def _handle_agent_event(
         self,
         event: AgentEvent,
         signal: asyncio.Event | None = None,
@@ -864,6 +891,15 @@ class AgentSession:
         在 message_end 时自动写入 JSONL。
         signal 为 Agent 当前运行的 abort signal（1.3 监听器协议），当前忽略。
         """
+        # 扩展事件转发（Agent 生命周期 / 消息 / 工具钩子）。
+        if self._extension_runner is not None:
+            try:
+                await self._extension_runner.emit_event(
+                    event.get("type", ""), event
+                )
+            except Exception:
+                pass
+
         event_type = event.get("type")
 
         # message_end → 持久化

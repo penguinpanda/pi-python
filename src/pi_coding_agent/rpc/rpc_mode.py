@@ -537,8 +537,40 @@ class RpcMessageHandler:
         )
 
     async def _handle_get_commands(self, _cmd: dict, command_id: str | None) -> dict:
-        # 扩展命令 / 提示模板 / skills 尚未接入（Phase 4/5）。
-        return success_response(command_id, "get_commands", {"commands": []})
+        commands: list[dict] = []
+        session = self.session
+
+        # 扩展命令（Phase 5）。
+        runner = session.extension_runner
+        if runner is not None:
+            for command in runner.get_registered_commands():
+                commands.append({
+                    "name": command.name,
+                    "description": command.description,
+                    "source": "extension",
+                    "sourceInfo": command.source_info or {},
+                })
+
+        # 提示模板（Phase 4）。
+        if session.template_loader is not None:
+            for template in session.template_loader.all():
+                commands.append({
+                    "name": template.name,
+                    "description": template.description,
+                    "source": "prompt",
+                    "sourceInfo": {"path": template.file_path},
+                })
+
+        # 技能（Phase 4）。
+        if session.skill_loader is not None:
+            for skill in session.skill_loader.all():
+                commands.append({
+                    "name": f"skill:{skill.name}",
+                    "description": skill.description,
+                    "source": "skill",
+                    "sourceInfo": {"path": skill.file_path},
+                })
+        return success_response(command_id, "get_commands", {"commands": commands})
 
 
 # ---------------------------------------------------------------------------

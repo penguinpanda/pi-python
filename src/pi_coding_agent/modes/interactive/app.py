@@ -14,6 +14,7 @@ from textual.binding import Binding
 from ..._config import get_sessions_dir
 from ..._session import AgentSession
 from ...model_runtime import ModelRuntime
+from ...extensions.registry import ExtensionRegistry
 from pi_tui.clipboard_image import ClipboardImage
 from pi_tui.components import (
     PiChatContainer,
@@ -145,6 +146,13 @@ class PiTuiApp(App):
 
         self._slash_registry = SlashCommandRegistry()
         register_builtin_commands(self._slash_registry)
+        # 扩展命令 / 快捷键注入 slash 注册表与键位表。
+        if session.extension_runner is not None:
+            ExtensionRegistry(
+                session.extension_runner,
+                slash_registry=self._slash_registry,
+                keybindings_manager=self._keybindings,
+            ).apply()
         self._slash_context = SlashContext(
             session=session,
             model_runtime=model_runtime,
