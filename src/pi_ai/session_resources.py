@@ -1,4 +1,4 @@
-"""pi_ai.session_resources — Session 资源清理（对齐 TS packages/ai/src/session-resources.ts）。
+"""pi_ai.session_resources — Session 资源清理。
 
 全局注册表：持有会话级资源的模块（WebSocket / SSE 连接、文件句柄等）把清理
 函数注册进来；session close / reload / shutdown 统一调用

@@ -75,6 +75,11 @@ StreamFn = Callable[
 
 ToolExecutionMode = Literal["sequential"]
 
+# 消息队列消费策略（对齐 TS QueueMode）：
+# - "all": 一次 drain 全部注入
+# - "one-at-a-time": 每次 drain 只消费最早一条，剩余留待后续 drain 点
+QueueMode = Literal["all", "one-at-a-time"]
+
 
 @dataclass(slots=True)
 class AgentToolResult:
@@ -318,6 +323,8 @@ class AgentLoopConfig:
     可选钩子（均为 Callable | None）:
         transform_context: 上下文预处理
         get_api_key: 动态认证密钥解析
+        get_steering_messages: 轮间注入引导消息
+        get_follow_up_messages: Agent 即将停止时注入后续消息
         should_stop_after_turn: 提前终止判断
         prepare_next_turn: 轮间状态准备
         before_tool_call: 工具执行前拦截
@@ -359,6 +366,15 @@ class AgentLoopConfig:
             | None,
         ]
         | None
+    ) = None
+
+    # 消息队列轮询钩子（双重嵌套循环 1.1 的核心输入）。
+    # 每次调用返回待注入的 AgentMessage 列表；无消息时返回 []。
+    get_steering_messages: (
+        Callable[[], Awaitable[list[AgentMessage]]] | None
+    ) = None
+    get_follow_up_messages: (
+        Callable[[], Awaitable[list[AgentMessage]]] | None
     ) = None
 
     # 配置

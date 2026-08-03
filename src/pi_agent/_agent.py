@@ -40,10 +40,48 @@ from ._types import (
     AgentState,
     AgentTool,
     BeforeToolCallResult,
+    QueueMode,
     StreamFn,
     ThinkingLevel,
     ToolExecutionMode,
 )
+
+# ---------------------------------------------------------------------------
+# PendingMessageQueue（1.2 双消息队列的前置实现，1.1 双重嵌套循环的输入源）
+# ---------------------------------------------------------------------------
+
+
+class PendingMessageQueue:
+    """消息队列，支持 QueueMode 消费策略。
+
+    - mode="all": drain() 一次取出全部消息
+    - mode="one-at-a-time": drain() 每次只取出最早一条，剩余留待后续 drain
+    """
+
+    def __init__(self, mode: QueueMode = "one-at-a-time"):
+        self.mode = mode
+        self._messages: list[AgentMessage] = []
+
+    def enqueue(self, message: AgentMessage) -> None:
+        self._messages.append(message)
+
+    def has_items(self) -> bool:
+        return len(self._messages) > 0
+
+    def drain(self) -> list[AgentMessage]:
+        if self.mode == "all":
+            drained = self._messages
+            self._messages = []
+            return drained
+        if not self._messages:
+            return []
+        first = self._messages[0]
+        self._messages = self._messages[1:]
+        return [first]
+
+    def clear(self) -> None:
+        self._messages = []
+
 
 # ---------------------------------------------------------------------------
 # AgentOptions
@@ -89,6 +127,9 @@ class AgentOptions:
         ) = None,
         should_stop_after_turn: Callable[[AgentContext], bool] | None = None,
         tool_execution: ToolExecutionMode = "sequential",
+        # 消息队列消费策略（1.2 前置；默认逐条消费）
+        steering_mode: QueueMode = "one-at-a-time",
+        follow_up_mode: QueueMode = "one-at-a-time",
         # 提示缓存与会话标识（透传给 StreamOptions）
         session_id: str | None = None,
         cache_retention: CacheRetention | None = None,
@@ -110,6 +151,8 @@ class AgentOptions:
         self.prepare_next_turn = prepare_next_turn
         self.should_stop_after_turn = should_stop_after_turn
         self.tool_execution = tool_execution
+        self.steering_mode = steering_mode
+        self.follow_up_mode = follow_up_mode
         self.session_id = session_id
         self.cache_retention = cache_retention
         self.retry_policy = retry_policy
@@ -159,6 +202,10 @@ class Agent:
         self.session_id: str | None = opts.session_id
         self.cache_retention: CacheRetention | None = opts.cache_retention
         self.retry_policy: RetryPolicy | None = opts.retry_policy
+
+        # -- 双消息队列（steering / follow-up）--
+        self._steering_queue = PendingMessageQueue(opts.steering_mode)
+        self._follow_up_queue = PendingMessageQueue(opts.follow_up_mode)
 
         # -- 运行时 --
         self._active: bool = False
@@ -231,14 +278,59 @@ class Agent:
         while self._active:
             await asyncio.sleep(0.01)
 
+    # ------------------------------------------------------------------
+    # 双消息队列 API（1.2 前置：steer / follow-up）
+    # ------------------------------------------------------------------
+
+    @property
+    def steering_mode(self) -> QueueMode:
+        """steering 队列消费策略。"""
+        return self._steering_queue.mode
+
+    @steering_mode.setter
+    def steering_mode(self, mode: QueueMode) -> None:
+        self._steering_queue.mode = mode
+
+    @property
+    def follow_up_mode(self) -> QueueMode:
+        """follow-up 队列消费策略。"""
+        return self._follow_up_queue.mode
+
+    @follow_up_mode.setter
+    def follow_up_mode(self, mode: QueueMode) -> None:
+        self._follow_up_queue.mode = mode
+
+    def steer(self, message: AgentMessage) -> None:
+        """入队一条 steering 消息：Agent 运行中途（turn 边界）注入。"""
+        self._steering_queue.enqueue(message)
+
+    def follow_up(self, message: AgentMessage) -> None:
+        """入队一条 follow-up 消息：Agent 即将停止时注入并继续。"""
+        self._follow_up_queue.enqueue(message)
+
+    def clear_steering_queue(self) -> None:
+        self._steering_queue.clear()
+
+    def clear_follow_up_queue(self) -> None:
+        self._follow_up_queue.clear()
+
+    def clear_all_queues(self) -> None:
+        self.clear_steering_queue()
+        self.clear_follow_up_queue()
+
+    def has_queued_messages(self) -> bool:
+        """任一队列仍有待处理消息时返回 True。"""
+        return self._steering_queue.has_items() or self._follow_up_queue.has_items()
+
     def reset(self) -> None:
-        """清空 transcript 和运行时状态。"""
+        """清空 transcript、运行时状态和双消息队列。"""
         if self._active:
             raise RuntimeError("Cannot reset while agent is running.")
         self._state.messages = []
         self._state.streaming_message = None
         self._state.error_message = None
         self._state.pending_tool_calls = set()
+        self.clear_all_queues()
 
     # ------------------------------------------------------------------
     # 内部：运行生命周期
@@ -336,7 +428,17 @@ class Agent:
             session_id=self.session_id,
             cache_retention=self.cache_retention,
             retry_policy=self.retry_policy,
+            get_steering_messages=self._get_steering_messages,
+            get_follow_up_messages=self._get_follow_up_messages,
         )
+
+    async def _get_steering_messages(self) -> list[AgentMessage]:
+        """AgentLoopConfig.get_steering_messages：消费 steering 队列。"""
+        return self._steering_queue.drain()
+
+    async def _get_follow_up_messages(self) -> list[AgentMessage]:
+        """AgentLoopConfig.get_follow_up_messages：消费 follow-up 队列。"""
+        return self._follow_up_queue.drain()
 
     def _resolve_stream_fn(self) -> StreamFn:
         """解析 stream 函数：显式传入 > 全局默认。"""

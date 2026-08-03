@@ -780,3 +780,165 @@ class TestPromptCacheWiring:
 
         assert captured["session_id"] is None
         assert captured["cache_retention"] is None
+
+
+class TestFollowUpLoop:
+    """1.1 双重嵌套循环：Follow-up 外层测试。"""
+
+    @pytest.mark.asyncio
+    async def test_follow_up_continues_after_text_stop(self):
+        """纯文本回复后存在 follow-up → 追加一轮再停止。"""
+        prompts = [UserMessage(role="user", content="Hi")]
+        context = AgentContext(system_prompt="test", messages=[])
+
+        stream_fn = _make_counting_stream_fn([
+            _make_llm_text_response("First answer"),
+            _make_llm_text_response("Second answer"),
+        ])
+
+        follow_up_msg = UserMessage(role="user", content="And then?")
+        poll_count = 0
+
+        async def _get_follow_up() -> list[AgentMessage]:
+            nonlocal poll_count
+            poll_count += 1
+            return [follow_up_msg] if poll_count == 1 else []
+
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+            get_follow_up_messages=_get_follow_up,
+        )
+
+        result, events = await _collect_events(prompts, context, config, stream_fn)
+
+        # 两次 turn（首轮 + follow-up 追加轮）
+        assert len(_find_events(events, "turn_start")) == 2
+        # follow-up 消息被注入结果
+        assert follow_up_msg in result
+        # 只应有一个 agent_end
+        assert len(_find_events(events, "agent_end")) == 1
+
+    @pytest.mark.asyncio
+    async def test_follow_up_drives_tool_turn(self):
+        """follow-up 触发的下一轮可以再次使用工具。"""
+        tool = _make_tool("search", "results")
+        prompts = [UserMessage(role="user", content="First")]
+        context = AgentContext(system_prompt="test", messages=[], tools=[tool])
+
+        stream_fn = _make_counting_stream_fn([
+            _make_llm_text_response("First answer"),
+            _make_llm_tool_response("search", {"q": "X"}),
+            _make_llm_text_response("Final answer"),
+        ])
+
+        follow_up_msg = UserMessage(role="user", content="Now search")
+        poll_count = 0
+
+        async def _get_follow_up() -> list[AgentMessage]:
+            nonlocal poll_count
+            poll_count += 1
+            return [follow_up_msg] if poll_count == 1 else []
+
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+            get_follow_up_messages=_get_follow_up,
+        )
+
+        result, events = await _collect_events(prompts, context, config, stream_fn)
+
+        assert len(_find_events(events, "turn_start")) == 3
+        assert len(_find_events(events, "tool_execution_start")) == 1
+        assert follow_up_msg in result
+        assert len(_find_events(events, "agent_end")) == 1
+
+    @pytest.mark.asyncio
+    async def test_follow_up_empty_returns_normally(self):
+        """无 follow-up 时保持原有单轮行为。"""
+        prompts = [UserMessage(role="user", content="Hi")]
+        context = AgentContext(system_prompt="test", messages=[])
+
+        final = _make_llm_text_response("Hello")
+        stream_fn = _make_stream_fn(final)
+
+        async def _get_follow_up() -> list[AgentMessage]:
+            return []
+
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+            get_follow_up_messages=_get_follow_up,
+        )
+
+        result, events = await _collect_events(prompts, context, config, stream_fn)
+
+        assert len(_find_events(events, "turn_start")) == 1
+        assert len(_find_events(events, "agent_end")) == 1
+
+
+class TestSteeringLoop:
+    """1.1 双重嵌套循环：Steering 注入测试。"""
+
+    @pytest.mark.asyncio
+    async def test_initial_steering_injected_first_turn(self):
+        """运行前已入队的 steering 消息在首轮注入。"""
+        prompts = [UserMessage(role="user", content="Hi")]
+        context = AgentContext(system_prompt="test", messages=[])
+
+        stream_fn = _make_counting_stream_fn([
+            _make_llm_text_response("A1"),
+            _make_llm_text_response("A2"),
+        ])
+
+        steering_msg = UserMessage(role="user", content="nudge")
+        poll_count = 0
+
+        async def _get_steering() -> list[AgentMessage]:
+            nonlocal poll_count
+            poll_count += 1
+            return [steering_msg] if poll_count == 1 else []
+
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+            get_steering_messages=_get_steering,
+        )
+
+        result, events = await _collect_events(prompts, context, config, stream_fn)
+
+        assert steering_msg in result
+        assert len(_find_events(events, "turn_start")) == 1
+
+    @pytest.mark.asyncio
+    async def test_steering_injected_between_tool_turns(self):
+        """工具轮结束后轮询 steering → 注入下一轮。"""
+        tool = _make_tool("search")
+        prompts = [UserMessage(role="user", content="Search")]
+        context = AgentContext(system_prompt="test", messages=[], tools=[tool])
+
+        stream_fn = _make_counting_stream_fn([
+            _make_llm_tool_response("search", {"q": "X"}),
+            _make_llm_text_response("done"),
+        ])
+
+        steering_msg = UserMessage(role="user", content="Wait, refine")
+        poll_count = 0
+
+        async def _get_steering() -> list[AgentMessage]:
+            nonlocal poll_count
+            poll_count += 1
+            # 首次轮询（运行前）返回空；工具轮结束后返回引导消息
+            return [steering_msg] if poll_count == 2 else []
+
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+            get_steering_messages=_get_steering,
+        )
+
+        result, events = await _collect_events(prompts, context, config, stream_fn)
+
+        assert steering_msg in result
+        assert len(_find_events(events, "turn_start")) == 2
+        assert len(_find_events(events, "tool_execution_start")) == 1

@@ -462,172 +462,155 @@ async def _run_loop(
     signal: asyncio.Event | None,
     stream_fn: StreamFn,
 ) -> list[AgentMessage]:
-    """
-    真正执行 Agent 推理循环。
+    """双重嵌套循环（对齐 TS agent-loop.ts runLoop）。
 
+    外层 (Follow-up): 内层循环结束后（无更多工具调用、无 steering 消息），
+    检查 follow-up 队列；有后续消息则重新进入内层循环，直到队列为空。
 
-    每一次循环代表一次:
+    内层 (Tool + Steering): 工具调用 + steering 注入循环。
+    每一轮：注入待处理消息 → LLM 推理 → 执行工具 → 轮询 steering 队列。
 
-    LLM Turn
-
-
-    一次 Turn:
-
-    1.
-    发送 messages 给 LLM
-
-
-    2.
-    接收 assistant
-
-
-    3.
-    检查是否调用工具
-
-
-    4.
-    执行工具
-
-
-    5.
-    把工具结果加入 messages
-
-
-    6.
-    下一轮
-
-
+    停止条件（对齐 TS）：
+    1. stop_reason == error/aborted
+    2. should_stop_after_turn 返回 True
+    3. 无更多工具调用且 steering / follow-up 队列均为空
     """
 
-
-
-    # 不直接使用 context.messages
-
-    # 原因:
-    #
-    # Agent Loop 是纯函数思想。
-    #
-    # 输入 context:
-    #
-    #       context
-    #          |
-    #          v
-    #       新 context
-    #
-    # 而不是:
-    #
-    #       context.messages.append(...)
-    #
-    #
-    # 避免外部引用被修改。
+    # 不直接使用 context.messages（Agent Loop 纯函数思想，避免外部引用被修改）
     messages: list[AgentMessage] = list(context.messages)
     tools = list(context.tools) if context.tools else []
     current_model = config.model
 
-    while True:
-        _check_signal(signal)
+    # 首轮开始前轮询一次 steering 队列（用户可能在等待期间已 steer()）
+    pending_messages: list[AgentMessage] = []
+    if config.get_steering_messages is not None:
+        pending_messages = await config.get_steering_messages()
 
-        await emit({"type": "turn_start"})
+    while True:  # ← 外层：Follow-up 驱动
+        has_more_tool_calls = True
 
-        # -- 构建本轮上下文 --
-        turn_context = AgentContext(
-            system_prompt=context.system_prompt,
-            messages=messages,
-            tools=tools,
-        )
+        while has_more_tool_calls or pending_messages:  # ← 内层：Tool + Steering
+            _check_signal(signal)
 
-        # -- 流式获取助手回复 --
-        assistant_msg = await _stream_assistant_response(
-            turn_context, config, emit, signal, stream_fn
-        )
-        messages.append(assistant_msg)
+            await emit({"type": "turn_start"})
 
-        # 检查错误/中止
-        stop_reason = assistant_msg.get("stop_reason", "stop")
-        if stop_reason in ("error", "aborted"):
-            await emit({
-                "type": "turn_end",
-                "message": assistant_msg,
-                "tool_results": [],
-            })
-            await emit({"type": "agent_end", "messages": messages})
-            return messages
+            # -- 注入待处理消息（steering / follow-up）--
+            if pending_messages:
+                for m in pending_messages:
+                    messages.append(m)
+                    await emit({"type": "message_start", "message": m})
+                    await emit({"type": "message_end", "message": m})
+                pending_messages = []
 
-        # -- 提取工具调用 --
-        tool_calls: list[ToolCall] = cast(
-            list[ToolCall],
-            [
-                c
-                for c in assistant_msg.get("content", [])
-                if c.get("type") == "toolCall"
-            ],
-        )
+            # -- 构建本轮上下文 --
+            turn_context = AgentContext(
+                system_prompt=context.system_prompt,
+                messages=messages,
+                tools=tools,
+            )
 
-        tool_results: list[ToolResultMessage] = []
-        has_more_tool_calls = False
+            # -- 流式获取助手回复 --
+            assistant_msg = await _stream_assistant_response(
+                turn_context, config, emit, signal, stream_fn
+            )
+            messages.append(assistant_msg)
 
-        if tool_calls:
-            # 截断保护：stop_reason="length" 时参数可能不完整
-            if stop_reason == "length":
-                tool_results = _fail_tool_calls_from_truncated(tool_calls)
-            else:
-                result = await _execute_tool_calls(
-                    tool_calls,
-                    tools,
-                    config,
-                    emit,
-                    signal,
-                )
-                tool_results = result["messages"]
-                has_more_tool_calls = not result["terminate"]
-
-            # 追加工具结果消息到上下文
-            for tr in tool_results:
-                messages.append(tr)
-                await emit({"type": "message_start", "message": tr})
-                await emit({"type": "message_end", "message": tr})
-
-        # -- turn_end --
-        await emit({
-            "type": "turn_end",
-            "message": assistant_msg,
-            "tool_results": tool_results,
-        })
-
-        # -- prepare_next_turn --
-        if config.prepare_next_turn is not None:
-            raw_update = config.prepare_next_turn(turn_context)
-            update: object = None
-            if asyncio.iscoroutine(raw_update):
-                update = await raw_update
-            else:
-                update = raw_update
-            if update is not None:
-                _update = cast(AgentLoopTurnUpdate, update)
-                if _update.context is not None:
-                    context = _update.context
-                    messages = list(context.messages)
-                    tools = list(context.tools) if context.tools else []
-                if _update.model is not None:
-                    current_model = _update.model
-
-        # -- should_stop_after_turn --
-        if config.should_stop_after_turn is not None:
-            raw_stop = config.should_stop_after_turn(turn_context)
-            if asyncio.iscoroutine(raw_stop):
-                should_stop = await raw_stop
-            else:
-                should_stop = raw_stop
-            if should_stop:
+            # 检查错误/中止
+            stop_reason = assistant_msg.get("stop_reason", "stop")
+            if stop_reason in ("error", "aborted"):
+                await emit({
+                    "type": "turn_end",
+                    "message": assistant_msg,
+                    "tool_results": [],
+                })
                 await emit({"type": "agent_end", "messages": messages})
                 return messages
 
-        # -- 无更多工具调用 → 结束 --
-        if not has_more_tool_calls:
-            await emit({"type": "agent_end", "messages": messages})
-            return messages
+            # -- 提取工具调用 --
+            tool_calls: list[ToolCall] = cast(
+                list[ToolCall],
+                [
+                    c
+                    for c in assistant_msg.get("content", [])
+                    if c.get("type") == "toolCall"
+                ],
+            )
 
-        # 继续下一轮
+            tool_results: list[ToolResultMessage] = []
+            has_more_tool_calls = False
+
+            if tool_calls:
+                # 截断保护：stop_reason="length" 时参数可能不完整
+                if stop_reason == "length":
+                    tool_results = _fail_tool_calls_from_truncated(tool_calls)
+                else:
+                    result = await _execute_tool_calls(
+                        tool_calls,
+                        tools,
+                        config,
+                        emit,
+                        signal,
+                    )
+                    tool_results = result["messages"]
+                    has_more_tool_calls = not result["terminate"]
+
+                # 追加工具结果消息到上下文
+                for tr in tool_results:
+                    messages.append(tr)
+                    await emit({"type": "message_start", "message": tr})
+                    await emit({"type": "message_end", "message": tr})
+
+            # -- turn_end --
+            await emit({
+                "type": "turn_end",
+                "message": assistant_msg,
+                "tool_results": tool_results,
+            })
+
+            # -- prepare_next_turn --
+            if config.prepare_next_turn is not None:
+                raw_update = config.prepare_next_turn(turn_context)
+                update: object = None
+                if asyncio.iscoroutine(raw_update):
+                    update = await raw_update
+                else:
+                    update = raw_update
+                if update is not None:
+                    _update = cast(AgentLoopTurnUpdate, update)
+                    if _update.context is not None:
+                        context = _update.context
+                        messages = list(context.messages)
+                        tools = list(context.tools) if context.tools else []
+                    if _update.model is not None:
+                        current_model = _update.model
+
+            # -- should_stop_after_turn --
+            if config.should_stop_after_turn is not None:
+                raw_stop = config.should_stop_after_turn(turn_context)
+                if asyncio.iscoroutine(raw_stop):
+                    should_stop = await raw_stop
+                else:
+                    should_stop = raw_stop
+                if should_stop:
+                    await emit({"type": "agent_end", "messages": messages})
+                    return messages
+
+            # -- 轮询 steering 队列（趁 agent 还在工作时注入引导消息）--
+            if config.get_steering_messages is not None:
+                pending_messages = await config.get_steering_messages()
+
+        # Agent 即将停止：检查 follow-up 队列
+        if config.get_follow_up_messages is not None:
+            follow_up = await config.get_follow_up_messages()
+            if follow_up:
+                pending_messages = follow_up
+                continue
+
+        # 无更多消息，退出
+        break
+
+    await emit({"type": "agent_end", "messages": messages})
+    return messages
 
 
 # ============================================================================

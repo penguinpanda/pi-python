@@ -340,3 +340,142 @@ class TestAgentState:
         assert "agent_end" in called
         # AgentState 记录错误消息
         assert agent.state.error_message == "Boom!"
+
+
+class TestAgentMessageQueues:
+    """1.1/1.2：双消息队列 + 双重嵌套循环（Agent 层集成）。"""
+
+    def test_queue_api_and_modes(self):
+        """steer/follow_up/clear/has_queued_messages + QueueMode setter。"""
+        agent = Agent(AgentOptions(
+            model=_make_model(),
+            stream_fn=_make_faux_stream_fn(),
+        ))
+        assert agent.has_queued_messages() is False
+
+        agent.steer(UserMessage(role="user", content="s1"))
+        agent.follow_up(UserMessage(role="user", content="f1"))
+        assert agent.has_queued_messages() is True
+
+        agent.clear_steering_queue()
+        assert agent.has_queued_messages() is True
+
+        agent.clear_all_queues()
+        assert agent.has_queued_messages() is False
+
+        agent.steering_mode = "all"
+        agent.follow_up_mode = "one-at-a-time"
+        assert agent.steering_mode == "all"
+        assert agent.follow_up_mode == "one-at-a-time"
+
+    @pytest.mark.asyncio
+    async def test_steer_before_prompt_injected_first_turn(self):
+        """prompt 前 steer() → 首轮注入。"""
+        stream_fn = _make_modeled_stream_fn(["A1"])
+        agent = Agent(AgentOptions(
+            model=_make_model(),
+            stream_fn=stream_fn,
+        ))
+        agent.steer(UserMessage(role="user", content="nudge"))
+        await agent.prompt("Q")
+
+        contents = [m.get("content") for m in agent.state.messages]
+        assert "nudge" in contents
+        assert agent.has_queued_messages() is False
+
+    @pytest.mark.asyncio
+    async def test_follow_up_processed_in_same_run(self):
+        """prompt 前 follow_up() → agent 停止后自动追加一轮。"""
+        stream_fn = _make_modeled_stream_fn(["A1", "A2"])
+        agent = Agent(AgentOptions(
+            model=_make_model(),
+            stream_fn=stream_fn,
+        ))
+        agent.follow_up(UserMessage(role="user", content="follow up"))
+        await agent.prompt("Q")
+
+        roles = [m.get("role") for m in agent.state.messages]
+        assert roles.count("assistant") == 2
+        contents = [m.get("content") for m in agent.state.messages]
+        assert "follow up" in contents
+
+    @pytest.mark.asyncio
+    async def test_one_at_a_time_follow_up_mode(self):
+        """one-at-a-time：每个 follow-up 占一轮。"""
+        stream_fn = _make_modeled_stream_fn(["A1", "A2", "A3"])
+        agent = Agent(AgentOptions(
+            model=_make_model(),
+            stream_fn=stream_fn,
+            follow_up_mode="one-at-a-time",
+        ))
+        agent.follow_up(UserMessage(role="user", content="F1"))
+        agent.follow_up(UserMessage(role="user", content="F2"))
+        await agent.prompt("Q0")
+
+        roles = [m.get("role") for m in agent.state.messages]
+        assert roles.count("assistant") == 3
+        assert agent.has_queued_messages() is False
+
+    @pytest.mark.asyncio
+    async def test_all_follow_up_mode_drains_all(self):
+        """all：一次注入全部 follow-up。"""
+        stream_fn = _make_modeled_stream_fn(["A1", "A2"])
+        agent = Agent(AgentOptions(
+            model=_make_model(),
+            stream_fn=stream_fn,
+            follow_up_mode="all",
+        ))
+        agent.follow_up(UserMessage(role="user", content="F1"))
+        agent.follow_up(UserMessage(role="user", content="F2"))
+        await agent.prompt("Q0")
+
+        roles = [m.get("role") for m in agent.state.messages]
+        assert roles.count("assistant") == 2
+        contents = [m.get("content") for m in agent.state.messages]
+        assert "F1" in contents and "F2" in contents
+
+    @pytest.mark.asyncio
+    async def test_steer_during_run_injected_next_turn(self):
+        """运行中 steer() → 下一个 turn 边界注入（CLI 交互场景）。"""
+        core = faux_provider(tokens_per_second=200)
+        core.set_responses([
+            faux_assistant_message("A" * 200),
+            faux_assistant_message("B" * 20),
+        ])
+        original_stream = core.stream
+        steer_done = asyncio.Event()
+
+        async def _delayed_stream(model, context, options=None):
+            # 首轮流式输出前等待 steer 被调用，保证 steer 落在 initial poll 之后
+            if not steer_done.is_set():
+                await steer_done.wait()
+            return await original_stream(model, context, options)
+
+        agent = Agent(AgentOptions(
+            model=_make_model(),
+            stream_fn=_delayed_stream,
+        ))
+
+        async def _steer_while_running():
+            await asyncio.sleep(0.01)  # 确保 initial steering poll 已完成
+            agent.steer(UserMessage(role="user", content="nudge"))
+            steer_done.set()
+
+        await asyncio.gather(agent.prompt("Q"), _steer_while_running())
+
+        roles = [m.get("role") for m in agent.state.messages]
+        assert roles.count("assistant") == 2
+        contents = [m.get("content") for m in agent.state.messages]
+        assert "nudge" in contents
+
+    @pytest.mark.asyncio
+    async def test_reset_clears_queues(self):
+        """reset() 同时清空双消息队列。"""
+        agent = Agent(AgentOptions(
+            model=_make_model(),
+            stream_fn=_make_faux_stream_fn(),
+        ))
+        agent.steer(UserMessage(role="user", content="s"))
+        agent.follow_up(UserMessage(role="user", content="f"))
+        agent.reset()
+        assert agent.has_queued_messages() is False

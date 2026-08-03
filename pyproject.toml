@@ -11,9 +11,6 @@ requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "pengupanda" }]
 keywords = ["ai", "llm", "openai", "deepseek"]
-
-[project.scripts]
-pi-ai = "pi_ai.cli:main"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -29,6 +26,9 @@ dependencies = [
     "httpx>=0.25",
     "python-dotenv>=1.2.2",
 ]
+
+[project.scripts]
+pi-ai = "pi_ai.cli:main"
 
 [dependency-groups]
 dev = [
