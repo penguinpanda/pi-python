@@ -72,6 +72,7 @@ from .prompt_templates import (
     load_sourced_prompt_templates,
     substitute_args,
 )
+from .proxy import ProxyMessageEventStream, build_proxy_request_options, process_proxy_event, stream_proxy
 from .session import (
     InMemorySessionStorage,
     InMemorySessionStore,
@@ -201,6 +202,11 @@ __all__ = [
     "BranchSummaryError",
     "collect_entries_for_branch_summary",
     "generate_branch_summary",
+    # Phase 5: Proxy
+    "stream_proxy",
+    "ProxyMessageEventStream",
+    "build_proxy_request_options",
+    "process_proxy_event",
     "Skill",
     "PromptTemplate",
     "AbortResult",
