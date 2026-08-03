@@ -1,0 +1,72 @@
+# pi-python coding-agent 隔离环境
+#
+# 两个服务，共用同一镜像与安全配置：
+#   - pi：一次性命令（docker compose run --rm pi ...），跑完即删
+#   - pi-dev：常驻容器（docker compose up -d pi-dev），用 exec 进入反复测试，
+#     会话/认证持久化在命名卷 pi-home，直到 docker compose down -v 才清空
+#
+# 安全边界：本容器隔离文件系统与进程，不隔离网络（模型必须联网访问 LLM API）。
+# 不要挂载任何真实数据；API key 只通过环境变量传入。
+services:
+  pi:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: pi-python-agent:dev
+    init: true
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    volumes:
+      # 一次性工作目录（挂载即双向共享，勿放真实数据）
+      - ../work/temp:/workspace
+      # HOME 持久化到命名卷：会话/认证跨容器保留，down -v 才清空
+      - pi-home:/home/pi
+    environment:
+      # 从宿主环境变量或 docker/.env 读取；留空表示未配置
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    stdin_open: true
+    tty: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 2g
+    cpus: 2.0
+    # 进阶：如需连接宿主机 Ollama，取消注释并让宿主机 Ollama 监听 0.0.0.0
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  pi-dev:
+    # 常驻服务：入口改为 sleep infinity 保持存活，测试命令用 exec 执行。
+    # 依赖 pi 服务构建出的同一镜像，无需重复 build。
+    image: pi-python-agent:dev
+    entrypoint: ["sleep", "infinity"]
+    init: true
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    volumes:
+      - ../work/temp:/workspace
+      - pi-home:/home/pi
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    stdin_open: true
+    tty: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 2g
+    cpus: 2.0
+
+volumes:
+  pi-home:

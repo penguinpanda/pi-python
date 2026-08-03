@@ -1,0 +1,15 @@
+.git
+.venv
+htmlcov
+.pytest_cache
+__pycache__
+*.pyc
+.coverage
+work
+docs
+bak
+.qodo
+.vscode
+.env
+*.drawio
+*.png
