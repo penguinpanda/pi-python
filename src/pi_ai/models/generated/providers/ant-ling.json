@@ -28,11 +28,7 @@
       "supportsLongCacheRetention": false
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "Ling-2.6-flash": {
     "id": "Ling-2.6-flash",
@@ -63,11 +59,7 @@
       "supportsLongCacheRetention": false
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "Ring-2.6-1T": {
     "id": "Ring-2.6-1T",
@@ -105,10 +97,6 @@
       "high": "high",
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   }
 }

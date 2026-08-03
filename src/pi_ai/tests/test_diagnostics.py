@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from pi_ai._types import AssistantMessage, Model, ModelCapabilities
+from pi_ai._types import AssistantMessage, Model
 from pi_ai.api._shared import build_error_message
 from pi_ai.utils.diagnostics import (
     append_assistant_message_diagnostic,
@@ -24,7 +24,6 @@ def _make_model() -> Model:
         id="m",
         provider="openai",
         api="openai-completions",
-        capabilities=ModelCapabilities(tools=True),
     )
 
 

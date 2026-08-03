@@ -22,10 +22,6 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   }
 }

@@ -11,7 +11,6 @@ import pytest
 from pi_ai._types import (
     AssistantMessage,
     Model,
-    ModelCapabilities,
     TextContent,
     UserMessage,
 )
@@ -40,7 +39,6 @@ def _make_model() -> Model:
         provider="test",
         api="openai-completions",
         name="Test",
-        capabilities=ModelCapabilities(tools=True),
     )
 
 

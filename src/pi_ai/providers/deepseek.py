@@ -37,7 +37,7 @@ DeepSeek Provider。
            Provider
 """
 
-from .._types import Model, ModelCapabilities, ModelCost
+from .._types import Model, ModelCost
 from ..auth import env_api_key_auth
 from ..provider import create_provider, Provider
 
@@ -70,8 +70,6 @@ DEEPSEEK_MODELS: list[Model] = [
         input=["text"],
         output=["text"],
         max_tokens=65536,            # 64K output # 最大输出 Token 数
-        capabilities=ModelCapabilities(tools=True),   # 支持 Function Calling
-
         # 价格（每百万 Token）。
         #
         # 单位由 Provider 自行约定，
@@ -95,7 +93,7 @@ DEEPSEEK_MODELS: list[Model] = [
         input=["text"],
         output=["text"],
         max_tokens=65536,
-        capabilities=ModelCapabilities(reasoning=True), # 模型会生成推理过程。
+        reasoning=True, # 模型会生成推理过程。
         cost=ModelCost(input=0.55, output=2.19, cache_read=0.14, cache_write=0.55),
     ),
 
@@ -114,8 +112,7 @@ DEEPSEEK_MODELS: list[Model] = [
         input=["text"],
         output=["text"],
         max_tokens=384000,           # 最大输出 Token 数
-        capabilities=ModelCapabilities(reasoning=True, tools=True),  # 支持 Function Calling
-
+        reasoning=True,              # 支持推理
         # 价格（每百万 Token）。
         #
         # 单位由 Provider 自行约定，

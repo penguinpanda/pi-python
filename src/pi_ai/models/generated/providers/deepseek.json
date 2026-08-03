@@ -32,11 +32,7 @@
       "high": "high",
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "deepseek-v4-pro": {
     "id": "deepseek-v4-pro",
@@ -71,10 +67,6 @@
       "high": "high",
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   }
 }

@@ -45,7 +45,7 @@ Ollama 是本地模型运行时，
 
 import httpx
 
-from .._types import Model, ModelCapabilities, ModelCost
+from .._types import Model, ModelCost
 from ..provider import create_provider, Provider, RefreshModelsContext
 
 
@@ -89,7 +89,7 @@ OLLAMA_MODELS: list[Model] = [
         input=["text"],
         output=["text"],
         max_tokens=8192,
-        capabilities=ModelCapabilities(reasoning=True, tools=True),
+        reasoning=True,
         cost=ModelCost(),  # 本地运行，无费用
     ),
 
@@ -102,7 +102,7 @@ OLLAMA_MODELS: list[Model] = [
         input=["text"],
         output=["text"],
         max_tokens=8192,
-        capabilities=ModelCapabilities(reasoning=True, tools=True),
+        reasoning=True,
         cost=ModelCost(),
     ),
 
@@ -115,7 +115,7 @@ OLLAMA_MODELS: list[Model] = [
         input=["text"],
         output=["text"],
         max_tokens=8192,
-        capabilities=ModelCapabilities(reasoning=True, tools=True),
+        reasoning=True,
         cost=ModelCost(),
     ),
 
@@ -135,7 +135,7 @@ OLLAMA_MODELS: list[Model] = [
         input=["text"],
         output=["text"],
         max_tokens=32768,
-        capabilities=ModelCapabilities(reasoning=True, tools=True),
+        reasoning=True,
         cost=ModelCost(),
     ),
 
@@ -155,7 +155,6 @@ OLLAMA_MODELS: list[Model] = [
         input=["text", "image"],
         output=["text"],
         max_tokens=4096,
-        capabilities=ModelCapabilities(tools=True, images=True),
         cost=ModelCost(),
     ),
 
@@ -168,7 +167,6 @@ OLLAMA_MODELS: list[Model] = [
         input=["text"],
         output=["text"],
         max_tokens=8192,
-        capabilities=ModelCapabilities(tools=True),
         cost=ModelCost(),
     ),
 
@@ -188,7 +186,7 @@ OLLAMA_MODELS: list[Model] = [
         input=["text"],
         output=["text"],
         max_tokens=8192,
-        capabilities=ModelCapabilities(reasoning=True),
+        reasoning=True,
         cost=ModelCost(),
     ),
 ]
@@ -209,7 +207,6 @@ def _default_model(name: str) -> Model:
         input=["text"],
         output=["text"],
         max_tokens=8192,
-        capabilities=ModelCapabilities(tools=True),
         cost=ModelCost(),  # 本地运行，无费用
     )
 

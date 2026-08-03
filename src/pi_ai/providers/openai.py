@@ -37,7 +37,7 @@ OpenAI Provider。
             Provider
 """
 
-from .._types import Model, ModelCapabilities, ModelCost
+from .._types import Model, ModelCost
 from ..auth import env_api_key_auth
 from ..provider import create_provider, Provider
 
@@ -80,7 +80,6 @@ OPENAI_MODELS: list[Model] = [
         input=["text", "image"],
         output=["text"],
         max_tokens=16384,
-        capabilities=ModelCapabilities(reasoning=False, tools=True, images=True),
         cost=ModelCost(input=2.50, output=10.00, cache_read=1.25, cache_write=2.50),
     ),
 
@@ -104,7 +103,6 @@ OPENAI_MODELS: list[Model] = [
         input=["text", "image"],
         output=["text"],
         max_tokens=16384,
-        capabilities=ModelCapabilities(reasoning=False, tools=True, images=True),
         cost=ModelCost(input=0.15, output=0.60, cache_read=0.075, cache_write=0.15),
     ),
 
@@ -127,7 +125,7 @@ OPENAI_MODELS: list[Model] = [
         input=["text"],
         output=["text"],
         max_tokens=100000,
-        capabilities=ModelCapabilities(reasoning=True, tools=True),
+        reasoning=True,
         cost=ModelCost(input=1.10, output=4.40, cache_read=0.275, cache_write=1.10),
     ),
 ]

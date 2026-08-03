@@ -24,11 +24,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "aion-labs/aion-2.0": {
     "id": "aion-labs/aion-2.0",
@@ -55,11 +51,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "aion-labs/aion-3.0": {
     "id": "aion-labs/aion-3.0",
@@ -86,11 +78,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "aion-labs/aion-3.0-mini": {
     "id": "aion-labs/aion-3.0-mini",
@@ -117,11 +105,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "amazon/nova-2-lite-v1": {
     "id": "amazon/nova-2-lite-v1",
@@ -149,11 +133,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "amazon/nova-lite-v1": {
     "id": "amazon/nova-lite-v1",
@@ -181,11 +161,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "amazon/nova-micro-v1": {
     "id": "amazon/nova-micro-v1",
@@ -212,11 +188,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "amazon/nova-premier-v1": {
     "id": "amazon/nova-premier-v1",
@@ -244,11 +216,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "amazon/nova-pro-v1": {
     "id": "amazon/nova-pro-v1",
@@ -276,11 +244,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "anthropic/claude-3-haiku": {
     "id": "anthropic/claude-3-haiku",
@@ -308,11 +272,7 @@
       "cacheControlFormat": "anthropic"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "anthropic/claude-fable-5": {
     "id": "anthropic/claude-fable-5",
@@ -344,11 +304,7 @@
       "xhigh": "xhigh",
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-haiku-4.5": {
     "id": "anthropic/claude-haiku-4.5",
@@ -376,11 +332,7 @@
       "cacheControlFormat": "anthropic"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-opus-4": {
     "id": "anthropic/claude-opus-4",
@@ -408,11 +360,7 @@
       "cacheControlFormat": "anthropic"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-opus-4.1": {
     "id": "anthropic/claude-opus-4.1",
@@ -440,11 +388,7 @@
       "cacheControlFormat": "anthropic"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-opus-4.5": {
     "id": "anthropic/claude-opus-4.5",
@@ -472,11 +416,7 @@
       "cacheControlFormat": "anthropic"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-opus-4.6": {
     "id": "anthropic/claude-opus-4.6",
@@ -506,11 +446,7 @@
     "thinking_level_map": {
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-opus-4.7": {
     "id": "anthropic/claude-opus-4.7",
@@ -541,11 +477,7 @@
       "xhigh": "xhigh",
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-opus-4.7-fast": {
     "id": "anthropic/claude-opus-4.7-fast",
@@ -576,11 +508,7 @@
       "xhigh": "xhigh",
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-opus-4.8": {
     "id": "anthropic/claude-opus-4.8",
@@ -611,11 +539,7 @@
       "xhigh": "xhigh",
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-opus-4.8-fast": {
     "id": "anthropic/claude-opus-4.8-fast",
@@ -646,11 +570,7 @@
       "xhigh": "xhigh",
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-opus-5": {
     "id": "anthropic/claude-opus-5",
@@ -681,11 +601,7 @@
       "xhigh": "xhigh",
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-opus-5-fast": {
     "id": "anthropic/claude-opus-5-fast",
@@ -716,11 +632,7 @@
       "xhigh": "xhigh",
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-sonnet-4": {
     "id": "anthropic/claude-sonnet-4",
@@ -748,11 +660,7 @@
       "cacheControlFormat": "anthropic"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-sonnet-4.5": {
     "id": "anthropic/claude-sonnet-4.5",
@@ -780,11 +688,7 @@
       "cacheControlFormat": "anthropic"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-sonnet-4.6": {
     "id": "anthropic/claude-sonnet-4.6",
@@ -814,11 +718,7 @@
     "thinking_level_map": {
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-sonnet-5": {
     "id": "anthropic/claude-sonnet-5",
@@ -849,11 +749,7 @@
       "xhigh": "xhigh",
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "arcee-ai/trinity-large-thinking": {
     "id": "arcee-ai/trinity-large-thinking",
@@ -880,11 +776,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "arcee-ai/virtuoso-large": {
     "id": "arcee-ai/virtuoso-large",
@@ -911,11 +803,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "auto": {
     "id": "auto",
@@ -943,11 +831,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "bytedance-seed/seed-1.6": {
     "id": "bytedance-seed/seed-1.6",
@@ -975,11 +859,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "bytedance-seed/seed-1.6-flash": {
     "id": "bytedance-seed/seed-1.6-flash",
@@ -1007,11 +887,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "bytedance-seed/seed-2.0-lite": {
     "id": "bytedance-seed/seed-2.0-lite",
@@ -1039,11 +915,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "bytedance-seed/seed-2.0-mini": {
     "id": "bytedance-seed/seed-2.0-mini",
@@ -1071,11 +943,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "cohere/command-r-08-2024": {
     "id": "cohere/command-r-08-2024",
@@ -1102,11 +970,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "cohere/command-r-plus-08-2024": {
     "id": "cohere/command-r-plus-08-2024",
@@ -1133,11 +997,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "cohere/north-mini-code:free": {
     "id": "cohere/north-mini-code:free",
@@ -1164,11 +1024,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "deepseek/deepseek-chat": {
     "id": "deepseek/deepseek-chat",
@@ -1195,11 +1051,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "deepseek/deepseek-chat-v3-0324": {
     "id": "deepseek/deepseek-chat-v3-0324",
@@ -1226,11 +1078,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "deepseek/deepseek-chat-v3.1": {
     "id": "deepseek/deepseek-chat-v3.1",
@@ -1257,11 +1105,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "deepseek/deepseek-r1": {
     "id": "deepseek/deepseek-r1",
@@ -1288,11 +1132,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "deepseek/deepseek-r1-0528": {
     "id": "deepseek/deepseek-r1-0528",
@@ -1319,11 +1159,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "deepseek/deepseek-v3.1-terminus": {
     "id": "deepseek/deepseek-v3.1-terminus",
@@ -1350,11 +1186,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "deepseek/deepseek-v3.2": {
     "id": "deepseek/deepseek-v3.2",
@@ -1381,11 +1213,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "deepseek/deepseek-v3.2-exp": {
     "id": "deepseek/deepseek-v3.2-exp",
@@ -1412,11 +1240,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "deepseek/deepseek-v4-flash": {
     "id": "deepseek/deepseek-v4-flash",
@@ -1451,11 +1275,7 @@
       "max": null,
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "deepseek/deepseek-v4-flash-0731": {
     "id": "deepseek/deepseek-v4-flash-0731",
@@ -1490,11 +1310,7 @@
       "max": null,
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "deepseek/deepseek-v4-pro": {
     "id": "deepseek/deepseek-v4-pro",
@@ -1529,11 +1345,7 @@
       "max": null,
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "google/gemini-2.5-flash": {
     "id": "google/gemini-2.5-flash",
@@ -1561,11 +1373,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemini-2.5-flash-lite": {
     "id": "google/gemini-2.5-flash-lite",
@@ -1593,11 +1401,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemini-2.5-pro": {
     "id": "google/gemini-2.5-pro",
@@ -1625,11 +1429,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemini-2.5-pro-preview": {
     "id": "google/gemini-2.5-pro-preview",
@@ -1657,11 +1457,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemini-2.5-pro-preview-05-06": {
     "id": "google/gemini-2.5-pro-preview-05-06",
@@ -1689,11 +1485,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemini-3-flash-preview": {
     "id": "google/gemini-3-flash-preview",
@@ -1721,11 +1513,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemini-3-pro-image": {
     "id": "google/gemini-3-pro-image",
@@ -1753,11 +1541,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemini-3.1-flash-lite": {
     "id": "google/gemini-3.1-flash-lite",
@@ -1785,11 +1569,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemini-3.1-flash-lite-preview": {
     "id": "google/gemini-3.1-flash-lite-preview",
@@ -1817,11 +1597,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemini-3.1-pro-preview": {
     "id": "google/gemini-3.1-pro-preview",
@@ -1849,11 +1625,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemini-3.1-pro-preview-customtools": {
     "id": "google/gemini-3.1-pro-preview-customtools",
@@ -1881,11 +1653,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemini-3.5-flash": {
     "id": "google/gemini-3.5-flash",
@@ -1913,11 +1681,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemini-3.5-flash-lite": {
     "id": "google/gemini-3.5-flash-lite",
@@ -1945,11 +1709,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemini-3.6-flash": {
     "id": "google/gemini-3.6-flash",
@@ -1977,11 +1737,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemma-3-12b-it": {
     "id": "google/gemma-3-12b-it",
@@ -2009,11 +1765,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "google/gemma-3-27b-it": {
     "id": "google/gemma-3-27b-it",
@@ -2041,11 +1793,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "google/gemma-4-26b-a4b-it": {
     "id": "google/gemma-4-26b-a4b-it",
@@ -2073,11 +1821,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemma-4-26b-a4b-it:free": {
     "id": "google/gemma-4-26b-a4b-it:free",
@@ -2105,11 +1849,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemma-4-31b-it": {
     "id": "google/gemma-4-31b-it",
@@ -2137,11 +1877,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemma-4-31b-it:free": {
     "id": "google/gemma-4-31b-it:free",
@@ -2169,11 +1905,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "ibm-granite/granite-4.1-8b": {
     "id": "ibm-granite/granite-4.1-8b",
@@ -2200,11 +1932,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "inception/mercury-2": {
     "id": "inception/mercury-2",
@@ -2233,11 +1961,7 @@
     "thinking_level_map": {
       "off": null
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "inclusionai/ling-2.6-1t": {
     "id": "inclusionai/ling-2.6-1t",
@@ -2264,11 +1988,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "inclusionai/ling-2.6-flash": {
     "id": "inclusionai/ling-2.6-flash",
@@ -2295,11 +2015,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "inclusionai/ling-3.0-flash:free": {
     "id": "inclusionai/ling-3.0-flash:free",
@@ -2326,11 +2042,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "inclusionai/ring-2.6-1t": {
     "id": "inclusionai/ring-2.6-1t",
@@ -2357,11 +2069,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "kwaipilot/kat-coder-air-v2.5": {
     "id": "kwaipilot/kat-coder-air-v2.5",
@@ -2388,11 +2096,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "kwaipilot/kat-coder-pro-v2": {
     "id": "kwaipilot/kat-coder-pro-v2",
@@ -2419,11 +2123,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "kwaipilot/kat-coder-pro-v2.5": {
     "id": "kwaipilot/kat-coder-pro-v2.5",
@@ -2450,11 +2150,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "meituan/longcat-2.0": {
     "id": "meituan/longcat-2.0",
@@ -2481,11 +2177,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "meta-llama/llama-3.1-70b-instruct": {
     "id": "meta-llama/llama-3.1-70b-instruct",
@@ -2512,11 +2204,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "meta-llama/llama-3.1-8b-instruct": {
     "id": "meta-llama/llama-3.1-8b-instruct",
@@ -2543,11 +2231,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "meta-llama/llama-3.3-70b-instruct": {
     "id": "meta-llama/llama-3.3-70b-instruct",
@@ -2574,11 +2258,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "meta-llama/llama-4-maverick": {
     "id": "meta-llama/llama-4-maverick",
@@ -2606,11 +2286,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "meta-llama/llama-4-scout": {
     "id": "meta-llama/llama-4-scout",
@@ -2638,11 +2314,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "meta/muse-spark-1.1": {
     "id": "meta/muse-spark-1.1",
@@ -2670,11 +2342,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "minimax/minimax-m1": {
     "id": "minimax/minimax-m1",
@@ -2701,11 +2369,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "minimax/minimax-m2": {
     "id": "minimax/minimax-m2",
@@ -2732,11 +2396,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "minimax/minimax-m2.1": {
     "id": "minimax/minimax-m2.1",
@@ -2763,11 +2423,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "minimax/minimax-m2.5": {
     "id": "minimax/minimax-m2.5",
@@ -2794,11 +2450,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "minimax/minimax-m2.7": {
     "id": "minimax/minimax-m2.7",
@@ -2825,11 +2477,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "minimax/minimax-m3": {
     "id": "minimax/minimax-m3",
@@ -2857,11 +2505,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "mistralai/codestral-2508": {
     "id": "mistralai/codestral-2508",
@@ -2888,11 +2532,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "mistralai/ministral-14b-2512": {
     "id": "mistralai/ministral-14b-2512",
@@ -2920,11 +2560,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "mistralai/ministral-3b-2512": {
     "id": "mistralai/ministral-3b-2512",
@@ -2952,11 +2588,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "mistralai/ministral-8b-2512": {
     "id": "mistralai/ministral-8b-2512",
@@ -2984,11 +2616,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "mistralai/mistral-large": {
     "id": "mistralai/mistral-large",
@@ -3015,11 +2643,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "mistralai/mistral-large-2407": {
     "id": "mistralai/mistral-large-2407",
@@ -3046,11 +2670,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "mistralai/mistral-large-2512": {
     "id": "mistralai/mistral-large-2512",
@@ -3078,11 +2698,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "mistralai/mistral-medium-3": {
     "id": "mistralai/mistral-medium-3",
@@ -3110,11 +2726,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "mistralai/mistral-medium-3-5": {
     "id": "mistralai/mistral-medium-3-5",
@@ -3142,11 +2754,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "mistralai/mistral-medium-3.1": {
     "id": "mistralai/mistral-medium-3.1",
@@ -3174,11 +2782,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "mistralai/mistral-nemo": {
     "id": "mistralai/mistral-nemo",
@@ -3205,11 +2809,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "mistralai/mistral-saba": {
     "id": "mistralai/mistral-saba",
@@ -3236,11 +2836,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "mistralai/mistral-small-2603": {
     "id": "mistralai/mistral-small-2603",
@@ -3268,11 +2864,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "mistralai/mistral-small-3.2-24b-instruct": {
     "id": "mistralai/mistral-small-3.2-24b-instruct",
@@ -3300,11 +2892,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "mistralai/mixtral-8x22b-instruct": {
     "id": "mistralai/mixtral-8x22b-instruct",
@@ -3331,11 +2919,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "mistralai/voxtral-small-24b-2507": {
     "id": "mistralai/voxtral-small-24b-2507",
@@ -3362,11 +2946,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "moonshotai/kimi-k2": {
     "id": "moonshotai/kimi-k2",
@@ -3393,11 +2973,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "moonshotai/kimi-k2-0905": {
     "id": "moonshotai/kimi-k2-0905",
@@ -3424,11 +3000,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "moonshotai/kimi-k2-thinking": {
     "id": "moonshotai/kimi-k2-thinking",
@@ -3455,11 +3027,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "moonshotai/kimi-k2.5": {
     "id": "moonshotai/kimi-k2.5",
@@ -3487,11 +3055,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "moonshotai/kimi-k2.6": {
     "id": "moonshotai/kimi-k2.6",
@@ -3520,11 +3084,7 @@
       "requiresReasoningContentOnAssistantMessages": true
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "moonshotai/kimi-k2.7-code": {
     "id": "moonshotai/kimi-k2.7-code",
@@ -3552,11 +3112,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "moonshotai/kimi-k3": {
     "id": "moonshotai/kimi-k3",
@@ -3584,11 +3140,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "nex-agi/nex-n2-mini": {
     "id": "nex-agi/nex-n2-mini",
@@ -3616,11 +3168,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "nex-agi/nex-n2-pro": {
     "id": "nex-agi/nex-n2-pro",
@@ -3648,11 +3196,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "nvidia/nemotron-3-nano-30b-a3b": {
     "id": "nvidia/nemotron-3-nano-30b-a3b",
@@ -3679,11 +3223,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "nvidia/nemotron-3-nano-30b-a3b:free": {
     "id": "nvidia/nemotron-3-nano-30b-a3b:free",
@@ -3710,11 +3250,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free": {
     "id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
@@ -3742,11 +3278,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "nvidia/nemotron-3-super-120b-a12b": {
     "id": "nvidia/nemotron-3-super-120b-a12b",
@@ -3773,11 +3305,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "nvidia/nemotron-3-super-120b-a12b:free": {
     "id": "nvidia/nemotron-3-super-120b-a12b:free",
@@ -3804,11 +3332,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "nvidia/nemotron-3-ultra-550b-a55b": {
     "id": "nvidia/nemotron-3-ultra-550b-a55b",
@@ -3835,11 +3359,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "nvidia/nemotron-3-ultra-550b-a55b:free": {
     "id": "nvidia/nemotron-3-ultra-550b-a55b:free",
@@ -3866,11 +3386,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "nvidia/nemotron-nano-12b-v2-vl:free": {
     "id": "nvidia/nemotron-nano-12b-v2-vl:free",
@@ -3898,11 +3414,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "nvidia/nemotron-nano-9b-v2:free": {
     "id": "nvidia/nemotron-nano-9b-v2:free",
@@ -3929,11 +3441,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "openai/gpt-3.5-turbo": {
     "id": "openai/gpt-3.5-turbo",
@@ -3959,11 +3467,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "openai/gpt-3.5-turbo-0613": {
     "id": "openai/gpt-3.5-turbo-0613",
@@ -3989,11 +3493,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "openai/gpt-3.5-turbo-16k": {
     "id": "openai/gpt-3.5-turbo-16k",
@@ -4019,11 +3519,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "openai/gpt-4": {
     "id": "openai/gpt-4",
@@ -4049,11 +3545,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "openai/gpt-4-turbo": {
     "id": "openai/gpt-4-turbo",
@@ -4080,11 +3572,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "openai/gpt-4-turbo-preview": {
     "id": "openai/gpt-4-turbo-preview",
@@ -4110,11 +3598,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "openai/gpt-4.1": {
     "id": "openai/gpt-4.1",
@@ -4141,11 +3625,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "openai/gpt-4.1-mini": {
     "id": "openai/gpt-4.1-mini",
@@ -4172,11 +3652,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "openai/gpt-4.1-nano": {
     "id": "openai/gpt-4.1-nano",
@@ -4203,11 +3679,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "openai/gpt-4o": {
     "id": "openai/gpt-4o",
@@ -4234,11 +3706,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "openai/gpt-4o-2024-05-13": {
     "id": "openai/gpt-4o-2024-05-13",
@@ -4265,11 +3733,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "openai/gpt-4o-2024-08-06": {
     "id": "openai/gpt-4o-2024-08-06",
@@ -4296,11 +3760,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "openai/gpt-4o-2024-11-20": {
     "id": "openai/gpt-4o-2024-11-20",
@@ -4327,11 +3787,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "openai/gpt-4o-mini": {
     "id": "openai/gpt-4o-mini",
@@ -4358,11 +3814,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "openai/gpt-4o-mini-2024-07-18": {
     "id": "openai/gpt-4o-mini-2024-07-18",
@@ -4389,11 +3841,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "openai/gpt-5": {
     "id": "openai/gpt-5",
@@ -4420,11 +3868,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5-mini": {
     "id": "openai/gpt-5-mini",
@@ -4451,11 +3895,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5-nano": {
     "id": "openai/gpt-5-nano",
@@ -4482,11 +3922,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5-pro": {
     "id": "openai/gpt-5-pro",
@@ -4513,11 +3949,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.1": {
     "id": "openai/gpt-5.1",
@@ -4544,11 +3976,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.1-codex": {
     "id": "openai/gpt-5.1-codex",
@@ -4575,11 +4003,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.1-codex-max": {
     "id": "openai/gpt-5.1-codex-max",
@@ -4606,11 +4030,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.1-codex-mini": {
     "id": "openai/gpt-5.1-codex-mini",
@@ -4637,11 +4057,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.2": {
     "id": "openai/gpt-5.2",
@@ -4670,11 +4086,7 @@
     "thinking_level_map": {
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.2-chat": {
     "id": "openai/gpt-5.2-chat",
@@ -4703,11 +4115,7 @@
     "thinking_level_map": {
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "openai/gpt-5.2-codex": {
     "id": "openai/gpt-5.2-codex",
@@ -4736,11 +4144,7 @@
     "thinking_level_map": {
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.2-pro": {
     "id": "openai/gpt-5.2-pro",
@@ -4769,11 +4173,7 @@
     "thinking_level_map": {
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.3-chat": {
     "id": "openai/gpt-5.3-chat",
@@ -4802,11 +4202,7 @@
     "thinking_level_map": {
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "openai/gpt-5.3-codex": {
     "id": "openai/gpt-5.3-codex",
@@ -4835,11 +4231,7 @@
     "thinking_level_map": {
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.4": {
     "id": "openai/gpt-5.4",
@@ -4868,11 +4260,7 @@
     "thinking_level_map": {
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.4-mini": {
     "id": "openai/gpt-5.4-mini",
@@ -4901,11 +4289,7 @@
     "thinking_level_map": {
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.4-nano": {
     "id": "openai/gpt-5.4-nano",
@@ -4934,11 +4318,7 @@
     "thinking_level_map": {
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.4-pro": {
     "id": "openai/gpt-5.4-pro",
@@ -4967,11 +4347,7 @@
     "thinking_level_map": {
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.5": {
     "id": "openai/gpt-5.5",
@@ -5000,11 +4376,7 @@
     "thinking_level_map": {
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.5-pro": {
     "id": "openai/gpt-5.5-pro",
@@ -5036,11 +4408,7 @@
       "minimal": null,
       "low": null
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.6-luna": {
     "id": "openai/gpt-5.6-luna",
@@ -5070,11 +4438,7 @@
       "xhigh": "xhigh",
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.6-luna-pro": {
     "id": "openai/gpt-5.6-luna-pro",
@@ -5104,11 +4468,7 @@
       "xhigh": "xhigh",
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.6-sol": {
     "id": "openai/gpt-5.6-sol",
@@ -5138,11 +4498,7 @@
       "xhigh": "xhigh",
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.6-sol-pro": {
     "id": "openai/gpt-5.6-sol-pro",
@@ -5172,11 +4528,7 @@
       "xhigh": "xhigh",
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.6-terra": {
     "id": "openai/gpt-5.6-terra",
@@ -5206,11 +4558,7 @@
       "xhigh": "xhigh",
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.6-terra-pro": {
     "id": "openai/gpt-5.6-terra-pro",
@@ -5240,11 +4588,7 @@
       "xhigh": "xhigh",
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-audio": {
     "id": "openai/gpt-audio",
@@ -5270,11 +4614,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "openai/gpt-audio-mini": {
     "id": "openai/gpt-audio-mini",
@@ -5300,11 +4640,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "openai/gpt-chat-latest": {
     "id": "openai/gpt-chat-latest",
@@ -5331,11 +4667,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "openai/gpt-oss-120b": {
     "id": "openai/gpt-oss-120b",
@@ -5361,11 +4693,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "openai/gpt-oss-20b": {
     "id": "openai/gpt-oss-20b",
@@ -5391,11 +4719,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "openai/gpt-oss-20b:free": {
     "id": "openai/gpt-oss-20b:free",
@@ -5421,11 +4745,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "openai/gpt-oss-safeguard-20b": {
     "id": "openai/gpt-oss-safeguard-20b",
@@ -5451,11 +4771,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "openai/o1": {
     "id": "openai/o1",
@@ -5482,11 +4798,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/o3": {
     "id": "openai/o3",
@@ -5513,11 +4825,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/o3-mini": {
     "id": "openai/o3-mini",
@@ -5543,11 +4851,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "openai/o3-mini-high": {
     "id": "openai/o3-mini-high",
@@ -5573,11 +4877,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "openai/o3-pro": {
     "id": "openai/o3-pro",
@@ -5604,11 +4904,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/o4-mini": {
     "id": "openai/o4-mini",
@@ -5635,11 +4931,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/o4-mini-high": {
     "id": "openai/o4-mini-high",
@@ -5666,11 +4958,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openrouter/auto": {
     "id": "openrouter/auto",
@@ -5698,11 +4986,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openrouter/auto-beta": {
     "id": "openrouter/auto-beta",
@@ -5730,11 +5014,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openrouter/free": {
     "id": "openrouter/free",
@@ -5762,11 +5042,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openrouter/fusion": {
     "id": "openrouter/fusion",
@@ -5793,11 +5069,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "poolside/laguna-s-2.1": {
     "id": "poolside/laguna-s-2.1",
@@ -5824,11 +5096,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "poolside/laguna-s-2.1:free": {
     "id": "poolside/laguna-s-2.1:free",
@@ -5855,11 +5123,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "poolside/laguna-xs-2.1": {
     "id": "poolside/laguna-xs-2.1",
@@ -5886,11 +5150,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "poolside/laguna-xs-2.1:free": {
     "id": "poolside/laguna-xs-2.1:free",
@@ -5917,11 +5177,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "qwen/qwen-2.5-72b-instruct": {
     "id": "qwen/qwen-2.5-72b-instruct",
@@ -5948,11 +5204,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "qwen/qwen-2.5-7b-instruct": {
     "id": "qwen/qwen-2.5-7b-instruct",
@@ -5979,11 +5231,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "qwen/qwen-plus": {
     "id": "qwen/qwen-plus",
@@ -6010,11 +5258,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "qwen/qwen-plus-2025-07-28": {
     "id": "qwen/qwen-plus-2025-07-28",
@@ -6041,11 +5285,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "qwen/qwen-plus-2025-07-28:thinking": {
     "id": "qwen/qwen-plus-2025-07-28:thinking",
@@ -6072,11 +5312,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "qwen/qwen3-14b": {
     "id": "qwen/qwen3-14b",
@@ -6103,11 +5339,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "qwen/qwen3-235b-a22b": {
     "id": "qwen/qwen3-235b-a22b",
@@ -6134,11 +5366,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "qwen/qwen3-235b-a22b-2507": {
     "id": "qwen/qwen3-235b-a22b-2507",
@@ -6165,11 +5393,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "qwen/qwen3-235b-a22b-thinking-2507": {
     "id": "qwen/qwen3-235b-a22b-thinking-2507",
@@ -6196,11 +5420,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "qwen/qwen3-30b-a3b": {
     "id": "qwen/qwen3-30b-a3b",
@@ -6227,11 +5447,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "qwen/qwen3-30b-a3b-instruct-2507": {
     "id": "qwen/qwen3-30b-a3b-instruct-2507",
@@ -6258,11 +5474,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "qwen/qwen3-30b-a3b-thinking-2507": {
     "id": "qwen/qwen3-30b-a3b-thinking-2507",
@@ -6289,11 +5501,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "qwen/qwen3-32b": {
     "id": "qwen/qwen3-32b",
@@ -6320,11 +5528,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "qwen/qwen3-8b": {
     "id": "qwen/qwen3-8b",
@@ -6351,11 +5555,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "qwen/qwen3-coder": {
     "id": "qwen/qwen3-coder",
@@ -6382,11 +5582,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "qwen/qwen3-coder-30b-a3b-instruct": {
     "id": "qwen/qwen3-coder-30b-a3b-instruct",
@@ -6413,11 +5609,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "qwen/qwen3-coder-flash": {
     "id": "qwen/qwen3-coder-flash",
@@ -6444,11 +5636,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "qwen/qwen3-coder-next": {
     "id": "qwen/qwen3-coder-next",
@@ -6475,11 +5663,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "qwen/qwen3-coder-plus": {
     "id": "qwen/qwen3-coder-plus",
@@ -6506,11 +5690,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "qwen/qwen3-max": {
     "id": "qwen/qwen3-max",
@@ -6537,11 +5717,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "qwen/qwen3-max-thinking": {
     "id": "qwen/qwen3-max-thinking",
@@ -6568,11 +5744,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "qwen/qwen3-next-80b-a3b-instruct": {
     "id": "qwen/qwen3-next-80b-a3b-instruct",
@@ -6599,11 +5771,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "qwen/qwen3-next-80b-a3b-thinking": {
     "id": "qwen/qwen3-next-80b-a3b-thinking",
@@ -6630,11 +5798,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "qwen/qwen3-vl-235b-a22b-instruct": {
     "id": "qwen/qwen3-vl-235b-a22b-instruct",
@@ -6662,11 +5826,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "qwen/qwen3-vl-235b-a22b-thinking": {
     "id": "qwen/qwen3-vl-235b-a22b-thinking",
@@ -6694,11 +5854,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "qwen/qwen3-vl-30b-a3b-instruct": {
     "id": "qwen/qwen3-vl-30b-a3b-instruct",
@@ -6726,11 +5882,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "qwen/qwen3-vl-30b-a3b-thinking": {
     "id": "qwen/qwen3-vl-30b-a3b-thinking",
@@ -6758,11 +5910,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "qwen/qwen3-vl-32b-instruct": {
     "id": "qwen/qwen3-vl-32b-instruct",
@@ -6790,11 +5938,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "qwen/qwen3-vl-8b-instruct": {
     "id": "qwen/qwen3-vl-8b-instruct",
@@ -6822,11 +5966,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "qwen/qwen3-vl-8b-thinking": {
     "id": "qwen/qwen3-vl-8b-thinking",
@@ -6854,11 +5994,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "qwen/qwen3.5-122b-a10b": {
     "id": "qwen/qwen3.5-122b-a10b",
@@ -6886,11 +6022,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "qwen/qwen3.5-27b": {
     "id": "qwen/qwen3.5-27b",
@@ -6918,11 +6050,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "qwen/qwen3.5-35b-a3b": {
     "id": "qwen/qwen3.5-35b-a3b",
@@ -6950,11 +6078,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "qwen/qwen3.5-397b-a17b": {
     "id": "qwen/qwen3.5-397b-a17b",
@@ -6982,11 +6106,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "qwen/qwen3.5-9b": {
     "id": "qwen/qwen3.5-9b",
@@ -7014,11 +6134,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "qwen/qwen3.5-flash-02-23": {
     "id": "qwen/qwen3.5-flash-02-23",
@@ -7046,11 +6162,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "qwen/qwen3.5-plus-02-15": {
     "id": "qwen/qwen3.5-plus-02-15",
@@ -7078,11 +6190,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "qwen/qwen3.5-plus-20260420": {
     "id": "qwen/qwen3.5-plus-20260420",
@@ -7110,11 +6218,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "qwen/qwen3.6-27b": {
     "id": "qwen/qwen3.6-27b",
@@ -7142,11 +6246,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "qwen/qwen3.6-35b-a3b": {
     "id": "qwen/qwen3.6-35b-a3b",
@@ -7174,11 +6274,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "qwen/qwen3.6-flash": {
     "id": "qwen/qwen3.6-flash",
@@ -7206,11 +6302,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "qwen/qwen3.6-max-preview": {
     "id": "qwen/qwen3.6-max-preview",
@@ -7237,11 +6329,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "qwen/qwen3.6-plus": {
     "id": "qwen/qwen3.6-plus",
@@ -7269,11 +6357,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "qwen/qwen3.7-flash": {
     "id": "qwen/qwen3.7-flash",
@@ -7301,11 +6385,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "qwen/qwen3.7-max": {
     "id": "qwen/qwen3.7-max",
@@ -7332,11 +6412,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "qwen/qwen3.7-plus": {
     "id": "qwen/qwen3.7-plus",
@@ -7364,11 +6440,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "rekaai/reka-edge": {
     "id": "rekaai/reka-edge",
@@ -7396,11 +6468,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "relace/relace-search": {
     "id": "relace/relace-search",
@@ -7427,11 +6495,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "sakana/fugu-ultra": {
     "id": "sakana/fugu-ultra",
@@ -7459,11 +6523,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "sao10k/l3.1-euryale-70b": {
     "id": "sao10k/l3.1-euryale-70b",
@@ -7490,11 +6550,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "stepfun/step-3.5-flash": {
     "id": "stepfun/step-3.5-flash",
@@ -7521,11 +6577,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "stepfun/step-3.7-flash": {
     "id": "stepfun/step-3.7-flash",
@@ -7553,11 +6605,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "tencent/hy3": {
     "id": "tencent/hy3",
@@ -7584,11 +6632,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "tencent/hy3-preview": {
     "id": "tencent/hy3-preview",
@@ -7615,11 +6659,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "thedrummer/unslopnemo-12b": {
     "id": "thedrummer/unslopnemo-12b",
@@ -7646,11 +6686,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "thinkingmachines/inkling": {
     "id": "thinkingmachines/inkling",
@@ -7678,11 +6714,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "thinkingmachines/inkling-small": {
     "id": "thinkingmachines/inkling-small",
@@ -7710,11 +6742,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "upstage/solar-pro-3": {
     "id": "upstage/solar-pro-3",
@@ -7741,11 +6769,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "x-ai/grok-4.20": {
     "id": "x-ai/grok-4.20",
@@ -7773,11 +6797,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "x-ai/grok-4.3": {
     "id": "x-ai/grok-4.3",
@@ -7805,11 +6825,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "x-ai/grok-4.5": {
     "id": "x-ai/grok-4.5",
@@ -7837,11 +6853,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "x-ai/grok-build-0.1": {
     "id": "x-ai/grok-build-0.1",
@@ -7869,11 +6881,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "xiaomi/mimo-v2.5": {
     "id": "xiaomi/mimo-v2.5",
@@ -7901,11 +6909,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "xiaomi/mimo-v2.5-pro": {
     "id": "xiaomi/mimo-v2.5-pro",
@@ -7932,11 +6936,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "z-ai/glm-4.5": {
     "id": "z-ai/glm-4.5",
@@ -7963,11 +6963,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "z-ai/glm-4.5-air": {
     "id": "z-ai/glm-4.5-air",
@@ -7994,11 +6990,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "z-ai/glm-4.5v": {
     "id": "z-ai/glm-4.5v",
@@ -8026,11 +7018,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "z-ai/glm-4.6": {
     "id": "z-ai/glm-4.6",
@@ -8057,11 +7045,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "z-ai/glm-4.6v": {
     "id": "z-ai/glm-4.6v",
@@ -8089,11 +7073,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "z-ai/glm-4.7": {
     "id": "z-ai/glm-4.7",
@@ -8120,11 +7100,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "z-ai/glm-4.7-flash": {
     "id": "z-ai/glm-4.7-flash",
@@ -8151,11 +7127,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "z-ai/glm-5": {
     "id": "z-ai/glm-5",
@@ -8182,11 +7154,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "z-ai/glm-5-turbo": {
     "id": "z-ai/glm-5-turbo",
@@ -8213,11 +7181,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "z-ai/glm-5.1": {
     "id": "z-ai/glm-5.1",
@@ -8244,11 +7208,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "z-ai/glm-5.2": {
     "id": "z-ai/glm-5.2",
@@ -8277,11 +7237,7 @@
     "thinking_level_map": {
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "z-ai/glm-5v-turbo": {
     "id": "z-ai/glm-5v-turbo",
@@ -8309,11 +7265,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "~anthropic/claude-fable-latest": {
     "id": "~anthropic/claude-fable-latest",
@@ -8342,11 +7294,7 @@
       "cacheControlFormat": "anthropic"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "~anthropic/claude-haiku-latest": {
     "id": "~anthropic/claude-haiku-latest",
@@ -8375,11 +7323,7 @@
       "cacheControlFormat": "anthropic"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "~anthropic/claude-opus-latest": {
     "id": "~anthropic/claude-opus-latest",
@@ -8408,11 +7352,7 @@
       "cacheControlFormat": "anthropic"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "~anthropic/claude-sonnet-latest": {
     "id": "~anthropic/claude-sonnet-latest",
@@ -8441,11 +7381,7 @@
       "cacheControlFormat": "anthropic"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "~deepseek/deepseek-v4-flash-latest": {
     "id": "~deepseek/deepseek-v4-flash-latest",
@@ -8480,11 +7416,7 @@
       "max": null,
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "~google/gemini-flash-latest": {
     "id": "~google/gemini-flash-latest",
@@ -8512,11 +7444,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "~google/gemini-pro-latest": {
     "id": "~google/gemini-pro-latest",
@@ -8544,11 +7472,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "~moonshotai/kimi-latest": {
     "id": "~moonshotai/kimi-latest",
@@ -8576,11 +7500,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "~openai/gpt-latest": {
     "id": "~openai/gpt-latest",
@@ -8608,11 +7528,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "~openai/gpt-mini-latest": {
     "id": "~openai/gpt-mini-latest",
@@ -8640,11 +7556,7 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "~x-ai/grok-latest": {
     "id": "~x-ai/grok-latest",
@@ -8672,10 +7584,6 @@
       "thinkingFormat": "openrouter"
     },
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   }
 }

@@ -94,7 +94,6 @@ class InMemoryModelsStore:
 def model_to_dict(model: Model) -> dict[str, Any]:
     """Model → 可 JSON 序列化的字典。"""
     cost = model.cost
-    caps = model.capabilities
     tiers = [
         {
             "input": tier.input,
@@ -127,17 +126,13 @@ def model_to_dict(model: Model) -> dict[str, Any]:
         "thinking_level_map": (
             dict(model.thinking_level_map) if model.thinking_level_map else None
         ),
-        "capabilities": {
-            "reasoning": caps.reasoning,
-            "tools": caps.tools,
-            "images": caps.images,
-        },
+        "reasoning": model.reasoning,
     }
 
 
 def model_from_dict(data: dict[str, Any]) -> Model:
     """字典 → Model（model_to_dict 的逆操作）。"""
-    from .._types import ModelCapabilities, ModelCost, ModelCostTier, ModelCostRates
+    from .._types import ModelCost, ModelCostTier, ModelCostRates
 
     cost_data = data.get("cost") or {}
     tiers = [
@@ -150,7 +145,6 @@ def model_from_dict(data: dict[str, Any]) -> Model:
         )
         for tier in cost_data.get("tiers") or []
     ]
-    caps = data.get("capabilities") or {}
     return Model(
         id=data["id"],
         provider=data["provider"],
@@ -171,11 +165,7 @@ def model_from_dict(data: dict[str, Any]) -> Model:
         headers=data.get("headers"),
         compat=data.get("compat"),
         thinking_level_map=data.get("thinking_level_map"),
-        capabilities=ModelCapabilities(
-            reasoning=bool(caps.get("reasoning")),
-            tools=bool(caps.get("tools")),
-            images=bool(caps.get("images")),
-        ),
+        reasoning=bool(data.get("reasoning", False)),
     )
 
 

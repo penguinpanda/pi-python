@@ -10,7 +10,7 @@ from pi_ai.models.models_store import (
     model_to_dict,
     provider_models_store,
 )
-from pi_ai.types import Model, ModelCapabilities, ModelCost, ModelCostTier
+from pi_ai.types import Model, ModelCost, ModelCostTier
 
 
 def _model(model_id: str = "gpt-test") -> Model:
@@ -33,7 +33,7 @@ def _model(model_id: str = "gpt-test") -> Model:
         context_window=128000,
         compat={"supportsStrictMode": True},
         thinking_level_map={"high": "high"},
-        capabilities=ModelCapabilities(reasoning=True, tools=True, images=True),
+        reasoning=True,
     )
 
 
@@ -42,7 +42,8 @@ def test_model_serialization_roundtrip():
     restored = model_from_dict(model_to_dict(model))
     assert restored == model
     assert restored.cost.tiers[0].input_tokens_above == 1000
-    assert restored.capabilities.images is True
+    assert "image" in restored.input
+    assert restored.reasoning is True
 
 
 @pytest.mark.asyncio

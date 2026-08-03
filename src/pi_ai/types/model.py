@@ -11,8 +11,7 @@ pi_ai.types.model — 模型元数据（Model）与成本。
     ├── max_tokens / context_window  容量限制
     ├── base_url / headers           端点覆盖（模型级可覆盖 Provider 级）
     ├── compat                       各 API 兼容配置（ModelCompat）
-    ├── thinking_level_map           思考级别 → provider 值映射
-    └── capabilities                 能力集合（ModelCapabilities）
+    └── thinking_level_map           思考级别 → provider 值映射
 """
 
 from dataclasses import dataclass, field
@@ -38,17 +37,6 @@ ModelInput = Literal[
 ModelOutput = Literal[
     "text",
 ]
-
-
-@dataclass(slots=True)
-class ModelCapabilities:
-    """模型能力（能力的唯一来源）"""
-
-    reasoning: bool = False
-
-    tools: bool = False
-
-    images: bool = False
 
 
 # =========================================================
@@ -104,8 +92,7 @@ class Model:
     headers: dict[str, str] | None = None               # 模型级自定义头
     compat: ModelCompat | None = None                   # 各 API 的兼容配置
     thinking_level_map: ThinkingLevelMap | None = None  # pi 思考级别 -> provider 值映射
-
-    capabilities: ModelCapabilities = field(default_factory=ModelCapabilities)
+    reasoning: bool = False                             # 是否支持推理（Thinking）
 
 
 __all__ = [
@@ -113,7 +100,6 @@ __all__ = [
     "ProviderId",
     "ModelInput",
     "ModelOutput",
-    "ModelCapabilities",
     "ModelCostRates",
     "ModelCostTier",
     "ModelCost",

@@ -83,11 +83,7 @@ def convert_ts_model(ts: dict) -> dict:
         "thinking_level_map": (
             dict(ts["thinkingLevelMap"]) if ts.get("thinkingLevelMap") else None
         ),
-        "capabilities": {
-            "reasoning": bool(ts.get("reasoning")),
-            "tools": True,  # TS 无独立 tools 标志；默认开启
-            "images": "image" in input_modalities,
-        },
+        "reasoning": bool(ts.get("reasoning")),
     }
 
 

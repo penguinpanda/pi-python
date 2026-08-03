@@ -76,7 +76,6 @@ from .compat import (
 from .model import (
     ApiId,
     Model,
-    ModelCapabilities,
     ModelCost,
     ModelCostRates,
     ModelCostTier,
@@ -175,7 +174,6 @@ __all__ = [
     "ProviderId",
     "ModelInput",
     "ModelOutput",
-    "ModelCapabilities",
     "ModelCostRates",
     "ModelCostTier",
     "ModelCost",

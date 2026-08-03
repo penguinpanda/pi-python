@@ -21,11 +21,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "alibaba/qwen-3-235b": {
     "id": "alibaba/qwen-3-235b",
@@ -49,11 +45,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "alibaba/qwen-3-30b": {
     "id": "alibaba/qwen-3-30b",
@@ -77,11 +69,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "alibaba/qwen-3-32b": {
     "id": "alibaba/qwen-3-32b",
@@ -105,11 +93,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "alibaba/qwen-3.6-max-preview": {
     "id": "alibaba/qwen-3.6-max-preview",
@@ -133,11 +117,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "alibaba/qwen3-235b-a22b-thinking": {
     "id": "alibaba/qwen3-235b-a22b-thinking",
@@ -162,11 +142,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "alibaba/qwen3-coder": {
     "id": "alibaba/qwen3-coder",
@@ -190,11 +166,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "alibaba/qwen3-coder-30b-a3b": {
     "id": "alibaba/qwen3-coder-30b-a3b",
@@ -218,11 +190,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "alibaba/qwen3-coder-next": {
     "id": "alibaba/qwen3-coder-next",
@@ -246,11 +214,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "alibaba/qwen3-coder-plus": {
     "id": "alibaba/qwen3-coder-plus",
@@ -274,11 +238,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "alibaba/qwen3-max": {
     "id": "alibaba/qwen3-max",
@@ -302,11 +262,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "alibaba/qwen3-max-preview": {
     "id": "alibaba/qwen3-max-preview",
@@ -330,11 +286,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "alibaba/qwen3-max-thinking": {
     "id": "alibaba/qwen3-max-thinking",
@@ -358,11 +310,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "alibaba/qwen3-next-80b-a3b-instruct": {
     "id": "alibaba/qwen3-next-80b-a3b-instruct",
@@ -386,11 +334,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "alibaba/qwen3-next-80b-a3b-thinking": {
     "id": "alibaba/qwen3-next-80b-a3b-thinking",
@@ -414,11 +358,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "alibaba/qwen3-vl-235b-a22b-instruct": {
     "id": "alibaba/qwen3-vl-235b-a22b-instruct",
@@ -443,11 +383,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "alibaba/qwen3-vl-instruct": {
     "id": "alibaba/qwen3-vl-instruct",
@@ -472,11 +408,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "alibaba/qwen3-vl-thinking": {
     "id": "alibaba/qwen3-vl-thinking",
@@ -501,11 +433,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "alibaba/qwen3.5-flash": {
     "id": "alibaba/qwen3.5-flash",
@@ -530,11 +458,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "alibaba/qwen3.5-plus": {
     "id": "alibaba/qwen3.5-plus",
@@ -559,11 +483,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "alibaba/qwen3.6-27b": {
     "id": "alibaba/qwen3.6-27b",
@@ -588,11 +508,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "alibaba/qwen3.6-plus": {
     "id": "alibaba/qwen3.6-plus",
@@ -617,11 +533,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "alibaba/qwen3.7-flash": {
     "id": "alibaba/qwen3.7-flash",
@@ -646,11 +558,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "alibaba/qwen3.7-max": {
     "id": "alibaba/qwen3.7-max",
@@ -674,11 +582,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "alibaba/qwen3.7-plus": {
     "id": "alibaba/qwen3.7-plus",
@@ -703,11 +607,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "alibaba/qwen3.8-max": {
     "id": "alibaba/qwen3.8-max",
@@ -732,11 +632,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "amazon/nova-2-lite": {
     "id": "amazon/nova-2-lite",
@@ -761,11 +657,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "amazon/nova-lite": {
     "id": "amazon/nova-lite",
@@ -790,11 +682,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "amazon/nova-micro": {
     "id": "amazon/nova-micro",
@@ -818,11 +706,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "amazon/nova-pro": {
     "id": "amazon/nova-pro",
@@ -847,11 +731,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "anthropic/claude-3-haiku": {
     "id": "anthropic/claude-3-haiku",
@@ -876,11 +756,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "anthropic/claude-fable-5": {
     "id": "anthropic/claude-fable-5",
@@ -911,11 +787,7 @@
       "xhigh": "xhigh",
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-haiku-4.5": {
     "id": "anthropic/claude-haiku-4.5",
@@ -940,11 +812,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-opus-4": {
     "id": "anthropic/claude-opus-4",
@@ -969,11 +837,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-opus-4.1": {
     "id": "anthropic/claude-opus-4.1",
@@ -998,11 +862,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-opus-4.5": {
     "id": "anthropic/claude-opus-4.5",
@@ -1027,11 +887,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-opus-4.6": {
     "id": "anthropic/claude-opus-4.6",
@@ -1060,11 +916,7 @@
     "thinking_level_map": {
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-opus-4.7": {
     "id": "anthropic/claude-opus-4.7",
@@ -1095,11 +947,7 @@
       "xhigh": "xhigh",
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-opus-4.8": {
     "id": "anthropic/claude-opus-4.8",
@@ -1130,11 +978,7 @@
       "xhigh": "xhigh",
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-opus-4.8-fast": {
     "id": "anthropic/claude-opus-4.8-fast",
@@ -1165,11 +1009,7 @@
       "xhigh": "xhigh",
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-opus-5": {
     "id": "anthropic/claude-opus-5",
@@ -1200,11 +1040,7 @@
       "xhigh": "xhigh",
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-opus-5-fast": {
     "id": "anthropic/claude-opus-5-fast",
@@ -1235,11 +1071,7 @@
       "xhigh": "xhigh",
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-sonnet-4": {
     "id": "anthropic/claude-sonnet-4",
@@ -1264,11 +1096,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-sonnet-4.5": {
     "id": "anthropic/claude-sonnet-4.5",
@@ -1293,11 +1121,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-sonnet-4.6": {
     "id": "anthropic/claude-sonnet-4.6",
@@ -1326,11 +1150,7 @@
     "thinking_level_map": {
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "anthropic/claude-sonnet-5": {
     "id": "anthropic/claude-sonnet-5",
@@ -1360,11 +1180,7 @@
       "xhigh": "xhigh",
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "arcee-ai/trinity-large-thinking": {
     "id": "arcee-ai/trinity-large-thinking",
@@ -1388,11 +1204,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "arcee-ai/trinity-mini": {
     "id": "arcee-ai/trinity-mini",
@@ -1416,11 +1228,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "bytedance/seed-1.6": {
     "id": "bytedance/seed-1.6",
@@ -1445,11 +1253,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "bytedance/seed-1.8": {
     "id": "bytedance/seed-1.8",
@@ -1474,11 +1278,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "cohere/command-a": {
     "id": "cohere/command-a",
@@ -1502,11 +1302,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "deepseek/deepseek-r1": {
     "id": "deepseek/deepseek-r1",
@@ -1530,11 +1326,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "deepseek/deepseek-v3": {
     "id": "deepseek/deepseek-v3",
@@ -1558,11 +1350,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "deepseek/deepseek-v3.1": {
     "id": "deepseek/deepseek-v3.1",
@@ -1586,11 +1374,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "deepseek/deepseek-v3.1-terminus": {
     "id": "deepseek/deepseek-v3.1-terminus",
@@ -1614,11 +1398,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "deepseek/deepseek-v3.2": {
     "id": "deepseek/deepseek-v3.2",
@@ -1642,11 +1422,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "deepseek/deepseek-v3.2-thinking": {
     "id": "deepseek/deepseek-v3.2-thinking",
@@ -1670,11 +1446,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "deepseek/deepseek-v4-flash": {
     "id": "deepseek/deepseek-v4-flash",
@@ -1698,11 +1470,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "deepseek/deepseek-v4-flash-0731": {
     "id": "deepseek/deepseek-v4-flash-0731",
@@ -1726,11 +1494,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "deepseek/deepseek-v4-pro": {
     "id": "deepseek/deepseek-v4-pro",
@@ -1754,11 +1518,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "google/gemini-2.5-flash": {
     "id": "google/gemini-2.5-flash",
@@ -1783,11 +1543,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemini-2.5-flash-lite": {
     "id": "google/gemini-2.5-flash-lite",
@@ -1812,11 +1568,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemini-2.5-pro": {
     "id": "google/gemini-2.5-pro",
@@ -1841,11 +1593,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemini-3-flash": {
     "id": "google/gemini-3-flash",
@@ -1870,11 +1618,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemini-3.1-flash-lite": {
     "id": "google/gemini-3.1-flash-lite",
@@ -1899,11 +1643,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemini-3.1-pro-preview": {
     "id": "google/gemini-3.1-pro-preview",
@@ -1928,11 +1668,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemini-3.5-flash": {
     "id": "google/gemini-3.5-flash",
@@ -1957,11 +1693,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemini-3.5-flash-lite": {
     "id": "google/gemini-3.5-flash-lite",
@@ -1986,11 +1718,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemini-3.6-flash": {
     "id": "google/gemini-3.6-flash",
@@ -2015,11 +1743,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemma-4-26b-a4b-it": {
     "id": "google/gemma-4-26b-a4b-it",
@@ -2044,11 +1768,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "google/gemma-4-31b-it": {
     "id": "google/gemma-4-31b-it",
@@ -2073,11 +1793,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "inception/mercury-2": {
     "id": "inception/mercury-2",
@@ -2101,11 +1817,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "inception/mercury-coder-small": {
     "id": "inception/mercury-coder-small",
@@ -2129,11 +1841,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "inclusionai/ling-3.0-flash-free": {
     "id": "inclusionai/ling-3.0-flash-free",
@@ -2157,11 +1865,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "interfaze/interfaze-beta": {
     "id": "interfaze/interfaze-beta",
@@ -2186,11 +1890,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "kwaipilot/kat-coder-air-v2.5": {
     "id": "kwaipilot/kat-coder-air-v2.5",
@@ -2215,11 +1915,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "kwaipilot/kat-coder-pro-v1": {
     "id": "kwaipilot/kat-coder-pro-v1",
@@ -2243,11 +1939,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "kwaipilot/kat-coder-pro-v2": {
     "id": "kwaipilot/kat-coder-pro-v2",
@@ -2271,11 +1963,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "kwaipilot/kat-coder-pro-v2.5": {
     "id": "kwaipilot/kat-coder-pro-v2.5",
@@ -2300,11 +1988,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "meta/llama-3.1-70b": {
     "id": "meta/llama-3.1-70b",
@@ -2328,11 +2012,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "meta/llama-3.1-8b": {
     "id": "meta/llama-3.1-8b",
@@ -2356,11 +2036,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "meta/llama-3.3-70b": {
     "id": "meta/llama-3.3-70b",
@@ -2384,11 +2060,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "meta/llama-4-maverick": {
     "id": "meta/llama-4-maverick",
@@ -2413,11 +2085,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "meta/llama-4-scout": {
     "id": "meta/llama-4-scout",
@@ -2442,11 +2110,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "meta/muse-spark-1.1": {
     "id": "meta/muse-spark-1.1",
@@ -2471,11 +2135,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "minimax/minimax-m2": {
     "id": "minimax/minimax-m2",
@@ -2499,11 +2159,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "minimax/minimax-m2.1": {
     "id": "minimax/minimax-m2.1",
@@ -2527,11 +2183,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "minimax/minimax-m2.1-lightning": {
     "id": "minimax/minimax-m2.1-lightning",
@@ -2555,11 +2207,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "minimax/minimax-m2.5": {
     "id": "minimax/minimax-m2.5",
@@ -2583,11 +2231,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "minimax/minimax-m2.5-highspeed": {
     "id": "minimax/minimax-m2.5-highspeed",
@@ -2611,11 +2255,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "minimax/minimax-m2.7": {
     "id": "minimax/minimax-m2.7",
@@ -2639,11 +2279,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "minimax/minimax-m2.7-highspeed": {
     "id": "minimax/minimax-m2.7-highspeed",
@@ -2667,11 +2303,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "minimax/minimax-m3": {
     "id": "minimax/minimax-m3",
@@ -2696,11 +2328,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "mistral/codestral": {
     "id": "mistral/codestral",
@@ -2724,11 +2352,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "mistral/devstral-2": {
     "id": "mistral/devstral-2",
@@ -2752,11 +2376,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "mistral/devstral-small-2": {
     "id": "mistral/devstral-small-2",
@@ -2781,11 +2401,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "mistral/magistral-medium": {
     "id": "mistral/magistral-medium",
@@ -2810,11 +2426,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "mistral/magistral-small": {
     "id": "mistral/magistral-small",
@@ -2839,11 +2451,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "mistral/ministral-14b": {
     "id": "mistral/ministral-14b",
@@ -2868,11 +2476,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "mistral/ministral-3b": {
     "id": "mistral/ministral-3b",
@@ -2897,11 +2501,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "mistral/ministral-8b": {
     "id": "mistral/ministral-8b",
@@ -2926,11 +2526,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "mistral/mistral-large-3": {
     "id": "mistral/mistral-large-3",
@@ -2955,11 +2551,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "mistral/mistral-medium": {
     "id": "mistral/mistral-medium",
@@ -2984,11 +2576,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "mistral/mistral-medium-3.5": {
     "id": "mistral/mistral-medium-3.5",
@@ -3013,11 +2601,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "mistral/mistral-nemo": {
     "id": "mistral/mistral-nemo",
@@ -3042,11 +2626,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "mistral/mistral-small": {
     "id": "mistral/mistral-small",
@@ -3071,11 +2651,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "mistral/pixtral-12b": {
     "id": "mistral/pixtral-12b",
@@ -3100,11 +2676,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "moonshotai/kimi-k2": {
     "id": "moonshotai/kimi-k2",
@@ -3128,11 +2700,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "moonshotai/kimi-k2-thinking": {
     "id": "moonshotai/kimi-k2-thinking",
@@ -3156,11 +2724,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "moonshotai/kimi-k2.5": {
     "id": "moonshotai/kimi-k2.5",
@@ -3185,11 +2749,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "moonshotai/kimi-k2.6": {
     "id": "moonshotai/kimi-k2.6",
@@ -3214,11 +2774,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "moonshotai/kimi-k2.7-code": {
     "id": "moonshotai/kimi-k2.7-code",
@@ -3243,11 +2799,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "moonshotai/kimi-k2.7-code-highspeed": {
     "id": "moonshotai/kimi-k2.7-code-highspeed",
@@ -3272,11 +2824,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "moonshotai/kimi-k3": {
     "id": "moonshotai/kimi-k3",
@@ -3301,11 +2849,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "moonshotai/kimi-k3-fast": {
     "id": "moonshotai/kimi-k3-fast",
@@ -3330,11 +2874,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "nvidia/nemotron-3-nano-30b-a3b": {
     "id": "nvidia/nemotron-3-nano-30b-a3b",
@@ -3358,11 +2898,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "nvidia/nemotron-3-super-120b-a12b": {
     "id": "nvidia/nemotron-3-super-120b-a12b",
@@ -3386,11 +2922,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "nvidia/nemotron-3-ultra-550b-a55b": {
     "id": "nvidia/nemotron-3-ultra-550b-a55b",
@@ -3414,11 +2946,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "nvidia/nemotron-nano-12b-v2-vl": {
     "id": "nvidia/nemotron-nano-12b-v2-vl",
@@ -3443,11 +2971,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "nvidia/nemotron-nano-9b-v2": {
     "id": "nvidia/nemotron-nano-9b-v2",
@@ -3471,11 +2995,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "openai/gpt-3.5-turbo": {
     "id": "openai/gpt-3.5-turbo",
@@ -3499,11 +3019,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": false
   },
   "openai/gpt-4-turbo": {
     "id": "openai/gpt-4-turbo",
@@ -3528,11 +3044,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "openai/gpt-4.1": {
     "id": "openai/gpt-4.1",
@@ -3557,11 +3069,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "openai/gpt-4.1-mini": {
     "id": "openai/gpt-4.1-mini",
@@ -3586,11 +3094,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "openai/gpt-4.1-nano": {
     "id": "openai/gpt-4.1-nano",
@@ -3615,11 +3119,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "openai/gpt-4o": {
     "id": "openai/gpt-4o",
@@ -3644,11 +3144,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "openai/gpt-4o-mini": {
     "id": "openai/gpt-4o-mini",
@@ -3673,11 +3169,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "openai/gpt-5": {
     "id": "openai/gpt-5",
@@ -3702,11 +3194,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5-codex": {
     "id": "openai/gpt-5-codex",
@@ -3731,11 +3219,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5-mini": {
     "id": "openai/gpt-5-mini",
@@ -3760,11 +3244,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5-nano": {
     "id": "openai/gpt-5-nano",
@@ -3789,11 +3269,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5-pro": {
     "id": "openai/gpt-5-pro",
@@ -3818,11 +3294,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.1-codex": {
     "id": "openai/gpt-5.1-codex",
@@ -3847,11 +3319,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.1-codex-max": {
     "id": "openai/gpt-5.1-codex-max",
@@ -3876,11 +3344,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.1-codex-mini": {
     "id": "openai/gpt-5.1-codex-mini",
@@ -3905,11 +3369,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.1-instant": {
     "id": "openai/gpt-5.1-instant",
@@ -3934,11 +3394,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "openai/gpt-5.1-thinking": {
     "id": "openai/gpt-5.1-thinking",
@@ -3963,11 +3419,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.2": {
     "id": "openai/gpt-5.2",
@@ -3994,11 +3446,7 @@
     "thinking_level_map": {
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.2-codex": {
     "id": "openai/gpt-5.2-codex",
@@ -4025,11 +3473,7 @@
     "thinking_level_map": {
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.2-pro": {
     "id": "openai/gpt-5.2-pro",
@@ -4056,11 +3500,7 @@
     "thinking_level_map": {
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.3-chat": {
     "id": "openai/gpt-5.3-chat",
@@ -4087,11 +3527,7 @@
     "thinking_level_map": {
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "openai/gpt-5.3-codex": {
     "id": "openai/gpt-5.3-codex",
@@ -4118,11 +3554,7 @@
     "thinking_level_map": {
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.4": {
     "id": "openai/gpt-5.4",
@@ -4149,11 +3581,7 @@
     "thinking_level_map": {
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.4-mini": {
     "id": "openai/gpt-5.4-mini",
@@ -4180,11 +3608,7 @@
     "thinking_level_map": {
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.4-nano": {
     "id": "openai/gpt-5.4-nano",
@@ -4211,11 +3635,7 @@
     "thinking_level_map": {
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.4-pro": {
     "id": "openai/gpt-5.4-pro",
@@ -4242,11 +3662,7 @@
     "thinking_level_map": {
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.5": {
     "id": "openai/gpt-5.5",
@@ -4273,11 +3689,7 @@
     "thinking_level_map": {
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.5-pro": {
     "id": "openai/gpt-5.5-pro",
@@ -4307,11 +3719,7 @@
       "minimal": null,
       "low": null
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.6-luna": {
     "id": "openai/gpt-5.6-luna",
@@ -4338,11 +3746,7 @@
     "thinking_level_map": {
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.6-sol": {
     "id": "openai/gpt-5.6-sol",
@@ -4369,11 +3773,7 @@
     "thinking_level_map": {
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-5.6-terra": {
     "id": "openai/gpt-5.6-terra",
@@ -4400,11 +3800,7 @@
     "thinking_level_map": {
       "xhigh": "xhigh"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/gpt-oss-120b": {
     "id": "openai/gpt-oss-120b",
@@ -4428,11 +3824,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "openai/gpt-oss-20b": {
     "id": "openai/gpt-oss-20b",
@@ -4456,11 +3848,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "openai/gpt-oss-safeguard-20b": {
     "id": "openai/gpt-oss-safeguard-20b",
@@ -4484,11 +3872,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "openai/o1": {
     "id": "openai/o1",
@@ -4513,11 +3897,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/o3": {
     "id": "openai/o3",
@@ -4542,11 +3922,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/o3-deep-research": {
     "id": "openai/o3-deep-research",
@@ -4571,11 +3947,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/o3-mini": {
     "id": "openai/o3-mini",
@@ -4599,11 +3971,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "openai/o3-pro": {
     "id": "openai/o3-pro",
@@ -4628,11 +3996,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "openai/o4-mini": {
     "id": "openai/o4-mini",
@@ -4657,11 +4021,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "poolside/laguna-s-2.1": {
     "id": "poolside/laguna-s-2.1",
@@ -4685,11 +4045,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "poolside/laguna-s-2.1-free": {
     "id": "poolside/laguna-s-2.1-free",
@@ -4713,11 +4069,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "sakana/fugu-ultra": {
     "id": "sakana/fugu-ultra",
@@ -4742,11 +4094,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "stepfun/step-3.5-flash": {
     "id": "stepfun/step-3.5-flash",
@@ -4771,11 +4119,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "stepfun/step-3.7-flash": {
     "id": "stepfun/step-3.7-flash",
@@ -4800,11 +4144,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "tencent/hy3": {
     "id": "tencent/hy3",
@@ -4828,11 +4168,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "thinkingmachines/inkling": {
     "id": "thinkingmachines/inkling",
@@ -4857,11 +4193,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "thinkingmachines/inkling-small": {
     "id": "thinkingmachines/inkling-small",
@@ -4886,11 +4218,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "xai/grok-4.1-fast-non-reasoning": {
     "id": "xai/grok-4.1-fast-non-reasoning",
@@ -4915,11 +4243,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "xai/grok-4.1-fast-reasoning": {
     "id": "xai/grok-4.1-fast-reasoning",
@@ -4944,11 +4268,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "xai/grok-4.20-multi-agent": {
     "id": "xai/grok-4.20-multi-agent",
@@ -4973,11 +4293,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "xai/grok-4.20-multi-agent-beta": {
     "id": "xai/grok-4.20-multi-agent-beta",
@@ -5002,11 +4318,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "xai/grok-4.20-non-reasoning": {
     "id": "xai/grok-4.20-non-reasoning",
@@ -5031,11 +4343,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "xai/grok-4.20-non-reasoning-beta": {
     "id": "xai/grok-4.20-non-reasoning-beta",
@@ -5060,11 +4368,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "xai/grok-4.20-reasoning": {
     "id": "xai/grok-4.20-reasoning",
@@ -5089,11 +4393,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "xai/grok-4.20-reasoning-beta": {
     "id": "xai/grok-4.20-reasoning-beta",
@@ -5118,11 +4418,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "xai/grok-4.3": {
     "id": "xai/grok-4.3",
@@ -5147,11 +4443,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "xai/grok-4.5": {
     "id": "xai/grok-4.5",
@@ -5176,11 +4468,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "xai/grok-build-0.1": {
     "id": "xai/grok-build-0.1",
@@ -5205,11 +4493,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "xiaomi/mimo-v2.5": {
     "id": "xiaomi/mimo-v2.5",
@@ -5234,11 +4518,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "xiaomi/mimo-v2.5-pro": {
     "id": "xiaomi/mimo-v2.5-pro",
@@ -5262,11 +4542,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "zai/glm-4.5": {
     "id": "zai/glm-4.5",
@@ -5290,11 +4566,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "zai/glm-4.5-air": {
     "id": "zai/glm-4.5-air",
@@ -5318,11 +4590,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "zai/glm-4.5v": {
     "id": "zai/glm-4.5v",
@@ -5347,11 +4615,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "zai/glm-4.6": {
     "id": "zai/glm-4.6",
@@ -5375,11 +4639,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "zai/glm-4.6v": {
     "id": "zai/glm-4.6v",
@@ -5404,11 +4664,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "zai/glm-4.6v-flash": {
     "id": "zai/glm-4.6v-flash",
@@ -5433,11 +4689,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "zai/glm-4.7": {
     "id": "zai/glm-4.7",
@@ -5461,11 +4713,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "zai/glm-4.7-flash": {
     "id": "zai/glm-4.7-flash",
@@ -5489,11 +4737,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "zai/glm-4.7-flashx": {
     "id": "zai/glm-4.7-flashx",
@@ -5517,11 +4761,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "zai/glm-5": {
     "id": "zai/glm-5",
@@ -5545,11 +4785,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "zai/glm-5-turbo": {
     "id": "zai/glm-5-turbo",
@@ -5573,11 +4809,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "zai/glm-5.1": {
     "id": "zai/glm-5.1",
@@ -5601,11 +4833,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "zai/glm-5.2": {
     "id": "zai/glm-5.2",
@@ -5629,11 +4857,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "zai/glm-5.2-fast": {
     "id": "zai/glm-5.2-fast",
@@ -5657,11 +4881,7 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": false
-    }
+    "reasoning": true
   },
   "zai/glm-5v-turbo": {
     "id": "zai/glm-5v-turbo",
@@ -5686,10 +4906,6 @@
     "headers": null,
     "compat": null,
     "thinking_level_map": null,
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   }
 }

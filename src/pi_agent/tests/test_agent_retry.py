@@ -16,7 +16,6 @@ import pytest
 from pi_ai._types import (
     AssistantMessage,
     Model,
-    ModelCapabilities,
 )
 from pi_ai.providers.faux import FauxCore, faux_assistant_message, faux_provider
 from pi_ai.utils.retry import RetryPolicy
@@ -39,7 +38,6 @@ def _make_model() -> Model:
         provider="test",
         api="openai-completions",
         name="Test",
-        capabilities=ModelCapabilities(tools=True),
     )
 
 

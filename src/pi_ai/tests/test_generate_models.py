@@ -46,9 +46,8 @@ def test_convert_ts_model():
     assert converted["compat"]["maxTokensField"] == "max_completion_tokens"
     assert converted["thinking_level_map"] == {"high": "high"}
     assert converted["headers"] == {"X-Test": "1"}
-    assert converted["capabilities"]["reasoning"] is True
-    assert converted["capabilities"]["images"] is True
-    assert converted["capabilities"]["tools"] is True
+    assert converted["reasoning"] is True
+    assert "image" in converted["input"]
     assert converted["cost"]["tiers"][0]["input_tokens_above"] == 1000
 
 
@@ -86,5 +85,6 @@ def test_write_generated_roundtrip(tmp_path):
     assert model.base_url == "https://api.openai.com/v1"
     assert model.context_window == 128000
     assert model.compat == {"maxTokensField": "max_completion_tokens"}
-    assert model.capabilities.reasoning is True
+    assert model.reasoning is True
+    assert "image" in model.input
     assert "MODEL_PROVIDERS" in init.read_text(encoding="utf-8")

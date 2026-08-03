@@ -23,7 +23,6 @@ from pi_ai._types import (
     AssistantMessage,
     Context,
     Model,
-    ModelCapabilities,
     StreamOptions,
     Tool,
 )
@@ -119,13 +118,13 @@ class TestFauxProviderFactory:
 
     def test_custom_models(self):
         models = [
-            Model(id="faux-fast", provider="faux", api="openai-completions", name="Faux Fast"),
-            Model(id="faux-thinker", provider="faux", api="openai-completions", name="Faux Thinker", capabilities=ModelCapabilities(reasoning=True)),
+    Model(id="faux-fast", provider="faux", api="openai-completions", name="Faux Fast"),
+            Model(id="faux-thinker", provider="faux", api="openai-completions", name="Faux Thinker", reasoning=True),
         ]
         faux = faux_provider(models=models)
         assert [m.id for m in faux.models] == ["faux-fast", "faux-thinker"]
         assert faux.get_model("faux-thinker") is not None
-        assert faux.get_model("faux-thinker").capabilities.reasoning is True  # type: ignore[union-attr]
+        assert faux.get_model("faux-thinker").reasoning is True  # type: ignore[union-attr]
 
 
 # ---------------------------------------------------------------------------
@@ -260,13 +259,13 @@ class TestResponseFactory:
     @pytest.mark.asyncio
     async def test_model_aware_factory(self):
         models = [
-            Model(id="faux-fast", provider="faux", api="openai-completions", name="Faux Fast", capabilities=ModelCapabilities()),
-            Model(id="faux-thinker", provider="faux", api="openai-completions", name="Faux Thinker", capabilities=ModelCapabilities(reasoning=True)),
+            Model(id="faux-fast", provider="faux", api="openai-completions", name="Faux Fast"),
+            Model(id="faux-thinker", provider="faux", api="openai-completions", name="Faux Thinker", reasoning=True),
         ]
         faux = faux_provider(models=models)
 
         async def factory(context, options, state, model):
-            return faux_assistant_message(f"{model.id}:{model.capabilities.reasoning}")
+            return faux_assistant_message(f"{model.id}:{model.reasoning}")
 
         faux.set_responses([factory, factory])
 

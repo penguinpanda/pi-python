@@ -53,7 +53,6 @@ from .._types import (
     ErrorEvent,
     Message,
     Model,
-    ModelCapabilities,
     ModelCost,
     StartEvent,
     StopReason,
@@ -97,7 +96,6 @@ FAUX_MODEL = Model(
     input=["text"],
     output=["text"],
     max_tokens=16384,
-    capabilities=ModelCapabilities(tools=True),
     cost=ModelCost(input=0, output=0, cache_read=0, cache_write=0),
 )
 

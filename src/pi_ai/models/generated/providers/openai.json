@@ -27,11 +27,7 @@
     "thinking_level_map": {
       "off": null
     },
-    "capabilities": {
-      "reasoning": false,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": false
   },
   "gpt-5.6-luna": {
     "id": "gpt-5.6-luna",
@@ -73,11 +69,7 @@
       "xhigh": "xhigh",
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "gpt-5.6-sol": {
     "id": "gpt-5.6-sol",
@@ -119,11 +111,7 @@
       "xhigh": "xhigh",
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   },
   "gpt-5.6-terra": {
     "id": "gpt-5.6-terra",
@@ -165,10 +153,6 @@
       "xhigh": "xhigh",
       "max": "max"
     },
-    "capabilities": {
-      "reasoning": true,
-      "tools": true,
-      "images": true
-    }
+    "reasoning": true
   }
 }
