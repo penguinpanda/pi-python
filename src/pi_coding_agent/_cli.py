@@ -22,7 +22,7 @@ from ._config import get_agent_dir, get_sessions_dir, load_settings
 from .extensions import ExtensionLoader, ExtensionRunner
 from ._print_mode import run_print_mode, run_print_mode_json
 from .file_processor import process_at_files
-from .first_time_setup import run_first_time_setup_sync
+from .first_time_setup import run_first_time_setup
 from .tools import filter_tools_by_names
 from .rpc import run_rpc_mode
 from .modes.interactive import run_tui_mode
@@ -64,7 +64,7 @@ async def _async_main(args: list[str] | None = None) -> int:
 
     # 首次启动向导。
     if parsed.setup:
-        return run_first_time_setup_sync(_auth_store())
+        return await run_first_time_setup(_auth_store())
 
     # 确定工作目录
     cwd = str(Path.cwd())
