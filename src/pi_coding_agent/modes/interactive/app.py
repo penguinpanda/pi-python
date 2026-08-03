@@ -269,6 +269,11 @@ class PiTuiApp(App):
             self._notify(f"Prompt failed: {exc}")
 
     async def _exec_slash(self, text: str) -> None:
+        # Phase 4：/skill:name 与 /templateName 先经会话管道展开。
+        expanded = self._session.expand_prompt(text)
+        if expanded != text:
+            await self._send_prompt(expanded)
+            return
         try:
             await self._slash_registry.execute(text, self._slash_context)
         except Exception as exc:

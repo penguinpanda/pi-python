@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from pi_agent import Agent, AgentEvent, AgentMessage, AgentTool
 from pi_ai import Model, UserMessage
@@ -29,8 +30,11 @@ from pi_ai.utils.retry import (
 )
 
 from ._session_manager import SessionManager
+from .frontmatter import strip_frontmatter
 from .model_resolver import ScopedModel
 from .model_runtime import ModelRuntime
+from .prompt_templates import PromptTemplateLoader
+from .skills import SkillLoader
 from .model_utils import (
     DEFAULT_THINKING_LEVEL,
     THINKING_LEVELS,
@@ -83,6 +87,9 @@ class AgentSession:
         model_runtime: ModelRuntime | None = None,
         # --models 循环列表（scope 模式优先于全量可用列表）。
         scoped_models: list[ScopedModel] | None = None,
+        # Phase 4：技能 / 提示模板加载器（/skill:name 与 /templateName 展开）。
+        skill_loader: SkillLoader | None = None,
+        template_loader: PromptTemplateLoader | None = None,
     ):
         self._agent = agent
         self._session_manager = session_manager
@@ -90,6 +97,8 @@ class AgentSession:
         self._model = model
         self._model_runtime = model_runtime
         self._scoped_models = list(scoped_models or [])
+        self._skill_loader = skill_loader
+        self._template_loader = template_loader
         self._listeners: list[Callable[[AgentEvent], None]] = []
         self._pending_writes: set[asyncio.Task[object]] = set()
         self._turn_retry_policy = turn_retry_policy
@@ -546,11 +555,48 @@ class AgentSession:
             # 新提示随后由 agent.prompt 发送，因此不调用 continue_()。
             if self._last_assistant_message() is not None:
                 await self._check_compaction(skip_aborted_check=False)
-            await self._agent.prompt(text)
+            await self._agent.prompt(self.expand_prompt(text))
             await self._check_compaction()
             await self._retry_failed_turn()
         finally:
             self._abort = None
+
+    def expand_prompt(self, text: str) -> str:
+        """展开 `/skill:name` 与 `/templateName`；未匹配时原样返回。"""
+        if not text.startswith("/"):
+            return text
+        expanded = self._expand_skill_command(text)
+        if expanded != text:
+            return expanded
+        if self._template_loader is not None:
+            expanded = self._template_loader.expand(text)
+            if expanded != text:
+                return expanded
+        return text
+
+    def _expand_skill_command(self, text: str) -> str:
+        """`/skill:name [instructions]` → <skill> XML 块（对齐 TS）。"""
+        if not text.startswith("/skill:"):
+            return text
+        space_index = text.find(" ")
+        skill_name = text[7:] if space_index == -1 else text[7:space_index]
+        args = "" if space_index == -1 else text[space_index + 1 :].strip()
+        if self._skill_loader is None:
+            return text
+        skill = self._skill_loader.get(skill_name)
+        if skill is None:
+            return text
+        try:
+            body = strip_frontmatter(
+                Path(skill.file_path).read_text(encoding="utf-8")
+            ).strip()
+        except OSError:
+            return text
+        block = (
+            f'<skill name="{skill.name}" location="{skill.file_path}">\n'
+            f"References are relative to {skill.base_dir}.\n\n{body}\n</skill>"
+        )
+        return f"{block}\n\n{args}" if args else block
 
     async def _retry_failed_turn(self) -> None:
         """turn 级自动重试：移除错误消息 + continue_() 恢复状态机。

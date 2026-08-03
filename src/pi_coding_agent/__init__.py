@@ -20,10 +20,19 @@ from ._session_manager import SessionManager
 from ._cli import main
 from ._print_mode import run_print_mode
 from ._config import get_agent_dir, get_sessions_dir, load_settings
+from ._config import get_prompts_dir, get_skills_dir
 from .auth_storage import AuthStorage, FileAuthStorageBackend
 from .model_config import ModelConfig, ModelOverride, ProviderOverride
 from .model_registry import ModelRegistry
 from .model_runtime import ModelRuntime
+from .prompt_templates import PromptTemplate, PromptTemplateLoader, parse_command_args
+from .skills import (
+    LoadSkillsResult,
+    ResourceDiagnostic,
+    Skill,
+    SkillLoader,
+    format_skills_for_prompt,
+)
 from .model_utils import (
     DEFAULT_THINKING_LEVEL,
     THINKING_LEVELS,
@@ -60,6 +69,8 @@ __all__ = [
     "get_agent_dir",
     "get_sessions_dir",
     "load_settings",
+    "get_skills_dir",
+    "get_prompts_dir",
     # Model runtime (Phase 1)
     "ModelRuntime",
     "ModelConfig",
@@ -87,6 +98,15 @@ __all__ = [
     "SlashContext",
     "Theme",
     "ThemeLoader",
+    # Skills + Prompt Templates (Phase 4)
+    "Skill",
+    "SkillLoader",
+    "LoadSkillsResult",
+    "ResourceDiagnostic",
+    "format_skills_for_prompt",
+    "PromptTemplate",
+    "PromptTemplateLoader",
+    "parse_command_args",
     # Tools
     "create_all_tools",
     "create_coding_tools",

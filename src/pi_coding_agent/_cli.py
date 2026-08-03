@@ -32,6 +32,8 @@ from .model_resolver import (
     restore_model_from_session,
 )
 from .model_runtime import ModelRuntime
+from .prompt_templates import PromptTemplateLoader
+from .skills import SkillLoader
 
 
 def main(args: list[str] | None = None) -> int:
@@ -94,6 +96,16 @@ async def _async_main(args: list[str] | None = None) -> int:
     if parsed.append_system_prompt:
         system_prompt += "\n" + parsed.append_system_prompt
 
+    # Phase 4：技能 / 提示模板加载器（全局 + 项目）。
+    skill_loader = SkillLoader(
+        global_dir=get_agent_dir() / "skills",
+        project_dir=Path(cwd) / ".pi" / "skills",
+    )
+    template_loader = PromptTemplateLoader(
+        global_dir=get_agent_dir() / "prompts",
+        project_dir=Path(cwd) / ".pi" / "prompts",
+    )
+
     # 创建 Agent
     def build_session(
         sm: SessionManager,
@@ -113,6 +125,8 @@ async def _async_main(args: list[str] | None = None) -> int:
             model=session_model,
             model_runtime=runtime,
             scoped_models=session_scoped,
+            skill_loader=skill_loader,
+            template_loader=template_loader,
         )
 
     session = build_session(session_manager, model, scoped_models)

@@ -26,28 +26,50 @@ class PromptTemplateDiagnostic:
 
 
 def substitute_args(content: str, args: list[str]) -> str:
-    """替换模板参数（逐字对齐 TS substituteArgs）。"""
-    result = content
+    """替换模板参数（逐字对齐 TS substituteArgs）。
 
-    def _positional(match: re.Match[str]) -> str:
-        index = int(match.group(1)) - 1
+    支持：
+    - `$1`、`$2`... 位置参数；
+    - `$@` / `$ARGUMENTS` 全部参数；
+    - `${N:-default}` / `${@:-default}` / `${ARGUMENTS:-default}` 带默认值；
+    - `${@:N}` 从第 N 个开始；`${@:N:L}` 从第 N 个开始取 L 个。
+    """
+    all_args = " ".join(args)
+
+    def _replace(match: re.Match[str]) -> str:
+        default_target = match.group(1)
+        default_value = match.group(2)
+        slice_start = match.group(3)
+        slice_length = match.group(4)
+        simple = match.group(5)
+
+        if default_target is not None:
+            if default_target in ("@", "ARGUMENTS"):
+                value = all_args
+            else:
+                index = int(default_target) - 1
+                value = args[index] if 0 <= index < len(args) else ""
+            return value if value else (default_value or "")
+
+        if slice_start is not None:
+            start = int(slice_start) - 1
+            if start < 0:
+                start = 0
+            if slice_length is not None:
+                return " ".join(args[start : start + int(slice_length)])
+            return " ".join(args[start:])
+
+        if simple in ("ARGUMENTS", "@"):
+            return all_args
+
+        index = int(simple) - 1
         return args[index] if 0 <= index < len(args) else ""
 
-    result = re.sub(r"\$(\d+)", _positional, result)
-
-    def _slice_args(match: re.Match[str]) -> str:
-        start = int(match.group(1)) - 1
-        if start < 0:
-            start = 0
-        if match.group(2) is not None:
-            return " ".join(args[start : start + int(match.group(2))])
-        return " ".join(args[start:])
-
-    result = re.sub(r"\$\{@:(\d+)(?::(\d+))?\}", _slice_args, result)
-    all_args = " ".join(args)
-    result = result.replace("$ARGUMENTS", all_args)
-    result = result.replace("$@", all_args)
-    return result
+    return re.sub(
+        r"\$\{(\d+|ARGUMENTS|@):-([^}]*)\}|\$\{@:(\d+)(?::(\d+))?\}|\$(ARGUMENTS|@|\d+)",
+        _replace,
+        content,
+    )
 
 
 def format_prompt_template_invocation(

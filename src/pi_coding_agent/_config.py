@@ -37,6 +37,16 @@ def get_sessions_dir(agent_dir: Path | None = None) -> Path:
     return (agent_dir or get_agent_dir()) / "sessions"
 
 
+def get_skills_dir(agent_dir: Path | None = None) -> Path:
+    """全局技能目录: ~/.pi/agent/skills/"""
+    return (agent_dir or get_agent_dir()) / "skills"
+
+
+def get_prompts_dir(agent_dir: Path | None = None) -> Path:
+    """全局提示模板目录: ~/.pi/agent/prompts/"""
+    return (agent_dir or get_agent_dir()) / "prompts"
+
+
 def get_settings_path() -> Path:
     """全局设置文件: ~/.pi/agent/settings.json"""
     return get_agent_dir() / "settings.json"
