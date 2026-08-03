@@ -52,58 +52,58 @@ from ..provider import create_provider, Provider
 # ------------------------------------------------------
 DEEPSEEK_MODELS: list[Model] = [
     
-    # DeepSeek Chat
-    #
-    # 通用对话模型。
-    #
-    # 已从官方定价页下架（Deprecated），保留以兼容旧会话。
-    #
-    # 特点：
-    #
-    # • 文本输入
-    # • 文本输出
-    # • 支持 Tool Calling
-    # • 不支持推理(Thinking)
-    Model(
-        id="deepseek-chat",
-        provider="deepseek",
-        api="openai-completions",
-        name="DeepSeek Chat",
-        input=["text"],
-        output=["text"],
-        max_tokens=65536,            # 64K output # 最大输出 Token 数
-        context_window=128000,
-        deprecated=True,
-        # 价格（每百万 Token）。
-        #
-        # 单位由 Provider 自行约定，
-        # 一般与官方 API 定价一致。
-        cost=ModelCost(input=0.27, output=1.10, cache_read=0.07, cache_write=0.27),
-    ),
+    # # DeepSeek Chat
+    # #
+    # # 通用对话模型。
+    # #
+    # # 已从官方定价页下架（Deprecated），保留以兼容旧会话。
+    # #
+    # # 特点：
+    # #
+    # # • 文本输入
+    # # • 文本输出
+    # # • 支持 Tool Calling
+    # # • 不支持推理(Thinking)
+    # Model(
+    #     id="deepseek-chat",
+    #     provider="deepseek",
+    #     api="openai-completions",
+    #     name="DeepSeek Chat",
+    #     input=["text"],
+    #     output=["text"],
+    #     max_tokens=65536,            # 64K output # 最大输出 Token 数
+    #     context_window=128000,
+    #     deprecated=True,
+    #     # 价格（每百万 Token）。
+    #     #
+    #     # 单位由 Provider 自行约定，
+    #     # 一般与官方 API 定价一致。
+    #     cost=ModelCost(input=0.27, output=1.10, cache_read=0.07, cache_write=0.27),
+    # ),
 
-    # DeepSeek Reasoner
-    #
-    # 推理模型。
-    #
-    # 已从官方定价页下架（Deprecated），保留以兼容旧会话。
-    #
-    # 特点：
-    #
-    # • 支持 Thinking
-    # • 不支持 Tool Calling
-    Model(
-        id="deepseek-reasoner",
-        provider="deepseek",
-        api="openai-completions",
-        name="DeepSeek Reasoner",
-        input=["text"],
-        output=["text"],
-        max_tokens=65536,
-        context_window=65536,
-        reasoning=True, # 模型会生成推理过程。
-        deprecated=True,
-        cost=ModelCost(input=0.55, output=2.19, cache_read=0.14, cache_write=0.55),
-    ),
+    # # DeepSeek Reasoner
+    # #
+    # # 推理模型。
+    # #
+    # # 已从官方定价页下架（Deprecated），保留以兼容旧会话。
+    # #
+    # # 特点：
+    # #
+    # # • 支持 Thinking
+    # # • 不支持 Tool Calling
+    # Model(
+    #     id="deepseek-reasoner",
+    #     provider="deepseek",
+    #     api="openai-completions",
+    #     name="DeepSeek Reasoner",
+    #     input=["text"],
+    #     output=["text"],
+    #     max_tokens=65536,
+    #     context_window=65536,
+    #     reasoning=True, # 模型会生成推理过程。
+    #     deprecated=True,
+    #     cost=ModelCost(input=0.55, output=2.19, cache_read=0.14, cache_write=0.55),
+    # ),
 
     # DeepSeek V4 Flash
     #

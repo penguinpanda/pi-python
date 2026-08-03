@@ -93,8 +93,6 @@ class TestDeepSeekProvider:
         provider = deepseek_provider()
         models = provider.get_models()
         assert _model_ids(models) == [
-            "deepseek-chat",
-            "deepseek-reasoner",
             "deepseek-v4-flash",
             "deepseek-v4-pro",
         ]
@@ -102,16 +100,6 @@ class TestDeepSeekProvider:
     def test_model_metadata(self):
         provider = deepseek_provider()
         by_id = {m.id: m for m in provider.get_models()}
-
-        chat = by_id["deepseek-chat"]
-        assert chat.api == "openai-completions"
-        assert chat.reasoning is False
-        assert chat.deprecated is True
-
-        reasoner = by_id["deepseek-reasoner"]
-        assert reasoner.api == "openai-completions"
-        assert reasoner.reasoning is True
-        assert reasoner.deprecated is True
 
         v4_flash = by_id["deepseek-v4-flash"]
         assert v4_flash.api == "openai-completions"
@@ -147,8 +135,6 @@ class TestModelConstants:
 
     def test_deepseek_models_constant(self):
         assert _model_ids(DEEPSEEK_MODELS) == [
-            "deepseek-chat",
-            "deepseek-reasoner",
             "deepseek-v4-flash",
             "deepseek-v4-pro",
         ]

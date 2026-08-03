@@ -32,8 +32,8 @@ class TestModelsRegistry:
     def test_get_models_all(self):
         models = create_default_models()
         all_models = models.get_models()
-        # 4 openai (GPT-5 系列) + 4 deepseek + 7 ollama + 1 faux
-        assert len(all_models) == 16
+        # 4 openai (GPT-5 系列) + 2 deepseek (v4) + 7 ollama + 1 faux
+        assert len(all_models) == 14
 
     def test_get_models_by_provider(self):
         models = create_default_models()
@@ -42,8 +42,7 @@ class TestModelsRegistry:
         assert any(m.id == "gpt-5-chat-latest" for m in openai_models)
 
         deepseek_models = models.get_models("deepseek")
-        assert len(deepseek_models) == 4
-        assert any(m.id == "deepseek-chat" for m in deepseek_models)
+        assert len(deepseek_models) == 2
         assert any(m.id == "deepseek-v4-flash" for m in deepseek_models)
         assert any(m.id == "deepseek-v4-pro" for m in deepseek_models)
 
@@ -56,10 +55,10 @@ class TestModelsRegistry:
         assert gpt5.api == "openai-responses"
         assert gpt5.context_window == 128000
 
-        ds_chat = models.get_model("deepseek", "deepseek-chat")
-        assert ds_chat is not None
-        assert ds_chat.api == "openai-completions"
-        assert ds_chat.deprecated is True
+        ds_pro = models.get_model("deepseek", "deepseek-v4-pro")
+        assert ds_pro is not None
+        assert ds_pro.api == "openai-completions"
+        assert ds_pro.context_window == 1000000
 
     def test_get_model_missing(self):
         models = create_default_models()
@@ -69,7 +68,7 @@ class TestModelsRegistry:
     def test_get_model_by_id_across_providers(self):
         models = create_default_models()
         # 跨 provider 按 ID 全局查找
-        m = models.get_model_by_id("deepseek-chat")
+        m = models.get_model_by_id("deepseek-v4-flash")
         assert m is not None
         assert m.provider == "deepseek"
         assert models.get_model_by_id("qwen3:30b") is not None
@@ -275,7 +274,7 @@ class TestModelsComplete:
         from pi_ai._types import AssistantMessage
 
         models = create_default_models()
-        model = models.get_model("deepseek", "deepseek-chat")
+        model = models.get_model("deepseek", "deepseek-v4-flash")
         assert model is not None
 
         expected_msg = AssistantMessage(

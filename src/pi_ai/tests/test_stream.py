@@ -23,7 +23,7 @@ async def test_deepseek_chat_stream():
     from pi_ai import create_default_models, Context
 
     models = create_default_models()
-    model = models.get_model("deepseek", "deepseek-chat")
+    model = models.get_model("deepseek", "deepseek-v4-flash")
     assert model is not None
 
     context = Context(
@@ -50,7 +50,7 @@ async def test_deepseek_chat_complete():
     from pi_ai import create_default_models, Context
 
     models = create_default_models()
-    model = models.get_model("deepseek", "deepseek-chat")
+    model = models.get_model("deepseek", "deepseek-v4-flash")
     assert model is not None
 
     context = Context(
@@ -100,7 +100,7 @@ async def test_tool_calling():
     from pi_ai import create_default_models, Context, Tool
 
     models = create_default_models()
-    model = models.get_model("deepseek", "deepseek-chat")
+    model = models.get_model("deepseek", "deepseek-v4-flash")
     assert model is not None
 
     tool = Tool(

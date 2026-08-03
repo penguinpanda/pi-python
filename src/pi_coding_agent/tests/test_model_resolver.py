@@ -132,9 +132,9 @@ class TestResolveModelScope:
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-x")
         monkeypatch.setenv("OPENAI_API_KEY", "sk-x")
         runtime = await _make_runtime()
-        scoped = await resolve_model_scope(["deepseek-chat", "faux/faux-1"], runtime)
+        scoped = await resolve_model_scope(["deepseek-v4-flash", "faux/faux-1"], runtime)
         ids = [(entry.model.provider, entry.model.id) for entry in scoped]
-        assert ("deepseek", "deepseek-chat") in ids
+        assert ("deepseek", "deepseek-v4-flash") in ids
         assert ("faux", "faux-1") in ids
 
     async def test_no_match_warns(self, capsys):
@@ -157,7 +157,10 @@ class TestFindInitialModel:
         assert result.model.provider == "openai"
         assert result.model.id == "gpt-5-chat-latest"
 
-    async def test_falls_back_to_first_available(self):
+    async def test_falls_back_to_first_available(self, monkeypatch):
+        # 不受外部 API Key 环境影响：仅保留免认证的 faux。
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
         runtime = await _make_runtime()
         result = await find_initial_model(
             cli_provider=None,
