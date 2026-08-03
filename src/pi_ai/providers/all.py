@@ -4,6 +4,7 @@ from ..providers import (
     faux_provider,
     ollama_provider,
     openai_provider,
+    qwen_provider,
 )
 
 def create_default_models() -> Models:
@@ -11,6 +12,7 @@ def create_default_models() -> Models:
     models = Models()
     models.add_provider(openai_provider())
     models.add_provider(deepseek_provider())
+    models.add_provider(qwen_provider())
     models.add_provider(ollama_provider())
     # Faux 放在最后：不改变默认模型回退顺序（第一个可用模型仍是 openai 的）。
     models.add_provider(faux_provider().provider)

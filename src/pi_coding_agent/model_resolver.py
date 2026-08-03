@@ -35,6 +35,7 @@ VALID_THINKING_LEVELS: list[ModelThinkingLevel] = [
 default_model_per_provider: dict[str, str] = {
     "openai": "gpt-5-chat-latest",
     "deepseek": "deepseek-v4-flash",
+    "qwen": "qwen-plus",
     "faux": "faux-1",
 }
 

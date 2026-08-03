@@ -2,7 +2,7 @@
 
 统一的 LLM API，Provider 抽象模式。
 
-基于 [pi-mono/packages/ai](https://github.com/earendil-works/pi-mono) 的 TypeScript 版本复刻，默认内置 **OpenAI**、**DeepSeek**、**Ollama** 与 **Faux** 四个 provider。
+基于 [pi-mono/packages/ai](https://github.com/earendil-works/pi-mono) 的 TypeScript 版本复刻，默认内置 **OpenAI**、**DeepSeek**、**Qwen**、**Ollama** 与 **Faux** 五个 provider。
 
 ---
 
@@ -18,6 +18,14 @@
 | DeepSeek | `deepseek-chat` | Completions | ✗ | ✓ | ✗ | 65,536 |
 | DeepSeek | `deepseek-reasoner` | Completions | ✓ | ✗ | ✗ | 65,536 |
 | DeepSeek | `deepseek-v4-flash` | Completions | ✓ | ✓ | ✗ | 384,000 |
+| Qwen | `qwen-turbo` | Completions | ✗ | ✓ | ✗ | 8,192 |
+| Qwen | `qwen-plus` | Completions | ✗ | ✓ | ✗ | 8,192 |
+| Qwen | `qwen-max` | Completions | ✗ | ✓ | ✗ | 8,192 |
+| Qwen | `qwen3-235b-a22b` | Completions | ✓ | ✓ | ✗ | 131,072 |
+| Qwen | `qwen3-30b-a3b` | Completions | ✓ | ✓ | ✗ | 32,768 |
+| Qwen | `qwen3-vl-flash` | Completions | ✗ | ✓ | ✓ | 8,192 |
+| Qwen | `qwen-vl-plus` | Completions | ✗ | ✓ | ✓ | 4,096 |
+| Qwen | `qwen-vl-max` | Completions | ✗ | ✓ | ✓ | 8,192 |
 | Ollama | `qwen3:30b` | Completions | ✓ | ✓ | ✗ | 8,192 |
 | Ollama | `qwen3:30b-a3b` | Completions | ✓ | ✓ | ✗ | 8,192 |
 | Ollama | `richardyoung/qwen3-14b-abliterated:Q5_K_M` | Completions | ✓ | ✓ | ✗ | 8,192 |

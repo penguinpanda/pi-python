@@ -29,6 +29,10 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
+      - QWEN_API_KEY=${QWEN_API_KEY:-}
+      # 容器内 Ollama 通过 host.docker.internal 访问宿主机
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
     stdin_open: true
     tty: true
     cap_drop:
@@ -59,8 +63,13 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
+      - QWEN_API_KEY=${QWEN_API_KEY:-}
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
     stdin_open: true
     tty: true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     cap_drop:
       - ALL
     security_opt:

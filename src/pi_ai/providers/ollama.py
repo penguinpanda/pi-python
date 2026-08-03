@@ -43,6 +43,8 @@ Ollama 是本地模型运行时，
            Provider
 """
 
+import os
+
 import httpx
 
 from ..types import Model, ModelCost
@@ -55,6 +57,14 @@ from ..provider import create_provider, Provider, RefreshModelsContext
 # httpx 默认读取 Windows 系统代理（trust_env=True），
 # localhost 可能被本地代理拦截导致 503。
 OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+
+
+def _ollama_base_url() -> str:
+    """Ollama 服务根地址，可用环境变量 OLLAMA_BASE_URL 覆盖。
+
+    容器内运行时可指向宿主机（如 http://host.docker.internal:11434）。
+    """
+    return os.environ.get("OLLAMA_BASE_URL", OLLAMA_BASE_URL)
 
 
 # ------------------------------------------------------
@@ -234,7 +244,7 @@ def _merge_ollama_models(names: list[str]) -> list[Model]:
 
 
 async def discover_ollama_models(
-    base_url: str = OLLAMA_BASE_URL,
+    base_url: str | None = None,
     timeout: float = 1.0,
 ) -> list[Model] | None:
     """运行时发现 Ollama 已安装的模型（GET /api/tags）。
@@ -245,6 +255,7 @@ async def discover_ollama_models(
     失败（未运行 / 超时 / 非 200）返回 None，
     调用方可回退到静态 OLLAMA_MODELS。
     """
+    base_url = base_url or _ollama_base_url()
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.get(f"{base_url}/api/tags")
@@ -323,7 +334,6 @@ def ollama_provider(models: list[Model] | None = None) -> Provider:
         #
         # 使用 127.0.0.1 而非 localhost，
         # 避免 httpx 走 Windows 系统代理。
-        base_url="http://127.0.0.1:11434/v1",
-        # base_url="http://localhost/v1",
+        base_url=f"{_ollama_base_url()}/v1",
         fetch_models=_fetch_ollama_models,
     )

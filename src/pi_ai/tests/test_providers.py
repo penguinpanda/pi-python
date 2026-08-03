@@ -15,9 +15,11 @@ from pi_ai.providers import (
     DEEPSEEK_MODELS,
     OLLAMA_MODELS,
     OPENAI_MODELS,
+    QWEN_MODELS,
     deepseek_provider,
     ollama_provider,
     openai_provider,
+    qwen_provider,
 )
 from pi_ai.providers.ollama import _merge_ollama_models, discover_ollama_models
 
@@ -122,6 +124,56 @@ class TestDeepSeekProvider:
         assert v4_pro.cost.cache_write == 0.0
 
 
+class TestQwenProvider:
+    """qwen_provider() 工厂。"""
+
+    def test_factory_config(self):
+        provider = qwen_provider()
+        assert provider.id == "qwen"
+        assert provider.name == "Qwen"
+        assert provider._api_kind == "completions"
+        assert provider.base_url == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+    def test_auth_uses_env_var(self):
+        provider = qwen_provider()
+        auth = provider.auth
+        assert isinstance(auth, EnvApiKeyAuth)
+        assert auth.display_name == "Qwen (DashScope) API key"
+        assert auth.env_vars == ["DASHSCOPE_API_KEY", "QWEN_API_KEY"]
+
+    def test_model_list(self):
+        provider = qwen_provider()
+        models = provider.get_models()
+        assert _model_ids(models) == [
+            "qwen-turbo",
+            "qwen-plus",
+            "qwen-max",
+            "qwen3-235b-a22b",
+            "qwen3-30b-a3b",
+            "qwen3-vl-flash",
+            "qwen-vl-plus",
+            "qwen-vl-max",
+        ]
+
+    def test_model_metadata(self):
+        provider = qwen_provider()
+        by_id = {m.id: m for m in provider.get_models()}
+
+        plus = by_id["qwen-plus"]
+        assert plus.api == "openai-completions"
+        assert plus.reasoning is False
+        assert plus.context_window == 131072
+
+        thinking = by_id["qwen3-235b-a22b"]
+        assert thinking.reasoning is True
+
+        vision = by_id["qwen-vl-plus"]
+        assert "image" in vision.input
+
+        vl_flash = by_id["qwen3-vl-flash"]
+        assert "image" in vl_flash.input
+
+
 class TestModelConstants:
     """OPENAI_MODELS / DEEPSEEK_MODELS / OLLAMA_MODELS 常量。"""
 
@@ -148,6 +200,18 @@ class TestModelConstants:
             "llama3.2-vision:latest",
             "qwen2.5:7b-instruct-q8_0",
             "deepseek-r1:14b",
+        ]
+
+    def test_qwen_models_constant(self):
+        assert _model_ids(QWEN_MODELS) == [
+            "qwen-turbo",
+            "qwen-plus",
+            "qwen-max",
+            "qwen3-235b-a22b",
+            "qwen3-30b-a3b",
+            "qwen3-vl-flash",
+            "qwen-vl-plus",
+            "qwen-vl-max",
         ]
 
     def test_all_models_have_provider_and_api(self):

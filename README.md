@@ -15,7 +15,7 @@ pi-python/
 
 | 包 | 文档 | 说明 | 打包 |
 |---|------|------|:---:|
-| `pi_ai` | [README](src/pi_ai/README.md) | 统一 LLM API，Provider 抽象模式。支持 OpenAI (Responses API) 和 DeepSeek (Completions API) | ✓ |
+| `pi_ai` | [README](src/pi_ai/README.md) | 统一 LLM API，Provider 抽象模式。支持 OpenAI (Responses API)、DeepSeek 与 Qwen (Completions API) | ✓ |
 | `pi_agent` | [README](src/pi_agent/readme.md) | 最小核心 Agent 循环。事件驱动、工具调用、循环钩子 | ✓ |
 | `pi_coding_agent` | [README](src/pi_coding_agent/README.md) | CLI 编码代理。7 个编码工具、会话持久化、双层配置 | ✓ |
 
@@ -49,10 +49,12 @@ uv sync
 # Windows PowerShell
 $env:OPENAI_API_KEY="sk-..."
 $env:DEEPSEEK_API_KEY="sk-..."
+$env:DASHSCOPE_API_KEY="sk-..."
 
 # Linux/macOS
 export OPENAI_API_KEY="sk-..."
 export DEEPSEEK_API_KEY="sk-..."
+export DASHSCOPE_API_KEY="sk-..."
 ```
 
 ### pi_ai — 直接调用 LLM
@@ -126,6 +128,10 @@ uv run python -m pi_coding_agent --no-session -p "what is 2+2?"
 | DeepSeek | `deepseek-chat` | Completions | ✗ | ✓ | ✗ | 65,536 |
 | DeepSeek | `deepseek-reasoner` | Completions | ✓ | ✗ | ✗ | 65,536 |
 | DeepSeek | `deepseek-v4-flash` | Completions | ✓ | ✓ | ✗ | 384,000 |
+| Qwen | `qwen-plus` | Completions | ✗ | ✓ | ✗ | 8,192 |
+| Qwen | `qwen3-235b-a22b` | Completions | ✓ | ✓ | ✗ | 131,072 |
+| Qwen | `qwen3-vl-flash` | Completions | ✗ | ✓ | ✓ | 8,192 |
+| Qwen | `qwen-vl-plus` | Completions | ✗ | ✓ | ✓ | 4,096 |
 
 ---
 

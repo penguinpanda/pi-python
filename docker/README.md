@@ -121,5 +121,6 @@ Windows Docker Desktop 下做域名级出站限制较麻烦，建议在 Ubuntu �
 
 - 容器内 bash 工具使用 Linux bash，宿主 Windows 上"Git Bash 执行 `find /` 扫描全盘"
   的问题在容器内不存在（只扫容器自身文件系统）。
-- Ollama：默认未接入。需要时取消 compose 中 `extra_hosts` 注释，并让宿主机
-  Ollama 监听 `0.0.0.0`。
+- Ollama：已接入。compose 默认注入 `OLLAMA_BASE_URL=http://host.docker.internal:11434`
+  并启用 `extra_hosts`；前提是宿主机 Ollama 监听 `0.0.0.0`
+  （Windows 设置环境变量 `OLLAMA_HOST=0.0.0.0` 后重启 Ollama）。
