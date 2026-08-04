@@ -41,7 +41,9 @@ class SlashContext:
         new_session: Callable[[], None] | None = None,
         open_model_selector: Callable[[], None] | None = None,
         open_tree_selector: Callable[[], None] | None = None,
+        open_fork_selector: Callable[[], None] | None = None,
         copy_to_clipboard: Callable[[str], None] | None = None,
+        auth_interaction=None,
         rebuild_session=None,
         reload_all: Callable[[], Any] | None = None,
     ) -> None:
@@ -54,7 +56,9 @@ class SlashContext:
         self._new_session = new_session
         self._open_model_selector = open_model_selector
         self._open_tree_selector = open_tree_selector
+        self._open_fork_selector = open_fork_selector
         self._copy_to_clipboard = copy_to_clipboard or (lambda _text: None)
+        self.auth_interaction = auth_interaction
         # 会话重建：fork / clone / resume / import 用（宿主注入）。
         self.rebuild_session = rebuild_session
         # 宿主级重载：/reload 用（TUI 注入）。
@@ -71,13 +75,19 @@ class SlashContext:
         if self._new_session is not None:
             self._new_session()
 
-    def open_model_selector(self) -> None:
+    async def open_model_selector(self) -> None:
         if self._open_model_selector is not None:
-            self._open_model_selector()
+            result = self._open_model_selector()
+            if inspect.isawaitable(result):
+                await result
 
     def open_tree_selector(self) -> None:
         if self._open_tree_selector is not None:
             self._open_tree_selector()
+
+    def open_fork_selector(self) -> None:
+        if self._open_fork_selector is not None:
+            self._open_fork_selector()
 
     def copy_to_clipboard(self, text: str) -> None:
         self._copy_to_clipboard(text)
@@ -179,7 +189,7 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
         from ...model_resolver import resolve_cli_model
 
         if not args.strip():
-            context.open_model_selector()
+            await context.open_model_selector()
             return ""
         resolved = resolve_cli_model(
             cli_provider=None,
@@ -280,6 +290,10 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
     async def _fork(context: SlashContext, args: str) -> str:
         entry_id = args.strip()
         if not entry_id:
+            # TUI 环境：打开树选择器选择要 fork 的消息（对齐 TS /fork 打开选择器）。
+            if context._open_fork_selector is not None:
+                context.open_fork_selector()
+                return ""
             return "Usage: /fork <entryId>"
         manager = context.session.session_manager
         if manager.get_entry(entry_id) is None:
@@ -346,7 +360,12 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
             )
         from ...model_resolver import resolve_model_scope
 
-        patterns = shlex.split(args_str)
+        patterns = [
+            part
+            for piece in shlex.split(args_str)
+            for part in piece.split(",")
+            if part
+        ]
         scoped = await resolve_model_scope(patterns, context.model_runtime)
         context.session.set_scoped_models(scoped)
         return f"Scoped {len(scoped)} models"
@@ -368,7 +387,12 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
         if context.auth_store is None:
             return "Auth store not available"
         try:
-            credential = await flow.login(_TerminalAuthInteraction())
+            interaction = (
+                context.auth_interaction
+                if context.auth_interaction is not None
+                else _TerminalAuthInteraction()
+            )
+            credential = await flow.login(interaction)
         except Exception as exc:
             return f"Login failed: {exc}"
         async def _set(_current):

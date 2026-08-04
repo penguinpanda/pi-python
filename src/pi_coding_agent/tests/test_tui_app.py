@@ -16,7 +16,7 @@ from pi_coding_agent.auth_storage import AuthStorage
 from pi_coding_agent.model_runtime import ModelRuntime
 from pi_coding_agent.modes.interactive.app import PiTuiApp
 from pi_tui.components import MessageEntry, PiEditor
-from pi_tui.selectors import ModelSelector, TreeSelector
+from pi_tui.selectors import ModelSelector, SessionPicker, TreeSelector
 
 
 def _make_runtime(
@@ -345,6 +345,85 @@ async def test_editor_ctrl_d_bubbles_when_empty():
 
 
 @pytest.mark.asyncio
+async def test_editor_ctrl_x_posts_copy_requested():
+    """回归：ctrl+x 应触发复制最后一条消息（对齐 TS），而不是 TextArea 剪切。"""
+    from textual.app import App
+
+    copied: list[bool] = []
+
+    class Host(App):
+        def compose(self):
+            yield PiEditor()
+
+        def on_pi_editor_copy_requested(self, _message) -> None:
+            copied.append(True)
+
+    app = Host()
+    async with app.run_test() as pilot:
+        editor = app.query_one(PiEditor)
+        editor.focus()
+        editor.text = "hello"
+        await pilot.press("ctrl+x")
+        assert copied == [True]
+        assert editor.text == "hello"  # 没有被剪切
+
+
+@pytest.mark.asyncio
+async def test_editor_shift_tab_posts_cycle_thinking_requested():
+    """回归：shift+tab 应触发循环 thinking（对齐 TS），而不是 Textual 焦点切换。"""
+    from textual.app import App
+
+    cycled: list[bool] = []
+
+    class Host(App):
+        def compose(self):
+            yield PiEditor()
+
+        def on_pi_editor_cycle_thinking_requested(self, _message) -> None:
+            cycled.append(True)
+
+    app = Host()
+    async with app.run_test() as pilot:
+        editor = app.query_one(PiEditor)
+        editor.focus()
+        await pilot.press("shift+tab")
+        assert cycled == [True]
+
+
+@pytest.mark.asyncio
+async def test_session_picker_mounts_with_sessions():
+    """回归：SessionPicker 挂载时填充列表不应抛 MountError（Ctrl+R 崩溃）。"""
+    from textual.app import App
+
+    sessions = [
+        {"path": "/home/pi/.pi/agent/sessions/aaa.jsonl", "session_id": "aaa", "modified": 1785839617},
+        {"path": "/home/pi/.pi/agent/sessions/bbb.jsonl", "session_id": "bbb", "modified": 1785839618},
+    ]
+    picked: list[str] = []
+
+    class Host(App):
+        def on_mount(self) -> None:
+            self.push_screen(SessionPicker(sessions), callback=picked.append)
+
+    app = Host()
+    async with app.run_test() as pilot:
+        await _wait_until(
+            lambda: isinstance(app.screen, SessionPicker),
+            pilot=pilot,
+            message="session picker screen",
+        )
+        await _wait_until(
+            lambda: len(app.screen.query_one("#session-list").children) == 2,
+            pilot=pilot,
+            message="session list populated",
+        )
+        # 初始选中第一项；不按方向键直接 Enter 也应选中并关闭选择器
+        assert app.screen.query_one("#session-list").index == 0
+        await pilot.press("enter")
+        assert picked == [sessions[0]["path"]]
+
+
+@pytest.mark.asyncio
 async def test_exit_with_empty_editor(tmp_path):
     runtime = _make_runtime()
     session = _make_session(runtime, tmp_path)
@@ -401,10 +480,119 @@ async def test_slash_tree_in_app(tmp_path):
             pilot=pilot,
             message="tree selector opened",
         )
+        await _wait_until(
+            lambda: len(app.screen.query_one("#tree-list").children) == 1,
+            pilot=pilot,
+            message="tree list populated",
+        )
         list_view = app.screen.query_one("#tree-list")
-        assert len(list_view.children) == 1
         label = list_view.children[0].query_one("Label")
         assert entry_id[:8] in str(label.content)
+
+
+@pytest.mark.asyncio
+async def test_slash_model_no_args_opens_selector(tmp_path):
+    """回归：/model 无参应打开模型选择器（协程未被 await 的 bug）。"""
+    runtime = _make_runtime(model_count=2)
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "/model"))
+        await _wait_until(
+            lambda: isinstance(app.screen, ModelSelector),
+            pilot=pilot,
+            message="model selector opened",
+        )
+
+
+@pytest.mark.asyncio
+async def test_slash_scoped_models_comma_separated(tmp_path):
+    """回归：/scoped-models 支持逗号分隔多个模型。"""
+    runtime = _make_runtime(model_count=3)
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        app.on_pi_editor_submitted(
+            PiEditor.Submitted(app._editor, "/scoped-models faux-1,faux-2")
+        )
+        await _wait_until(
+            lambda: len(session.scoped_models) == 2,
+            pilot=pilot,
+            message="scoped models set",
+        )
+
+
+@pytest.mark.asyncio
+async def test_slash_login_unknown_provider(tmp_path):
+    """回归：TUI /login 不应阻塞事件循环，未知 provider 直接提示。"""
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "/login bogus"))
+        await _wait_until(
+            lambda: any(
+                "Unknown provider" in str(entry.entry_text)
+                for entry in app.query(MessageEntry)
+            ),
+            pilot=pilot,
+            message="unknown provider message",
+        )
+
+
+@pytest.mark.asyncio
+async def test_tui_auth_interaction_notify_routes_to_chat(tmp_path):
+    """回归：TUI OAuth 的 URL/设备码应发到聊天区，而非阻塞的 print/input。"""
+    from pi_coding_agent.modes.interactive.app import _TuiAuthInteraction
+
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        _TuiAuthInteraction(app).notify({
+            "type": "device_code",
+            "verificationUri": "https://example.com/device",
+            "userCode": "ABCD-1234",
+        })
+        await _wait_until(
+            lambda: any(
+                "ABCD-1234" in str(entry.entry_text)
+                for entry in app.query(MessageEntry)
+            ),
+            pilot=pilot,
+            message="device code shown in chat",
+        )
+        assert any(
+            "剪贴板" in str(entry.entry_text) for entry in app.query(MessageEntry)
+        )
+
+
+@pytest.mark.asyncio
+async def test_text_input_dialog_submits():
+    """回归：TextInputDialog 输入后 Enter 返回结果。"""
+    from textual.app import App
+    from textual.widgets import Input
+
+    from pi_tui.selectors import TextInputDialog
+
+    result: list[str] = []
+
+    class Host(App):
+        def on_mount(self) -> None:
+            self.push_screen(TextInputDialog("paste url"), callback=result.append)
+
+    app = Host()
+    async with app.run_test() as pilot:
+        await _wait_until(
+            lambda: isinstance(app.screen, TextInputDialog),
+            pilot=pilot,
+            message="input dialog opened",
+        )
+        inp = app.screen.query_one(Input)
+        inp.focus()
+        await pilot.press("h", "i")
+        await pilot.press("enter")
+    assert result == ["hi"]
 
 
 @pytest.mark.asyncio
@@ -434,6 +622,41 @@ async def test_slash_fork_in_app(tmp_path):
             message="session replaced after fork",
         )
         assert app._session.session_manager.get_leaf_id() == e1
+
+
+@pytest.mark.asyncio
+async def test_slash_fork_no_args_opens_selector(tmp_path):
+    """回归：/fork 无参应打开树选择器，选中后直接 fork（无需手填 entryId）。"""
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    from pi_ai._types import UserMessage
+
+    await session.session_manager.append_message(
+        UserMessage(role="user", content="a")
+    )
+    await session.session_manager.append_message(
+        UserMessage(role="user", content="b")
+    )
+
+    def rebuilder(manager):
+        return _make_session_with_manager(runtime, manager, tmp_path)
+
+    app = PiTuiApp(session, runtime, session_rebuilder=rebuilder)
+    async with app.run_test() as pilot:
+        app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "/fork"))
+        await _wait_until(
+            lambda: isinstance(app.screen, TreeSelector),
+            pilot=pilot,
+            message="fork selector opened",
+        )
+        # 初始选中第一项，Enter 直接 fork
+        await pilot.press("enter")
+        await _wait_until(
+            lambda: app._session is not session,
+            pilot=pilot,
+            message="session replaced after fork",
+        )
+        assert app._slash_context.session is app._session
 
 
 @pytest.mark.asyncio

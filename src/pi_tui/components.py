@@ -184,6 +184,16 @@ class PiEditor(TextArea):
 
         pass
 
+    class CopyRequested(Message):
+        """ctrl+x：复制最后一条 assistant 消息（对齐 TS app.message.copy）。"""
+
+        pass
+
+    class CycleThinkingRequested(Message):
+        """shift+tab：循环 thinking 级别（对齐 TS app.thinking.cycle）。"""
+
+        pass
+
     def action_submit(self) -> None:
         text = self.text.strip()
         if not text:
@@ -213,6 +223,18 @@ class PiEditor(TextArea):
                 return
             # 非空：保留 TextArea 默认行为（删除右侧字符）。
             await super()._on_key(event)
+            return
+        if event.key == "ctrl+x":
+            # TextArea 默认把 ctrl+x 当剪切；对齐 TS：ctrl+x 复制最后一条消息。
+            self.post_message(self.CopyRequested())
+            event.stop()
+            event.prevent_default()
+            return
+        if event.key == "shift+tab":
+            # Textual 默认用 shift+tab 切换焦点；对齐 TS：循环 thinking 级别。
+            self.post_message(self.CycleThinkingRequested())
+            event.stop()
+            event.prevent_default()
             return
         await super()._on_key(event)
 

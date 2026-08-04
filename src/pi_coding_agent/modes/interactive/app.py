@@ -26,13 +26,68 @@ from pi_tui.components import (
     PiStatusBar,
 )
 from pi_tui.keybindings import KeybindingsManager
-from pi_tui.selectors import ModelSelector, SessionPicker, TreeSelector
+from pi_tui.selectors import (
+    ModelSelector,
+    SessionPicker,
+    TextInputDialog,
+    TreeSelector,
+)
 from .slash_commands import (
     SlashContext,
     SlashCommandRegistry,
     register_builtin_commands,
 )
 from pi_tui.theme import ThemeLoader
+
+
+class _TuiAuthInteraction:
+    """TUI 内 OAuth 交互：URL/设备码发到聊天区，需要粘贴时弹输入框。
+
+    对齐 TS 的 showLoginDialog：不阻塞 Textual 事件循环（不能用 input()）。
+    """
+
+    def __init__(self, app: "PiTuiApp") -> None:
+        self.app = app
+        self.signal = None
+        self._last_auth_url: str | None = None
+
+    def notify(self, event: dict) -> None:
+        if event.get("type") == "auth_url":
+            self._last_auth_url = event["url"]
+            # 自动复制完整 URL，避免终端折行截断导致链接不完整。
+            self.app.copy_to_clipboard(event["url"])
+            self.app._slash_notify(
+                "请在浏览器完成授权（URL 已复制到剪贴板），"
+                "然后把最终重定向 URL 粘贴回来：\n" + event["url"]
+            )
+        elif event.get("type") == "device_code":
+            self.app.copy_to_clipboard(event.get("userCode", ""))
+            self.app._slash_notify(
+                f"请打开 {event['verificationUri']} 并输入代码："
+                f"{event['userCode']}（代码已复制到剪贴板）"
+            )
+        else:
+            message = event.get("message")
+            if message:
+                self.app._slash_notify(message)
+
+    async def prompt(self, prompt) -> str | None:
+        if prompt.get("type") == "select":
+            return None
+        message = prompt.get("message", "")
+        if prompt.get("type") == "manual_code" and self._last_auth_url:
+            # 对话框里同时显示授权 URL，方便复制（用户手动打开浏览器）。
+            message = (
+                "使用步骤：\n"
+                "1. 授权 URL 已复制到剪贴板，直接粘贴到浏览器地址栏打开并完成授权\n"
+                "2. 完成后浏览器会跳转到本地回调地址（页面打不开属正常）\n"
+                "3. 把地址栏里的完整 URL 复制到下方输入框，按 Enter 提交\n\n"
+                f"授权 URL：\n{self._last_auth_url}\n\n{message}"
+            )
+        return await self.app._await_text_input(
+            message,
+            placeholder=prompt.get("placeholder", ""),
+        )
 
 
 _CSS_TEMPLATE = """
@@ -90,7 +145,7 @@ MessageEntry {
     margin: 0 2 1 2;
 }
 
-ModelSelector, SessionPicker {
+ModelSelector, SessionPicker, TreeSelector, TextInputDialog {
     background: __PI_BGPANEL__;
     color: __PI_TEXT__;
     border: round __PI_BORDERACTIVE__;
@@ -174,7 +229,9 @@ class PiTuiApp(App):
             new_session=self._handle_new_session,
             open_model_selector=self._open_model_selector,
             open_tree_selector=self._open_tree_selector,
-            copy_to_clipboard=_copy_text,
+            open_fork_selector=self._open_fork_selector,
+            copy_to_clipboard=self._copy_to_clipboard,
+            auth_interaction=_TuiAuthInteraction(self),
             reload_all=self._reload_all,
         )
         self._slash_context.rebuild_session = self._apply_rebuilt_session
@@ -266,6 +323,13 @@ class PiTuiApp(App):
     def _notify(self, message: str) -> None:
         self._set_status(message)
 
+    def _copy_to_clipboard(self, text: str) -> None:
+        """复制到剪贴板：优先 OSC 52（终端处理，可穿过 docker exec），失败回退系统工具。"""
+        try:
+            self.copy_to_clipboard(text)
+        except Exception:
+            _copy_text(text)
+
     def _slash_notify(self, message: str) -> None:
         """slash 命令输出：状态栏 + 聊天区。
 
@@ -351,6 +415,42 @@ class PiTuiApp(App):
         """编辑器为空时 ctrl+d → 退出。"""
         self.action_exit()
 
+    def on_pi_editor_copy_requested(self, _message) -> None:
+        """ctrl+x → 复制最后一条 assistant 消息（对齐 TS）。"""
+        self.action_copy_last_message()
+
+    def on_pi_editor_cycle_thinking_requested(self, _message) -> None:
+        """shift+tab → 循环 thinking 级别（对齐 TS）。"""
+        self.action_cycle_thinking()
+
+    def action_external_editor(self) -> None:
+        """ctrl+g：用外部编辑器编辑当前输入（对齐 TS app.editor.external）。"""
+        import os
+        import shlex
+        import subprocess
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".txt", delete=False, encoding="utf-8"
+        ) as handle:
+            handle.write(self._editor.text)
+            path = handle.name
+        editor = (
+            os.environ.get("EDITOR")
+            or os.environ.get("VISUAL")
+            or ("notepad" if os.name == "nt" else "vi")
+        )
+        try:
+            subprocess.run([*shlex.split(editor), path], check=False)
+            with open(path, "r", encoding="utf-8") as handle:
+                updated = handle.read()
+            self._editor.text = updated
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
     def action_cycle_thinking(self) -> None:
         level = self._session.cycle_thinking_level()
         if level is None:
@@ -396,6 +496,16 @@ class PiTuiApp(App):
             self._notify(f"Set model failed: {exc}")
         self._update_footer()
 
+    async def _await_text_input(self, message: str, placeholder: str = "") -> str | None:
+        """弹输入框并等待结果（OAuth 登录等 TUI 交互用，不阻塞事件循环）。"""
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future = loop.create_future()
+        self.push_screen(
+            TextInputDialog(message, placeholder),
+            callback=lambda value: future.set_result(value),
+        )
+        return await future
+
     def _open_tree_selector(self) -> None:
         manager = self._session.session_manager
         tree = manager.get_tree()
@@ -418,6 +528,35 @@ class PiTuiApp(App):
             self._notify(f"Navigated to {entry_id[:8]}")
         except Exception as exc:
             self._notify(f"Navigate failed: {exc}")
+
+    def _open_fork_selector(self) -> None:
+        manager = self._session.session_manager
+        tree = manager.get_tree()
+        if not tree:
+            self._notify("(empty session)")
+            return
+        self.push_screen(
+            TreeSelector(tree, leaf_id=manager.get_leaf_id()),
+            callback=self._on_fork_selected,
+        )
+
+    def _on_fork_selected(self, entry_id) -> None:
+        if entry_id is None:
+            return
+        self._run_task(self._fork_from_entry(entry_id))
+
+    async def _fork_from_entry(self, entry_id: str) -> None:
+        manager = self._session.session_manager
+        if manager.get_entry(entry_id) is None:
+            self._notify(f"Entry not found: {entry_id}")
+            return
+        try:
+            forked = manager.fork(entry_id)
+            new_session = await self._apply_rebuilt_session(forked)
+            self._slash_context.session = new_session
+            self._notify(f"Forked at {entry_id[:8]} (session {new_session.session_id})")
+        except Exception as exc:
+            self._notify(f"Fork failed: {exc}")
 
     def action_toggle_tools(self) -> None:
         self._show_tools = not self._show_tools
@@ -626,7 +765,7 @@ class PiTuiApp(App):
         if not text:
             self._notify("No assistant message to copy")
             return
-        _copy_text(text)
+        self._copy_to_clipboard(text)
         self._notify("Copied last assistant message")
 
     # ------------------------------------------------------------------

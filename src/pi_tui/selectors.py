@@ -107,6 +107,9 @@ class ModelSelector(ModalScreen):
             # 不设置 id：模型 id 可能含冒号等 Textual 非法字符
             # （如 ollama/qwen3:30b），选择逻辑只依赖列表索引。
             list_view.append(ListItem(Label(f"{marker} {_model_label(model)}")))
+        # 初始选中第一项，否则不按方向键直接 Enter 不会有 Selected 事件。
+        if len(list_view.children) > 0 and list_view.index is None:
+            list_view.index = 0
 
     def on_input_changed(self, event: Input.Changed) -> None:
         self._query = event.value
@@ -141,25 +144,40 @@ class SessionPicker(ModalScreen):
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Label("Resume session", classes="selector-title")
-            list_view = ListView(id="session-list")
-            for session in self._sessions:
-                from datetime import datetime
+            yield ListView(id="session-list")
 
-                when = datetime.fromtimestamp(session["modified"]).strftime(
-                    "%Y-%m-%d %H:%M"
-                )
-                list_view.append(
-                    ListItem(Label(f"{session['session_id']}  [dim]{when}[/dim]"))
-                )
-            yield list_view
+    def on_mount(self) -> None:
+        """挂载后再填充列表（compose 阶段 ListView 尚未挂载，append 会抛 MountError）。"""
+        from datetime import datetime
+
+        list_view = self.query_one("#session-list", ListView)
+        for session in self._sessions:
+            when = datetime.fromtimestamp(session["modified"]).strftime(
+                "%Y-%m-%d %H:%M"
+            )
+            list_view.append(
+                ListItem(Label(f"{session['session_id']}  [dim]{when}[/dim]"))
+            )
+        if len(list_view.children) > 0:
+            list_view.index = 0
 
     def action_select(self) -> None:
+        """兜底选择（ListView 未消费 Enter 时）。"""
         list_view = self.query_one("#session-list", ListView)
-        if list_view.index is None:
-            return
         index = list_view.index
+        if index is None:
+            index = 0
         if 0 <= index < len(self._sessions):
             self.dismiss(self._sessions[index]["path"])
+
+    def on_list_view_selected(self, event: Any) -> None:
+        """ListView 的 Enter 选择（Textual 会先于屏幕绑定消费 enter）。"""
+        list_view = self.query_one("#session-list", ListView)
+        index = list_view.index
+        if index is not None and 0 <= index < len(self._sessions):
+            self.dismiss(self._sessions[index]["path"])
+        else:
+            self.dismiss(None)
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -209,6 +227,8 @@ class TreeSelector(ModalScreen):
             indent = "  " * depth
             prefix = f"{indent}{connector} " if connector else indent
             list_view.append(ListItem(Label(f"{prefix}{label}")))
+        if len(list_view.children) > 0:
+            list_view.index = 0
 
     def on_list_view_selected(self, event: Any) -> None:
         list_view = self.query_one("#tree-list", ListView)
@@ -222,4 +242,31 @@ class TreeSelector(ModalScreen):
         self.dismiss(None)
 
 
-__all__ = ["ModelSelector", "SessionPicker", "TreeSelector"]
+class TextInputDialog(ModalScreen):
+    """通用文本输入弹层（TUI 内 OAuth 登录等需要用户输入的场景）。"""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(self, message: str, placeholder: str = "") -> None:
+        super().__init__()
+        self._message = message
+        self._placeholder = placeholder
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label(self._message, classes="selector-title")
+            yield Input(placeholder=self._placeholder, classes="selector-input")
+
+    def on_mount(self) -> None:
+        self.query_one(Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self.dismiss(event.value)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+__all__ = ["ModelSelector", "SessionPicker", "TreeSelector", "TextInputDialog"]

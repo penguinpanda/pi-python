@@ -6,6 +6,7 @@ settings.json 的 `keybindings` 节覆盖（单键字符串 / 多键数组 / Non
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -32,7 +33,13 @@ DEFAULT_APP_KEYBINDINGS: dict[str, Keybinding] = {
     "app.thinking.toggle": Keybinding("ctrl+t", "app.thinking.toggle", "toggle_thinking", "Toggle thinking blocks"),
     "app.message.followUp": Keybinding("alt+enter", "app.message.followUp", "follow_up", "Queue follow-up message"),
     "app.message.dequeue": Keybinding("alt+up", "app.message.dequeue", "dequeue", "Restore queued messages"),
-    "app.clipboard.pasteImage": Keybinding("alt+v", "app.clipboard.pasteImage", "paste_image", "Paste image from clipboard"),
+    # 对齐 TS：Windows 用 alt+v（避免与终端文本粘贴 ctrl+v 冲突），其他平台用 ctrl+v。
+    "app.clipboard.pasteImage": Keybinding(
+        "alt+v" if os.name == "nt" else "ctrl+v",
+        "app.clipboard.pasteImage",
+        "paste_image",
+        "Paste image from clipboard",
+    ),
     "app.session.new": Keybinding("ctrl+n", "app.session.new", "new_session", "Start a new session"),
     "app.session.resume": Keybinding("ctrl+r", "app.session.resume", "resume_session", "Resume a session"),
     "app.message.copy": Keybinding("ctrl+x", "app.message.copy", "copy_last_message", "Copy last assistant message"),

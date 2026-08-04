@@ -23,8 +23,10 @@ TOKEN_URL = "https://openrouter.ai/api/v1/auth/keys"
 CALLBACK_URL = "http://127.0.0.1:1457/oauth/callback"
 
 
-def _parse_authorization_input(value: str) -> str | None:
+def _parse_authorization_input(value: str | None) -> str | None:
     """从用户输入提取授权码（URL / code= 串 / 原始码）。"""
+    if not isinstance(value, str):
+        return None
     trimmed = value.strip()
     if not trimmed:
         return None

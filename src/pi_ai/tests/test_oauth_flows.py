@@ -168,6 +168,7 @@ def test_openrouter_parse_authorization_input():
     assert openrouter._parse_authorization_input("code=xyz&state=s") == "xyz"
     assert openrouter._parse_authorization_input("raw-code") == "raw-code"
     assert openrouter._parse_authorization_input("") is None
+    assert openrouter._parse_authorization_input(None) is None
 
 
 def test_builtin_oauth_providers():
