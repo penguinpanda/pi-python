@@ -14,6 +14,7 @@ AgentSession — coding-agent 中枢编排类
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -52,6 +53,7 @@ from .compaction import (
     prepare_compaction,
     should_compact,
 )
+from .cache_stats import compute_cache_waste
 from .tools import create_all_tools
 
 
@@ -92,6 +94,8 @@ class AgentSession:
         template_loader: PromptTemplateLoader | None = None,
         # Phase 5：扩展运行器（事件分发 / input 变换 / 注册项）。
         extension_runner=None,
+        # 系统提示构建器（/reload 重建用）。
+        system_prompt_builder: Callable[[], str] | None = None,
     ):
         self._agent = agent
         self._session_manager = session_manager
@@ -102,6 +106,7 @@ class AgentSession:
         self._skill_loader = skill_loader
         self._template_loader = template_loader
         self._extension_runner = extension_runner
+        self._system_prompt_builder = system_prompt_builder
         if extension_runner is not None:
             extension_runner.bind_session(self)
         self._listeners: list[Callable[[AgentEvent], None]] = []
@@ -114,6 +119,8 @@ class AgentSession:
         self._is_compacting = False
         # turn 级重试退避期间的中止信号（None 表示空闲）。
         self._abort: asyncio.Event | None = None
+        # turn 级耗时记录（get_session_stats 用）。
+        self._turn_timings: list[dict] = []
 
         # 注入编码工具
         tools = tools_override if tools_override is not None else create_all_tools(cwd)
@@ -193,6 +200,11 @@ class AgentSession:
         return int(self._agent.pending_message_count)
 
     @property
+    def turn_timings(self) -> list[dict]:
+        """每轮耗时记录（[{startedAtMs, durationMs}]）。"""
+        return list(self._turn_timings)
+
+    @property
     def steering_mode(self):
         return self._agent.steering_mode
 
@@ -258,6 +270,14 @@ class AgentSession:
         if runner is not None:
             runner.bind_session(self)
 
+    def rebuild_system_prompt(self) -> str | None:
+        """重建系统提示（上下文文件 / 技能变化后调用，/reload 用）。"""
+        if self._system_prompt_builder is None:
+            return None
+        prompt = self._system_prompt_builder()
+        self._agent.state.system_prompt = prompt
+        return prompt
+
     def steer(self, text: str) -> None:
         """入队一条 steering 消息（Agent 运行中注入）。"""
         self._agent.steer(UserMessage(role="user", content=text))
@@ -305,6 +325,12 @@ class AgentSession:
                     cost += (usage.get("cost") or {}).get("total", 0) or 0
             elif role == "toolResult":
                 tool_results += 1
+
+        turn_count = len(self._turn_timings)
+        total_turn_ms = sum(
+            timing.get("durationMs", 0) for timing in self._turn_timings
+        )
+        cache_stats = compute_cache_waste(messages, self._model_runtime)
         return {
             "sessionFile": self.session_file,
             "sessionId": self.session_id,
@@ -316,6 +342,13 @@ class AgentSession:
             "tokens": tokens,
             "cost": cost,
             "contextUsage": None,
+            "turnTimings": {
+                "turnCount": turn_count,
+                "totalMs": int(total_turn_ms),
+                "averageMs": int(total_turn_ms / turn_count) if turn_count else 0,
+                "lastMs": int(self._turn_timings[-1]["durationMs"]) if turn_count else 0,
+            },
+            "cacheStats": cache_stats,
         }
 
     async def compact(
@@ -637,6 +670,8 @@ class AgentSession:
         上下文超阈值（should_compact）时压缩（不重试）。
         """
         self._abort = asyncio.Event()
+        started = time.perf_counter()
+        started_at_ms = int(time.time() * 1000)
         try:
             self._overflow_recovery_attempted = False
             # 发送前检查：上一轮 aborted/error 响应触发压缩（不重试）。
@@ -653,6 +688,10 @@ class AgentSession:
             await self._retry_failed_turn()
         finally:
             self._abort = None
+            self._turn_timings.append({
+                "startedAtMs": started_at_ms,
+                "durationMs": (time.perf_counter() - started) * 1000,
+            })
 
     def expand_prompt(self, text: str) -> str:
         """展开 `/skill:name` 与 `/templateName`；未匹配时原样返回。"""

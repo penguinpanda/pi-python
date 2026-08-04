@@ -249,15 +249,20 @@ class TextInputDialog(ModalScreen):
         Binding("escape", "cancel", "Cancel"),
     ]
 
-    def __init__(self, message: str, placeholder: str = "") -> None:
+    def __init__(self, message: str, placeholder: str = "", value: str = "") -> None:
         super().__init__()
         self._message = message
         self._placeholder = placeholder
+        self._value = value
 
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Label(self._message, classes="selector-title")
-            yield Input(placeholder=self._placeholder, classes="selector-input")
+            yield Input(
+                placeholder=self._placeholder,
+                value=self._value,
+                classes="selector-input",
+            )
 
     def on_mount(self) -> None:
         self.query_one(Input).focus()
@@ -269,4 +274,250 @@ class TextInputDialog(ModalScreen):
         self.dismiss(None)
 
 
-__all__ = ["ModelSelector", "SessionPicker", "TreeSelector", "TextInputDialog"]
+class ChoiceSelector(ModalScreen):
+    """通用选项列表弹层（settings 菜单子项等）。"""
+
+    BINDINGS = [
+        Binding("enter", "select", "Select"),
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(
+        self,
+        title: str,
+        options: list[str],
+        current: str | None = None,
+    ) -> None:
+        super().__init__()
+        self._title = title
+        self._options = list(options)
+        self._current = current
+        self._selected = 0
+        if current is not None and current in self._options:
+            self._selected = self._options.index(current)
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label(self._title, classes="selector-title")
+            yield ListView(id="choice-list")
+
+    def on_mount(self) -> None:
+        list_view = self.query_one("#choice-list", ListView)
+        for index, option in enumerate(self._options):
+            marker = ">" if index == self._selected else " "
+            check = " ✓" if option == self._current else ""
+            list_view.append(ListItem(Label(f"{marker} {option}{check}")))
+        if len(list_view.children) > 0:
+            list_view.index = self._selected
+        list_view.focus()
+
+    def on_list_view_selected(self, event: Any) -> None:
+        self.action_select()
+
+    def action_select(self) -> None:
+        list_view = self.query_one("#choice-list", ListView)
+        index = list_view.index
+        if index is not None and 0 <= index < len(self._options):
+            self.dismiss(self._options[index])
+        else:
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class SettingsSelector(ModalScreen):
+    """设置菜单（对齐 TS SettingsSelectorComponent 的 Python 子集）。
+
+    items: [{"key", "label", "type": "bool"|"choice"|"string", "choices"?}]
+    current: 当前合并后的 settings 字典。
+    on_change(key, value)：持久化并应用。
+    """
+
+    BINDINGS = [
+        Binding("enter", "select", "Select"),
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(
+        self,
+        items: list[dict[str, Any]],
+        current: dict[str, Any],
+        on_change,
+    ) -> None:
+        super().__init__()
+        self._items = list(items)
+        self._current = dict(current)
+        self._on_change = on_change
+
+    def _value(self, key: str) -> Any:
+        return self._current.get(key)
+
+    def _label(self, item: dict[str, Any]) -> str:
+        key = item["key"]
+        value = self._value(key)
+        if item.get("type") == "bool":
+            display = "true" if value else "false"
+        else:
+            display = str(value) if value is not None else "(unset)"
+        return f"{item['label']}: {display}"
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label("Settings", classes="selector-title")
+            yield ListView(id="settings-list")
+
+    def on_mount(self) -> None:
+        self._rebuild()
+        self.query_one("#settings-list").focus()
+
+    def _rebuild(self) -> None:
+        list_view = self.query_one("#settings-list", ListView)
+        list_view.clear()
+        for item in self._items:
+            list_view.append(ListItem(Label(self._label(item))))
+        if len(list_view.children) > 0 and list_view.index is None:
+            list_view.index = 0
+
+    def on_list_view_selected(self, event: Any) -> None:
+        self._select_item()
+
+    def action_select(self) -> None:
+        self._select_item()
+
+    def _select_item(self) -> None:
+        list_view = self.query_one("#settings-list", ListView)
+        index = list_view.index
+        if index is None or not (0 <= index < len(self._items)):
+            self.dismiss(None)
+            return
+        item = self._items[index]
+        item_type = item.get("type", "string")
+        key = item["key"]
+        if item_type == "bool":
+            new_value = not bool(self._value(key))
+            self._on_change(key, new_value)
+            self._current[key] = new_value
+            self._rebuild()
+            return
+        if item_type == "choice":
+            current = self._value(key)
+            current_text = str(current) if current is not None else None
+            self.push_screen(
+                ChoiceSelector(
+                    item.get("label", key),
+                    list(item.get("choices", [])),
+                    current_text,
+                ),
+                callback=lambda value: self._apply_value(key, value),
+            )
+            return
+        current = self._value(key)
+        self.push_screen(
+            TextInputDialog(
+                f"{item.get('label', key)}:",
+                value=str(current) if current is not None else "",
+            ),
+            callback=lambda value: self._apply_value(key, value),
+        )
+
+    def _apply_value(self, key: str, value) -> None:
+        if value is None or value == "":
+            return
+        self._on_change(key, value)
+        self._current[key] = value
+        self._rebuild()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class TrustSelector(ModalScreen):
+    """项目信任选择器（对齐 TS TrustSelectorComponent）。"""
+
+    BINDINGS = [
+        Binding("enter", "select", "Select"),
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(
+        self,
+        cwd: str,
+        saved_decision: dict | None = None,
+        project_trusted: bool = False,
+    ) -> None:
+        super().__init__()
+        from pi_coding_agent.trust import get_project_trust_options
+
+        self._cwd = cwd
+        self._saved_decision = saved_decision
+        self._project_trusted = project_trusted
+        self._options = get_project_trust_options(cwd)
+        # 预选当前已保存的选项。
+        self._selected = 0
+        if saved_decision is not None:
+            for index, option in enumerate(self._options):
+                if (
+                    option.get("savedPath") == saved_decision.get("path")
+                    and option.get("trusted") == saved_decision.get("decision")
+                ):
+                    self._selected = index
+                    break
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label("Project trust", classes="selector-title")
+            yield Label(self._cwd, classes="selector-title")
+            status = self._format_decision()
+            yield Label(
+                f"Saved decision: {status}  |  Current session: "
+                f"{'trusted' if self._project_trusted else 'untrusted'}",
+                classes="selector-title",
+            )
+            yield ListView(id="trust-list")
+
+    def _format_decision(self) -> str:
+        entry = self._saved_decision
+        if entry is None:
+            return "none"
+        label = "trusted" if entry.get("decision") else "untrusted"
+        if entry.get("path") != self._cwd:
+            return f"{label} (inherited from {entry.get('path')})"
+        return f"{label} ({entry.get('path')})"
+
+    def on_mount(self) -> None:
+        list_view = self.query_one("#trust-list", ListView)
+        for index, option in enumerate(self._options):
+            marker = ">" if index == self._selected else " "
+            check = " ✓" if option.get("savedPath") == self._saved_decision and (
+                option.get("trusted") == self._saved_decision.get("decision")
+            ) else ""
+            list_view.append(ListItem(Label(f"{marker} {option['label']}{check}")))
+        if len(list_view.children) > 0:
+            list_view.index = self._selected
+        list_view.focus()
+
+    def on_list_view_selected(self, event: Any) -> None:
+        self.action_select()
+
+    def action_select(self) -> None:
+        list_view = self.query_one("#trust-list", ListView)
+        index = list_view.index
+        if index is not None and 0 <= index < len(self._options):
+            self.dismiss(self._options[index])
+        else:
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+__all__ = [
+    "ModelSelector",
+    "SessionPicker",
+    "TreeSelector",
+    "TextInputDialog",
+    "ChoiceSelector",
+    "SettingsSelector",
+    "TrustSelector",
+]

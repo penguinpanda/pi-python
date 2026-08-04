@@ -10,6 +10,15 @@ from filelock import FileLock
 from ._config import get_agent_dir
 
 _RESOURCE_DIRS = ("skills", "prompts", "extensions")
+_TRUST_REQUIRING_ENTRIES = (
+    "settings.json",
+    "extensions",
+    "skills",
+    "prompts",
+    "themes",
+    "SYSTEM.md",
+    "APPEND_SYSTEM.md",
+)
 
 
 class TrustManager:
@@ -37,18 +46,34 @@ class TrustManager:
 
     def is_trusted(self, cwd: str) -> bool | None:
         """祖先目录继承：最近祖先的显式决定优先；无记录返回 None。"""
+        entry = self.get_trust_entry(cwd)
+        return entry["decision"] if entry is not None else None
+
+    def get_trust_entry(self, cwd: str) -> dict | None:
+        """返回最近祖先的显式决定 {path, decision}；无记录返回 None。"""
         current = Path(self._canonical(cwd))
         while True:
             value = self._data.get(str(current))
             if value is not None:
-                return value
+                return {"path": str(current), "decision": value}
             if current.parent == current:
                 return None
             current = current.parent
 
     def set_trust(self, cwd: str, trusted: bool) -> None:
         """写入信任决定（原子 + 文件锁）。"""
-        canonical = self._canonical(cwd)
+        self.set_many([{"path": cwd, "decision": trusted}])
+
+    def clear_trust(self, cwd: str) -> None:
+        """删除指定目录的信任决定（继承回退到祖先）。"""
+        self.set_many([{"path": cwd, "decision": None}])
+
+    def set_many(self, updates: list[dict]) -> None:
+        """批量写入信任决定（原子 + 文件锁）。
+
+        updates 元素: {"path": str, "decision": bool | None}；decision 为
+        None 时删除该路径的记录（对齐 TS setMany）。
+        """
         self._path.parent.mkdir(parents=True, exist_ok=True)
         lock = FileLock(str(self._path) + ".lock", timeout=30)
         lock.acquire()
@@ -57,18 +82,20 @@ class TrustManager:
                 raw = json.loads(self._path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 raw = {}
-            raw[canonical] = trusted
+            for update in updates:
+                path = self._canonical(update["path"])
+                decision = update.get("decision")
+                if decision is None:
+                    raw.pop(path, None)
+                else:
+                    raw[path] = bool(decision)
             tmp = self._path.with_suffix(self._path.suffix + ".tmp")
             tmp.write_text(
                 json.dumps(raw, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
             tmp.replace(self._path)
-            self._data = {
-                str(key): value
-                for key, value in raw.items()
-                if isinstance(value, bool) or value is None
-            }
+            self.reload()
         finally:
             lock.release()
 
@@ -79,6 +106,85 @@ def project_has_local_resources(cwd: str) -> bool:
     if not pi_dir.is_dir():
         return False
     return any((pi_dir / name).is_dir() for name in _RESOURCE_DIRS)
+
+
+def has_trust_requiring_project_resources(cwd: str) -> bool:
+    """项目是否存在需要信任门控的资源（对齐 TS hasTrustRequiringProjectResources）。
+
+    覆盖 `.pi` 下的 settings/extensions/skills/prompts/themes/SYSTEM.md/
+    APPEND_SYSTEM.md，以及 cwd 祖先链上的 `.agents/skills`
+    （用户全局 `~/.agents/skills` 视为受信用户资源，排除）。
+    """
+    user_home = Path.home().resolve()
+    user_agents_skills = user_home / ".agents" / "skills"
+    current = Path(cwd).expanduser().resolve()
+
+    pi_dir = current / ".pi"
+    if any((pi_dir / name).exists() for name in _TRUST_REQUIRING_ENTRIES):
+        return True
+
+    while True:
+        agents_skills = current / ".agents" / "skills"
+        if agents_skills != user_agents_skills and agents_skills.exists():
+            return True
+        if current == user_home or current.parent == current:
+            return False
+        current = current.parent
+
+
+def get_project_trust_options(
+    cwd: str, *, include_session_only: bool = False
+) -> list[dict]:
+    """项目信任选项（对齐 TS getProjectTrustOptions）。"""
+    canonical = str(Path(cwd).expanduser().resolve())
+    parent = str(Path(canonical).parent)
+    options: list[dict] = [
+        {
+            "label": "Trust",
+            "trusted": True,
+            "updates": [{"path": canonical, "decision": True}],
+            "savedPath": canonical,
+        },
+    ]
+    if parent != canonical:
+        options.append(
+            {
+                "label": f"Trust parent folder ({parent})",
+                "trusted": True,
+                "updates": [
+                    {"path": parent, "decision": True},
+                    {"path": canonical, "decision": None},
+                ],
+                "savedPath": parent,
+            }
+        )
+    if include_session_only:
+        options.append(
+            {
+                "label": "Trust (this session only)",
+                "trusted": True,
+                "updates": [],
+                "savedPath": None,
+            }
+        )
+    options.append(
+        {
+            "label": "Do not trust",
+            "trusted": False,
+            "updates": [{"path": canonical, "decision": False}],
+            "savedPath": canonical,
+        }
+    )
+    if include_session_only:
+        options.append(
+            {
+                "label": "Do not trust (this session only)",
+                "trusted": False,
+                "updates": [],
+                "savedPath": None,
+            }
+        )
+    return options
 
 
 async def resolve_project_trusted(
@@ -102,7 +208,7 @@ async def resolve_project_trusted(
     if override is not None:
         return bool(override)
 
-    if not project_has_local_resources(cwd):
+    if not has_trust_requiring_project_resources(cwd):
         return True
 
     if extensions is not None and extensions.has_handlers("project_trust"):
@@ -132,5 +238,7 @@ async def resolve_project_trusted(
 __all__ = [
     "TrustManager",
     "project_has_local_resources",
+    "has_trust_requiring_project_resources",
+    "get_project_trust_options",
     "resolve_project_trusted",
 ]

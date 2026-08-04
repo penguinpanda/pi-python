@@ -42,10 +42,13 @@ class SlashContext:
         open_model_selector: Callable[[], None] | None = None,
         open_tree_selector: Callable[[], None] | None = None,
         open_fork_selector: Callable[[], None] | None = None,
+        open_trust_selector: Callable[[], None] | None = None,
+        open_settings_selector: Callable[[], None] | None = None,
         copy_to_clipboard: Callable[[str], None] | None = None,
         auth_interaction=None,
         rebuild_session=None,
         reload_all: Callable[[], Any] | None = None,
+        trust_manager=None,
     ) -> None:
         self.session = session
         self.model_runtime = model_runtime
@@ -57,12 +60,16 @@ class SlashContext:
         self._open_model_selector = open_model_selector
         self._open_tree_selector = open_tree_selector
         self._open_fork_selector = open_fork_selector
+        self._open_trust_selector = open_trust_selector
+        self._open_settings_selector = open_settings_selector
         self._copy_to_clipboard = copy_to_clipboard or (lambda _text: None)
         self.auth_interaction = auth_interaction
         # 会话重建：fork / clone / resume / import 用（宿主注入）。
         self.rebuild_session = rebuild_session
         # 宿主级重载：/reload 用（TUI 注入）。
         self.reload_all = reload_all
+        # 项目信任管理器（/trust 用；TUI 注入）。
+        self.trust_manager = trust_manager
 
     def notify(self, message: str) -> None:
         self._notify(message)
@@ -88,6 +95,14 @@ class SlashContext:
     def open_fork_selector(self) -> None:
         if self._open_fork_selector is not None:
             self._open_fork_selector()
+
+    def open_trust_selector(self) -> None:
+        if self._open_trust_selector is not None:
+            self._open_trust_selector()
+
+    def open_settings_selector(self) -> None:
+        if self._open_settings_selector is not None:
+            self._open_settings_selector()
 
     def copy_to_clipboard(self, text: str) -> None:
         self._copy_to_clipboard(text)
@@ -246,14 +261,54 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
 
     async def _session(context: SlashContext, _args: str) -> str:
         stats = context.session.get_session_stats()
-        return (
-            f"Session {stats['sessionId']}: "
-            f"{stats['userMessages']} user / {stats['assistantMessages']} assistant, "
-            f"{stats['totalMessages']} messages, cost ${stats['cost']:.6f}"
-        )
+        lines = [
+            f"Session {stats.get('sessionId', '?')}: "
+            f"{stats.get('userMessages', 0)} user / "
+            f"{stats.get('assistantMessages', 0)} assistant, "
+            f"{stats.get('totalMessages', 0)} messages, "
+            f"cost ${stats.get('cost', 0):.6f}"
+        ]
+        turn_timings = stats.get("turnTimings")
+        if turn_timings:
+            lines.append(
+                f"Turns: {turn_timings.get('turnCount', 0)} "
+                f"(last {turn_timings.get('lastMs', 0)}ms, "
+                f"avg {turn_timings.get('averageMs', 0)}ms)"
+            )
+        cache_stats = stats.get("cacheStats")
+        if cache_stats:
+            lines.append(
+                f"Cache misses: {cache_stats.get('missCount', 0)} "
+                f"({cache_stats.get('missedTokens', 0)} tokens, "
+                f"${cache_stats.get('missedCost', 0):.6f})"
+            )
+        return "\n".join(lines)
 
     async def _reload(context: SlashContext, _args: str) -> str:
         return await context.reload()
+
+    async def _changelog(context: SlashContext, args: str) -> str:
+        from ...changelog import (
+            find_changelog_path,
+            format_changelog,
+            get_new_entries,
+            parse_changelog,
+        )
+
+        path = find_changelog_path(context.session.cwd)
+        if path is None:
+            return "No changelog found (searched cwd ancestors and ~/.pi/agent)."
+        entries = parse_changelog(path)
+        if not entries:
+            return f"No changelog entries found in {path}"
+        arg = args.strip()
+        if arg:
+            # 支持显示自某版本以来的新条目：/changelog 0.1.0
+            filtered = get_new_entries(entries, arg)
+            if not filtered:
+                return f"No entries newer than {arg} in {path}"
+            return format_changelog(filtered)
+        return format_changelog(entries)
 
     async def _copy(context: SlashContext, _args: str) -> str:
         text = context.session.get_last_assistant_text()
@@ -313,6 +368,10 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
         return f"Cloned to session {new_session.session_id}"
 
     async def _settings(context: SlashContext, args: str) -> str:
+        # TUI 环境：/settings 无参数时打开菜单式选择器（对齐 TS）。
+        if not args.strip() and context._open_settings_selector is not None:
+            context.open_settings_selector()
+            return ""
         from ..._config import (
             _deep_merge,
             _load_json,
@@ -345,6 +404,49 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
             f"Settings (global: {get_settings_path()}, project: {get_project_settings_path(cwd)}):\n"
             + json.dumps(merged, ensure_ascii=False, indent=2)
         )
+
+    async def _trust(context: SlashContext, args: str) -> str:
+        from ...trust import TrustManager, get_project_trust_options
+
+        cwd = context.session.cwd
+        manager: TrustManager | None = context.trust_manager
+        arg = args.strip()
+        if arg in ("trust", "block", "unset", "clear"):
+            if manager is None:
+                return "Trust manager not available"
+            assert manager is not None
+            if arg == "trust":
+                manager.set_trust(cwd, True)
+            elif arg == "block":
+                manager.set_trust(cwd, False)
+            else:
+                manager.clear_trust(cwd)
+            return f"Project trust saved: {arg}"
+        if arg:
+            return "Usage: /trust [trust|block|unset]"
+
+        # 无参数：TUI 打开选择器；无选择器时显示当前状态与用法。
+        if context._open_trust_selector is not None:
+            context.open_trust_selector()
+            return ""
+        if manager is None:
+            return "Usage: /trust [trust|block|unset]"
+        entry = manager.get_trust_entry(cwd)
+        status = (
+            f"{'trusted' if entry['decision'] else 'untrusted'} ({entry['path']})"
+            if entry is not None
+            else "none"
+        )
+        lines = [
+            f"Project trust: {status}",
+            f"Path: {cwd}",
+            "Usage: /trust [trust|block|unset]",
+            "",
+            "Options:",
+        ]
+        for option in get_project_trust_options(cwd, include_session_only=True):
+            lines.append(f"  {option['label']}")
+        return "\n".join(lines)
 
     async def _scoped_models(context: SlashContext, args: str) -> str:
         args_str = args.strip()
@@ -477,7 +579,9 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
         ("help", _help, "List available commands", ""),
         ("hotkeys", _hotkeys, "Show all keyboard shortcuts", ""),
         ("session", _session, "Show session info and stats", ""),
-        ("reload", _reload, "Reload keybindings, skills, prompts, and themes", ""),
+        ("reload", _reload, "Reload keybindings, skills, prompts, themes, and context files", ""),
+        ("changelog", _changelog, "Show changelog entries", "[version]"),
+        ("trust", _trust, "Save project trust decision for future sessions", "[trust|block|unset]"),
         ("copy", _copy, "Copy last agent message to clipboard", ""),
         ("export", _export, "Export session (HTML/JSONL)", "[path]"),
         ("tree", _tree, "Navigate session tree", "<entryId>"),

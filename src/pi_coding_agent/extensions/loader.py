@@ -43,6 +43,10 @@ class ExtensionLoader:
         self._project_dir = Path(project_dir) if project_dir else None
         self._cwd = cwd
 
+    def set_project_dir(self, project_dir: str | Path | None) -> None:
+        """更新项目扩展目录（/reload 在信任状态变化后调用）。"""
+        self._project_dir = Path(project_dir) if project_dir else None
+
     # ------------------------------------------------------------------
     # 发现
     # ------------------------------------------------------------------

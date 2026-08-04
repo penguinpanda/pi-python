@@ -341,6 +341,10 @@ class SkillLoader:
         self._diagnostics = diagnostics
         return LoadSkillsResult(skills=list(skill_map.values()), diagnostics=list(diagnostics))
 
+    def set_project_dir(self, project_dir: str | Path | None) -> None:
+        """更新项目技能目录（/reload 在信任状态变化后调用）。"""
+        self._project_dir = Path(project_dir) if project_dir else None
+
     def reload(self) -> LoadSkillsResult:
         return self.load()
 

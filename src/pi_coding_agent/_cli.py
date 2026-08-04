@@ -24,7 +24,7 @@ from .extensions import ExtensionLoader, ExtensionRunner
 from ._print_mode import run_print_mode, run_print_mode_json
 from .file_processor import process_at_files
 from .first_time_setup import run_first_time_setup
-from .tools import filter_tools_by_names
+from .tools import create_all_tools, filter_tools_by_names
 from .rpc import run_rpc_mode
 from .modes.interactive import run_tui_mode
 from ._session import AgentSession
@@ -40,6 +40,17 @@ from .model_resolver import (
 from .model_runtime import ModelRuntime
 from .prompt_templates import PromptTemplateLoader
 from .skills import SkillLoader
+from .system_prompt import (
+    BuildSystemPromptOptions,
+    build_system_prompt,
+    load_project_context_files,
+    tool_snippets_for,
+)
+from .trust import (
+    TrustManager,
+    has_trust_requiring_project_resources,
+    resolve_project_trusted,
+)
 
 
 def main(args: list[str] | None = None) -> int:
@@ -81,6 +92,24 @@ async def _async_main(args: list[str] | None = None) -> int:
     # 加载配置
     settings = load_settings(cwd)
 
+    # 项目信任：启动时解析（TUI 的交互提示由应用内 TrustSelector 承担，
+    # 其余模式无 UI 时按 defaultProjectTrust=ask 拒绝并提示）。
+    trust_manager = TrustManager()
+    needs_trust_decision = (
+        has_trust_requiring_project_resources(cwd)
+        and trust_manager.is_trusted(cwd) is None
+        and settings.get("defaultProjectTrust", "ask") == "ask"
+    )
+    project_trusted = await resolve_project_trusted(
+        cwd, trust_manager, settings, ui=None
+    )
+    if needs_trust_decision and not project_trusted and parsed.mode != "tui":
+        print(
+            "Warning: project not trusted; .pi settings and resources are ignored. "
+            "Use /trust (TUI) or set defaultProjectTrust to trust/block.",
+            file=sys.stderr,
+        )
+
     # 创建 ModelRuntime（组合 provider + models.json + auth.json）
     runtime = await _create_runtime()
     set_agent_stream_fn(runtime.stream)
@@ -114,19 +143,19 @@ async def _async_main(args: list[str] | None = None) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    # 系统提示
-    system_prompt = parsed.system_prompt or "You are a helpful coding assistant."
-    if parsed.append_system_prompt:
-        system_prompt += "\n" + parsed.append_system_prompt
-
-    # Phase 4：技能 / 提示模板加载器（全局 + 项目）。
+    # Phase 4：技能 / 提示模板加载器（全局 + 项目；未信任项目不加载 .pi 资源）。
+    project_skills_dir = Path(cwd) / ".pi" / "skills" if project_trusted else None
+    project_prompts_dir = Path(cwd) / ".pi" / "prompts" if project_trusted else None
+    project_extensions_dir = (
+        Path(cwd) / ".pi" / "extensions" if project_trusted else None
+    )
     skill_loader = SkillLoader(
         global_dir=get_agent_dir() / "skills",
-        project_dir=Path(cwd) / ".pi" / "skills",
+        project_dir=project_skills_dir,
     )
     template_loader = PromptTemplateLoader(
         global_dir=get_agent_dir() / "prompts",
-        project_dir=Path(cwd) / ".pi" / "prompts",
+        project_dir=project_prompts_dir,
     )
     # 启动时扫描一次；否则 /skill: 与 /模板名 永远找不到资源
     # （只有 TUI /reload 会触发加载，print/RPC 模式会静默失败）。
@@ -135,10 +164,51 @@ async def _async_main(args: list[str] | None = None) -> int:
         print(f"Warning: {diagnostic.message} ({diagnostic.path})", file=sys.stderr)
     template_loader.load()
 
+    # 系统提示构建器：默认结构化提示（工具说明 + 指南 + 上下文文件 + 技能），
+    # /reload 时重新调用（上下文文件与技能会变化）。
+    default_tools = create_all_tools(cwd)
+    tool_snippets = tool_snippets_for(default_tools)
+    tools_include = (
+        [part.strip() for part in parsed.tools.split(",") if part.strip()]
+        if parsed.tools
+        else None
+    )
+    tools_exclude = (
+        [part.strip() for part in parsed.exclude_tools.split(",") if part.strip()]
+        if parsed.exclude_tools
+        else None
+    )
+    if parsed.no_tools:
+        selected_tools: list[str] = []
+    elif tools_include is not None or tools_exclude:
+        selected_tools = [
+            tool.name
+            for tool in filter_tools_by_names(
+                default_tools,
+                include=tools_include,
+                exclude=tools_exclude,
+            )
+        ]
+    else:
+        selected_tools = [tool.name for tool in default_tools]
+
+    def system_prompt_builder() -> str:
+        return build_system_prompt(BuildSystemPromptOptions(
+            cwd=cwd,
+            custom_prompt=parsed.system_prompt,
+            selected_tools=selected_tools,
+            tool_snippets=tool_snippets,
+            append_system_prompt=parsed.append_system_prompt,
+            context_files=load_project_context_files(cwd, get_agent_dir()),
+            skills=skill_loader.all(),
+        ))
+
+    system_prompt = system_prompt_builder()
+
     # Phase 5：扩展（项目 .pi/extensions + 全局 extensions）。
     extension_loader = ExtensionLoader(
         global_dir=get_agent_dir() / "extensions",
-        project_dir=Path(cwd) / ".pi" / "extensions",
+        project_dir=project_extensions_dir,
         cwd=cwd,
     )
     extension_result = await extension_loader.load()
@@ -150,18 +220,6 @@ async def _async_main(args: list[str] | None = None) -> int:
         runtime=extension_result.runtime,
         cwd=cwd,
         model_runtime=runtime,
-    )
-
-    # 工具白名单 / 黑名单。
-    tools_include = (
-        [part.strip() for part in parsed.tools.split(",") if part.strip()]
-        if parsed.tools
-        else None
-    )
-    tools_exclude = (
-        [part.strip() for part in parsed.exclude_tools.split(",") if part.strip()]
-        if parsed.exclude_tools
-        else None
     )
 
     # 创建 Agent
@@ -199,6 +257,7 @@ async def _async_main(args: list[str] | None = None) -> int:
             extension_runner=extension_runner,
             tools_override=tools_override,
             compaction_settings=compaction_settings_from_config(settings),
+            system_prompt_builder=system_prompt_builder,
         )
 
     session = build_session(session_manager, model, scoped_models)
@@ -242,6 +301,9 @@ async def _async_main(args: list[str] | None = None) -> int:
             session_rebuilder=rebuilder,
             settings=settings,
             extension_loader=extension_loader,
+            trust_manager=trust_manager,
+            project_trusted=project_trusted,
+            needs_trust_decision=needs_trust_decision,
         )
 
     # 运行 print 模式

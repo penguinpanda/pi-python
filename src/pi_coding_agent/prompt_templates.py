@@ -133,6 +133,10 @@ class PromptTemplateLoader:
         self._templates = templates
         return list(templates.values())
 
+    def set_project_dir(self, project_dir: str | Path | None) -> None:
+        """更新项目模板目录（/reload 在信任状态变化后调用）。"""
+        self._project_dir = Path(project_dir) if project_dir else None
+
     def reload(self) -> list[PromptTemplate]:
         return self.load()
 

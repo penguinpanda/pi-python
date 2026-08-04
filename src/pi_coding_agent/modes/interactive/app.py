@@ -29,8 +29,10 @@ from pi_tui.keybindings import KeybindingsManager
 from pi_tui.selectors import (
     ModelSelector,
     SessionPicker,
+    SettingsSelector,
     TextInputDialog,
     TreeSelector,
+    TrustSelector,
 )
 from .slash_commands import (
     SlashContext,
@@ -179,6 +181,9 @@ class PiTuiApp(App):
         session_rebuilder=None,
         settings: dict | None = None,
         extension_loader=None,
+        trust_manager=None,
+        project_trusted: bool = False,
+        needs_trust_decision: bool = False,
     ) -> None:
         self._keybindings = keybindings_manager or KeybindingsManager()
         self._settings = settings if settings is not None else {}
@@ -188,6 +193,9 @@ class PiTuiApp(App):
         self._theme_name = theme_name
         self._theme = self._theme_loader.resolve(theme_name)
         self._extension_loader = extension_loader
+        self._trust_manager = trust_manager
+        self._project_trusted = project_trusted
+        self._needs_trust_decision = needs_trust_decision
 
         # 实例级 BINDINGS / CSS：必须在 super().__init__() 之前设置。
         self.BINDINGS = [
@@ -230,9 +238,12 @@ class PiTuiApp(App):
             open_model_selector=self._open_model_selector,
             open_tree_selector=self._open_tree_selector,
             open_fork_selector=self._open_fork_selector,
+            open_trust_selector=self._open_trust_selector,
+            open_settings_selector=self._open_settings_selector,
             copy_to_clipboard=self._copy_to_clipboard,
             auth_interaction=_TuiAuthInteraction(self),
             reload_all=self._reload_all,
+            trust_manager=trust_manager,
         )
         self._slash_context.rebuild_session = self._apply_rebuilt_session
 
@@ -253,6 +264,9 @@ class PiTuiApp(App):
             self._chat.add_message_agent(message)
         self._update_footer()
         self._editor.focus()
+        # 启动时对未定信任项目提示（对齐 TS 启动 trust 选择器）。
+        if self._needs_trust_decision:
+            self.call_after_refresh(self._open_trust_selector)
 
     def on_unmount(self) -> None:
         if self._unsubscribe is not None:
@@ -540,6 +554,94 @@ class PiTuiApp(App):
             callback=self._on_fork_selected,
         )
 
+    def _open_trust_selector(self) -> None:
+        if self._trust_manager is None:
+            self._notify("Trust manager not available")
+            return
+        cwd = self._session.cwd
+        self.push_screen(
+            TrustSelector(
+                cwd,
+                saved_decision=self._trust_manager.get_trust_entry(cwd),
+                project_trusted=self._project_trusted,
+            ),
+            callback=self._on_trust_selected,
+        )
+
+    def _on_trust_selected(self, option) -> None:
+        if option is None or self._trust_manager is None:
+            return
+        updates = option.get("updates") or []
+        if updates:
+            self._trust_manager.set_many(updates)
+        self._project_trusted = bool(option.get("trusted"))
+        self._needs_trust_decision = False
+        label = option.get("label", "Trust")
+        self._notify(
+            f"{label}: saved. Project resources load on /reload or restart."
+        )
+
+    def _open_settings_selector(self) -> None:
+        items = [
+            {
+                "key": "autoCompaction",
+                "label": "Auto-compact",
+                "type": "bool",
+            },
+            {
+                "key": "defaultProjectTrust",
+                "label": "Default project trust",
+                "type": "choice",
+                "choices": ["ask", "trust", "block"],
+            },
+            {
+                "key": "trustOverride",
+                "label": "Trust override",
+                "type": "bool",
+            },
+            {
+                "key": "defaultProvider",
+                "label": "Default provider",
+                "type": "string",
+            },
+            {
+                "key": "defaultModel",
+                "label": "Default model",
+                "type": "string",
+            },
+        ]
+        current = dict(self._settings)
+        current.setdefault("autoCompaction", self._session.auto_compaction_enabled)
+        self.push_screen(
+            SettingsSelector(items, current, self._on_settings_change),
+            callback=lambda _result: self._update_footer(),
+        )
+
+    def _on_settings_change(self, key: str, value) -> None:
+        """持久化设置到项目 .pi/settings.json 并应用会话侧效果。"""
+        from ..._config import (
+            _load_json,
+            get_project_settings_path,
+        )
+
+        cwd = self._session.cwd
+        path = get_project_settings_path(cwd)
+        data = _load_json(path)
+        data[key] = value
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            path.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            self._notify(f"Settings save failed: {exc}")
+            return
+        self._settings[key] = value
+        if key == "autoCompaction":
+            self._session.set_auto_compaction_enabled(bool(value))
+        self._notify(f"Saved {key} = {value} to {path}")
+
     def _on_fork_selected(self, entry_id) -> None:
         if entry_id is None:
             return
@@ -643,6 +745,11 @@ class PiTuiApp(App):
         skill_loader = session.skill_loader
         if skill_loader is not None:
             try:
+                skill_loader.set_project_dir(
+                    Path(session.cwd) / ".pi" / "skills"
+                    if self._project_trusted
+                    else None
+                )
                 result = skill_loader.reload()
                 details.append(f"{len(result.skills)} skills")
             except Exception as exc:
@@ -650,6 +757,11 @@ class PiTuiApp(App):
         template_loader = session.template_loader
         if template_loader is not None:
             try:
+                template_loader.set_project_dir(
+                    Path(session.cwd) / ".pi" / "prompts"
+                    if self._project_trusted
+                    else None
+                )
                 templates = template_loader.reload()
                 details.append(f"{len(templates)} prompts")
             except Exception as exc:
@@ -665,6 +777,11 @@ class PiTuiApp(App):
                 except Exception:
                     pass
             try:
+                self._extension_loader.set_project_dir(
+                    Path(session.cwd) / ".pi" / "extensions"
+                    if self._project_trusted
+                    else None
+                )
                 result = await self._extension_loader.load()
                 new_runner = ExtensionRunner(
                     result.extensions,
@@ -718,6 +835,15 @@ class PiTuiApp(App):
             details.append(f"theme {self._theme.name}")
         except Exception as exc:
             details.append(f"theme failed: {exc}")
+
+        # 5. 系统提示 / 上下文文件：随技能与 AGENTS.md 变化重建。
+        try:
+            if session.rebuild_system_prompt() is not None:
+                details.append("context files + system prompt")
+            else:
+                details.append("system prompt (static)")
+        except Exception as exc:
+            details.append(f"system prompt failed: {exc}")
 
         return "Reloaded: " + "; ".join(details)
 
