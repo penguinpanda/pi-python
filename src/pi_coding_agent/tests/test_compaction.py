@@ -15,6 +15,7 @@ from pi_coding_agent.compaction import (
     DEFAULT_COMPACTION_SETTINGS,
     CompactionSettings,
     compact,
+    compaction_settings_from_config,
     compute_file_lists,
     create_file_ops,
     estimate_context_tokens,
@@ -30,6 +31,36 @@ from pi_coding_agent.compaction import (
     serialize_conversation,
     should_compact,
 )
+
+
+def test_compaction_settings_from_config_defaults():
+    assert compaction_settings_from_config({}) == DEFAULT_COMPACTION_SETTINGS
+    assert compaction_settings_from_config({"other": 1}) == DEFAULT_COMPACTION_SETTINGS
+
+
+def test_compaction_settings_from_config_parses():
+    settings = {
+        "compaction": {
+            "enabled": False,
+            "reserveTokens": 128000,
+            "keepRecentTokens": 5000,
+        }
+    }
+    result = compaction_settings_from_config(settings)
+    assert result.enabled is False
+    assert result.reserve_tokens == 128000
+    assert result.keep_recent_tokens == 5000
+
+
+def test_compaction_settings_from_config_invalid_falls_back():
+    settings = {
+        "compaction": {
+            "enabled": "yes",
+            "reserveTokens": -1,
+            "keepRecentTokens": 0,
+        }
+    }
+    assert compaction_settings_from_config(settings) == DEFAULT_COMPACTION_SETTINGS
 
 
 @pytest.fixture

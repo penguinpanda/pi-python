@@ -33,6 +33,43 @@ from pi_ai import Context, Model, Usage
 from pi_ai.api._shared import empty_usage
 from pi_ai.utils.retry import RetryPolicy, retry_assistant_call
 
+
+def compaction_settings_from_config(settings: dict) -> CompactionSettings:
+    """从 settings.json 的 `compaction` 节解析压缩配置（对齐 TS CompactionSettings）。
+
+    支持的键：
+
+        enabled           bool，默认 True
+        reserveTokens     int，默认 16384（压缩阈值 = context_window - reserveTokens，
+                          值越大越早压缩）
+        keepRecentTokens  int，默认 20000（压缩时保留的最近 token 数）
+
+    非法值回退默认。
+    """
+    raw = settings.get("compaction") if isinstance(settings, dict) else None
+    if not isinstance(raw, dict):
+        return DEFAULT_COMPACTION_SETTINGS
+    base = DEFAULT_COMPACTION_SETTINGS
+
+    enabled = raw.get("enabled", base.enabled)
+    if not isinstance(enabled, bool):
+        enabled = base.enabled
+
+    reserve = raw.get("reserveTokens", base.reserve_tokens)
+    if not isinstance(reserve, int) or reserve <= 0:
+        reserve = base.reserve_tokens
+
+    keep = raw.get("keepRecentTokens", base.keep_recent_tokens)
+    if not isinstance(keep, int) or keep <= 0:
+        keep = base.keep_recent_tokens
+
+    return CompactionSettings(
+        enabled=enabled,
+        reserve_tokens=reserve,
+        keep_recent_tokens=keep,
+    )
+
+
 # ---------------------------------------------------------------------------
 # 常量
 # ---------------------------------------------------------------------------

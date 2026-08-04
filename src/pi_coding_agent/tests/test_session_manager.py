@@ -1,5 +1,6 @@
 """SessionManager 单元测试。"""
 
+import json
 import tempfile
 from pathlib import Path
 
@@ -7,6 +8,29 @@ import pytest
 
 from pi_coding_agent._session_manager import SessionManager
 from pi_ai._types import UserMessage, TextContent
+
+
+def test_open_expands_tilde(tmp_path, monkeypatch):
+    """回归：SessionManager.open 应展开 ~（TUI /resume、/import 传字面 ~）。"""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("HOME", str(home))
+
+    sessions_dir = home / ".pi" / "agent" / "sessions"
+    sessions_dir.mkdir(parents=True)
+    session_file = sessions_dir / "abc123.jsonl"
+    header = {
+        "type": "session",
+        "version": 3,
+        "id": "abc123",
+        "timestamp": "2026-01-01T00:00:00+00:00",
+        "cwd": "/workspace",
+    }
+    session_file.write_text(json.dumps(header) + "\n", encoding="utf-8")
+
+    manager = SessionManager.open("~/.pi/agent/sessions/abc123.jsonl")
+    assert manager.session_id == "abc123"
 
 
 class TestSessionManagerCreate:

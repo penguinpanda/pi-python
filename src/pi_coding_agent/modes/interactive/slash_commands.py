@@ -203,7 +203,8 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
     async def _compact(context: SlashContext, args: str) -> str:
         result = await context.session.compact(args.strip() or None)
         if result is None:
-            return "Nothing to compact"
+            # 对齐 TS handleCompactCommand：无可压缩内容时静默，不渲染消息。
+            return ""
         return "Session compacted"
 
     async def _new(context: SlashContext, _args: str) -> None:

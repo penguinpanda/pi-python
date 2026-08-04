@@ -92,6 +92,25 @@ exit
 
 一次性容器也可以进 shell（不常驻）：`docker compose run --rm --entrypoint bash pi`。
 
+### 一键重建并进入容器
+
+每次改完源码想直接进容器测试，用脚本（自动 build + `--force-recreate` + 进入 shell，
+不用再手动记命令）：
+
+```powershell
+.\docker\dev-enter.ps1
+```
+
+Linux/macOS：
+
+```bash
+./docker/dev-enter.sh
+```
+
+脚本内部执行：`docker compose build` → `up -d --force-recreate pi-dev` →
+`docker compose exec pi-dev bash`。容器名不写死，按服务名 `pi-dev` 进入。
+不想每次都重建镜像的话，删掉脚本里的 `build` 行即可。
+
 注意：容器内**不要用 `uv run`**——镜像没有宿主那样的项目环境，`uv run` 会新建
 一个空环境，导致 `httpx` 等依赖缺失（ModuleNotFoundError）。直接使用 `python`
 （即 `/app/.venv/bin/python`）。重建镜像后 `PATH` 已包含该目录，无需再 export。

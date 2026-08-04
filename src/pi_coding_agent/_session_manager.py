@@ -136,7 +136,8 @@ class SessionManager:
             filepath: JSONL 文件路径
             cwd_override: 覆盖 header 中的 cwd（可选）
         """
-        fp = Path(filepath)
+        # 展开 ~（TUI slash 命令 / CLI 引号路径可能传入字面 ~）
+        fp = Path(filepath).expanduser()
         if not fp.exists():
             raise FileNotFoundError(f"Session file not found: {fp}")
 

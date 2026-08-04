@@ -29,6 +29,7 @@ from .modes.interactive import run_tui_mode
 from ._session import AgentSession
 from ._session_manager import SessionManager
 from .auth_storage import AuthStorage
+from .compaction import compaction_settings_from_config
 from .model_resolver import (
     ScopedModel,
     find_initial_model,
@@ -195,6 +196,7 @@ async def _async_main(args: list[str] | None = None) -> int:
             extension_runner=extension_runner,
             tools_override=tools_override,
             summary_model=summary_model,
+            compaction_settings=compaction_settings_from_config(settings),
         )
 
     session = build_session(session_manager, model, scoped_models)
