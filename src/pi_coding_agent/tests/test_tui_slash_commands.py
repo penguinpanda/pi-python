@@ -237,6 +237,19 @@ class TestPhase7Commands:
         assert "defaultModel" in notifications[-1]
         assert "deepseek-chat" in notifications[-1]
 
+    async def test_settings_no_args_opens_selector_in_tui(self, tmp_path):
+        session = FakeSession(cwd=str(tmp_path))
+        registry = _make_registry()
+        opened: list[bool] = []
+        context = SlashContext(
+            session=session,
+            notify=lambda _message: None,
+            open_settings_selector=lambda: opened.append(True),
+        )
+
+        await registry.execute("/settings", context)
+        assert opened == [True]
+
     async def test_settings_preserves_existing_keys(self, tmp_path):
         """回归（CF-04）：/settings 顶层合并，写入新键不覆盖已有键。"""
         import json
@@ -258,6 +271,106 @@ class TestPhase7Commands:
         data = json.loads(project_path.read_text(encoding="utf-8"))
         assert data["defaultModel"] == "qwen-plus"
         assert data["keybindings"] == {"app.model.select": "ctrl+0"}
+
+    async def test_trust_save_clear_and_status(self, tmp_path):
+        from pi_coding_agent.trust import TrustManager
+
+        manager = TrustManager(tmp_path / "trust.json")
+        session = FakeSession(cwd=str(tmp_path))
+        registry = _make_registry()
+        notifications: list[str] = []
+        context = SlashContext(
+            session=session,
+            notify=notifications.append,
+            trust_manager=manager,
+        )
+
+        await registry.execute("/trust trust", context)
+        assert manager.is_trusted(str(tmp_path)) is True
+
+        await registry.execute("/trust", context)
+        assert "Project trust: trusted" in notifications[-1]
+
+        await registry.execute("/trust block", context)
+        assert manager.is_trusted(str(tmp_path)) is False
+
+        await registry.execute("/trust unset", context)
+        assert manager.is_trusted(str(tmp_path)) is None
+
+    async def test_trust_opens_selector_in_tui(self, tmp_path):
+        from pi_coding_agent.trust import TrustManager
+
+        manager = TrustManager(tmp_path / "trust.json")
+        session = FakeSession(cwd=str(tmp_path))
+        registry = _make_registry()
+        notifications: list[str] = []
+        opened: list[str] = []
+        context = SlashContext(
+            session=session,
+            notify=notifications.append,
+            trust_manager=manager,
+            open_trust_selector=lambda: opened.append("opened"),
+        )
+
+        await registry.execute("/trust", context)
+        assert opened == ["opened"]
+
+    async def test_trust_unavailable_without_manager(self, tmp_path):
+        session = FakeSession(cwd=str(tmp_path))
+        registry = _make_registry()
+        notifications: list[str] = []
+        context = SlashContext(session=session, notify=notifications.append)
+
+        await registry.execute("/trust trust", context)
+        assert "not available" in notifications[-1]
+
+    async def test_trust_usage(self, tmp_path):
+        session = FakeSession(cwd=str(tmp_path))
+        registry = _make_registry()
+        notifications: list[str] = []
+        context = SlashContext(session=session, notify=notifications.append)
+
+        await registry.execute("/trust bogus", context)
+        assert "Usage: /trust" in notifications[-1]
+
+    async def test_changelog_renders_entries(self, tmp_path):
+        (tmp_path / "CHANGELOG.md").write_text(
+            "## [0.2.0]\n\n### Added\n\n- thing\n\n"
+            "## [0.1.0]\n\n### Fixed\n\n- bug\n",
+            encoding="utf-8",
+        )
+        session = FakeSession(cwd=str(tmp_path))
+        registry = _make_registry()
+        notifications: list[str] = []
+        context = SlashContext(session=session, notify=notifications.append)
+
+        await registry.execute("/changelog", context)
+        assert "0.2.0" in notifications[-1]
+        assert "thing" in notifications[-1]
+
+    async def test_changelog_version_filter(self, tmp_path):
+        (tmp_path / "CHANGELOG.md").write_text(
+            "## [0.2.0]\n\n### Added\n\n- thing\n\n"
+            "## [0.1.0]\n\n### Fixed\n\n- bug\n",
+            encoding="utf-8",
+        )
+        session = FakeSession(cwd=str(tmp_path))
+        registry = _make_registry()
+        notifications: list[str] = []
+        context = SlashContext(session=session, notify=notifications.append)
+
+        await registry.execute("/changelog 0.1.0", context)
+        assert "0.2.0" in notifications[-1]
+        assert "bug" not in notifications[-1]
+
+    async def test_changelog_missing(self, tmp_path):
+        session = FakeSession(cwd=str(tmp_path))
+        registry = _make_registry()
+        notifications: list[str] = []
+        context = SlashContext(session=session, notify=notifications.append)
+
+        await registry.execute("/changelog", context)
+        assert "No changelog found" in notifications[-1]
 
     async def test_login_unknown_provider_friendly_error(self):
         """回归（P13）：/login 未知 provider 返回可读错误，不抛 traceback。"""

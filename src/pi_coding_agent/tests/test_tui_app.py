@@ -16,7 +16,7 @@ from pi_coding_agent.auth_storage import AuthStorage
 from pi_coding_agent.model_runtime import ModelRuntime
 from pi_coding_agent.modes.interactive.app import PiTuiApp
 from pi_tui.components import MessageEntry, PiEditor
-from pi_tui.selectors import ModelSelector, SessionPicker, TreeSelector
+from pi_tui.selectors import ModelSelector, SessionPicker, SettingsSelector, TreeSelector
 
 
 def _make_runtime(
@@ -503,6 +503,42 @@ async def test_slash_model_no_args_opens_selector(tmp_path):
             pilot=pilot,
             message="model selector opened",
         )
+
+
+@pytest.mark.asyncio
+async def test_slash_settings_opens_selector(tmp_path):
+    """/settings 无参在 TUI 中打开菜单式设置选择器。"""
+    import json
+
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    initial_auto_compact = session.auto_compaction_enabled
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "/settings"))
+        await _wait_until(
+            lambda: isinstance(app.screen, SettingsSelector),
+            pilot=pilot,
+            message="settings selector opened",
+        )
+        await _wait_until(
+            lambda: len(app.screen.query_one("#settings-list").children) == 5,
+            pilot=pilot,
+            message="settings list populated",
+        )
+        # 第一项 autoCompaction：选择后切换并落盘到项目 .pi/settings.json。
+        # （headless 下 Enter 键路由偶发时序抖动，直接调用 action_select 保持确定。）
+        await pilot.pause()
+        app.screen.action_select()
+        await _wait_until(
+            lambda: app._settings.get("autoCompaction") is (not initial_auto_compact),
+            pilot=pilot,
+            message="autoCompaction toggled",
+        )
+        project_path = tmp_path / ".pi" / "settings.json"
+        assert project_path.exists()
+        data = json.loads(project_path.read_text(encoding="utf-8"))
+        assert data["autoCompaction"] is (not initial_auto_compact)
 
 
 @pytest.mark.asyncio

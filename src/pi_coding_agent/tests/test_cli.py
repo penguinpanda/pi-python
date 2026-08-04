@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from pi_coding_agent import _cli
 from pi_coding_agent._session_manager import SessionManager
+from pi_coding_agent.settings_manager import SettingsManager
 from pi_ai import Model
 
 
@@ -17,6 +18,14 @@ class _FakeRuntime:
 
 async def _fake_runtime() -> _FakeRuntime:
     return _FakeRuntime()
+
+
+def _fake_settings_manager(cwd, project_trusted=True):
+    """测试用 SettingsManager：defaultProjectTrust=trust（项目资源可用）。"""
+    return SettingsManager.in_memory(
+        {"defaultProjectTrust": "trust"},
+        project_trusted=project_trusted,
+    )
 
 
 async def test_unknown_provider_returns_friendly_error(monkeypatch, capsys):
@@ -60,7 +69,9 @@ async def test_cli_loads_skills_and_templates_on_startup(tmp_path, monkeypatch):
 
     monkeypatch.setattr(_cli.SkillLoader, "load", skill_load)
     monkeypatch.setattr(_cli.PromptTemplateLoader, "load", template_load)
-    monkeypatch.setattr(_cli, "load_settings", lambda cwd: {})
+    monkeypatch.setattr(
+        _cli.SettingsManager, "create", staticmethod(_fake_settings_manager)
+    )
     monkeypatch.setattr(_cli, "_create_runtime", _fake_runtime)
 
     async def fake_resolve(*_args, **_kwargs):
@@ -97,7 +108,9 @@ async def test_cli_loads_extensions_and_warns_on_syntax_error(
 ):
     """回归（E-04/P17）：CLI 启动加载项目扩展；语法错误扩展输出 stderr
     Warning 且不崩溃；好扩展在 print 模式仍注册（跨模式一致性）。"""
-    monkeypatch.setattr(_cli, "load_settings", lambda cwd: {})
+    monkeypatch.setattr(
+        _cli.SettingsManager, "create", staticmethod(_fake_settings_manager)
+    )
     monkeypatch.setattr(_cli, "_create_runtime", _fake_runtime)
 
     async def fake_resolve(*_args, **_kwargs):

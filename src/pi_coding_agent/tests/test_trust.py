@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
 from pi_coding_agent.trust import (
     TrustManager,
+    get_project_trust_options,
+    has_trust_requiring_project_resources,
     project_has_local_resources,
     resolve_project_trusted,
 )
@@ -40,14 +43,37 @@ class TestTrustManager:
         assert TrustManager(path).is_trusted("/tmp/p") is True
 
     def test_reload_after_external_write(self, tmp_path):
-        from pathlib import Path
-
         path = tmp_path / "trust.json"
         manager = TrustManager(path)
         canonical = str(Path("/tmp/x").resolve())
         path.write_text(json.dumps({canonical: False}), encoding="utf-8")
         manager.reload()
         assert manager.is_trusted("/tmp/x") is False
+
+    def test_get_trust_entry_nearest_ancestor(self, tmp_path):
+        manager = TrustManager(tmp_path / "trust.json")
+        manager.set_trust("/tmp/root", True)
+        entry = manager.get_trust_entry("/tmp/root/sub/deep")
+        assert entry == {"path": str(Path("/tmp/root").resolve()), "decision": True}
+
+    def test_clear_trust(self, tmp_path):
+        manager = TrustManager(tmp_path / "trust.json")
+        manager.set_trust("/tmp/proj", True)
+        manager.clear_trust("/tmp/proj")
+        assert manager.is_trusted("/tmp/proj") is None
+
+    def test_set_many_updates(self, tmp_path):
+        manager = TrustManager(tmp_path / "trust.json")
+        manager.set_many(
+            [
+                {"path": "/tmp/parent", "decision": True},
+                {"path": "/tmp/parent/child", "decision": None},
+            ]
+        )
+        assert manager.is_trusted("/tmp/parent") is True
+        assert manager.is_trusted("/tmp/parent/child") is True
+        manager.set_many([{"path": "/tmp/parent", "decision": False}])
+        assert manager.is_trusted("/tmp/parent/child") is False
 
 
 class TestProjectResources:
@@ -62,6 +88,34 @@ class TestProjectResources:
         (tmp_path / ".pi").mkdir()
         (tmp_path / ".pi" / "settings.json").write_text("{}", encoding="utf-8")
         assert project_has_local_resources(str(tmp_path)) is False
+
+    def test_settings_json_requires_trust(self, tmp_path):
+        (tmp_path / ".pi").mkdir()
+        (tmp_path / ".pi" / "settings.json").write_text("{}", encoding="utf-8")
+        assert has_trust_requiring_project_resources(str(tmp_path)) is True
+
+    def test_agents_skills_ancestor_requires_trust(self, tmp_path):
+        (tmp_path / "sub" / ".agents" / "skills").mkdir(parents=True)
+        assert has_trust_requiring_project_resources(str(tmp_path / "sub" / "deep")) is True
+
+    def test_user_agents_skills_not_trust_requiring(self, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        (home / ".agents" / "skills").mkdir(parents=True)
+        monkeypatch.setattr("pathlib.Path.home", lambda: home)
+        assert has_trust_requiring_project_resources(str(home)) is False
+
+    def test_get_project_trust_options(self, tmp_path):
+        options = get_project_trust_options(str(tmp_path))
+        labels = [option["label"] for option in options]
+        assert labels == ["Trust", f"Trust parent folder ({str(tmp_path.resolve().parent)})", "Do not trust"]
+        trust_option = options[0]
+        assert trust_option["trusted"] is True
+        assert trust_option["updates"][0]["decision"] is True
+
+    def test_get_project_trust_options_session_only(self, tmp_path):
+        options = get_project_trust_options(str(tmp_path), include_session_only=True)
+        assert any(option["label"] == "Trust (this session only)" for option in options)
+        assert any(option["label"] == "Do not trust (this session only)" for option in options)
 
 
 class _FakeUI:
