@@ -5,8 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from pi_coding_agent.skills import (
-    ResourceDiagnostic,
-    Skill,
     SkillLoader,
     format_skills_for_prompt,
 )
@@ -76,7 +74,9 @@ class TestSkillLoaderLoad:
     def test_missing_description_drops_skill_with_warning(self, tmp_path):
         root = tmp_path / "skills"
         (root / "noskill").mkdir(parents=True)
-        (root / "noskill" / "SKILL.md").write_text("---\nname: noskill\n---\n\nBody", encoding="utf-8")
+        (root / "noskill" / "SKILL.md").write_text(
+            "---\nname: noskill\n---\n\nBody", encoding="utf-8"
+        )
         loader = SkillLoader(global_dir=root)
         result = loader.load()
         assert result.skills == []
@@ -126,7 +126,7 @@ class TestSkillFormatting:
             encoding="utf-8",
         )
         loader = SkillLoader(global_dir=root)
-        result = loader.load()
+        loader.load()
         prompt = loader.format_for_prompt()
         assert "<available_skills>" in prompt
         assert "normal" in prompt

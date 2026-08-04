@@ -112,19 +112,17 @@ class ModelConfig:
         except FileNotFoundError:
             return ModelConfig()
         except OSError as exc:
-            return ModelConfig(
-                error=f"Failed to load models.json: {exc}\n\nFile: {path}"
-            )
+            return ModelConfig(error=f"Failed to load models.json: {exc}\n\nFile: {path}")
 
         try:
             parsed = json.loads(strip_json_comments(content))
         except json.JSONDecodeError as exc:
-            return ModelConfig(
-                error=f"Failed to parse models.json: {exc}\n\nFile: {path}"
-            )
+            return ModelConfig(error=f"Failed to parse models.json: {exc}\n\nFile: {path}")
 
         if not isinstance(parsed, dict):
-            return ModelConfig(error=f"Invalid models.json schema: root must be an object\n\nFile: {path}")
+            return ModelConfig(
+                error=f"Invalid models.json schema: root must be an object\n\nFile: {path}"
+            )
 
         providers_raw = parsed.get("providers", {})
         if not isinstance(providers_raw, dict):
@@ -152,7 +150,7 @@ class ModelConfig:
             return ModelConfig(
                 models=flattened,
                 providers=providers,
-                error=f"Invalid models.json schema:\n" + "\n".join(errors) + f"\n\nFile: {path}",
+                error="Invalid models.json schema:\n" + "\n".join(errors) + f"\n\nFile: {path}",
             )
         return ModelConfig(models=flattened, providers=providers)
 
@@ -321,9 +319,7 @@ def _parse_provider_override(
     )
 
 
-def _merge_overrides(
-    previous: ModelOverride | None, override: ModelOverride
-) -> ModelOverride:
+def _merge_overrides(previous: ModelOverride | None, override: ModelOverride) -> ModelOverride:
     """逐字段合并（后者覆盖前者；None 字段表示不覆盖）。"""
     if previous is None:
         return override
@@ -338,7 +334,9 @@ def _merge_overrides(
         input=override.input if override.input is not None else previous.input,
         cost=override.cost if override.cost is not None else previous.cost,
         context_window=(
-            override.context_window if override.context_window is not None else previous.context_window
+            override.context_window
+            if override.context_window is not None
+            else previous.context_window
         ),
         max_tokens=override.max_tokens if override.max_tokens is not None else previous.max_tokens,
         headers={**(previous.headers or {}), **(override.headers or {})}

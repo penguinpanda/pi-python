@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from pi_coding_agent.system_prompt import (
     BuildSystemPromptOptions,
@@ -29,42 +28,50 @@ def _snippets():
 
 class TestBuildSystemPrompt:
     def test_default_prompt_contains_cwd_and_tools(self, tmp_path):
-        prompt = build_system_prompt(BuildSystemPromptOptions(
-            cwd=str(tmp_path),
-            tool_snippets=_snippets(),
-        ))
+        prompt = build_system_prompt(
+            BuildSystemPromptOptions(
+                cwd=str(tmp_path),
+                tool_snippets=_snippets(),
+            )
+        )
         assert "Current working directory:" in prompt
         assert str(tmp_path).replace("\\", "/") in prompt
         assert "- read: Read a file" in prompt
         assert "Be concise in your responses" in prompt
 
     def test_no_tools_lists_none(self, tmp_path):
-        prompt = build_system_prompt(BuildSystemPromptOptions(
-            cwd=str(tmp_path),
-            selected_tools=[],
-            tool_snippets=_snippets(),
-        ))
+        prompt = build_system_prompt(
+            BuildSystemPromptOptions(
+                cwd=str(tmp_path),
+                selected_tools=[],
+                tool_snippets=_snippets(),
+            )
+        )
         assert "Available tools:\n(none)" in prompt
 
     def test_custom_prompt_keeps_context_and_skills(self, tmp_path):
-        prompt = build_system_prompt(BuildSystemPromptOptions(
-            cwd=str(tmp_path),
-            custom_prompt="You are custom.",
-            context_files=[
-                {"path": str(tmp_path / "AGENTS.md"), "content": "Follow repo rules"}
-            ],
-            skills=[],
-        ))
+        prompt = build_system_prompt(
+            BuildSystemPromptOptions(
+                cwd=str(tmp_path),
+                custom_prompt="You are custom.",
+                context_files=[
+                    {"path": str(tmp_path / "AGENTS.md"), "content": "Follow repo rules"}
+                ],
+                skills=[],
+            )
+        )
         assert "You are custom." in prompt
         assert "<project_context>" in prompt
         assert "Follow repo rules" in prompt
         assert "Current working directory:" in prompt
 
     def test_append_system_prompt(self, tmp_path):
-        prompt = build_system_prompt(BuildSystemPromptOptions(
-            cwd=str(tmp_path),
-            append_system_prompt="Extra instruction.",
-        ))
+        prompt = build_system_prompt(
+            BuildSystemPromptOptions(
+                cwd=str(tmp_path),
+                append_system_prompt="Extra instruction.",
+            )
+        )
         assert "Extra instruction." in prompt
 
     def test_skills_included_when_read_available(self, tmp_path):
@@ -77,11 +84,13 @@ class TestBuildSystemPrompt:
             base_dir=str(tmp_path),
             source="user",
         )
-        prompt = build_system_prompt(BuildSystemPromptOptions(
-            cwd=str(tmp_path),
-            tool_snippets=_snippets(),
-            skills=[skill],
-        ))
+        prompt = build_system_prompt(
+            BuildSystemPromptOptions(
+                cwd=str(tmp_path),
+                tool_snippets=_snippets(),
+                skills=[skill],
+            )
+        )
         assert "<available_skills>" in prompt
         assert "<name>alpha</name>" in prompt
 
@@ -95,12 +104,14 @@ class TestBuildSystemPrompt:
             base_dir=str(tmp_path),
             source="user",
         )
-        prompt = build_system_prompt(BuildSystemPromptOptions(
-            cwd=str(tmp_path),
-            selected_tools=["bash"],
-            tool_snippets={"bash": "Run a shell command"},
-            skills=[skill],
-        ))
+        prompt = build_system_prompt(
+            BuildSystemPromptOptions(
+                cwd=str(tmp_path),
+                selected_tools=["bash"],
+                tool_snippets={"bash": "Run a shell command"},
+                skills=[skill],
+            )
+        )
         assert "<available_skills>" not in prompt
 
 
@@ -146,7 +157,7 @@ class TestToolSnippets:
 class TestSessionRebuild:
     async def test_rebuild_updates_agent_state(self, tmp_path):
         from pi_agent import Agent, AgentOptions
-        from pi_ai import Model, Models
+        from pi_ai import Models
         from pi_ai.providers.faux import faux_provider
 
         from pi_coding_agent._session import AgentSession
@@ -162,10 +173,12 @@ class TestSessionRebuild:
         assert model is not None
 
         def builder() -> str:
-            return build_system_prompt(BuildSystemPromptOptions(
-                cwd=str(tmp_path),
-                custom_prompt="v2 prompt",
-            ))
+            return build_system_prompt(
+                BuildSystemPromptOptions(
+                    cwd=str(tmp_path),
+                    custom_prompt="v2 prompt",
+                )
+            )
 
         agent = Agent(AgentOptions(system_prompt="v1 prompt", model=model))
         session = AgentSession(

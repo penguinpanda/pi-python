@@ -17,11 +17,9 @@ from ..types import (
     AssistantMessageEvent,
     Context,
     Model,
-    ProviderStreams,
     SimpleStreamOptions,
     StopReason,
     StreamOptions,
-    ToolCall,
     Usage,
     now_ms,
 )
@@ -78,9 +76,7 @@ def _context_payload(context: Context) -> dict[str, Any]:
     }
 
 
-def _append_rewrite_diagnostic(
-    message: AssistantMessage, rewrite: dict[str, Any] | None
-) -> None:
+def _append_rewrite_diagnostic(message: AssistantMessage, rewrite: dict[str, Any] | None) -> None:
     if not rewrite:
         return
     append_assistant_message_diagnostic(
@@ -151,20 +147,35 @@ def _create_event_converter(model: Model):
         if etype == "text_delta":
             block = partial["content"][content_index]
             block["text"] += event.get("delta", "")
-            return {"type": "text_delta", "content_index": content_index, "delta": event.get("delta", ""), "partial": partial}
+            return {
+                "type": "text_delta",
+                "content_index": content_index,
+                "delta": event.get("delta", ""),
+                "partial": partial,
+            }
         if etype == "text_end":
             block = partial["content"][content_index]
             block["text"] = event.get("content", "")
             if event.get("contentSignature"):
                 block["text_signature"] = event["contentSignature"]
-            return {"type": "text_end", "content_index": content_index, "content": block["text"], "partial": partial}
+            return {
+                "type": "text_end",
+                "content_index": content_index,
+                "content": block["text"],
+                "partial": partial,
+            }
         if etype == "thinking_start":
             _set_content_block(partial, content_index, {"type": "thinking", "thinking": ""})
             return {"type": "thinking_start", "content_index": content_index, "partial": partial}
         if etype == "thinking_delta":
             block = partial["content"][content_index]
             block["thinking"] += event.get("delta", "")
-            return {"type": "thinking_delta", "content_index": content_index, "delta": event.get("delta", ""), "partial": partial}
+            return {
+                "type": "thinking_delta",
+                "content_index": content_index,
+                "delta": event.get("delta", ""),
+                "partial": partial,
+            }
         if etype == "thinking_end":
             block = partial["content"][content_index]
             block["thinking"] = event.get("content", "")
@@ -172,7 +183,12 @@ def _create_event_converter(model: Model):
                 block["thinking_signature"] = event["contentSignature"]
             if event.get("redacted"):
                 block["redacted"] = True
-            return {"type": "thinking_end", "content_index": content_index, "content": block["thinking"], "partial": partial}
+            return {
+                "type": "thinking_end",
+                "content_index": content_index,
+                "content": block["thinking"],
+                "partial": partial,
+            }
         if etype == "toolcall_start":
             _set_content_block(
                 partial,
@@ -192,14 +208,23 @@ def _create_event_converter(model: Model):
             tool_json[content_index] = accumulated
             block = partial["content"][content_index]
             block["arguments"] = parse_streaming_json(accumulated)
-            return {"type": "toolcall_delta", "content_index": content_index, "delta": event.get("delta", ""), "partial": partial}
+            return {
+                "type": "toolcall_delta",
+                "content_index": content_index,
+                "delta": event.get("delta", ""),
+                "partial": partial,
+            }
         if etype == "toolcall_end":
             wire_tool = event.get("toolCall") or {}
             block = partial["content"][content_index]
             block["id"] = wire_tool.get("id", block.get("id", ""))
             block["name"] = wire_tool.get("name", block.get("name", ""))
-            block["raw_arguments"] = wire_tool.get("raw_arguments") or tool_json.get(content_index, "")
-            block["arguments"] = wire_tool.get("arguments") or parse_streaming_json(block["raw_arguments"])
+            block["raw_arguments"] = wire_tool.get("raw_arguments") or tool_json.get(
+                content_index, ""
+            )
+            block["arguments"] = wire_tool.get("arguments") or parse_streaming_json(
+                block["raw_arguments"]
+            )
             tool_json.pop(content_index, None)
             return {
                 "type": "toolcall_end",
@@ -254,8 +279,16 @@ def _create_response_error(
             error = None
     except Exception:
         error = None
-    message = error.get("message") if isinstance(error, dict) and isinstance(error.get("message"), str) else None
-    code = error.get("code") if isinstance(error, dict) and isinstance(error.get("code"), str) else None
+    message = (
+        error.get("message")
+        if isinstance(error, dict) and isinstance(error.get("message"), str)
+        else None
+    )
+    code = (
+        error.get("code")
+        if isinstance(error, dict) and isinstance(error.get("code"), str)
+        else None
+    )
     suffix = message or body
     code_suffix = f" ({code})" if code else ""
     return PiMessagesResponseError(
@@ -315,9 +348,7 @@ def _options_payload(opts: StreamOptions) -> dict[str, Any]:
         "temperature": opts.get("temperature"),
         "maxTokens": opts.get("max_tokens"),
         "reasoning": opts.get("reasoning"),
-        "cacheRetention": _resolve_cache_retention(
-            opts.get("cache_retention"), opts.get("env")
-        ),
+        "cacheRetention": _resolve_cache_retention(opts.get("cache_retention"), opts.get("env")),
         "sessionId": opts.get("session_id"),
         "toolChoice": opts.get("tool_choice"),
     }
@@ -369,9 +400,7 @@ def stream(
 
             timeout_ms = opts.get("timeout_ms") or 120000
             async with _AsyncClient(timeout=timeout_ms / 1000) as client:
-                async with client.stream(
-                    "POST", url, headers=headers, json=payload
-                ) as response:
+                async with client.stream("POST", url, headers=headers, json=payload) as response:
                     on_response = opts.get("on_response")
                     if on_response is not None:
                         event = {
@@ -385,16 +414,12 @@ def stream(
                         body = (await response.aread()).decode("utf-8", errors="replace")
                         raise _create_response_error(model, response, body)
 
-                    async for pi_event in read_pi_messages_events(
-                        response.aiter_bytes()
-                    ):
+                    async for pi_event in read_pi_messages_events(response.aiter_bytes()):
                         event = convert_event(pi_event)
                         outer.push(event)
                         if event["type"] in ("done", "error"):
                             return
-            raise RuntimeError(
-                f"{model.provider} stream ended without a terminal event"
-            )
+            raise RuntimeError(f"{model.provider} stream ended without a terminal event")
         except asyncio.CancelledError:
             raise
         except BaseException as exc:

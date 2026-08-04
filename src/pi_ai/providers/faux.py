@@ -54,7 +54,6 @@ from ..types import (
     Message,
     Model,
     ModelCost,
-    StartEvent,
     StopReason,
     StreamOptions,
     TextContent,
@@ -391,12 +390,15 @@ class FauxCore:
         model: Model,
     ) -> AssistantMessage:
         """将消息的 api/provider/model 重写为请求模型。"""
-        return cast(AssistantMessage, {
-            **message,
-            "api": model.api,
-            "provider": model.provider,
-            "model": model.id,
-        })
+        return cast(
+            AssistantMessage,
+            {
+                **message,
+                "api": model.api,
+                "provider": model.provider,
+                "model": model.id,
+            },
+        )
 
     def _with_usage(
         self,
@@ -406,17 +408,20 @@ class FauxCore:
         """基于序列化上下文与输出内容估算 Usage。"""
         prompt_tokens = _estimate_tokens(_serialize_context(context))
         output_tokens = _estimate_tokens(_assistant_content_to_text(message["content"]))
-        return cast(AssistantMessage, {
-            **message,
-            "usage": Usage(
-                input=prompt_tokens,
-                output=output_tokens,
-                cache_read=0,
-                cache_write=0,
-                total_tokens=prompt_tokens + output_tokens,
-                cost={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0},
-            ),
-        })
+        return cast(
+            AssistantMessage,
+            {
+                **message,
+                "usage": Usage(
+                    input=prompt_tokens,
+                    output=output_tokens,
+                    cache_read=0,
+                    cache_write=0,
+                    total_tokens=prompt_tokens + output_tokens,
+                    cost={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0},
+                ),
+            },
+        )
 
     def _chunk_text(self, text: str) -> list[str]:
         """按 token_size 将文本拆分为流式 chunk。"""
@@ -431,11 +436,14 @@ class FauxCore:
 
     def _push_aborted(self, stream: AssistantMessageEventStream, message: AssistantMessage) -> None:
         """以 aborted 结束流。"""
-        aborted = cast(AssistantMessage, {
-            **message,
-            "stop_reason": "aborted",
-            "error_message": "Request was aborted",
-        })
+        aborted = cast(
+            AssistantMessage,
+            {
+                **message,
+                "stop_reason": "aborted",
+                "error_message": "Request was aborted",
+            },
+        )
         stream.push(ErrorEvent(type="error", reason="aborted", error=aborted))
         stream.end(aborted)
 
@@ -460,51 +468,95 @@ class FauxCore:
 
         for content_index, block in enumerate(message["content"]):
             if block["type"] == "text":
-                stream.push(TextStartEvent(
-                    type="text_start", content_index=content_index, partial=_partial(),
-                ))
+                stream.push(
+                    TextStartEvent(
+                        type="text_start",
+                        content_index=content_index,
+                        partial=_partial(),
+                    )
+                )
                 for chunk in self._chunk_text(block["text"]):
                     if signal and signal.is_set():
                         self._push_aborted(stream, message)
                         return
-                    stream.push(TextDeltaEvent(
-                        type="text_delta", content_index=content_index, delta=chunk, partial=_partial(),
-                    ))
+                    stream.push(
+                        TextDeltaEvent(
+                            type="text_delta",
+                            content_index=content_index,
+                            delta=chunk,
+                            partial=_partial(),
+                        )
+                    )
                     await self._delay(chunk)
-                stream.push(TextEndEvent(
-                    type="text_end", content_index=content_index, content=block["text"], partial=_partial(),
-                ))
+                stream.push(
+                    TextEndEvent(
+                        type="text_end",
+                        content_index=content_index,
+                        content=block["text"],
+                        partial=_partial(),
+                    )
+                )
             elif block["type"] == "thinking":
-                stream.push(ThinkingStartEvent(
-                    type="thinking_start", content_index=content_index, partial=_partial(),
-                ))
+                stream.push(
+                    ThinkingStartEvent(
+                        type="thinking_start",
+                        content_index=content_index,
+                        partial=_partial(),
+                    )
+                )
                 for chunk in self._chunk_text(block["thinking"]):
                     if signal and signal.is_set():
                         self._push_aborted(stream, message)
                         return
-                    stream.push(ThinkingDeltaEvent(
-                        type="thinking_delta", content_index=content_index, delta=chunk, partial=_partial(),
-                    ))
+                    stream.push(
+                        ThinkingDeltaEvent(
+                            type="thinking_delta",
+                            content_index=content_index,
+                            delta=chunk,
+                            partial=_partial(),
+                        )
+                    )
                     await self._delay(chunk)
-                stream.push(ThinkingEndEvent(
-                    type="thinking_end", content_index=content_index, content=block["thinking"], partial=_partial(),
-                ))
+                stream.push(
+                    ThinkingEndEvent(
+                        type="thinking_end",
+                        content_index=content_index,
+                        content=block["thinking"],
+                        partial=_partial(),
+                    )
+                )
             elif block["type"] == "toolCall":
-                stream.push(ToolCallStartEvent(
-                    type="toolcall_start", content_index=content_index, partial=_partial(),
-                ))
-                args_json = block.get("raw_arguments") or json.dumps(block["arguments"] or {}, ensure_ascii=False)
+                stream.push(
+                    ToolCallStartEvent(
+                        type="toolcall_start",
+                        content_index=content_index,
+                        partial=_partial(),
+                    )
+                )
+                args_json = block.get("raw_arguments") or json.dumps(
+                    block["arguments"] or {}, ensure_ascii=False
+                )
                 for chunk in self._chunk_text(args_json):
                     if signal and signal.is_set():
                         self._push_aborted(stream, message)
                         return
-                    stream.push(ToolCallDeltaEvent(
-                        type="toolcall_delta", content_index=content_index, delta=chunk, partial=_partial(),
-                    ))
+                    stream.push(
+                        ToolCallDeltaEvent(
+                            type="toolcall_delta",
+                            content_index=content_index,
+                            delta=chunk,
+                            partial=_partial(),
+                        )
+                    )
                     await self._delay(chunk)
-                stream.push(ToolCallEndEvent(
-                    type="toolcall_end", content_index=content_index, tool_call=cast(ToolCall, block), partial=_partial(),
-                ))
+                stream.push(
+                    ToolCallEndEvent(
+                        type="toolcall_end",
+                        content_index=content_index,
+                        tool_call=cast(ToolCall, block),
+                        partial=_partial(),
+                    )
+                )
 
         if stop_reason in ("error", "aborted"):
             stream.push(ErrorEvent(type="error", reason=stop_reason, error=message))

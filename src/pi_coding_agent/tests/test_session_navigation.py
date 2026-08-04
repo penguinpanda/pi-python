@@ -18,18 +18,22 @@ from pi_coding_agent.auth_storage import AuthStorage
 def _make_session(tmp_path: Path, manager: SessionManager) -> AgentSession:
     models = Models(credentials=AuthStorage.in_memory())
     core = faux_provider()
-    core.set_responses([
-        faux_assistant_message("## Goal\nSummary of the other branch"),
-        faux_assistant_message("ok"),
-    ])
+    core.set_responses(
+        [
+            faux_assistant_message("## Goal\nSummary of the other branch"),
+            faux_assistant_message("ok"),
+        ]
+    )
     models.add_provider(core.provider)
     model = models.get_model("faux", "faux-1")
     assert model is not None
-    agent = Agent(AgentOptions(
-        system_prompt="You are a helpful coding assistant.",
-        model=model,
-        stream_fn=models.stream,
-    ))
+    agent = Agent(
+        AgentOptions(
+            system_prompt="You are a helpful coding assistant.",
+            model=model,
+            stream_fn=models.stream,
+        )
+    )
     return AgentSession(
         agent=agent,
         session_manager=manager,
@@ -64,7 +68,7 @@ async def test_navigate_to_generates_branch_summary(tmp_path):
 async def test_navigate_to_without_summary(tmp_path):
     manager = SessionManager.in_memory(cwd=str(tmp_path))
     e1 = await manager.append_message(UserMessage(role="user", content="base"))
-    e2 = await manager.append_message(UserMessage(role="user", content="tail"))
+    await manager.append_message(UserMessage(role="user", content="tail"))
 
     session = _make_session(tmp_path, manager)
     try:

@@ -4,9 +4,7 @@ import re
 
 from pi_ai.utils.uuid import uuidv7
 
-_UUID7_RE = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-)
+_UUID7_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 
 
 def test_uuidv7_format_and_version_bits():

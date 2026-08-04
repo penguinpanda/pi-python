@@ -25,6 +25,7 @@ from pi_ai.provider import Provider, create_provider
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_model(
     model_id: str = "test-model",
     provider: str = "test-provider",
@@ -54,9 +55,11 @@ def _make_provider(api_kind: str = "completions", base_url: str | None = None) -
 
 
 def _context() -> Context:
-    return Context(messages=[
-        {"role": "user", "content": "Hi"}  # type: ignore[typeddict-unknown-key]
-    ])
+    return Context(
+        messages=[
+            {"role": "user", "content": "Hi"}  # type: ignore[typeddict-unknown-key]
+        ]
+    )
 
 
 def _done_message(model: Model) -> AssistantMessage:
@@ -96,6 +99,7 @@ def _isolated_registry():
 # ---------------------------------------------------------------------------
 # Provider.stream() 注册表分发
 # ---------------------------------------------------------------------------
+
 
 class TestProviderStreamDispatch:
     """Provider.stream() 按 model.api 从注册表分发。"""
@@ -207,6 +211,7 @@ class TestProviderStreamDispatch:
 # Provider.complete()
 # ---------------------------------------------------------------------------
 
+
 class TestProviderComplete:
     """Provider.complete() — non-streaming convenience method."""
 
@@ -274,6 +279,7 @@ class TestProviderComplete:
 # create_provider
 # ---------------------------------------------------------------------------
 
+
 class TestCreateProvider:
     """Factory function create_provider()."""
 
@@ -288,7 +294,10 @@ class TestCreateProvider:
     def test_custom_api_kind_and_base_url(self):
         auth = EnvApiKeyAuth(display_name="Test", env_vars=["KEY"])
         p = create_provider(
-            "p2", "Provider 2", auth, [],
+            "p2",
+            "Provider 2",
+            auth,
+            [],
             api_kind="responses",
             base_url="https://custom.api.com/v1",
         )
@@ -300,6 +309,7 @@ class TestCreateProvider:
 # Provider._stream_fn（自定义流函数）
 # ---------------------------------------------------------------------------
 
+
 class TestProviderStreamFn:
     """设置 _stream_fn 时跳过 API Key 解析与注册表分发。"""
 
@@ -308,7 +318,10 @@ class TestProviderStreamFn:
             return AssistantMessageEventStream()
 
         p = create_provider(
-            "custom", "Custom", None, [_make_model(provider="custom")],
+            "custom",
+            "Custom",
+            None,
+            [_make_model(provider="custom")],
             stream_fn=stream_fn,
         )
         assert p._stream_fn is stream_fn
@@ -319,14 +332,20 @@ class TestProviderStreamFn:
 
         async def stream_fn(model, context, options):
             stream = AssistantMessageEventStream()
-            stream.push({"type": "done", "reason": "stop", "message": AssistantMessage(
-                role="assistant",
-                content=[{"type": "text", "text": "faux"}],
-                api=model.api,
-                provider=model.provider,
-                model=model.id,
-                stop_reason="stop",
-            )})
+            stream.push(
+                {
+                    "type": "done",
+                    "reason": "stop",
+                    "message": AssistantMessage(
+                        role="assistant",
+                        content=[{"type": "text", "text": "faux"}],
+                        api=model.api,
+                        provider=model.provider,
+                        model=model.id,
+                        stop_reason="stop",
+                    ),
+                }
+            )
             stream.end()
             return stream
 
@@ -349,11 +368,20 @@ class TestProviderStreamFn:
             received["context"] = context
             received["options"] = options
             stream = AssistantMessageEventStream()
-            stream.push({"type": "done", "reason": "stop", "message": AssistantMessage(
-                role="assistant", content=[], api=model.api,
-                provider=model.provider, model=model.id,
-                stop_reason="stop",
-            )})
+            stream.push(
+                {
+                    "type": "done",
+                    "reason": "stop",
+                    "message": AssistantMessage(
+                        role="assistant",
+                        content=[],
+                        api=model.api,
+                        provider=model.provider,
+                        model=model.id,
+                        stop_reason="stop",
+                    ),
+                }
+            )
             stream.end()
             return stream
 

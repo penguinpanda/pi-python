@@ -37,9 +37,7 @@ def _build_params(model: ImagesModel, context: ImagesContext) -> dict[str, Any]:
             content.append(
                 {
                     "type": "image_url",
-                    "image_url": {
-                        "url": f"data:{item['mime_type']};base64,{item['data']}"
-                    },
+                    "image_url": {"url": f"data:{item['mime_type']};base64,{item['data']}"},
                 }
             )
     modalities = ["image", "text"] if "text" in model.output else ["image"]
@@ -164,9 +162,7 @@ async def generate_images(
         return output
     except Exception as exc:
         output["stop_reason"] = (
-            "aborted"
-            if opts.get("signal") is not None and opts["signal"].is_set()
-            else "error"
+            "aborted" if opts.get("signal") is not None and opts["signal"].is_set() else "error"
         )
         output["error_message"] = str(exc)
         return output

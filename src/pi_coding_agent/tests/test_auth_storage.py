@@ -10,7 +10,6 @@ from pi_ai.auth import ApiKeyCredential
 from pi_coding_agent.auth_storage import (
     AuthStorage,
     FileAuthStorageBackend,
-    InMemoryAuthStorageBackend,
     read_stored_credential,
 )
 
@@ -18,6 +17,7 @@ from pi_coding_agent.auth_storage import (
 class TestInMemoryAuthStorage:
     async def test_modify_read_delete(self):
         store = AuthStorage.in_memory()
+
         async def _set(_current):
             return ApiKeyCredential(key="sk-test")
 
@@ -36,6 +36,7 @@ class TestInMemoryAuthStorage:
 
     async def test_modify_with_none_result_keeps_current(self):
         store = AuthStorage.in_memory()
+
         async def _set(_current):
             return ApiKeyCredential(key="sk-a")
 
@@ -64,6 +65,7 @@ class TestFileAuthStorage:
 
     async def test_persists_across_instances(self, tmp_path):
         store1 = self._store(tmp_path)
+
         async def _set(_current):
             return ApiKeyCredential(key="sk-file")
 
@@ -77,6 +79,7 @@ class TestFileAuthStorage:
 
     async def test_file_created_on_write(self, tmp_path):
         store = self._store(tmp_path)
+
         async def _set(_current):
             return ApiKeyCredential(key="sk-lock")
 
@@ -87,6 +90,7 @@ class TestFileAuthStorage:
 
     async def test_delete_removes_entry(self, tmp_path):
         store = self._store(tmp_path)
+
         async def _set(_current):
             return ApiKeyCredential(key="sk-del")
 
@@ -96,6 +100,7 @@ class TestFileAuthStorage:
 
     async def test_concurrent_modify_serialized(self, tmp_path):
         store = self._store(tmp_path)
+
         async def _make(key: str):
             return ApiKeyCredential(key=key)
 

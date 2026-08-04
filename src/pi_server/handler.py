@@ -89,24 +89,30 @@ def _content_to_protocol(blocks: Any) -> list[dict]:
         if block_type == "text":
             result.append({"type": "text", "text": block.get("text", "")})
         elif block_type == "image":
-            result.append({
-                "type": "image",
-                "data": block.get("data") or block.get("url") or "",
-                "mimeType": block.get("mimeType") or block.get("mime_type") or "image/png",
-            })
+            result.append(
+                {
+                    "type": "image",
+                    "data": block.get("data") or block.get("url") or "",
+                    "mimeType": block.get("mimeType") or block.get("mime_type") or "image/png",
+                }
+            )
         elif block_type == "thinking":
-            result.append({
-                "type": "thinking",
-                "thinking": block.get("thinking", ""),
-                **({"redacted": True} if block.get("redacted") else {}),
-            })
+            result.append(
+                {
+                    "type": "thinking",
+                    "thinking": block.get("thinking", ""),
+                    **({"redacted": True} if block.get("redacted") else {}),
+                }
+            )
         elif block_type == "toolCall":
-            result.append({
-                "type": "tool_call",
-                "toolCallId": block.get("id", ""),
-                "toolName": block.get("name", ""),
-                "input": block.get("arguments"),
-            })
+            result.append(
+                {
+                    "type": "tool_call",
+                    "toolCallId": block.get("id", ""),
+                    "toolName": block.get("name", ""),
+                    "input": block.get("arguments"),
+                }
+            )
     return result
 
 
@@ -119,11 +125,7 @@ def _usage_to_protocol(usage: Any) -> Usage | None:
         output=int(usage.get("output") or 0),
         cacheRead=int(usage.get("cache_read") or 0),
         cacheWrite=int(usage.get("cache_write") or 0),
-        reasoning=(
-            int(usage["reasoning"])
-            if usage.get("reasoning") is not None
-            else None
-        ),
+        reasoning=(int(usage["reasoning"]) if usage.get("reasoning") is not None else None),
         totalTokens=int(usage.get("total_tokens") or 0),
         cost=UsageCost(
             input=float(cost.get("input") or 0),
@@ -243,7 +245,6 @@ class ServerSession:
 
     def snapshot(self) -> SessionSnapshot:
         session = self.session
-        model = session.model
         transcript = [
             item
             for message in session.get_messages()
@@ -300,9 +301,7 @@ class PiServer:
             return [
                 ServerHelloError(
                     type="hello_error",
-                    error=ProtocolError(
-                        code="invalid_request", message=f"Invalid message: {exc}"
-                    ),
+                    error=ProtocolError(code="invalid_request", message=f"Invalid message: {exc}"),
                 ).model_dump(mode="json")
             ]
         return await self.handle_message(message)
@@ -361,9 +360,7 @@ class PiServer:
                 type="response",
                 id=envelope.id,
                 ok=False,
-                error=ProtocolError(
-                    code=error.code, message=error.message, details=error.details
-                ),
+                error=ProtocolError(code=error.code, message=error.message, details=error.details),
             ).model_dump(mode="json")
             events: list[dict] = []
         return [response, *events]
@@ -420,11 +417,13 @@ class PiServer:
         if not available:
             raise ProtocolException("invalid_request", "No available models")
         model = available[0]
-        agent = Agent(AgentOptions(
-            system_prompt="You are a helpful coding assistant.",
-            model=model,
-            stream_fn=runtime.stream,
-        ))
+        agent = Agent(
+            AgentOptions(
+                system_prompt="You are a helpful coding assistant.",
+                model=model,
+                stream_fn=runtime.stream,
+            )
+        )
         from pi_coding_agent._session import AgentSession
         from pi_coding_agent._session_manager import SessionManager
 
@@ -446,7 +445,9 @@ class PiServer:
         server_session = self._get(command.sessionId)
         server_session.attached = True
         snapshot = server_session.snapshot()
-        return AttachResult(command="attach", session=snapshot), self._session_snapshot_events(snapshot)
+        return AttachResult(command="attach", session=snapshot), self._session_snapshot_events(
+            snapshot
+        )
 
     async def _cmd_detach(self, command: DetachCommand):
         server_session = self._get(command.sessionId)
@@ -458,19 +459,25 @@ class PiServer:
         if server_session.locked:
             raise ProtocolException("session_locked", "Session is locked")
         snapshot = await server_session.prompt(command.text)
-        return PromptResult(command="prompt", session=snapshot), self._session_snapshot_events(snapshot)
+        return PromptResult(command="prompt", session=snapshot), self._session_snapshot_events(
+            snapshot
+        )
 
     async def _cmd_steer(self, command: SteerCommand):
         server_session = self._get(command.sessionId)
         server_session.session.steer(command.text)
         snapshot = server_session.snapshot()
-        return SteerResult(command="steer", session=snapshot), self._session_snapshot_events(snapshot)
+        return SteerResult(command="steer", session=snapshot), self._session_snapshot_events(
+            snapshot
+        )
 
     async def _cmd_abort(self, command: AbortCommand):
         server_session = self._get(command.sessionId)
         await server_session.session.abort()
         snapshot = server_session.snapshot()
-        return AbortResult(command="abort", session=snapshot), self._session_snapshot_events(snapshot)
+        return AbortResult(command="abort", session=snapshot), self._session_snapshot_events(
+            snapshot
+        )
 
     async def _cmd_set_model(self, command: SetModelCommand):
         server_session = self._get(command.sessionId)
@@ -484,13 +491,17 @@ class PiServer:
             )
         await server_session.session.set_model(model)
         snapshot = server_session.snapshot()
-        return SetModelResult(command="set_model", session=snapshot), self._session_snapshot_events(snapshot)
+        return SetModelResult(command="set_model", session=snapshot), self._session_snapshot_events(
+            snapshot
+        )
 
     async def _cmd_set_thinking(self, command: SetThinkingCommand):
         server_session = self._get(command.sessionId)
         server_session.session.set_thinking_level(command.thinkingLevel)
         snapshot = server_session.snapshot()
-        return SetThinkingResult(command="set_thinking", session=snapshot), self._session_snapshot_events(snapshot)
+        return SetThinkingResult(
+            command="set_thinking", session=snapshot
+        ), self._session_snapshot_events(snapshot)
 
     # ------------------------------------------------------------------
     # 快照
@@ -517,9 +528,7 @@ class PiServer:
         return [
             EventEnvelope(
                 type="event",
-                event=ServerSnapshotEvent(
-                    type="server_snapshot", snapshot=self.server_snapshot()
-                ),
+                event=ServerSnapshotEvent(type="server_snapshot", snapshot=self.server_snapshot()),
             ).model_dump(mode="json"),
             EventEnvelope(
                 type="event",

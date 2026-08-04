@@ -33,9 +33,7 @@ class RuntimeCredentials:
         return await self._store.read(provider_id)
 
     async def list(self) -> list[CredentialInfo]:
-        entries = {
-            info["provider_id"]: info for info in await self._store.list()
-        }
+        entries = {info["provider_id"]: info for info in await self._store.list()}
         for provider_id in self._overrides:
             entries[provider_id] = {"provider_id": provider_id, "type": "api_key"}
         return list(entries.values())

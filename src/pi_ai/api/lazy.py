@@ -127,9 +127,7 @@ def lazy_api(load: Callable[[], Awaitable[ProviderStreams]]) -> ProviderStreams:
             context: Context,
             options: SimpleStreamOptions | None = None,
         ) -> AssistantMessageEventStream:
-            return lazy_stream(
-                model, _call_api("streamSimple", load, model, context, options)
-            )
+            return lazy_stream(model, _call_api("streamSimple", load, model, context, options))
 
     return _LazyStreams()  # type: ignore[return-value]
 

@@ -7,8 +7,9 @@ from ..providers import (
     qwen_provider,
 )
 
+
 def create_default_models() -> Models:
-    """ 创建一个预加载了OpenAI、DeepSeek、Ollama与Faux的Models实例。 """
+    """创建一个预加载了OpenAI、DeepSeek、Ollama与Faux的Models实例。"""
     models = Models()
     models.add_provider(openai_provider())
     models.add_provider(deepseek_provider())

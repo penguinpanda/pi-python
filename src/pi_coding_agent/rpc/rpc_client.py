@@ -290,9 +290,7 @@ class RpcClient:
         return self._get_data(await self.send("get_session_stats"))
 
     async def export_html(self, output_path: str | None = None) -> dict:
-        return self._get_data(
-            await self.send("export_html", {"outputPath": output_path})
-        )
+        return self._get_data(await self.send("export_html", {"outputPath": output_path}))
 
     async def switch_session(self, session_path: str) -> dict:
         return self._get_data(await self.send("switch_session", {"sessionPath": session_path}))

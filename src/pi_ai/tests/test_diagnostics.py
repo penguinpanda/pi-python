@@ -95,13 +95,17 @@ class TestCreateAppend:
         assert "details" not in diag
 
     def test_create_with_details(self):
-        diag = create_assistant_message_diagnostic(
-            "x", details={"attempts": 3, "max_retries": 3}
-        )
+        diag = create_assistant_message_diagnostic("x", details={"attempts": 3, "max_retries": 3})
         assert diag["details"] == {"attempts": 3, "max_retries": 3}
 
     def test_append_keeps_previous(self):
-        msg: AssistantMessage = {"role": "assistant", "content": [], "api": "a", "provider": "p", "model": "m"}
+        msg: AssistantMessage = {
+            "role": "assistant",
+            "content": [],
+            "api": "a",
+            "provider": "p",
+            "model": "m",
+        }
         append_assistant_message_diagnostic(msg, {"type": "one", "timestamp": 1})
         append_assistant_message_diagnostic(msg, {"type": "two", "timestamp": 2})
         assert [d["type"] for d in msg["diagnostics"]] == ["one", "two"]

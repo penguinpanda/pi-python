@@ -83,9 +83,7 @@ class PostgresSessionStore:
             max_size=self._max_size,
         )
         if self._schema:
-            await self._pool.execute(
-                f'CREATE SCHEMA IF NOT EXISTS "{self._schema}"'
-            )
+            await self._pool.execute(f'CREATE SCHEMA IF NOT EXISTS "{self._schema}"')
 
     async def close(self) -> None:
         if self._pool is not None:
@@ -102,9 +100,7 @@ class PostgresSessionStore:
         """应用迁移（schema 隔离时在独立 schema 内执行）。"""
         if self._schema:
             async with self.pool.acquire() as conn:
-                await conn.execute(
-                    f'SET search_path TO "{self._schema}", public'
-                )
+                await conn.execute(f'SET search_path TO "{self._schema}", public')
                 return await apply_migrations(conn)
         async with self.pool.acquire() as conn:
             return await apply_migrations(conn)
@@ -165,9 +161,7 @@ class PostgresSessionStore:
                     cwd,
                 )
             else:
-                rows = await conn.fetch(
-                    "SELECT * FROM sessions ORDER BY created_at DESC"
-                )
+                rows = await conn.fetch("SELECT * FROM sessions ORDER BY created_at DESC")
             return [SessionMetadata.from_row(row) for row in rows]
         finally:
             await self.pool.release(conn)
@@ -175,9 +169,7 @@ class PostgresSessionStore:
     async def get_session(self, session_id: str) -> SessionMetadata | None:
         conn = await self._acquire()
         try:
-            row = await conn.fetchrow(
-                "SELECT * FROM sessions WHERE id = $1", session_id
-            )
+            row = await conn.fetchrow("SELECT * FROM sessions WHERE id = $1", session_id)
             return SessionMetadata.from_row(row) if row is not None else None
         finally:
             await self.pool.release(conn)
@@ -197,15 +189,11 @@ class PostgresSessionStore:
                         f"DELETE FROM {table} WHERE session_id = $1",
                         session_id,
                     )
-                await conn.execute(
-                    "DELETE FROM sessions WHERE id = $1", session_id
-                )
+                await conn.execute("DELETE FROM sessions WHERE id = $1", session_id)
         finally:
             await self.pool.release(conn)
 
-    async def set_leaf_id(
-        self, session_id: str, leaf_id: str | None
-    ) -> str | None:
+    async def set_leaf_id(self, session_id: str, leaf_id: str | None) -> str | None:
         conn = await self._acquire()
         try:
             await conn.execute(
@@ -282,9 +270,7 @@ class PostgresSessionStore:
         finally:
             await self.pool.release(conn)
 
-    async def get_entries(
-        self, session_id: str, *, since_seq: int | None = None
-    ) -> list[dict]:
+    async def get_entries(self, session_id: str, *, since_seq: int | None = None) -> list[dict]:
         conn = await self._acquire()
         try:
             if since_seq is not None:
@@ -309,9 +295,7 @@ class PostgresSessionStore:
         finally:
             await self.pool.release(conn)
 
-    async def get_branch(
-        self, session_id: str, branch_id: str | None = None
-    ) -> list[dict]:
+    async def get_branch(self, session_id: str, branch_id: str | None = None) -> list[dict]:
         branch = branch_id or session_id
         conn = await self._acquire()
         try:
@@ -333,9 +317,7 @@ class PostgresSessionStore:
     # search
     # ------------------------------------------------------------------
 
-    async def search(
-        self, query: str, *, limit: int = 50
-    ) -> list[tuple[str, float]]:
+    async def search(self, query: str, *, limit: int = 50) -> list[tuple[str, float]]:
         """全文/模糊搜索会话（tsvector + pg_trgm），返回 [(session_id, score)]。"""
         conn = await self._acquire()
         try:

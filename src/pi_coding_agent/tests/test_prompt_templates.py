@@ -10,7 +10,9 @@ from pi_coding_agent.prompt_templates import (
 )
 
 
-def _write_template(path: Path, body: str, description: str | None = None, hint: str | None = None) -> Path:
+def _write_template(
+    path: Path, body: str, description: str | None = None, hint: str | None = None
+) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = ["---"]
     if description is not None:

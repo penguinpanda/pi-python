@@ -73,11 +73,14 @@ def _content_text(content: Any, default: str = "") -> str:
         return content
     if not isinstance(content, list):
         return default
-    return "".join(
-        block.get("text", "")
-        for block in content
-        if isinstance(block, dict) and block.get("type") == "text"
-    ) or default
+    return (
+        "".join(
+            block.get("text", "")
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+        or default
+    )
 
 
 def truncate_for_summary(text: str, max_chars: int) -> str:
@@ -123,13 +126,19 @@ def serialize_conversation(messages: list[AgentMessage]) -> str:
         elif role == "toolResult":
             content = _content_text(message.get("content"), "")
             if content:
-                parts.append(f"[Tool result]: {truncate_for_summary(content, TOOL_RESULT_MAX_CHARS)}")
+                parts.append(
+                    f"[Tool result]: {truncate_for_summary(content, TOOL_RESULT_MAX_CHARS)}"
+                )
     return "\n\n".join(parts)
 
 
 def get_message_from_entry(entry: SessionTreeEntry) -> AgentMessage | None:
     """把会话条目投影为 AgentMessage（对齐 TS getMessageFromEntry）。"""
-    from .session.session import _create_branch_summary_message, _create_compaction_summary_message, _create_custom_message
+    from .session.session import (
+        _create_branch_summary_message,
+        _create_compaction_summary_message,
+        _create_custom_message,
+    )
 
     entry_type = entry["type"]
     if entry_type == "message":
@@ -188,7 +197,9 @@ def estimate_tokens(message: AgentMessage) -> int:
             elif block_type == "thinking":
                 chars += len(block.get("thinking", ""))
             elif block_type == "toolCall":
-                chars += len(block.get("name", "")) + len(safe_json_stringify(block.get("arguments") or {}))
+                chars += len(block.get("name", "")) + len(
+                    safe_json_stringify(block.get("arguments") or {})
+                )
         return math.ceil(chars / 4)
     if role in ("custom", "toolResult"):
         return math.ceil(estimate_text_and_image_content_chars(message.get("content") or "") / 4)

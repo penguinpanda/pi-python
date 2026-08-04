@@ -27,6 +27,7 @@ from pi_coding_agent.auth_storage import AuthStorage
 from pi_coding_agent.model_runtime import ModelRuntime
 from pi_evals import PiCodingAgentHarness
 
+
 async def main():
     store = AuthStorage.in_memory()
     models = Models(credentials=store)
@@ -41,6 +42,7 @@ async def main():
     )
     result = await harness.run("What's the capital of France?")
     print(result.output, result.errors)
+
 
 asyncio.run(main())
 ```

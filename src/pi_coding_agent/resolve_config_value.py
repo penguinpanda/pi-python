@@ -2,7 +2,7 @@
 
 用于 models.json / auth.json 中的 API Key、header 等值：
 
-- `!command`       执行 shell 命令并取 stdout（进程内缓存）；
+- `!command`       执行命令并取 stdout（进程内缓存；无 shell 解释，不支持管道/重定向）；
 - `$ENV_VAR` / `${ENV_VAR}`  引用环境变量（可出现在任意位置）；
 - `$$` / `$!`      转义字面量 `$` / `!`（非命令值）；
 - 其它             原样作为字面量。
@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import subprocess
 from typing import TypedDict
 
@@ -107,9 +108,7 @@ def _get_template_env_var_names(parts: list[TemplatePart]) -> list[str]:
     return names
 
 
-def _resolve_template(
-    parts: list[TemplatePart], env: dict[str, str] | None = None
-) -> str | None:
+def _resolve_template(parts: list[TemplatePart], env: dict[str, str] | None = None) -> str | None:
     resolved = ""
     for part in parts:
         if part["type"] == "literal":
@@ -155,19 +154,25 @@ def is_command_config_value(config: str) -> bool:
     return config.startswith("!")
 
 
-def is_config_value_configured(
-    config: str, env: dict[str, str] | None = None
-) -> bool:
+def is_config_value_configured(config: str, env: dict[str, str] | None = None) -> bool:
     return not get_missing_config_value_env_var_names(config, env)
 
 
 def _execute_command_uncached(command_config: str) -> str | None:
-    """执行 `!command` 并返回 stdout（去首尾空白）。"""
+    """执行 `!command` 并返回 stdout（去首尾空白）。
+
+    参数经 shlex 拆分后直接执行，不经过 shell，
+    因此 `|`、`&&`、`;` 等 shell 元字符不会被解释，
+    避免配置值被当作任意 shell 脚本执行（命令注入边界）。
+    配置来源仍应视为可信输入，命令受执行环境权限约束。
+    """
     command = command_config[1:]
+    parts = shlex.split(command, posix=(os.name != "nt"))
+    if not parts:
+        return None
     try:
         result = subprocess.run(
-            command,
-            shell=True,
+            parts,
             capture_output=True,
             text=True,
             timeout=10,
@@ -187,9 +192,7 @@ def _execute_command(command_config: str) -> str | None:
     return result
 
 
-def resolve_config_value(
-    config: str, env: dict[str, str] | None = None
-) -> str | None:
+def resolve_config_value(config: str, env: dict[str, str] | None = None) -> str | None:
     """解析配置值；无法解析（命令失败 / 环境变量缺失）时返回 None。"""
     is_command, parts = _parse_config_value_reference(config)
     if is_command:
@@ -197,9 +200,7 @@ def resolve_config_value(
     return _resolve_template(parts, env)
 
 
-def resolve_config_value_uncached(
-    config: str, env: dict[str, str] | None = None
-) -> str | None:
+def resolve_config_value_uncached(config: str, env: dict[str, str] | None = None) -> str | None:
     """同 resolve_config_value，但命令结果不缓存（供或错解析使用）。"""
     is_command, parts = _parse_config_value_reference(config)
     if is_command:
@@ -253,9 +254,7 @@ def resolve_headers_or_throw(
         return None
     resolved: dict[str, str] = {}
     for key, value in headers.items():
-        resolved[key] = resolve_config_value_or_throw(
-            value, f'{description} header "{key}"', env
-        )
+        resolved[key] = resolve_config_value_or_throw(value, f'{description} header "{key}"', env)
     return resolved or None
 
 

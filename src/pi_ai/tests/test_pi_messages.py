@@ -81,7 +81,9 @@ async def test_stream_full_sequence(monkeypatch):
         body = json.loads(request.content)
         assert body["model"] == "router-model"
         assert body["options"]["sessionId"] == "s-1"
-        return httpx.Response(200, content=_sse(*events), headers={"content-type": "text/event-stream"})
+        return httpx.Response(
+            200, content=_sse(*events), headers={"content-type": "text/event-stream"}
+        )
 
     monkeypatch.setattr(
         "pi_ai.api.pi_messages._AsyncClient",
@@ -116,7 +118,12 @@ async def test_stream_toolcall_streaming_json(monkeypatch):
         {
             "type": "toolcall_end",
             "contentIndex": 0,
-            "toolCall": {"id": "call_1", "name": "search", "arguments": {"query": "x"}, "raw_arguments": '{"query": "x"}'},
+            "toolCall": {
+                "id": "call_1",
+                "name": "search",
+                "arguments": {"query": "x"},
+                "raw_arguments": '{"query": "x"}',
+            },
         },
         {"type": "done", "reason": "toolUse", "usage": None},
     ]

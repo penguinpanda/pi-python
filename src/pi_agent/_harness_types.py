@@ -7,10 +7,10 @@ hook 结果与 AgentHarnessOptions。
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Literal, TypedDict
 
-from pi_ai.types import ImageContent, Model, TextContent, Usage
+from pi_ai.types import ImageContent, Model, Usage
 
 from ._types import AgentEvent, AgentMessage, AgentTool, QueueMode, StreamFn, ThinkingLevel
 
@@ -54,6 +54,7 @@ class AgentHarnessError(Exception):
 @dataclass(slots=True)
 class Skill:
     """从 SKILL.md 或应用提供的技能。"""
+
     name: str
     description: str = ""
     content: str = ""
@@ -64,6 +65,7 @@ class Skill:
 @dataclass(slots=True)
 class PromptTemplate:
     """显式调用时可格式化的提示模板。"""
+
     name: str
     content: str = ""
     description: str | None = None
@@ -72,6 +74,7 @@ class PromptTemplate:
 @dataclass(slots=True)
 class AgentHarnessResources:
     """提供给显式调用方法与 system-prompt 回调的资源。"""
+
     skills: list[Skill] | None = None
     prompt_templates: list[PromptTemplate] | None = None
 
@@ -92,6 +95,7 @@ class AgentHarnessResources:
 @dataclass(slots=True)
 class AgentHarnessStreamOptions:
     """harness 持有的 provider 请求选项，按 turn 快照。"""
+
     transport: str | None = None
     timeout_ms: int | None = None
     max_retries: int | None = None
@@ -118,6 +122,7 @@ _MISSING = object()
 @dataclass(slots=True)
 class AgentHarnessStreamOptionsPatch:
     """流选项补丁。字段默认 _MISSING 表示"未提供"；None 表示删除。"""
+
     transport: Any = _MISSING
     timeout_ms: Any = _MISSING
     max_retries: Any = _MISSING
@@ -411,6 +416,7 @@ AgentHarnessSystemPrompt = str | Callable[[dict], str]
 @dataclass(slots=True)
 class AgentHarnessOptions:
     """AgentHarness 构造选项（Phase 2 骨架）。"""
+
     model: Model
     session: Any | None = None  # 最小 Session；None 时自动创建内存会话
     system_prompt: AgentHarnessSystemPrompt | None = None

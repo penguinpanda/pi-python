@@ -25,7 +25,6 @@ from .types import (
     CustomEntry,
     CustomMessageEntry,
     LabelEntry,
-    LeafEntry,
     MessageEntry,
     ModelChangeEntry,
     SessionContext,
@@ -50,7 +49,10 @@ class SessionContextBuildOptions:
     def __init__(
         self,
         entry_transforms: list[ContextEntryTransform] | None = None,
-        entry_projectors: dict[str, Callable[[CustomEntry, int, list[SessionTreeEntry]], list[AgentMessage]]] | None = None,
+        entry_projectors: dict[
+            str, Callable[[CustomEntry, int, list[SessionTreeEntry]], list[AgentMessage]]
+        ]
+        | None = None,
     ) -> None:
         self.entry_transforms = list(entry_transforms) if entry_transforms else []
         self.entry_projectors = dict(entry_projectors) if entry_projectors else {}
@@ -127,7 +129,7 @@ def build_context_entries(
     options: SessionContextBuildOptions | None = None,
 ) -> list[SessionTreeEntry]:
     entries = default_context_entry_transform(path_entries)
-    for transform in (options.entry_transforms if options else []):
+    for transform in options.entry_transforms if options else []:
         entries = list(transform(entries))
     return entries
 
@@ -389,9 +391,7 @@ class Session:
     ) -> list[SessionTreeEntry]:
         return await self._storage.get_entries(options)
 
-    async def get_branch(
-        self, from_id: str | None = None
-    ) -> list[SessionTreeEntry]:
+    async def get_branch(self, from_id: str | None = None) -> list[SessionTreeEntry]:
         """从根到指定节点（默认 leaf）的路径，到最近 compaction 起点为止。"""
         state = await self._load()
         return get_path_to_root_or_compaction(state["entries"], from_id or state["leafId"])
@@ -446,41 +446,49 @@ class Session:
         return entry["id"]
 
     async def append_message(self, message: AgentMessage) -> str:
-        return await self._append_typed({
-            "type": "message",
-            "id": await self._create_entry_id(),
-            "parentId": await self.get_leaf_id(),
-            "timestamp": _timestamp_now(),
-            "message": message,
-        })
+        return await self._append_typed(
+            {
+                "type": "message",
+                "id": await self._create_entry_id(),
+                "parentId": await self.get_leaf_id(),
+                "timestamp": _timestamp_now(),
+                "message": message,
+            }
+        )
 
     async def append_thinking_level_change(self, thinking_level: str) -> str:
-        return await self._append_typed({
-            "type": "thinking_level_change",
-            "id": await self._create_entry_id(),
-            "parentId": await self.get_leaf_id(),
-            "timestamp": _timestamp_now(),
-            "thinkingLevel": thinking_level,
-        })
+        return await self._append_typed(
+            {
+                "type": "thinking_level_change",
+                "id": await self._create_entry_id(),
+                "parentId": await self.get_leaf_id(),
+                "timestamp": _timestamp_now(),
+                "thinkingLevel": thinking_level,
+            }
+        )
 
     async def append_model_change(self, provider: str, model_id: str) -> str:
-        return await self._append_typed({
-            "type": "model_change",
-            "id": await self._create_entry_id(),
-            "parentId": await self.get_leaf_id(),
-            "timestamp": _timestamp_now(),
-            "provider": provider,
-            "modelId": model_id,
-        })
+        return await self._append_typed(
+            {
+                "type": "model_change",
+                "id": await self._create_entry_id(),
+                "parentId": await self.get_leaf_id(),
+                "timestamp": _timestamp_now(),
+                "provider": provider,
+                "modelId": model_id,
+            }
+        )
 
     async def append_active_tools_change(self, active_tool_names: list[str]) -> str:
-        return await self._append_typed({
-            "type": "active_tools_change",
-            "id": await self._create_entry_id(),
-            "parentId": await self.get_leaf_id(),
-            "timestamp": _timestamp_now(),
-            "activeToolNames": list(active_tool_names),
-        })
+        return await self._append_typed(
+            {
+                "type": "active_tools_change",
+                "id": await self._create_entry_id(),
+                "parentId": await self.get_leaf_id(),
+                "timestamp": _timestamp_now(),
+                "activeToolNames": list(active_tool_names),
+            }
+        )
 
     async def append_compaction(
         self,
@@ -546,24 +554,28 @@ class Session:
     async def append_label(self, target_id: str, label: str | None) -> str:
         if await self.get_entry(target_id) is None:
             raise SessionError("not_found", f"Entry {target_id} not found")
-        return await self._append_typed({
-            "type": "label",
-            "id": await self._create_entry_id(),
-            "parentId": await self.get_leaf_id(),
-            "timestamp": _timestamp_now(),
-            "targetId": target_id,
-            "label": label,
-        })
+        return await self._append_typed(
+            {
+                "type": "label",
+                "id": await self._create_entry_id(),
+                "parentId": await self.get_leaf_id(),
+                "timestamp": _timestamp_now(),
+                "targetId": target_id,
+                "label": label,
+            }
+        )
 
     async def append_session_name(self, name: str) -> str:
         sanitized = re.sub(r"[\r\n]+", " ", name).strip()
-        return await self._append_typed({
-            "type": "session_info",
-            "id": await self._create_entry_id(),
-            "parentId": await self.get_leaf_id(),
-            "timestamp": _timestamp_now(),
-            "name": sanitized,
-        })
+        return await self._append_typed(
+            {
+                "type": "session_info",
+                "id": await self._create_entry_id(),
+                "parentId": await self.get_leaf_id(),
+                "timestamp": _timestamp_now(),
+                "name": sanitized,
+            }
+        )
 
     async def move_to(
         self,

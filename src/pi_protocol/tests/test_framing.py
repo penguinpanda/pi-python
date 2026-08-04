@@ -47,17 +47,17 @@ class TestFrames:
 
 class TestParsing:
     def test_parse_client_hello(self):
-        message = parse_client_message(
-            {"type": "hello", "version": 2, "token": "abc"}
-        )
+        message = parse_client_message({"type": "hello", "version": 2, "token": "abc"})
         assert isinstance(message, ClientHello)
 
     def test_parse_client_request(self):
-        message = parse_client_message({
-            "type": "request",
-            "id": "q1",
-            "request": {"command": "list"},
-        })
+        message = parse_client_message(
+            {
+                "type": "request",
+                "id": "q1",
+                "request": {"command": "list"},
+            }
+        )
         assert isinstance(message, RequestEnvelope)
         assert isinstance(message.request, ListCommand)
 
@@ -66,38 +66,44 @@ class TestParsing:
             parse_client_message({"type": "bogus"})
 
     def test_parse_server_hello(self):
-        message = parse_server_message({
-            "type": "hello",
-            "version": PROTOCOL_VERSION,
-            "connectionId": "c1",
-            "snapshot": {
-                "serverId": "srv",
-                "protocolVersion": PROTOCOL_VERSION,
-                "revision": 0,
-                "sessions": [],
-                "models": [],
-            },
-        })
+        message = parse_server_message(
+            {
+                "type": "hello",
+                "version": PROTOCOL_VERSION,
+                "connectionId": "c1",
+                "snapshot": {
+                    "serverId": "srv",
+                    "protocolVersion": PROTOCOL_VERSION,
+                    "revision": 0,
+                    "sessions": [],
+                    "models": [],
+                },
+            }
+        )
         assert isinstance(message, ServerHello)
         assert isinstance(message.snapshot, ServerSnapshot)
 
     def test_parse_server_response(self):
-        message = parse_server_message({
-            "type": "response",
-            "id": "r1",
-            "ok": False,
-            "error": {"code": "not_found", "message": "missing"},
-        })
+        message = parse_server_message(
+            {
+                "type": "response",
+                "id": "r1",
+                "ok": False,
+                "error": {"code": "not_found", "message": "missing"},
+            }
+        )
         assert isinstance(message, ResponseEnvelope)
         assert isinstance(message.error, ProtocolError)
 
     def test_parse_server_event(self):
-        message = parse_server_message({
-            "type": "event",
-            "event": {
-                "type": "session_removed",
-                "sessionId": "s1",
-            },
-        })
+        message = parse_server_message(
+            {
+                "type": "event",
+                "event": {
+                    "type": "session_removed",
+                    "sessionId": "s1",
+                },
+            }
+        )
         assert message.type == "event"
         assert message.event.sessionId == "s1"

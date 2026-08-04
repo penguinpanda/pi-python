@@ -59,7 +59,6 @@ from ..provider import create_provider, Provider
 # Provider 初始化时会直接使用该列表。
 # ------------------------------------------------------
 OPENAI_MODELS: list[Model] = [
-
     # ------------------------------------------------------
     # GPT-5 Chat Latest
     #
@@ -83,7 +82,6 @@ OPENAI_MODELS: list[Model] = [
         context_window=128000,
         cost=ModelCost(input=1.25, output=10.00, cache_read=0.125, cache_write=0.0),
     ),
-
     # ------------------------------------------------------
     # GPT-5.6 Luna
     #
@@ -122,7 +120,6 @@ OPENAI_MODELS: list[Model] = [
             ],
         ),
     ),
-
     # ------------------------------------------------------
     # GPT-5.6 Sol
     #
@@ -161,7 +158,6 @@ OPENAI_MODELS: list[Model] = [
             ],
         ),
     ),
-
     # ------------------------------------------------------
     # GPT-5.6 Terra
     #
@@ -231,7 +227,6 @@ def openai_provider() -> Provider:
         name="OpenAI",
         auth=env_api_key_auth("OpenAI API key", ["OPENAI_API_KEY"]),
         models=OPENAI_MODELS,
-
         # 使用 OpenAI Responses API。
         #
         # Responses API 是 OpenAI 新一代统一接口，

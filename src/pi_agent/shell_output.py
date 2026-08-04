@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any
 
 from .env import ExecutionEnv, ShellExecOptions, to_execution_error
 from .truncate import (
@@ -127,7 +127,9 @@ async def execute_shell_with_capture(
 
             tail_output += cleaned
             total_lines = completed_lines + (1 if has_open_line else 0)
-            if (total_bytes > DEFAULT_MAX_BYTES or total_lines > DEFAULT_MAX_LINES) and not full_output_requested:
+            if (
+                total_bytes > DEFAULT_MAX_BYTES or total_lines > DEFAULT_MAX_LINES
+            ) and not full_output_requested:
                 mark_full_output_requested(tail_output)
             elif full_output_requested and full_output_path:
                 write_chain.append(cleaned)
@@ -145,11 +147,7 @@ async def execute_shell_with_capture(
         truncation = TruncationResult(
             content=tail_truncation.content,
             truncated=truncated,
-            truncated_by=(
-                tail_truncation.truncated_by
-                if truncated
-                else None
-            ),
+            truncated_by=(tail_truncation.truncated_by if truncated else None),
             total_lines=total_lines,
             total_bytes=total_bytes,
             output_lines=tail_truncation.output_lines,

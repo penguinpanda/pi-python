@@ -203,16 +203,12 @@ async def _login(interaction: AuthInteraction) -> OAuthCredential:
         }
     )
     github_access_token = await _poll_for_github_access_token(domain, device, interaction.signal)
-    credential = await refresh_copilot_access_token(
-        github_access_token, enterprise_domain or None
-    )
+    credential = await refresh_copilot_access_token(github_access_token, enterprise_domain or None)
     interaction.notify({"type": "progress", "message": "Signed in to GitHub Copilot"})
     return credential
 
 
-async def _refresh(
-    credential: OAuthCredential, signal: Any = None
-) -> OAuthCredential:
+async def _refresh(credential: OAuthCredential, signal: Any = None) -> OAuthCredential:
     return await refresh_copilot_access_token(
         credential["refresh"],
         credential.get("enterprise_url"),

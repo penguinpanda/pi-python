@@ -44,9 +44,7 @@ class TestCustomTheme:
     def test_load_custom_json(self, tmp_path):
         colors = dict(BUILTIN_THEMES["dark"])
         colors["bg"] = "#000000"
-        (tmp_path / "custom.json").write_text(
-            json.dumps(colors), encoding="utf-8"
-        )
+        (tmp_path / "custom.json").write_text(json.dumps(colors), encoding="utf-8")
         loader = ThemeLoader(tmp_path)
         theme = loader.load("custom")
         assert theme.name == "custom"
@@ -54,9 +52,7 @@ class TestCustomTheme:
         assert "custom" in loader.available()
 
     def test_missing_keys_error(self, tmp_path):
-        (tmp_path / "broken.json").write_text(
-            json.dumps({"bg": "#000000"}), encoding="utf-8"
-        )
+        (tmp_path / "broken.json").write_text(json.dumps({"bg": "#000000"}), encoding="utf-8")
         loader = ThemeLoader(tmp_path)
         with pytest.raises(ThemeError, match="missing color keys"):
             loader.load("broken")
@@ -64,9 +60,7 @@ class TestCustomTheme:
     def test_invalid_hex_error(self, tmp_path):
         colors = dict(BUILTIN_THEMES["dark"])
         colors["bg"] = "not-a-color"
-        (tmp_path / "bad.json").write_text(
-            json.dumps(colors), encoding="utf-8"
-        )
+        (tmp_path / "bad.json").write_text(json.dumps(colors), encoding="utf-8")
         loader = ThemeLoader(tmp_path)
         with pytest.raises(ThemeError, match="hex"):
             loader.load("bad")

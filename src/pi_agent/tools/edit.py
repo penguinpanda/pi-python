@@ -7,7 +7,6 @@ import json
 from pi_ai.types import TextContent
 
 from .._types import AgentTool, AgentToolResult
-from ..env import get_or_throw
 from .edit_diff import (
     apply_edits_to_normalized_content,
     detect_line_ending,
@@ -45,13 +44,17 @@ def _edit_access_error(path: str, error) -> ValueError:
 
 
 def create_edit_tool() -> AgentTool:
-    async def execute(tool_call_id, params, signal=None, on_update=None, context=None) -> AgentToolResult:
+    async def execute(
+        tool_call_id, params, signal=None, on_update=None, context=None
+    ) -> AgentToolResult:
         env = context.env
         input_data = _prepare_edit_arguments(params)
         path = input_data["path"]
         edits = input_data.get("edits")
         if not isinstance(edits, list) or len(edits) == 0:
-            raise ValueError("Edit tool input is invalid. edits must contain at least one replacement.")
+            raise ValueError(
+                "Edit tool input is invalid. edits must contain at least one replacement."
+            )
 
         absolute_path = await resolve_tool_path(env, path, signal)
 
@@ -86,13 +89,17 @@ def create_edit_tool() -> AgentTool:
 
             diff_result = generate_diff_string(applied["baseContent"], applied["newContent"])
             return AgentToolResult(
-                content=[TextContent(
-                    type="text",
-                    text=f"Successfully replaced {len(edits)} block(s) in {path}.",
-                )],
+                content=[
+                    TextContent(
+                        type="text",
+                        text=f"Successfully replaced {len(edits)} block(s) in {path}.",
+                    )
+                ],
                 details={
                     "diff": diff_result["diff"],
-                    "patch": generate_unified_patch(path, applied["baseContent"], applied["newContent"]),
+                    "patch": generate_unified_patch(
+                        path, applied["baseContent"], applied["newContent"]
+                    ),
                     "firstChangedLine": diff_result["firstChangedLine"],
                 },
             )
@@ -110,7 +117,10 @@ def create_edit_tool() -> AgentTool:
         input_schema={
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "Path to the file to edit (relative or absolute)"},
+                "path": {
+                    "type": "string",
+                    "description": "Path to the file to edit (relative or absolute)",
+                },
                 "edits": {
                     "type": "array",
                     "items": {

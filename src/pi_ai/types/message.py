@@ -19,7 +19,7 @@ Agent 层可通过 AgentMessage 携带任意 Agent role（planner/observation/me
 from typing import Any, Literal, NotRequired, TypedDict
 
 from .common import StopReason
-from .content import ContentBlock, ImageContent, TextContent, ToolCall
+from .content import ContentBlock, ImageContent, TextContent
 
 
 class BaseMessage(TypedDict):
@@ -83,16 +83,16 @@ class Usage(TypedDict):
 
     # 可选字段
     cache_write_1h: NotRequired[int]  # 仅 Anthropic 拆分；cache_write 的子集
-    reasoning: NotRequired[int]       # 推理 token（output 的子集）
+    reasoning: NotRequired[int]  # 推理 token（output 的子集）
 
 
 class DiagnosticErrorInfo(TypedDict, total=False):
     """诊断错误信息（对齐 TS `DiagnosticErrorInfo`）。"""
 
-    name: str                 # 错误类型名（如 ProviderError）
-    message: str              # 错误消息
-    stack: str                # 堆栈（可用时）
-    code: str | int           # 错误码（如 HTTP 429）
+    name: str  # 错误类型名（如 ProviderError）
+    message: str  # 错误消息
+    stack: str  # 堆栈（可用时）
+    code: str | int  # 错误码（如 HTTP 429）
 
 
 class AssistantMessageDiagnostic(TypedDict, total=False):
@@ -101,10 +101,10 @@ class AssistantMessageDiagnostic(TypedDict, total=False):
     记录 provider / runtime 失败与恢复信息，供调试定位。
     """
 
-    type: str                 # 诊断类型（如 provider_error / retry_exhausted）
-    timestamp: int            # 诊断时间戳（Unix 毫秒）
+    type: str  # 诊断类型（如 provider_error / retry_exhausted）
+    timestamp: int  # 诊断时间戳（Unix 毫秒）
     error: DiagnosticErrorInfo  # 规范化错误信息
-    details: dict[str, Any]   # 附加信息
+    details: dict[str, Any]  # 附加信息
 
 
 class AssistantMessage(BaseMessage):
@@ -113,20 +113,20 @@ class AssistantMessage(BaseMessage):
     """
 
     role: Literal["assistant"]
-    content: list[ContentBlock]          # 输出内容
-    api: str                             # 使用哪个 API
-    provider: str                        # Provider 名称
-    model: str                           # 模型名称
-    usage: NotRequired[Usage]            # Token 使用统计（部分 provider 不提供）
-    stop_reason: NotRequired[StopReason] # 停止原因
-    timestamp: int                       # 时间戳（必填）
+    content: list[ContentBlock]  # 输出内容
+    api: str  # 使用哪个 API
+    provider: str  # Provider 名称
+    model: str  # 模型名称
+    usage: NotRequired[Usage]  # Token 使用统计（部分 provider 不提供）
+    stop_reason: NotRequired[StopReason]  # 停止原因
+    timestamp: int  # 时间戳（必填）
 
     # 可选字段
-    response_model: NotRequired[str]     # 实际响应的模型（如 OpenRouter auto）
-    response_id: NotRequired[str]        # 上游 response id
+    response_model: NotRequired[str]  # 实际响应的模型（如 OpenRouter auto）
+    response_id: NotRequired[str]  # 上游 response id
     diagnostics: NotRequired[list[AssistantMessageDiagnostic]]  # 诊断信息
     error_message: NotRequired[str | None]  # 错误信息
-    raw_stop_reason: NotRequired[str]    # 上游原始 finish_reason
+    raw_stop_reason: NotRequired[str]  # 上游原始 finish_reason
 
 
 class ToolDetails(TypedDict, total=False):
@@ -151,13 +151,13 @@ class ToolResultMessage(BaseMessage):
     tool_call_id: str
     tool_name: str
     content: list[TextContent | ImageContent]
-    is_error: bool                          # 是否执行失败
-    timestamp: int                          # Unix 毫秒时间戳
+    is_error: bool  # 是否执行失败
+    timestamp: int  # Unix 毫秒时间戳
     added_tool_names: NotRequired[list[str] | None]
 
     # 可选字段
-    details: NotRequired[Any]   # 工具执行的额外细节（推荐用 ToolDetails 结构）
-    usage: NotRequired[Usage]   # 工具自身 usage（不计入主 LLM 上下文）
+    details: NotRequired[Any]  # 工具执行的额外细节（推荐用 ToolDetails 结构）
+    usage: NotRequired[Usage]  # 工具自身 usage（不计入主 LLM 上下文）
 
 
 class AgentMessage(BaseMessage):
@@ -185,20 +185,14 @@ class AgentMessage(BaseMessage):
     content: str | list[ContentBlock]
 
     # 可选字段
-    name: NotRequired[str]                 # 发送者/工具名
-    tool_call_id: NotRequired[str]         # 关联的 tool call（如 function 结果）
+    name: NotRequired[str]  # 发送者/工具名
+    tool_call_id: NotRequired[str]  # 关联的 tool call（如 function 结果）
     metadata: NotRequired[dict[str, Any]]  # 附加信息
     timestamp: NotRequired[int]
 
 
 # 所有 Message 的联合类型
-Message = (
-    SystemMessage
-    | UserMessage
-    | AssistantMessage
-    | ToolResultMessage
-    | AgentMessage
-)
+Message = SystemMessage | UserMessage | AssistantMessage | ToolResultMessage | AgentMessage
 
 
 __all__ = [

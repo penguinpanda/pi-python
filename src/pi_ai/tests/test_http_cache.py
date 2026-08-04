@@ -1,7 +1,5 @@
 """HTTP 缓存语义（etag / last-modified / 304）测试。"""
 
-import pytest
-
 from pi_ai.models.http_cache import (
     cache_headers,
     extract_cache_metadata,

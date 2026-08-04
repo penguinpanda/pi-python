@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from . import ApiKeyCredential
-from .types import Credential, CredentialInfo, CredentialStore, credential_type
+from .types import Credential, CredentialInfo, credential_type
 
 
 def _to_raw(credential: Credential) -> dict[str, Any]:

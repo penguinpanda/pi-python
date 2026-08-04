@@ -16,9 +16,7 @@ def report_results(results: list[EvalResult], *, title: str = "Eval summary") ->
     for index, result in enumerate(results, start=1):
         status = "FAIL" if result.errors else "ok"
         tokens = result.usage.get("totalTokens", 0)
-        lines.append(
-            f"{index:<28} {status:<8} {result.duration_ms:<12} {tokens:<8}"
-        )
+        lines.append(f"{index:<28} {status:<8} {result.duration_ms:<12} {tokens:<8}")
     failed = [index for index, result in enumerate(results, 1) if result.errors]
     if failed:
         lines.append("")

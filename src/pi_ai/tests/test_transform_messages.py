@@ -7,13 +7,9 @@ Unit tests for transform_messages.py — 跨 Provider 消息转换管道。
     lax-message-content.test.ts
 """
 
-import pytest
-
 from pi_ai._types import (
-    AssistantMessage,
     Message,
     Model,
-    ToolCall,
 )
 from pi_ai.api.responses import _to_responses_input
 from pi_ai.api.transform_messages import (
@@ -29,6 +25,7 @@ from pi_ai.api.transform_messages import (
 # ---------------------------------------------------------------------------
 # Test helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_model(
     model_id: str = "test-model",
@@ -81,6 +78,7 @@ def _tool_call(id_: str, name: str = "bash", arguments: dict | None = None, **ex
 # short_hash（对齐 TS utils/hash.ts）
 # ---------------------------------------------------------------------------
 
+
 class TestShortHash:
     def test_matches_ts_reference_values(self):
         # 参考值来自 TS shortHash 实测输出。
@@ -92,8 +90,8 @@ class TestShortHash:
         # UTF-16 code unit 迭代，非 ASCII 输入与 TS 一致。
         # 参考值来自 TS shortHash 实测输出。
         assert short_hash("你好世界") == "tv7rq2jx1on"
-        assert short_hash("emoji: \U0001F600\U0001F680 mixed 中文") == "18h4cz0e802lb"
-        assert short_hash("emoji: \U0001F600\U0001F680 mixed 中文 and ascii") == "1sjt4c01p754sm"
+        assert short_hash("emoji: \U0001f600\U0001f680 mixed 中文") == "18h4cz0e802lb"
+        assert short_hash("emoji: \U0001f600\U0001f680 mixed 中文 and ascii") == "1sjt4c01p754sm"
 
     def test_deterministic(self):
         assert short_hash("call_" + "a" * 300) == short_hash("call_" + "a" * 300)
@@ -103,17 +101,25 @@ class TestShortHash:
 # 图片降级
 # ---------------------------------------------------------------------------
 
+
 class TestImageDowngrade:
     def test_user_image_downgraded_for_non_vision(self):
         model = _make_model(supports_images=False)
-        messages: list[Message] = [{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "Describe:"},
-                {"type": "image", "url": "https://example.com/p.png", "data": None, "mime_type": None},
-            ],
-            "timestamp": 1,
-        }]
+        messages: list[Message] = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Describe:"},
+                    {
+                        "type": "image",
+                        "url": "https://example.com/p.png",
+                        "data": None,
+                        "mime_type": None,
+                    },
+                ],
+                "timestamp": 1,
+            }
+        ]
         result = transform_messages(messages, model)
         assert result[0]["content"] == [
             {"type": "text", "text": "Describe:"},
@@ -122,16 +128,18 @@ class TestImageDowngrade:
 
     def test_tool_result_image_downgraded(self):
         model = _make_model(supports_images=False)
-        messages: list[Message] = [{
-            "role": "toolResult",
-            "tool_call_id": "call_1",
-            "tool_name": "web",
-            "content": [
-                {"type": "image", "url": None, "data": "abcd", "mime_type": "image/png"},
-            ],
-            "is_error": False,
-            "timestamp": 1,
-        }]
+        messages: list[Message] = [
+            {
+                "role": "toolResult",
+                "tool_call_id": "call_1",
+                "tool_name": "web",
+                "content": [
+                    {"type": "image", "url": None, "data": "abcd", "mime_type": "image/png"},
+                ],
+                "is_error": False,
+                "timestamp": 1,
+            }
+        ]
         result = transform_messages(messages, model)
         assert result[0]["content"] == [
             {"type": "text", "text": NON_VISION_TOOL_IMAGE_PLACEHOLDER},
@@ -139,15 +147,17 @@ class TestImageDowngrade:
 
     def test_consecutive_images_deduplicated(self):
         model = _make_model(supports_images=False)
-        messages: list[Message] = [{
-            "role": "user",
-            "content": [
-                {"type": "image", "url": "a", "data": None, "mime_type": None},
-                {"type": "image", "url": "b", "data": None, "mime_type": None},
-                {"type": "text", "text": "after"},
-            ],
-            "timestamp": 1,
-        }]
+        messages: list[Message] = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "url": "a", "data": None, "mime_type": None},
+                    {"type": "image", "url": "b", "data": None, "mime_type": None},
+                    {"type": "text", "text": "after"},
+                ],
+                "timestamp": 1,
+            }
+        ]
         result = transform_messages(messages, model)
         assert result[0]["content"] == [
             {"type": "text", "text": NON_VISION_USER_IMAGE_PLACEHOLDER},
@@ -156,26 +166,30 @@ class TestImageDowngrade:
 
     def test_vision_model_keeps_images(self):
         model = _make_model(supports_images=True)
-        messages: list[Message] = [{
-            "role": "user",
-            "content": [
-                {"type": "image", "url": "a", "data": None, "mime_type": None},
-            ],
-            "timestamp": 1,
-        }]
+        messages: list[Message] = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "url": "a", "data": None, "mime_type": None},
+                ],
+                "timestamp": 1,
+            }
+        ]
         result = transform_messages(messages, model)
         assert result[0]["content"] == messages[0]["content"]
 
     def test_model_input_none_no_crash(self):
         model = _make_model(supports_images=False)
         model.input = None  # type: ignore[assignment]
-        messages: list[Message] = [{
-            "role": "user",
-            "content": [
-                {"type": "image", "url": "a", "data": None, "mime_type": None},
-            ],
-            "timestamp": 1,
-        }]
+        messages: list[Message] = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "url": "a", "data": None, "mime_type": None},
+                ],
+                "timestamp": 1,
+            }
+        ]
         result = transform_messages(messages, model)
         assert result[0]["content"] == [
             {"type": "text", "text": NON_VISION_USER_IMAGE_PLACEHOLDER},
@@ -185,6 +199,7 @@ class TestImageDowngrade:
 # ---------------------------------------------------------------------------
 # null content 归一化
 # ---------------------------------------------------------------------------
+
 
 class TestNullContent:
     def test_null_content_normalized_to_empty_list(self):
@@ -211,15 +226,22 @@ class TestNullContent:
 # Thinking 块处理
 # ---------------------------------------------------------------------------
 
+
 class TestThinkingBlocks:
     def test_thinking_cross_model_converted_to_text(self):
         model = _make_model()
         messages: list[Message] = [
             {"role": "user", "content": "hello", "timestamp": 1},
-            _asst([
-                {"type": "thinking", "thinking": "Let me think...", "thinking_signature": "reasoning_content"},
-                {"type": "text", "text": "Hi!"},
-            ]),
+            _asst(
+                [
+                    {
+                        "type": "thinking",
+                        "thinking": "Let me think...",
+                        "thinking_signature": "reasoning_content",
+                    },
+                    {"type": "text", "text": "Hi!"},
+                ]
+            ),
         ]
         result = transform_messages(messages, model)
         asst = result[1]
@@ -235,10 +257,17 @@ class TestThinkingBlocks:
         model = _make_model()
         messages: list[Message] = [
             {"role": "user", "content": "q", "timestamp": 1},
-            _asst([
-                {"type": "thinking", "thinking": "", "thinking_signature": "sig", "redacted": True},
-                {"type": "text", "text": "answer"},
-            ]),
+            _asst(
+                [
+                    {
+                        "type": "thinking",
+                        "thinking": "",
+                        "thinking_signature": "sig",
+                        "redacted": True,
+                    },
+                    {"type": "text", "text": "answer"},
+                ]
+            ),
         ]
         result = transform_messages(messages, model)
         assert result[1]["content"] == [{"type": "text", "text": "answer"}]
@@ -249,7 +278,12 @@ class TestThinkingBlocks:
             {"role": "user", "content": "q", "timestamp": 1},
             _asst(
                 [
-                    {"type": "thinking", "thinking": "", "thinking_signature": "sig", "redacted": True},
+                    {
+                        "type": "thinking",
+                        "thinking": "",
+                        "thinking_signature": "sig",
+                        "redacted": True,
+                    },
                     {"type": "text", "text": "answer"},
                 ],
                 provider=model.provider,
@@ -264,10 +298,12 @@ class TestThinkingBlocks:
         model = _make_model()
         messages: list[Message] = [
             {"role": "user", "content": "q", "timestamp": 1},
-            _asst([
-                {"type": "thinking", "thinking": "   "},
-                {"type": "text", "text": "answer"},
-            ]),
+            _asst(
+                [
+                    {"type": "thinking", "thinking": "   "},
+                    {"type": "text", "text": "answer"},
+                ]
+            ),
         ]
         result = transform_messages(messages, model)
         assert result[1]["content"] == [{"type": "text", "text": "answer"}]
@@ -298,14 +334,17 @@ class TestThinkingBlocks:
 # Text 块：跨模型剥 text_signature
 # ---------------------------------------------------------------------------
 
+
 class TestTextBlocks:
     def test_text_signature_stripped_cross_model(self):
         model = _make_model()
         messages: list[Message] = [
             {"role": "user", "content": "q", "timestamp": 1},
-            _asst([
-                {"type": "text", "text": "hello", "text_signature": "msg_123"},
-            ]),
+            _asst(
+                [
+                    {"type": "text", "text": "hello", "text_signature": "msg_123"},
+                ]
+            ),
         ]
         result = transform_messages(messages, model)
         assert result[1]["content"] == [{"type": "text", "text": "hello"}]
@@ -332,6 +371,7 @@ class TestTextBlocks:
 # ---------------------------------------------------------------------------
 # Tool Call ID 规范化 + thought_signature
 # ---------------------------------------------------------------------------
+
 
 class TestToolCallNormalization:
     def test_tool_call_id_normalized_and_result_remapped(self):
@@ -378,9 +418,16 @@ class TestToolCallNormalization:
         model = _make_model()
         messages: list[Message] = [
             {"role": "user", "content": "run", "timestamp": 1},
-            _asst([
-                _tool_call("call_123", "bash", {"command": "ls"}, thought_signature='{"type":"reasoning.encrypted"}'),
-            ]),
+            _asst(
+                [
+                    _tool_call(
+                        "call_123",
+                        "bash",
+                        {"command": "ls"},
+                        thought_signature='{"type":"reasoning.encrypted"}',
+                    ),
+                ]
+            ),
         ]
         result = transform_messages(messages, model)
         assert "thought_signature" not in result[1]["content"][0]
@@ -403,6 +450,7 @@ class TestToolCallNormalization:
 # ---------------------------------------------------------------------------
 # Responses 系 Tool Call ID 规范化（fc_ item id）
 # ---------------------------------------------------------------------------
+
 
 class TestResponsesToolCallNormalization:
     def test_pipe_id_normalized_and_result_remapped(self):
@@ -487,6 +535,7 @@ class TestResponsesToolCallNormalization:
 # 第二遍：孤立 tool call 合成 + error/aborted 跳过
 # ---------------------------------------------------------------------------
 
+
 class TestSyntheticToolResults:
     def test_synthetic_result_for_trailing_orphaned_tool_calls(self):
         model = _make_model()
@@ -506,10 +555,12 @@ class TestSyntheticToolResults:
         model = _make_model()
         messages: list[Message] = [
             {"role": "user", "content": "run", "timestamp": 1},
-            _asst([
-                _tool_call("call_1", "read", {}),
-                _tool_call("call_2", "bash", {}),
-            ]),
+            _asst(
+                [
+                    _tool_call("call_1", "read", {}),
+                    _tool_call("call_2", "bash", {}),
+                ]
+            ),
             {
                 "role": "toolResult",
                 "tool_call_id": "call_1",
@@ -564,6 +615,7 @@ class TestSyntheticToolResults:
 # AgentMessage 透传（TS 无此类型，Python 刻意保持语义）
 # ---------------------------------------------------------------------------
 
+
 class TestAgentMessagePassthrough:
     def test_unknown_role_passes_through(self):
         model = _make_model()
@@ -593,6 +645,7 @@ class TestAgentMessagePassthrough:
 # ---------------------------------------------------------------------------
 # Responses 侧集成：function_call 历史 + 合成结果合法
 # ---------------------------------------------------------------------------
+
 
 class TestResponsesIntegration:
     def test_responses_function_call_history(self):

@@ -59,9 +59,7 @@ def get_supported_thinking_levels(model: Model) -> list[ModelThinkingLevel]:
     return supported
 
 
-def clamp_thinking_level(
-    model: Model, level: ModelThinkingLevel
-) -> ModelThinkingLevel:
+def clamp_thinking_level(model: Model, level: ModelThinkingLevel) -> ModelThinkingLevel:
     """把思考级别收敛到模型支持的范围内。"""
     available = get_supported_thinking_levels(model)
     if level in available:

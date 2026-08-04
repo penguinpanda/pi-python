@@ -32,11 +32,13 @@ def _make_session(
     models.add_provider(core.provider)
     model = models.get_model("faux", "faux-1")
     assert model is not None
-    agent = Agent(AgentOptions(
-        system_prompt="You are a helpful coding assistant.",
-        model=model,
-        stream_fn=models.stream,
-    ))
+    agent = Agent(
+        AgentOptions(
+            system_prompt="You are a helpful coding assistant.",
+            model=model,
+            stream_fn=models.stream,
+        )
+    )
     return AgentSession(
         agent=agent,
         session_manager=SessionManager.in_memory(cwd=str(tmp_path)),
@@ -114,23 +116,27 @@ async def test_bind_session_provider_registration(tmp_path):
 
     runtime = ModelRuntime(models, AuthStorage.in_memory())
     extension = Extension(path="<inline>", resolved_path="<inline>")
-    extension.providers.append((
-        "acme",
-        {
-            "api_key": "sk-acme",
-            "base_url": "https://acme.api/v1",
-            "models": [{"id": "acme-1", "api": "openai-completions", "reasoning": False}],
-        },
-    ))
+    extension.providers.append(
+        (
+            "acme",
+            {
+                "api_key": "sk-acme",
+                "base_url": "https://acme.api/v1",
+                "models": [{"id": "acme-1", "api": "openai-completions", "reasoning": False}],
+            },
+        )
+    )
     runner = ExtensionRunner([extension], cwd=str(tmp_path), model_runtime=runtime)
 
     core = faux_provider()
     core.set_responses([faux_assistant_message("ok")])
-    agent = Agent(AgentOptions(
-        system_prompt="You are a helpful coding assistant.",
-        model=runtime.get_model("faux", "faux-1"),
-        stream_fn=models.stream,
-    ))
+    agent = Agent(
+        AgentOptions(
+            system_prompt="You are a helpful coding assistant.",
+            model=runtime.get_model("faux", "faux-1"),
+            stream_fn=models.stream,
+        )
+    )
     session = AgentSession(
         agent=agent,
         session_manager=SessionManager.in_memory(cwd=str(tmp_path)),

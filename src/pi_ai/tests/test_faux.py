@@ -20,15 +20,11 @@ import pytest
 
 from pi_ai import Models
 from pi_ai._types import (
-    AssistantMessage,
     Context,
     Model,
-    StreamOptions,
     Tool,
 )
 from pi_ai.providers.faux import (
-    FAUX_MODEL,
-    FauxCore,
     faux_assistant_message,
     faux_provider,
     faux_text,
@@ -118,8 +114,14 @@ class TestFauxProviderFactory:
 
     def test_custom_models(self):
         models = [
-    Model(id="faux-fast", provider="faux", api="openai-completions", name="Faux Fast"),
-            Model(id="faux-thinker", provider="faux", api="openai-completions", name="Faux Thinker", reasoning=True),
+            Model(id="faux-fast", provider="faux", api="openai-completions", name="Faux Fast"),
+            Model(
+                id="faux-thinker",
+                provider="faux",
+                api="openai-completions",
+                name="Faux Thinker",
+                reasoning=True,
+            ),
         ]
         faux = faux_provider(models=models)
         assert [m.id for m in faux.models] == ["faux-fast", "faux-thinker"]
@@ -139,7 +141,9 @@ class TestBasicResponses:
     async def test_complete_returns_scripted_text_and_usage(self):
         faux = faux_provider()
         faux.set_responses([faux_assistant_message("hello world")])
-        ctx = Context(system_prompt="Be concise.", messages=[{"role": "user", "content": "hi there"}])
+        ctx = Context(
+            system_prompt="Be concise.", messages=[{"role": "user", "content": "hi there"}]
+        )
 
         msg = await faux.provider.complete(faux.models[0], ctx)
 
@@ -153,22 +157,30 @@ class TestBasicResponses:
     @pytest.mark.asyncio
     async def test_helper_blocks(self):
         faux = faux_provider()
-        faux.set_responses([
-            faux_assistant_message(
-                [
-                    faux_thinking("think"),
-                    faux_tool_call("echo", {"text": "hi"}, tool_call_id="call-1"),
-                    faux_text("done"),
-                ],
-                stop_reason="tool_call",
-            )
-        ])
+        faux.set_responses(
+            [
+                faux_assistant_message(
+                    [
+                        faux_thinking("think"),
+                        faux_tool_call("echo", {"text": "hi"}, tool_call_id="call-1"),
+                        faux_text("done"),
+                    ],
+                    stop_reason="tool_call",
+                )
+            ]
+        )
 
         msg = await faux.provider.complete(faux.models[0], _context())
 
         assert msg["content"] == [
             {"type": "thinking", "thinking": "think"},
-            {"type": "toolCall", "id": "call-1", "name": "echo", "raw_arguments": '{"text": "hi"}', "arguments": {"text": "hi"}},
+            {
+                "type": "toolCall",
+                "id": "call-1",
+                "name": "echo",
+                "raw_arguments": '{"text": "hi"}',
+                "arguments": {"text": "hi"},
+            },
             {"type": "text", "text": "done"},
         ]
         assert msg["stop_reason"] == "tool_call"
@@ -177,7 +189,14 @@ class TestBasicResponses:
     async def test_rewrites_api_provider_model(self):
         faux = faux_provider(
             provider="faux-provider",
-            models=[Model(id="faux-model", provider="faux-provider", api="openai-completions", name="Faux Model")],
+            models=[
+                Model(
+                    id="faux-model",
+                    provider="faux-provider",
+                    api="openai-completions",
+                    name="Faux Model",
+                )
+            ],
         )
         faux.set_responses([faux_assistant_message("hello")])
 
@@ -260,7 +279,13 @@ class TestResponseFactory:
     async def test_model_aware_factory(self):
         models = [
             Model(id="faux-fast", provider="faux", api="openai-completions", name="Faux Fast"),
-            Model(id="faux-thinker", provider="faux", api="openai-completions", name="Faux Thinker", reasoning=True),
+            Model(
+                id="faux-thinker",
+                provider="faux",
+                api="openai-completions",
+                name="Faux Thinker",
+                reasoning=True,
+            ),
         ]
         faux = faux_provider(models=models)
 
@@ -354,13 +379,15 @@ class TestUsageEstimation:
             "description": "Echo back text",
             "input_schema": tool.input_schema,
         }
-        expected_prompt = "\n\n".join([
-            "system:sys",
-            "user:hello\n[image:image/png:4]",
-            "assistant:prior",
-            "toolResult:echo\ntool out",
-            f"tools:{json.dumps([tool_dict], ensure_ascii=False)}",
-        ])
+        expected_prompt = "\n\n".join(
+            [
+                "system:sys",
+                "user:hello\n[image:image/png:4]",
+                "assistant:prior",
+                "toolResult:echo\ntool out",
+                f"tools:{json.dumps([tool_dict], ensure_ascii=False)}",
+            ]
+        )
         expected_input = math.ceil(len(expected_prompt) / 4)
         expected_output = math.ceil(len("done") / 4)
 
@@ -410,12 +437,14 @@ class TestStreamingEvents:
     @pytest.mark.asyncio
     async def test_tool_call_deltas_and_done(self):
         faux = faux_provider()
-        faux.set_responses([
-            faux_assistant_message(
-                faux_tool_call("echo", {"text": "hi"}, tool_call_id="call-1"),
-                stop_reason="tool_call",
-            )
-        ])
+        faux.set_responses(
+            [
+                faux_assistant_message(
+                    faux_tool_call("echo", {"text": "hi"}, tool_call_id="call-1"),
+                    stop_reason="tool_call",
+                )
+            ]
+        )
 
         events = await _collect(await faux.provider.stream(faux.models[0], _context()))
 
@@ -426,7 +455,13 @@ class TestStreamingEvents:
         msg = events[-1]["message"]
         assert msg["stop_reason"] == "tool_call"
         assert msg["content"] == [
-            {"type": "toolCall", "id": "call-1", "name": "echo", "raw_arguments": '{"text": "hi"}', "arguments": {"text": "hi"}}
+            {
+                "type": "toolCall",
+                "id": "call-1",
+                "name": "echo",
+                "raw_arguments": '{"text": "hi"}',
+                "arguments": {"text": "hi"},
+            }
         ]
 
     @pytest.mark.asyncio

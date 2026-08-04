@@ -14,7 +14,7 @@ def _write_extension(path: Path, source: str) -> Path:
     return path
 
 
-_SYNC_EXTENSION = '''
+_SYNC_EXTENSION = """
 def create_extension(pi):
     pi.on("message_end", lambda event, ctx: None)
     pi.register_tool({
@@ -25,12 +25,12 @@ def create_extension(pi):
     pi.register_command("extcmd", {"description": "Extension command"})
     pi.register_flag("ext-flag", {"type": "boolean", "default": True})
     pi.register_provider("acme", {"api_key": "sk-acme", "models": []})
-'''
+"""
 
-_ASYNC_EXTENSION = '''
+_ASYNC_EXTENSION = """
 async def create_extension(pi):
     pi.on("agent_start", lambda event, ctx: None)
-'''
+"""
 
 
 class TestLoadExtension:
@@ -94,7 +94,7 @@ class TestDiscovery:
 
 class TestLoadAll:
     async def test_load_collects_errors(self, tmp_path):
-        good = _write_extension(tmp_path / "exts" / "good.py", _SYNC_EXTENSION)
+        _write_extension(tmp_path / "exts" / "good.py", _SYNC_EXTENSION)
         _write_extension(tmp_path / "exts" / "bad.py", "VALUE = 1\n")
         loader = ExtensionLoader(global_dir=tmp_path / "exts", cwd=str(tmp_path))
         result = await loader.load()

@@ -23,9 +23,13 @@ from ..types import AssistantMessage
 # ------------------------------------------------------------------
 OVERFLOW_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"prompt is too long", re.IGNORECASE),  # Anthropic token overflow
-    re.compile(r"request_too_large", re.IGNORECASE),  # Anthropic request byte-size overflow (HTTP 413)
+    re.compile(
+        r"request_too_large", re.IGNORECASE
+    ),  # Anthropic request byte-size overflow (HTTP 413)
     re.compile(r"input is too long for requested model", re.IGNORECASE),  # Amazon Bedrock
-    re.compile(r"exceeds the context window", re.IGNORECASE),  # OpenAI (Completions & Responses API)
+    re.compile(
+        r"exceeds the context window", re.IGNORECASE
+    ),  # OpenAI (Completions & Responses API)
     # OpenAI-compatible proxies (LiteLLM)
     re.compile(
         r"exceeds (?:the )?(?:model'?s )?maximum context length(?: of [\d,]+ tokens?|\s*\([\d,]+\))",
@@ -34,7 +38,9 @@ OVERFLOW_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"input token count.*exceeds the maximum", re.IGNORECASE),  # Google (Gemini)
     re.compile(r"maximum prompt length is \d+", re.IGNORECASE),  # xAI (Grok)
     re.compile(r"reduce the length of the messages", re.IGNORECASE),  # Groq
-    re.compile(r"maximum context length is \d+ tokens", re.IGNORECASE),  # OpenRouter (most backends)
+    re.compile(
+        r"maximum context length is \d+ tokens", re.IGNORECASE
+    ),  # OpenRouter (most backends)
     # OpenRouter/Poolside
     re.compile(
         r"exceeds (?:the )?maximum allowed input length of [\d,]+ tokens?",

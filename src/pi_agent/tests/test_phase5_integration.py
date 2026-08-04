@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from pi_ai._types import Model, TextContent, UserMessage
+from pi_ai._types import Model, TextContent
 from pi_ai.providers.faux import faux_assistant_message, faux_provider, faux_tool_call
 
 from pi_agent import (
@@ -66,16 +66,20 @@ class TestHarnessToolsIntegration:
         env = PythonExecutionEnv(str(tmp_path))
         tool = create_read_tool()
         core = faux_provider()
-        core.set_responses([
-            _tool_response("read", {"path": "data.txt"}),
-            faux_assistant_message("done reading"),
-        ])
-        harness = AgentHarness(AgentHarnessOptions(
-            model=_make_model(),
-            tools=[tool],
-            tool_context=type("ToolContext", (), {"env": env})(),
-            stream_fn=core.stream,
-        ))
+        core.set_responses(
+            [
+                _tool_response("read", {"path": "data.txt"}),
+                faux_assistant_message("done reading"),
+            ]
+        )
+        harness = AgentHarness(
+            AgentHarnessOptions(
+                model=_make_model(),
+                tools=[tool],
+                tool_context=type("ToolContext", (), {"env": env})(),
+                stream_fn=core.stream,
+            )
+        )
 
         result = await harness.prompt("read the file")
 
@@ -103,10 +107,12 @@ class TestHarnessToolsIntegration:
             captured.append(dict(options or {}))
             return await original(model, context, options)
 
-        harness = AgentHarness(AgentHarnessOptions(
-            model=_make_model(),
-            stream_fn=_capturing_stream,
-        ))
+        harness = AgentHarness(
+            AgentHarnessOptions(
+                model=_make_model(),
+                stream_fn=_capturing_stream,
+            )
+        )
         await harness.set_thinking_level("low")
         await harness.prompt("Hi")
 
@@ -128,17 +134,21 @@ class TestHarnessToolsIntegration:
             execute=_tool_execute,
         )
         core = faux_provider()
-        core.set_responses([
-            _tool_response("slow", {}),
-            faux_assistant_message("after slow"),
-            faux_assistant_message("after steer"),
-        ])
-        harness = AgentHarness(AgentHarnessOptions(
-            model=_make_model(),
-            tools=[tool],
-            tool_context=None,
-            stream_fn=core.stream,
-        ))
+        core.set_responses(
+            [
+                _tool_response("slow", {}),
+                faux_assistant_message("after slow"),
+                faux_assistant_message("after steer"),
+            ]
+        )
+        harness = AgentHarness(
+            AgentHarnessOptions(
+                model=_make_model(),
+                tools=[tool],
+                tool_context=None,
+                stream_fn=core.stream,
+            )
+        )
 
         run_task = asyncio.create_task(harness.prompt("run slow"))
         await asyncio.sleep(0.05)
@@ -205,11 +215,13 @@ class TestHarnessSkillInstructions:
         )
         core = faux_provider()
         core.set_responses([faux_assistant_message("ok")])
-        harness = AgentHarness(AgentHarnessOptions(
-            model=_make_model(),
-            resources=AgentHarnessResources(skills=[skill]),
-            stream_fn=core.stream,
-        ))
+        harness = AgentHarness(
+            AgentHarnessOptions(
+                model=_make_model(),
+                resources=AgentHarnessResources(skills=[skill]),
+                stream_fn=core.stream,
+            )
+        )
 
         await harness.skill("docs", "Focus on API reference")
 

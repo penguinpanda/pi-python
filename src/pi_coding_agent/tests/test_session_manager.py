@@ -71,6 +71,7 @@ class TestSessionManagerOpen:
             mgr1 = SessionManager.create(cwd="/tmp/test", sessions_dir=tmpdir)
             msg = UserMessage(role="user", content="hello")
             import asyncio
+
             asyncio.run(mgr1.append_message(msg))
 
             # 再打开
@@ -94,6 +95,7 @@ class TestSessionManagerAppendMessage:
         mgr = SessionManager.in_memory(cwd="/tmp/test")
         msg = UserMessage(role="user", content="hello")
         import asyncio
+
         entry_id = asyncio.run(mgr.append_message(msg))
         assert entry_id is not None
         assert len(mgr.get_entries()) == 1
@@ -106,6 +108,7 @@ class TestSessionManagerAppendMessage:
         asyncio.run(mgr.append_message(msg1))
 
         from pi_ai._types import AssistantMessage
+
         msg2: AssistantMessage = {
             "role": "assistant",
             "content": [TextContent(type="text", text="hi there")],
@@ -130,6 +133,7 @@ class TestSessionManagerBuildContext:
         mgr = SessionManager.in_memory(cwd="/tmp/test")
         msg = UserMessage(role="user", content="hello")
         import asyncio
+
         asyncio.run(mgr.append_message(msg))
 
         messages = mgr.build_context()
@@ -145,6 +149,7 @@ class TestSessionManagerBuildContext:
         asyncio.run(mgr.append_message(msg1))
 
         from pi_ai._types import AssistantMessage
+
         msg2: AssistantMessage = {
             "role": "assistant",
             "content": [TextContent(type="text", text="hi")],
@@ -181,7 +186,7 @@ class TestSessionManagerCompaction:
         mgr = SessionManager.in_memory(cwd="/tmp/test")
         import asyncio
 
-        e1 = asyncio.run(mgr.append_message(UserMessage(role="user", content="old1")))
+        asyncio.run(mgr.append_message(UserMessage(role="user", content="old1")))
         e2 = asyncio.run(
             mgr.append_message(
                 {
@@ -240,4 +245,3 @@ class TestSessionManagerCompaction:
         asyncio.run(mgr.append_message(UserMessage(role="user", content="b")))
         messages = mgr.build_context()
         assert [m["content"] for m in messages] == ["a", "b"]
-

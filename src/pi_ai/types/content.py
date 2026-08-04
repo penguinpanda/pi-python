@@ -62,8 +62,8 @@ class ImageContent(BaseContent):
     """
 
     type: Literal["image"]
-    url: str | None        # 图片地址
-    data: str | None       # Base64 编码图片
+    url: str | None  # 图片地址
+    data: str | None  # Base64 编码图片
     mime_type: str | None  # MIME 类型，例如 image/png
 
 
@@ -93,9 +93,9 @@ class ToolCall(BaseContent):
     """
 
     type: Literal["toolCall"]
-    id: str                           # Tool Call 唯一 ID
-    name: str                         # 工具名称
-    raw_arguments: str                # 流式累积的原始 JSON 字符串
+    id: str  # Tool Call 唯一 ID
+    name: str  # 工具名称
+    raw_arguments: str  # 流式累积的原始 JSON 字符串
     arguments: dict[str, Any] | None  # 已解析对象；None 表示尚未解析/解析失败
     thought_signature: NotRequired[str]  # Google 专用：复用思考上下文的签名
 
@@ -109,8 +109,10 @@ class ThinkingContent(BaseContent):
     """
 
     type: Literal["thinking"]
-    thinking: str                         # 思考内容
-    thinking_signature: NotRequired[str]  # 推理签名（某些 API 使用；如 OpenAI responses 的 reasoning item ID）
+    thinking: str  # 思考内容
+    thinking_signature: NotRequired[
+        str
+    ]  # 推理签名（某些 API 使用；如 OpenAI responses 的 reasoning item ID）
 
     # True 表示思考内容被安全过滤改写（加密占位存于 thinking_signature，以支持多轮续传）
     redacted: NotRequired[bool]
@@ -128,8 +130,8 @@ class CodeContent(BaseContent):
     """
 
     type: Literal["code"]
-    language: str   # 编程语言（python / typescript / ...）
-    code: str       # 代码内容
+    language: str  # 编程语言（python / typescript / ...）
+    code: str  # 代码内容
 
 
 # ContentBlock 可以是任意一种内容

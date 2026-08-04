@@ -27,9 +27,7 @@ def _read_u32le(data: bytes, offset: int) -> int:
 
 def _is_png(data: bytes) -> bool:
     return (
-        len(data) >= 16
-        and _read_u32be(data, len(_PNG_SIGNATURE)) == 13
-        and data[12:16] == b"IHDR"
+        len(data) >= 16 and _read_u32be(data, len(_PNG_SIGNATURE)) == 13 and data[12:16] == b"IHDR"
     )
 
 

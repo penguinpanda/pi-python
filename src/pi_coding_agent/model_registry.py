@@ -111,7 +111,9 @@ class ModelRegistry:
     def is_using_oauth(self, model: Model) -> bool:
         return self._runtime.is_using_oauth(model.provider)
 
-    def register_provider(self, provider_or_name: Provider | str, config: ProviderConfigInput | None = None):
+    def register_provider(
+        self, provider_or_name: Provider | str, config: ProviderConfigInput | None = None
+    ):
         if isinstance(provider_or_name, str):
             if not config:
                 raise ValueError("Provider config is required when registering by name")

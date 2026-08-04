@@ -79,9 +79,7 @@ async def test_refresh_models_concurrent_shared_inflight(dynamic_provider):
         await asyncio.sleep(0.01)
         return [_model("dyn-1")]
 
-    provider = create_provider(
-        id="dyn", name="Dynamic", auth=None, models=[], fetch_models=fetch
-    )
+    provider = create_provider(id="dyn", name="Dynamic", auth=None, models=[], fetch_models=fetch)
     store = InMemoryModelsStore()
     ctx = RefreshModelsContext(store=provider_models_store(store, "dyn"), allow_network=True)
     await asyncio.gather(provider.refresh_models(ctx), provider.refresh_models(ctx))

@@ -137,9 +137,7 @@ class EventStream(Generic[T, R]):
         #
         # 本质上就是 await 这个 Future。
         # --------------------------------------------------
-        self._result: asyncio.Future[R] = (
-            asyncio.get_running_loop().create_future()
-        )
+        self._result: asyncio.Future[R] = asyncio.get_running_loop().create_future()
 
         # 判断结束事件
         self._is_complete = is_complete
@@ -196,9 +194,7 @@ class EventStream(Generic[T, R]):
 
             # Future 只允许设置一次结果
             if not self._result.done():
-                self._result.set_result(
-                    self._extract_result(event)
-                )
+                self._result.set_result(self._extract_result(event))
 
         # 不管是不是结束事件，
         # 都要放入队列，
@@ -323,7 +319,6 @@ class EventStream(Generic[T, R]):
         """
 
         while True:
-
             # --------------------------------------------------
             # 优先读取已经缓存好的事件
             #
@@ -333,7 +328,6 @@ class EventStream(Generic[T, R]):
                 event = self._queue.get_nowait()
 
             except asyncio.QueueEmpty:
-
                 # 队列为空
 
                 # 如果事件流已经结束，
@@ -366,9 +360,7 @@ class EventStream(Generic[T, R]):
 from ..types import AssistantMessage, AssistantMessageEvent, ErrorEvent
 
 
-class AssistantMessageEventStream(
-    EventStream[AssistantMessageEvent, AssistantMessage]
-):
+class AssistantMessageEventStream(EventStream[AssistantMessageEvent, AssistantMessage]):
     """
     AssistantMessage 专用事件流。
 
@@ -389,12 +381,10 @@ class AssistantMessageEventStream(
 
     def __init__(self) -> None:
         super().__init__(
-            
             # --------------------------------------------------
             # 收到 done 或 error 即认为整个流结束
             # --------------------------------------------------
             is_complete=lambda e: e["type"] in ("done", "error"),
-
             # --------------------------------------------------
             # done:
             #
@@ -416,8 +406,6 @@ class AssistantMessageEventStream(
             # 返回 error 中携带的 AssistantMessage。
             # --------------------------------------------------
             extract_result=lambda e: (
-                e["message"]
-                if e["type"] == "done"
-                else cast(ErrorEvent, e)["error"]
+                e["message"] if e["type"] == "done" else cast(ErrorEvent, e)["error"]
             ),
         )

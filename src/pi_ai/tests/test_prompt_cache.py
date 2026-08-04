@@ -13,7 +13,6 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 
 from pi_ai._types import Context, Model
 from pi_ai.utils.prompt_cache import (
@@ -90,16 +89,19 @@ def _async_iter(items):
     async def gen():
         for item in items:
             yield item
+
     return gen()
 
 
 def _completions_chunk(content=None, finish_reason=None):
     return SimpleNamespace(
-        choices=[SimpleNamespace(
-            index=0,
-            delta=SimpleNamespace(content=content, tool_calls=None),
-            finish_reason=finish_reason,
-        )],
+        choices=[
+            SimpleNamespace(
+                index=0,
+                delta=SimpleNamespace(content=content, tool_calls=None),
+                finish_reason=finish_reason,
+            )
+        ],
         usage=None,
     )
 
@@ -110,15 +112,23 @@ def _responses_event(event_type, **kwargs):
 
 def _completions_model() -> Model:
     return Model(
-        id="deepseek-chat", provider="deepseek", api="openai-completions",
-        name="deepseek-chat", input=["text"], output=["text"],
+        id="deepseek-chat",
+        provider="deepseek",
+        api="openai-completions",
+        name="deepseek-chat",
+        input=["text"],
+        output=["text"],
     )
 
 
 def _responses_model() -> Model:
     return Model(
-        id="gpt-4o", provider="openai", api="openai-responses",
-        name="gpt-4o", input=["text"], output=["text"],
+        id="gpt-4o",
+        provider="openai",
+        api="openai-responses",
+        name="gpt-4o",
+        input=["text"],
+        output=["text"],
     )
 
 
@@ -225,12 +235,14 @@ class TestResponsesPromptCache:
             model.compat = compat
         client = MagicMock()
         client.responses.create = AsyncMock(
-            return_value=_async_iter([
-                _responses_event(
-                    "response.completed",
-                    response=SimpleNamespace(output_text="Hi", usage=None),
-                ),
-            ])
+            return_value=_async_iter(
+                [
+                    _responses_event(
+                        "response.completed",
+                        response=SimpleNamespace(output_text="Hi", usage=None),
+                    ),
+                ]
+            )
         )
         asyncio.run(_collect_responses(model, client, options))
         return client.responses.create.call_args.kwargs

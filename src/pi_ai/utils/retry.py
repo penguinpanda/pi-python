@@ -30,7 +30,7 @@ import asyncio
 import random
 import re
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from ..types import AssistantMessage
 from .diagnostics import append_assistant_message_diagnostic, create_assistant_message_diagnostic

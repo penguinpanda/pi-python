@@ -129,7 +129,9 @@ class TestRegistryBasics:
 
 
 class TestProviderRegistryDispatch:
-    def _make_provider(self, api_kind: str = "completions", base_url: str | None = None) -> Provider:
+    def _make_provider(
+        self, api_kind: str = "completions", base_url: str | None = None
+    ) -> Provider:
         return Provider(
             id="test-provider",
             name="Test Provider",

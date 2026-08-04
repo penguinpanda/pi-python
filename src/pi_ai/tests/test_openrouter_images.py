@@ -50,13 +50,7 @@ async def test_generate_images_success(monkeypatch):
                     {
                         "message": {
                             "content": "Here is your image",
-                            "images": [
-                                {
-                                    "image_url": {
-                                        "url": "data:image/png;base64,aGVsbG8="
-                                    }
-                                }
-                            ],
+                            "images": [{"image_url": {"url": "data:image/png;base64,aGVsbG8="}}],
                         }
                     }
                 ],
@@ -111,9 +105,7 @@ async def test_generate_images_http_error_returns_error_output(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_generate_images_missing_key():
-    result = await openrouter_images.generate_images(
-        _image_model(), {"input": []}, {}
-    )
+    result = await openrouter_images.generate_images(_image_model(), {"input": []}, {})
     assert result["stop_reason"] == "error"
     assert "No API key" in result["error_message"]
 

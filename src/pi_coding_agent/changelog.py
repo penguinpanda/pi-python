@@ -110,9 +110,7 @@ def find_changelog_path(cwd: str | Path | None = None) -> Path | None:
     return None
 
 
-def format_changelog(
-    entries: list[ChangelogEntry], *, limit: int | None = None
-) -> str:
+def format_changelog(entries: list[ChangelogEntry], *, limit: int | None = None) -> str:
     """把条目渲染为 Markdown 文本（最新在前）。"""
     ordered = sorted(entries, key=lambda entry: entry.version, reverse=True)
     if limit is not None and limit > 0:

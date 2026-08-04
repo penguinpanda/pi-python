@@ -18,11 +18,11 @@ from typing import Any, NotRequired, TypedDict
 class TraceSpan(TypedDict, total=False):
     """单个 span 记录（一段可观测的操作）。"""
 
-    name: str                        # span 名称（如 "llm.call" / "tool.execute"）
-    parent_id: NotRequired[str]      # 父 span 标识（构成树状结构）
-    start_time: int                  # 开始时间（Unix 毫秒）
-    end_time: NotRequired[int]       # 结束时间（Unix 毫秒）
-    status: NotRequired[str]         # 状态（ok / error / cancelled）
+    name: str  # span 名称（如 "llm.call" / "tool.execute"）
+    parent_id: NotRequired[str]  # 父 span 标识（构成树状结构）
+    start_time: int  # 开始时间（Unix 毫秒）
+    end_time: NotRequired[int]  # 结束时间（Unix 毫秒）
+    status: NotRequired[str]  # 状态（ok / error / cancelled）
     metadata: NotRequired[dict[str, Any]]  # 附加信息
 
 
@@ -30,11 +30,11 @@ class TraceSpan(TypedDict, total=False):
 class Trace:
     """一次完整追踪（trace）记录。"""
 
-    trace_id: str                    # 追踪唯一标识
-    parent_id: str | None = None     # 父追踪标识（多 Agent 嵌套时）
-    name: str = ""                   # 追踪名称（如 "agent.run"）
-    start_time: int = 0              # 开始时间（Unix 毫秒）
-    end_time: int | None = None      # 结束时间（Unix 毫秒）
+    trace_id: str  # 追踪唯一标识
+    parent_id: str | None = None  # 父追踪标识（多 Agent 嵌套时）
+    name: str = ""  # 追踪名称（如 "agent.run"）
+    start_time: int = 0  # 开始时间（Unix 毫秒）
+    end_time: int | None = None  # 结束时间（Unix 毫秒）
     spans: list[TraceSpan] = field(default_factory=list)
 
     def add_span(self, span: TraceSpan) -> None:

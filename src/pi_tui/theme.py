@@ -199,14 +199,10 @@ def validate_theme_colors(colors: dict[str, Any], name: str) -> None:
     """校验主题包含全部命名颜色。"""
     missing = [key for key in COLOR_KEYS if key not in colors]
     if missing:
-        raise ThemeError(
-            f'Theme "{name}" is missing color keys: {", ".join(missing)}'
-        )
+        raise ThemeError(f'Theme "{name}" is missing color keys: {", ".join(missing)}')
     for key, value in colors.items():
         if not isinstance(value, str) or not value.startswith("#"):
-            raise ThemeError(
-                f'Theme "{name}" color "{key}" must be a hex string, got {value!r}'
-            )
+            raise ThemeError(f'Theme "{name}" color "{key}" must be a hex string, got {value!r}')
 
 
 class ThemeLoader:
@@ -219,11 +215,7 @@ class ThemeLoader:
         names = list(BUILTIN_THEMES)
         if self._theme_dir is not None and self._theme_dir.is_dir():
             names.extend(
-                sorted(
-                    path.stem
-                    for path in self._theme_dir.glob("*.json")
-                    if path.is_file()
-                )
+                sorted(path.stem for path in self._theme_dir.glob("*.json") if path.is_file())
             )
         return names
 

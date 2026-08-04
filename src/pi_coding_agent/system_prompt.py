@@ -62,9 +62,7 @@ def _load_context_file_from_dir(directory: Path) -> dict | None:
     return None
 
 
-def load_project_context_files(
-    cwd: str | Path, agent_dir: str | Path | None = None
-) -> list[dict]:
+def load_project_context_files(cwd: str | Path, agent_dir: str | Path | None = None) -> list[dict]:
     """加载全局 agent 目录 + cwd 祖先链上的 AGENTS.md/CLAUDE.md（去重）。"""
     resolved_agent_dir = (Path(agent_dir) if agent_dir else get_agent_dir()).resolve()
     context_files: list[dict] = []
@@ -113,9 +111,7 @@ def _find_project_docs(cwd: str) -> tuple[str | None, str | None, str | None]:
 def build_system_prompt(options: BuildSystemPromptOptions) -> str:
     """构建系统提示：自定义提示 / 工具说明 + 指南 + 上下文文件 + 技能。"""
     custom_prompt = options.custom_prompt
-    append_section = (
-        f"\n\n{options.append_system_prompt}" if options.append_system_prompt else ""
-    )
+    append_section = f"\n\n{options.append_system_prompt}" if options.append_system_prompt else ""
     context_files = options.context_files or []
     skills = options.skills or []
     prompt_cwd = str(Path(options.cwd)).replace("\\", "/")
@@ -130,7 +126,7 @@ def build_system_prompt(options: BuildSystemPromptOptions) -> str:
             for entry in context_files:
                 prompt += (
                     f'<project_instructions path="{entry["path"]}">\n'
-                    f'{entry["content"]}\n'
+                    f"{entry['content']}\n"
                     f"</project_instructions>\n\n"
                 )
             prompt += "</project_context>\n"
@@ -212,7 +208,7 @@ def build_system_prompt(options: BuildSystemPromptOptions) -> str:
         for entry in context_files:
             prompt += (
                 f'<project_instructions path="{entry["path"]}">\n'
-                f'{entry["content"]}\n'
+                f"{entry['content']}\n"
                 f"</project_instructions>\n\n"
             )
         prompt += "</project_context>\n"

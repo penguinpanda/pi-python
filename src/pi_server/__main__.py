@@ -8,7 +8,6 @@ import os
 from pi_ai import create_default_models
 
 from pi_coding_agent._config import get_agent_dir
-from pi_coding_agent.auth_storage import AuthStorage
 from pi_coding_agent.model_runtime import ModelRuntime
 
 from .handler import PiServer

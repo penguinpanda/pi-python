@@ -9,8 +9,6 @@ import pytest
 from pi_ai.utils._event_stream import AssistantMessageEventStream, EventStream
 from pi_ai._types import (
     AssistantMessage,
-    DoneEvent,
-    ErrorEvent,
 )
 
 
@@ -117,12 +115,14 @@ class TestAssistantMessageEventStream:
             timestamp=0,
         )
 
-        stream.push({
-            "type": "text_delta",
-            "content_index": 0,
-            "delta": "Hello",
-            "partial": msg,
-        })
+        stream.push(
+            {
+                "type": "text_delta",
+                "content_index": 0,
+                "delta": "Hello",
+                "partial": msg,
+            }
+        )
         stream.push({"type": "done", "reason": "stop", "message": msg})
 
         events = [e async for e in stream]

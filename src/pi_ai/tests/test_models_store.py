@@ -50,7 +50,7 @@ def test_model_serialization_roundtrip():
 async def test_in_memory_store_isolation():
     store = InMemoryModelsStore()
     a = provider_models_store(store, "a")
-    b = provider_models_store(store, "b")
+    provider_models_store(store, "b")
     await a.write(ModelsStoreEntry(models=[_model("m-a")]))
     assert await store.read("a") is not None
     assert await store.read("b") is None

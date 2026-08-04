@@ -264,9 +264,7 @@ class PiFooter(Label):
         session_name: str | None = None,
     ) -> None:
         name = f" [{session_name}]" if session_name else ""
-        self.update(
-            f"model: {model}  thinking: {thinking}  messages: {message_count}{name}"
-        )
+        self.update(f"model: {model}  thinking: {thinking}  messages: {message_count}{name}")
 
 
 class PiToolbar(Input):

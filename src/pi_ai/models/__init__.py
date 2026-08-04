@@ -69,12 +69,7 @@ import asyncio
 from dataclasses import dataclass, field
 
 from ..utils._event_stream import AssistantMessageEventStream
-from ..types import(
-    AssistantMessage,
-    Context,
-    Model,
-    StreamOptions
-)
+from ..types import AssistantMessage, Context, Model, StreamOptions
 from ..auth import InMemoryCredentialStore
 from ..provider import Provider, RefreshModelsContext
 from .models_store import (
@@ -121,13 +116,14 @@ class Models:
 
     所有网络请求都会转发给对应 Provider。
     """
+
     def __init__(
         self,
         *,
         models_store: ModelsStore | None = None,
         credentials=None,
     ) -> None:
-        
+
         # 已注册的 Provider
         #
         # key:
@@ -195,16 +191,16 @@ class Models:
 
         如果 Provider 不存在，
 
-        不会抛异常。 
+        不会抛异常。
         """
-        
+
         self._providers.pop(provider_id, None)
 
     def get_providers(self) -> list[Provider]:
         """
         返回所有已注册 Provider。
         """
-        
+
         return list(self._providers.values())
 
     # 模型查找
@@ -223,13 +219,13 @@ class Models:
 
         返回：
 
-            OpenAI 的模型。 
+            OpenAI 的模型。
         """
 
         if provider_id is not None:
             provider = self._providers.get(provider_id)
             return provider.get_models() if provider else []
-        
+
         result: list[Model] = []
 
         for provider in self._providers.values():
@@ -346,10 +342,7 @@ class Models:
     # 请求调度
 
     async def stream(
-            self,
-            model: Model,
-            context: Context,
-            options: StreamOptions  | None = None
+        self, model: Model, context: Context, options: StreamOptions | None = None
     ) -> AssistantMessageEventStream:
         """
         发起流式请求。
@@ -372,10 +365,7 @@ class Models:
         return lazy_stream(model, _setup)
 
     async def complete(
-            self,
-            model: Model,
-            context: Context,
-            options: StreamOptions  | None = None
+        self, model: Model, context: Context, options: StreamOptions | None = None
     ) -> AssistantMessage:
         """
         非流式调用。
@@ -410,12 +400,12 @@ class Models:
 
         Provider 会优先使用这里保存的 Key，
 
-        而不是环境变量。 
+        而不是环境变量。
         """
 
         from ..auth import ApiKeyCredential
-        await self._credentials.write(provider_id, ApiKeyCredential(key=api_key))
 
+        await self._credentials.write(provider_id, ApiKeyCredential(key=api_key))
 
     # 辅助函数
 
@@ -433,7 +423,7 @@ class Models:
 
         if provider is None
         """
-        
+
         provider = self._providers.get(provider_id)
         if not provider:
             raise ValueError(f"Unknown provider: {provider_id}")

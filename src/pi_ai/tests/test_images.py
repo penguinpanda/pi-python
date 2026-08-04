@@ -119,7 +119,11 @@ async def test_images_models_refresh_all_best_effort():
         raise RuntimeError("network down")
 
     provider = create_images_provider(
-        id="dyn", name="Dynamic", auth=None, models=[], api=_fake_generate,
+        id="dyn",
+        name="Dynamic",
+        auth=None,
+        models=[],
+        api=_fake_generate,
         refresh_models=bad_refresh,
     )
     models = create_images_models()
@@ -131,7 +135,6 @@ async def test_images_models_refresh_all_best_effort():
 @pytest.mark.asyncio
 async def test_images_models_stores_oauth_refresh_path():
     """OAuth 凭证经 resolve_provider_auth 自动刷新（复用 M4 路径）。"""
-    from pi_ai.auth.resolve import resolve_provider_auth
     from pi_ai.types import now_ms
 
     class _OAuthAuth:

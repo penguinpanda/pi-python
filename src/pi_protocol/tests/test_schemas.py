@@ -9,8 +9,6 @@ from pi_protocol.schemas import (
     PROTOCOL_VERSION,
     AssistantTranscriptItem,
     ClientHello,
-    Command,
-    CommandResult,
     CreateCommand,
     CreateResult,
     ListCommand,
@@ -117,8 +115,16 @@ class TestRoundTrip:
         summary_data = {
             key: _snapshot().model_dump(mode="json")[key]
             for key in (
-                "id", "name", "cwd", "createdAt", "updatedAt", "phase",
-                "model", "thinkingLevel", "attached", "locked",
+                "id",
+                "name",
+                "cwd",
+                "createdAt",
+                "updatedAt",
+                "phase",
+                "model",
+                "thinkingLevel",
+                "attached",
+                "locked",
             )
         }
         server = ServerSnapshot(
@@ -181,9 +187,9 @@ class TestValidation:
 
     def test_request_envelope(self):
         envelope = RequestEnvelope(
-            type="request", id="q1", request=PromptCommand(
-                command="prompt", sessionId="s1", text="hi"
-            )
+            type="request",
+            id="q1",
+            request=PromptCommand(command="prompt", sessionId="s1", text="hi"),
         )
         restored = RequestEnvelope.model_validate(envelope.model_dump(mode="json"))
         assert restored.request.sessionId == "s1"

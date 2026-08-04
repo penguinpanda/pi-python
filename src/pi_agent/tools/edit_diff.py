@@ -9,7 +9,6 @@ from __future__ import annotations
 import difflib
 import re
 import unicodedata
-from dataclasses import dataclass
 from typing import Any
 
 
@@ -131,7 +130,9 @@ def _apply_replacements_preserving_unchanged_lines(
         base_lines.append({"start": offset, "end": offset + len(line)})
         offset += len(line)
     if len(original_lines) != len(base_lines):
-        raise ValueError("Cannot preserve unchanged lines because the base content has a different line count.")
+        raise ValueError(
+            "Cannot preserve unchanged lines because the base content has a different line count."
+        )
 
     groups: list[dict[str, Any]] = []
     sorted_replacements = sorted(replacements, key=lambda r: r["matchIndex"])
@@ -211,9 +212,13 @@ def apply_edits_to_normalized_content(
         if len(edit["oldText"]) == 0:
             raise ValueError(_empty_old_text_error(path, index, len(normalized_edits)))
 
-    initial_matches = [fuzzy_find_text(normalized_content, edit["oldText"]) for edit in normalized_edits]
+    initial_matches = [
+        fuzzy_find_text(normalized_content, edit["oldText"]) for edit in normalized_edits
+    ]
     used_fuzzy = any(match["usedFuzzyMatch"] for match in initial_matches)
-    replacement_base = normalize_for_fuzzy_match(normalized_content) if used_fuzzy else normalized_content
+    replacement_base = (
+        normalize_for_fuzzy_match(normalized_content) if used_fuzzy else normalized_content
+    )
 
     matched_edits: list[dict[str, Any]] = []
     for index, edit in enumerate(normalized_edits):
@@ -223,12 +228,14 @@ def apply_edits_to_normalized_content(
         occurrences = _count_occurrences(replacement_base, edit["oldText"])
         if occurrences > 1:
             raise ValueError(_duplicate_error(path, index, len(normalized_edits), occurrences))
-        matched_edits.append({
-            "editIndex": index,
-            "matchIndex": match["index"],
-            "matchLength": match["matchLength"],
-            "newText": edit["newText"],
-        })
+        matched_edits.append(
+            {
+                "editIndex": index,
+                "matchIndex": match["index"],
+                "matchLength": match["matchLength"],
+                "newText": edit["newText"],
+            }
+        )
 
     matched_edits.sort(key=lambda m: m["matchIndex"])
     for index in range(1, len(matched_edits)):
@@ -242,7 +249,9 @@ def apply_edits_to_normalized_content(
 
     base_content = normalized_content
     new_content = (
-        _apply_replacements_preserving_unchanged_lines(normalized_content, replacement_base, matched_edits)
+        _apply_replacements_preserving_unchanged_lines(
+            normalized_content, replacement_base, matched_edits
+        )
         if used_fuzzy
         else _apply_replacements(replacement_base, matched_edits)
     )
@@ -251,7 +260,9 @@ def apply_edits_to_normalized_content(
     return {"baseContent": base_content, "newContent": new_content}
 
 
-def generate_unified_patch(path: str, old_content: str, new_content: str, context_lines: int = 4) -> str:
+def generate_unified_patch(
+    path: str, old_content: str, new_content: str, context_lines: int = 4
+) -> str:
     old_lines = old_content.split("\n")
     new_lines = new_content.split("\n")
     diff = difflib.unified_diff(
@@ -271,7 +282,9 @@ def generate_diff_string(
     context_lines: int = 4,
 ) -> dict[str, Any]:
     """生成带行号的展示用 diff（对齐 TS generateDiffString）。"""
-    differ = difflib.SequenceMatcher(a=old_content.split("\n"), b=new_content.split("\n"), autojunk=False)
+    differ = difflib.SequenceMatcher(
+        a=old_content.split("\n"), b=new_content.split("\n"), autojunk=False
+    )
     output: list[str] = []
     old_line_num = 1
     new_line_num = 1

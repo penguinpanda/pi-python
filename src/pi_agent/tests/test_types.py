@@ -1,6 +1,6 @@
 """_types.py 模块测试。"""
 
-from pi_ai._types import Model, TextContent, ToolResultMessage, Usage
+from pi_ai._types import Model, TextContent
 from pi_agent._types import (
     AfterToolCallResult,
     AgentContext,
@@ -124,7 +124,13 @@ class TestAgentEvent:
         assert evt["type"] == "turn_start"
 
     def test_turn_end(self):
-        msg: dict = {"role": "assistant", "content": [], "api": "test", "provider": "test", "model": "test"}
+        msg: dict = {
+            "role": "assistant",
+            "content": [],
+            "api": "test",
+            "provider": "test",
+            "model": "test",
+        }
         evt: AgentEvent = {"type": "turn_end", "message": msg, "tool_results": []}
         assert evt["type"] == "turn_end"
         assert evt["tool_results"] == []

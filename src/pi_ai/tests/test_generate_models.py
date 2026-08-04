@@ -2,7 +2,6 @@
 
 import json
 
-from pathlib import Path
 
 from pi_ai.models.models_store import model_from_dict
 
@@ -52,9 +51,7 @@ def test_convert_ts_model():
 
 
 def test_load_ts_catalog_from_flat_dir(tmp_path):
-    (tmp_path / "openai.json").write_text(
-        json.dumps({"gpt-test": TS_MODEL}), encoding="utf-8"
-    )
+    (tmp_path / "openai.json").write_text(json.dumps({"gpt-test": TS_MODEL}), encoding="utf-8")
     catalog = load_ts_catalog(tmp_path)
     assert "openai" in catalog
     assert catalog["openai"]["gpt-test"]["id"] == "gpt-test"

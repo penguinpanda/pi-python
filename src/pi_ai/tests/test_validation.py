@@ -295,9 +295,7 @@ class TestAdvancedSchemas:
             "additionalProperties": {"type": "boolean"},
         }
         # 已声明字段按 properties 转；未声明字段按 additionalProperties 转
-        assert coerce_with_json_schema(
-            {"a": "1", "flag": "true"}, schema
-        ) == {"a": 1, "flag": True}
+        assert coerce_with_json_schema({"a": "1", "flag": "true"}, schema) == {"a": 1, "flag": True}
 
     def test_additional_properties_as_schema_validation(self):
         schema = {
@@ -380,7 +378,10 @@ class TestExtendedKeywords:
         assert validate_arguments("t", schema, {"x": "fixed"}) == {"x": "fixed"}
 
     def test_pattern(self):
-        schema = {"type": "object", "properties": {"code": {"type": "string", "pattern": "^[a-z]+$"}}}
+        schema = {
+            "type": "object",
+            "properties": {"code": {"type": "string", "pattern": "^[a-z]+$"}},
+        }
         with pytest.raises(ValidationError, match="pattern"):
             validate_arguments("t", schema, {"code": "ABC123"})
         assert validate_arguments("t", schema, {"code": "abc"}) == {"code": "abc"}

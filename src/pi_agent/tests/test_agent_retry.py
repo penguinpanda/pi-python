@@ -96,10 +96,12 @@ def _events_of(events: list[AgentEvent], event_type: str) -> list[AgentEvent]:
 
 @pytest.mark.asyncio
 async def test_retry_succeeds_on_second_attempt() -> None:
-    core = _make_faux([
-        _llm_error("500 Internal Server Error"),
-        _llm_ok("retried ok"),
-    ])
+    core = _make_faux(
+        [
+            _llm_error("500 Internal Server Error"),
+            _llm_ok("retried ok"),
+        ]
+    )
     config = _make_config(RetryPolicy(max_retries=3, base_delay_ms=1, jitter=False))
 
     result, events = await _run(core.stream, config)
@@ -112,13 +114,13 @@ async def test_retry_succeeds_on_second_attempt() -> None:
     # 每次尝试各发射一次 assistant message_start；
     # message_end 只对最终结果发射一次（失败尝试未提交）
     assistant_starts = [
-        e for e in events
+        e
+        for e in events
         if e["type"] == "message_start" and e["message"].get("role") == "assistant"
     ]
     assert len(assistant_starts) == 2
     ends = [
-        e for e in events
-        if e["type"] == "message_end" and e["message"].get("role") == "assistant"
+        e for e in events if e["type"] == "message_end" and e["message"].get("role") == "assistant"
     ]
     assert len(ends) == 1
     assert ends[0]["message"]["stop_reason"] == "stop"
@@ -142,10 +144,12 @@ async def test_retry_succeeds_on_second_attempt() -> None:
 @pytest.mark.asyncio
 async def test_default_policy_enabled() -> None:
     """retry_policy=None → 默认启用重试。"""
-    core = _make_faux([
-        _llm_error("503 Service Unavailable"),
-        _llm_ok("ok"),
-    ])
+    core = _make_faux(
+        [
+            _llm_error("503 Service Unavailable"),
+            _llm_ok("ok"),
+        ]
+    )
     config = _make_config()  # retry_policy=None
 
     result, events = await _run(core.stream, config)
@@ -158,11 +162,13 @@ async def test_default_policy_enabled() -> None:
 @pytest.mark.asyncio
 async def test_retry_exhausted_returns_error() -> None:
     """重试预算耗尽 → 返回最终错误，且只提交一条错误消息。"""
-    core = _make_faux([
-        _llm_error("503 Service Unavailable"),
-        _llm_error("503 Service Unavailable"),
-        _llm_error("503 Service Unavailable"),
-    ])
+    core = _make_faux(
+        [
+            _llm_error("503 Service Unavailable"),
+            _llm_error("503 Service Unavailable"),
+            _llm_error("503 Service Unavailable"),
+        ]
+    )
     config = _make_config(RetryPolicy(max_retries=2, base_delay_ms=1, jitter=False))
 
     result, events = await _run(core.stream, config)
@@ -173,8 +179,7 @@ async def test_retry_exhausted_returns_error() -> None:
 
     assert len(_events_of(events, "auto_retry_start")) == 2
     ends = [
-        e for e in events
-        if e["type"] == "message_end" and e["message"].get("role") == "assistant"
+        e for e in events if e["type"] == "message_end" and e["message"].get("role") == "assistant"
     ]
     assert len(ends) == 1
     assert ends[0]["message"]["stop_reason"] == "error"

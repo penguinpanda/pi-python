@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: pi
+          POSTGRES_PASSWORD: pi
+          POSTGRES_DB: pi_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pi -d pi_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PI_PG_DSN: postgresql://pi:pi@localhost:5432/pi_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: Ruff lint
+        run: uv run ruff check .
+      - name: Ruff format check
+        run: uv run ruff format --check .
+      - name: Type check (baseline, non-blocking)
+        run: uv run mypy src/pi_ai src/pi_agent
+        continue-on-error: true
+      - name: Tests
+        run: uv run pytest -q -k "not live and not oauth and not device" --cov=pi_ai --cov=pi_agent --cov=pi_coding_agent --cov-report=term-missing

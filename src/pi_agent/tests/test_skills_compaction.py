@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 
 import pytest
 from pi_ai._types import Model, TextContent
@@ -120,9 +119,10 @@ class TestPromptTemplates:
         template = result["promptTemplates"][0]
         assert template["name"] == "greet"
         assert template["description"] == "Greeting"
-        assert format_prompt_template_invocation(
-            template["name"], template["content"], ["World"]
-        ) == "Hi World!"
+        assert (
+            format_prompt_template_invocation(template["name"], template["content"], ["World"])
+            == "Hi World!"
+        )
 
 
 class TestCompaction:
@@ -158,7 +158,9 @@ class TestCompaction:
         assert preparation is not None
 
         core = faux_provider()
-        core.set_responses([faux_assistant_message("## Goal\nBuild a calculator\n\n## Progress\n- done")])
+        core.set_responses(
+            [faux_assistant_message("## Goal\nBuild a calculator\n\n## Progress\n- done")]
+        )
 
         ok_flag, result = await compact(preparation, core.stream, _make_model())
         assert ok_flag is True

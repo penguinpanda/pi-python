@@ -51,7 +51,6 @@ from ..provider import create_provider, Provider
 # Provider 初始化时会直接使用该列表。
 # ------------------------------------------------------
 DEEPSEEK_MODELS: list[Model] = [
-    
     # # DeepSeek Chat
     # #
     # # 通用对话模型。
@@ -80,7 +79,6 @@ DEEPSEEK_MODELS: list[Model] = [
     #     # 一般与官方 API 定价一致。
     #     cost=ModelCost(input=0.27, output=1.10, cache_read=0.07, cache_write=0.27),
     # ),
-
     # # DeepSeek Reasoner
     # #
     # # 推理模型。
@@ -104,7 +102,6 @@ DEEPSEEK_MODELS: list[Model] = [
     #     deprecated=True,
     #     cost=ModelCost(input=0.55, output=2.19, cache_read=0.14, cache_write=0.55),
     # ),
-
     # DeepSeek V4 Flash
     #
     # 高速对话模型。
@@ -119,13 +116,12 @@ DEEPSEEK_MODELS: list[Model] = [
         name="DeepSeek V4 Flash",
         input=["text"],
         output=["text"],
-        max_tokens=384000,           # 最大输出 Token 数
+        max_tokens=384000,  # 最大输出 Token 数
         context_window=1000000,
-        reasoning=True,              # 支持推理
+        reasoning=True,  # 支持推理
         # 价格（每百万 Token）。
         cost=ModelCost(input=0.14, output=0.28, cache_read=0.0028, cache_write=0.0),
     ),
-
     # DeepSeek V4 Pro
     #
     # 旗舰推理模型。
@@ -140,9 +136,9 @@ DEEPSEEK_MODELS: list[Model] = [
         name="DeepSeek V4 Pro",
         input=["text"],
         output=["text"],
-        max_tokens=384000,           # 最大输出 Token 数
+        max_tokens=384000,  # 最大输出 Token 数
         context_window=1000000,
-        reasoning=True,              # 支持推理
+        reasoning=True,  # 支持推理
         cost=ModelCost(input=0.435, output=0.87, cache_read=0.003625, cache_write=0.0),
     ),
 ]
@@ -173,7 +169,6 @@ def deepseek_provider() -> Provider:
     return create_provider(
         id="deepseek",
         name="DeepSeek",
-
         # API Key 优先从：
         #
         # Credential Store
@@ -185,10 +180,8 @@ def deepseek_provider() -> Provider:
         # 环境变量读取。
         auth=env_api_key_auth("DeepSeek API key", ["DEEPSEEK_API_KEY"]),
         models=DEEPSEEK_MODELS,
-
         # DeepSeek 兼容 OpenAI Chat Completions API。
         api_kind="completions",
-
         # DeepSeek OpenAI Compatible API 地址。
         base_url="https://api.deepseek.com",
     )

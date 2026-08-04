@@ -57,11 +57,7 @@ def _render_markdown_with_code(text: str) -> str:
     def _replace(match: re.Match[str]) -> str:
         language = match.group(1) or None
         code = html.unescape(match.group(2))
-        return (
-            '<pre class="code-block">'
-            + _highlight_code(code, language)
-            + "</pre>"
-        )
+        return '<pre class="code-block">' + _highlight_code(code, language) + "</pre>"
 
     return _CODE_FENCE_RE.sub(_replace, escaped)
 
@@ -82,7 +78,7 @@ def _content_to_text(content: Any) -> str:
             parts.append(f"<thinking>{block.get('thinking', '')}</thinking>")
         elif block_type == "toolCall":
             parts.append(
-                f"<tool_call name=\"{block.get('name', '')}\">{block.get('raw_arguments', '')}</tool_call>"
+                f'<tool_call name="{block.get("name", "")}">{block.get("raw_arguments", "")}</tool_call>'
             )
         elif block_type == "image":
             parts.append("[image]")

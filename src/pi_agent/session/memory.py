@@ -15,7 +15,7 @@ from .repo import (
     SessionRepo,
 )
 from .search import ScanningSessionSearch
-from .session import _get_label, _get_session_name, _get_session_stats
+from .session import _get_session_name, _get_session_stats
 from .types import (
     LeafEntry,
     SessionCreateOptions,
@@ -24,8 +24,6 @@ from .types import (
     SessionForkOptions,
     SessionMetadata,
     SessionSnapshot,
-    SessionStorage,
-    SessionStore,
     SessionTreeEntry,
 )
 
@@ -74,9 +72,7 @@ class InMemorySessionStorage:
         metadata: SessionMetadata | None = None,
     ) -> None:
         self._entries: list[SessionTreeEntry] = list(entries or [])
-        self._by_id: dict[str, SessionTreeEntry] = {
-            entry["id"]: entry for entry in self._entries
-        }
+        self._by_id: dict[str, SessionTreeEntry] = {entry["id"]: entry for entry in self._entries}
         self._labels_by_id = _build_labels_by_id(self._entries)
         self._leaf_id: str | None = None
         for entry in self._entries:
@@ -135,9 +131,7 @@ class InMemorySessionStorage:
     async def get_session_stats(self):
         return _get_session_stats(self._entries)
 
-    async def get_path_to_root_or_compaction(
-        self, leaf_id: str | None
-    ) -> list[SessionTreeEntry]:
+    async def get_path_to_root_or_compaction(self, leaf_id: str | None) -> list[SessionTreeEntry]:
         return get_path_to_root_or_compaction(self._entries, leaf_id)
 
     async def get_entries(
@@ -155,9 +149,7 @@ class InMemorySessionStore:
     def __init__(self) -> None:
         self._sessions: dict[str, InMemorySessionStorage] = {}
 
-    async def create(
-        self, options: SessionCreateOptions | None = None
-    ) -> SessionMetadata:
+    async def create(self, options: SessionCreateOptions | None = None) -> SessionMetadata:
         options = options or {}
         metadata: SessionMetadata = {
             "id": options.get("id") or create_session_id(),

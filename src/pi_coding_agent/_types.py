@@ -25,6 +25,7 @@ CURRENT_SESSION_VERSION = 3
 
 class SessionHeader(TypedDict):
     """JSONL 文件首行 —— 会话元数据。"""
+
     type: Literal["session"]
     version: int
     id: str
@@ -34,6 +35,7 @@ class SessionHeader(TypedDict):
 
 class SessionMessageEntry(TypedDict):
     """JSONL 消息条目 —— 唯一需要的条目类型（最小核心）。"""
+
     type: Literal["message"]
     id: str
     parentId: str | None
@@ -43,6 +45,7 @@ class SessionMessageEntry(TypedDict):
 
 class CompactionEntry(TypedDict):
     """JSONL 压缩条目 —— 摘要替代旧历史，标记保留起点。"""
+
     type: Literal["compaction"]
     id: str
     parentId: str | None
@@ -54,6 +57,7 @@ class CompactionEntry(TypedDict):
 
 class ModelChangeEntry(TypedDict):
     """JSONL 模型切换条目 —— 记录 setModel/cycleModel 历史。"""
+
     type: Literal["model_change"]
     id: str
     parentId: str | None
@@ -64,6 +68,7 @@ class ModelChangeEntry(TypedDict):
 
 class ThinkingLevelChangeEntry(TypedDict):
     """JSONL 思考级别切换条目。"""
+
     type: Literal["thinking_level_change"]
     id: str
     parentId: str | None
@@ -73,6 +78,7 @@ class ThinkingLevelChangeEntry(TypedDict):
 
 class BranchSummaryEntry(TypedDict, total=False):
     """JSONL 分支摘要条目 —— 记录跨分支导航的上下文摘要。"""
+
     type: Literal["branch_summary"]
     id: str
     parentId: str | None
@@ -86,6 +92,7 @@ class BranchSummaryEntry(TypedDict, total=False):
 
 class LabelEntry(TypedDict):
     """JSONL 标签条目 —— 指向被标记的条目。"""
+
     type: Literal["label"]
     id: str
     parentId: str | None
@@ -96,6 +103,7 @@ class LabelEntry(TypedDict):
 
 class SessionInfoEntry(TypedDict, total=False):
     """JSONL 会话信息条目（名称等）。"""
+
     type: Literal["session_info"]
     id: str
     parentId: str | None
@@ -105,6 +113,7 @@ class SessionInfoEntry(TypedDict, total=False):
 
 class CustomEntry(TypedDict, total=False):
     """JSONL 自定义条目 —— 状态持久化，不进入 LLM 上下文。"""
+
     type: Literal["custom"]
     id: str
     parentId: str | None
@@ -115,6 +124,7 @@ class CustomEntry(TypedDict, total=False):
 
 class CustomMessageEntry(TypedDict, total=False):
     """JSONL 自定义消息条目。"""
+
     type: Literal["custom_message"]
     id: str
     parentId: str | None
@@ -127,6 +137,7 @@ class CustomMessageEntry(TypedDict, total=False):
 
 class LeafEntry(TypedDict):
     """JSONL leaf 指针条目 —— 持久化当前分支叶节点。"""
+
     type: Literal["leaf"]
     id: str
     parentId: str | None
@@ -136,6 +147,7 @@ class LeafEntry(TypedDict):
 
 class ActiveToolsChangeEntry(TypedDict):
     """JSONL 工具集变更条目。"""
+
     type: Literal["active_tools_change"]
     id: str
     parentId: str | None
@@ -167,6 +179,7 @@ SessionEntry = (
 @dataclass(slots=True)
 class AgentSessionConfig:
     """AgentSession 构造参数。"""
+
     agent: Agent
     cwd: str
     model: Model
@@ -177,5 +190,6 @@ class AgentSessionConfig:
 @dataclass(slots=True)
 class PrintModeOptions:
     """Print 模式执行选项。"""
+
     message: str
     system_prompt: str | None = None

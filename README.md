@@ -23,7 +23,7 @@ pi-python/
 | `pi_ai` | [README](src/pi_ai/README.md) | 统一 LLM API，Provider 抽象模式。支持 OpenAI (Responses API)、DeepSeek/Qwen (Completions API)、Ollama 本地与 Faux 测试 Provider | ✓ |
 | `pi_agent` | [README](src/pi_agent/README.md) | 最小核心 Agent 循环。事件驱动、工具调用、循环钩子 | ✓ |
 | `pi_coding_agent` | [README](src/pi_coding_agent/README.md) | CLI 编码代理。7 个编码工具、DAG 会话持久化、双层配置、扩展/技能/信任/压缩 | ✓ |
-| `pi_tui` | — | Textual TUI：主题、快捷键、选择器、剪贴板图片 | ✓ |
+| `pi_tui` | [README](src/pi_tui/README.md) | Textual TUI：主题、快捷键、选择器、剪贴板图片 | ✓ |
 | `pi_protocol` | — | protocol v2：Command/Result/Snapshot/Progress/Error + JSONL framing | ✓ |
 | `pi_storage` | — | PostgreSQL SessionStore/SessionSearch（`docker compose up -d pg`） | ✓ |
 | `pi_server` | — | 常驻服务：`python -m pi_server`（stdio JSONL） | ✓ |
@@ -74,15 +74,20 @@ export DASHSCOPE_API_KEY="sk-..."
 import asyncio
 from pi_ai import create_default_models, Context
 
+
 async def main():
     models = create_default_models()
     model = models.get_model("deepseek", "deepseek-v4-flash")
 
-    async for event in await models.stream(model, Context(
-        messages=[{"role": "user", "content": "Hello!"}],
-    )):
+    async for event in await models.stream(
+        model,
+        Context(
+            messages=[{"role": "user", "content": "Hello!"}],
+        ),
+    ):
         if event["type"] == "text_delta":
             print(event["delta"], end="", flush=True)
+
 
 asyncio.run(main())
 ```
@@ -96,16 +101,20 @@ import asyncio
 from pi_agent import Agent, AgentOptions, set_default_stream_fn
 from pi_ai import create_default_models
 
+
 async def main():
     models = create_default_models()
     set_default_stream_fn(models.stream)
 
-    agent = Agent(AgentOptions(
-        model=models.get_model("deepseek", "deepseek-v4-flash"),
-    ))
+    agent = Agent(
+        AgentOptions(
+            model=models.get_model("deepseek", "deepseek-v4-flash"),
+        )
+    )
     agent.subscribe(lambda e: print(f"[{e['type']}]"))
     await agent.prompt("What is 2+2?")
     await agent.wait_for_idle()
+
 
 asyncio.run(main())
 ```
@@ -156,6 +165,11 @@ uv sync
 
 # 运行全部测试（pi_ai + pi_agent + pi_coding_agent + pi_tui + 新包）
 uv run pytest
+
+# 静态检查（ruff lint + format；mypy 为基线阶段，CI 中暂不阻塞）
+uv run ruff check .
+uv run ruff format .
+uv run mypy src/pi_ai src/pi_agent
 
 # 按包运行测试
 uv run pytest src/pi_ai/tests/ -v

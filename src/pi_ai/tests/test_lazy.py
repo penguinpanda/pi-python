@@ -9,7 +9,6 @@ from pi_ai.types import (
     AssistantMessage,
     Context,
     Model,
-    StreamOptions,
     Usage,
     now_ms,
 )

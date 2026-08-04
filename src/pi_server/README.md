@@ -33,6 +33,7 @@ server → response {id, ok, result|error} + event（server_snapshot / session_s
 import asyncio
 from pi_server import PiServer
 
+
 async def main():
     server = PiServer(session_factory=lambda cwd: my_agent_session(cwd))
     await server.handle_line('{"type":"hello","version":2,"token":""}\n')
@@ -40,6 +41,7 @@ async def main():
         '{"type":"request","id":"1","request":{"command":"create","cwd":"."}}\n'
     )
     # messages[0] = response；后续为 server_snapshot / session_snapshot 事件
+
 
 asyncio.run(main())
 ```

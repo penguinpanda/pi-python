@@ -37,8 +37,8 @@ hello = ServerHello(
         models=[],
     ),
 )
-line = encode_frame(hello)          # JSON 行（含 \n）
-parsed = parse_server_message({})   # 解析并校验服务端消息
+line = encode_frame(hello)  # JSON 行（含 \n）
+parsed = parse_server_message({})  # 解析并校验服务端消息
 ```
 
 ## 测试

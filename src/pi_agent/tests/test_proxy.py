@@ -49,8 +49,12 @@ class TestProcessProxyEvent:
             {"type": "toolcall_start", "contentIndex": 0, "id": "tc-1", "toolName": "search"},
             partial,
         )
-        process_proxy_event({"type": "toolcall_delta", "contentIndex": 0, "delta": '{"q": "py'}, partial)
-        process_proxy_event({"type": "toolcall_delta", "contentIndex": 0, "delta": 'thon"}'}, partial)
+        process_proxy_event(
+            {"type": "toolcall_delta", "contentIndex": 0, "delta": '{"q": "py'}, partial
+        )
+        process_proxy_event(
+            {"type": "toolcall_delta", "contentIndex": 0, "delta": 'thon"}'}, partial
+        )
         end = process_proxy_event({"type": "toolcall_end", "contentIndex": 0}, partial)
 
         block = partial["content"][0]
@@ -91,13 +95,15 @@ class TestStreamProxy:
 
     @pytest.mark.asyncio
     async def test_stream_proxy_reconstructs_message(self):
-        body = self._sse_body([
-            {"type": "start"},
-            {"type": "text_start", "contentIndex": 0},
-            {"type": "text_delta", "contentIndex": 0, "delta": "Hi from proxy"},
-            {"type": "text_end", "contentIndex": 0},
-            {"type": "done", "reason": "stop", "usage": {"input": 5, "output": 3}},
-        ])
+        body = self._sse_body(
+            [
+                {"type": "start"},
+                {"type": "text_start", "contentIndex": 0},
+                {"type": "text_delta", "contentIndex": 0, "delta": "Hi from proxy"},
+                {"type": "text_end", "contentIndex": 0},
+                {"type": "done", "reason": "stop", "usage": {"input": 5, "output": 3}},
+            ]
+        )
 
         def _handler(request: httpx.Request) -> httpx.Response:
             assert request.headers["Authorization"] == "Bearer token123"
@@ -121,11 +127,7 @@ class TestStreamProxy:
         assert types[-1] == "done"
         message = await stream.result()
         assert message["stop_reason"] == "stop"
-        text = "".join(
-            block["text"]
-            for block in message["content"]
-            if block.get("type") == "text"
-        )
+        text = "".join(block["text"] for block in message["content"] if block.get("type") == "text")
         assert text == "Hi from proxy"
 
     @pytest.mark.asyncio
@@ -150,10 +152,12 @@ class TestStreamProxy:
 
     @pytest.mark.asyncio
     async def test_stream_proxy_abort(self):
-        body = self._sse_body([
-            {"type": "text_start", "contentIndex": 0},
-            {"type": "text_delta", "contentIndex": 0, "delta": "partial"},
-        ])
+        body = self._sse_body(
+            [
+                {"type": "text_start", "contentIndex": 0},
+                {"type": "text_delta", "contentIndex": 0, "delta": "partial"},
+            ]
+        )
 
         def _handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, text=body)

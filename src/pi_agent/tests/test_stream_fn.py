@@ -12,6 +12,7 @@ class TestSetDefaultStreamFn:
         async def mock_fn(model, context, options):
             called.append(True)
             from pi_ai.utils._event_stream import AssistantMessageEventStream
+
             stream = AssistantMessageEventStream()
             return stream
 

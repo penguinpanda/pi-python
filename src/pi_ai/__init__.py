@@ -155,7 +155,6 @@ __all__ = [
     # Core registry
     "Models",
     "create_default_models",
-
     # API 注册表（对齐 TS compat.ts apiProviderRegistry）
     "ApiProvider",
     "ApiStreamFunction",
@@ -165,14 +164,12 @@ __all__ = [
     "unregister_api_providers",
     "register_builtin_api_providers",
     "reset_api_providers",
-
     # Retry
     "RetryPolicy",
     "RetryCallbacks",
     "retry_assistant_call",
     "is_retryable_error",
     "compute_backoff_delay",
-
     # Token / Context
     "ContextUsageEstimate",
     "calculate_context_tokens",
@@ -185,29 +182,24 @@ __all__ = [
     "get_overflow_patterns",
     "OVERFLOW_PATTERNS",
     "NON_OVERFLOW_PATTERNS",
-
     # Provider
     "Provider",
     "create_provider",
-    
     # Provider factories
     "openai_provider",
     "deepseek_provider",
     "ollama_provider",
     "faux_provider",
-
     # Model lists
     "OPENAI_MODELS",
     "DEEPSEEK_MODELS",
     "OLLAMA_MODELS",
     "FAUX_MODEL",
-
     # Faux helpers
     "faux_assistant_message",
     "faux_text",
     "faux_thinking",
     "faux_tool_call",
-
     # Types
     "Model",
     "ApiId",
@@ -240,12 +232,15 @@ __all__ = [
     "TraceSpan",
     "now_ms",
     "StreamOptions",
-
     # Types (阶段 1 新增)
     "TextSignatureV1",
     "ThinkingLevel",
     "ThinkingLevelMap",
     "ThinkingBudgets",
+    "ModelThinkingLevel",
+    "StopReason",
+    "Transport",
+    "CacheRetention",
     "ChatTemplateKwargVar",
     "ChatTemplateKwargValue",
     "ProviderEnv",
@@ -285,7 +280,6 @@ __all__ = [
     "ProviderImages",
     "StreamFunction",
     "ImagesFunction",
-
     # Events
     "AssistantMessageEvent",
     "StartEvent",
@@ -301,11 +295,9 @@ __all__ = [
     "DoneEvent",
     "ErrorEvent",
     "BaseEvent",
-
     # Stream
     "AssistantMessageEventStream",
     "EventStream",
-    
     # Auth
     "env_api_key_auth",
     "ApiKeyCredential",

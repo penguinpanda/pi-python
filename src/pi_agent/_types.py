@@ -92,6 +92,7 @@ class AgentToolResult:
 
     content 中的 TextContent/ImageContent 会作为 toolResult 消息传给 LLM。
     """
+
     content: list[TextContent | ImageContent]
     details: Any = None
     usage: Usage | None = None
@@ -113,6 +114,7 @@ class AgentTool:
     - before_execute(args, context) → dict | None：执行前调用，返回 dict 替换参数
     - after_execute(result) → AgentToolResult | None：执行后调用，返回新值替换结果
     """
+
     name: str
     description: str
     input_schema: dict[str, Any]
@@ -137,9 +139,7 @@ class AgentTool:
 # AgentState / AgentContext
 # ---------------------------------------------------------------------------
 
-ThinkingLevel = Literal[
-    "off", "minimal", "low", "medium", "high", "xhigh", "max"
-]
+ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh", "max"]
 
 
 @dataclass
@@ -148,6 +148,7 @@ class AgentState:
 
     tools 和 messages 赋值时自动防御性复制。
     """
+
     system_prompt: str
     model: Model
     thinking_level: ThinkingLevel = "off"
@@ -187,6 +188,7 @@ class AgentState:
 @dataclass(slots=True)
 class AgentContext:
     """传入 agent loop 的不可变上下文快照。"""
+
     system_prompt: str
     messages: list[AgentMessage]
     tools: list[AgentTool] | None = None
@@ -195,6 +197,7 @@ class AgentContext:
 # ---------------------------------------------------------------------------
 # AgentEvent（10 种判别联合事件）
 # ---------------------------------------------------------------------------
+
 
 class AgentStartEvent(TypedDict):
     type: Literal["agent_start"]
@@ -256,18 +259,20 @@ class ToolExecutionEndEvent(TypedDict):
 
 class AutoRetryStartEvent(TypedDict):
     """重试已计划：退避等待开始前发射（对齐 TS auto_retry_start）。"""
+
     type: Literal["auto_retry_start"]
-    attempt: int          # 本次重试序号（从 1 起）
-    max_attempts: int     # 策略重试上限
-    delay_ms: float       # 退避延迟（毫秒）
-    error_message: str    # 触发重试的错误消息
+    attempt: int  # 本次重试序号（从 1 起）
+    max_attempts: int  # 策略重试上限
+    delay_ms: float  # 退避延迟（毫秒）
+    error_message: str  # 触发重试的错误消息
 
 
 class AutoRetryEndEvent(TypedDict):
     """重试循环结束（成功 / 放弃）发射（对齐 TS auto_retry_end）。"""
+
     type: Literal["auto_retry_end"]
-    success: bool          # 是否最终成功
-    attempt: int           # 结束时的重试序号
+    success: bool  # 是否最终成功
+    attempt: int  # 结束时的重试序号
     final_error: str | None  # 最终错误（成功时为 None）
 
 
@@ -294,9 +299,11 @@ AgentEventSink = Callable[[AgentEvent], Awaitable[None]]
 # AgentLoopConfig（可注入钩子）
 # ---------------------------------------------------------------------------
 
+
 @dataclass(slots=True)
 class BeforeToolCallResult:
     """beforeToolCall 返回值，block=True 阻止工具执行。"""
+
     block: bool = False
     reason: str = ""
 
@@ -304,6 +311,7 @@ class BeforeToolCallResult:
 @dataclass(slots=True)
 class AfterToolCallResult:
     """afterToolCall 返回值，字段级覆盖工具结果。"""
+
     content: list[TextContent | ImageContent] | None = None
     details: Any = None
     is_error: bool | None = None
@@ -314,26 +322,29 @@ class AfterToolCallResult:
 @dataclass(slots=True)
 class BeforeToolCallContext:
     """beforeToolCall 专用 context（对齐 TS BeforeToolCallContext）。"""
+
     assistant_message: AssistantMessage  # 触发工具调用的 assistant 消息
-    tool_call: ToolCall                  # 原始 toolCall 块
-    args: Any                            # 校验后的参数
-    context: AgentContext                # 当前 Agent 上下文（含本轮 messages）
+    tool_call: ToolCall  # 原始 toolCall 块
+    args: Any  # 校验后的参数
+    context: AgentContext  # 当前 Agent 上下文（含本轮 messages）
 
 
 @dataclass(slots=True)
 class AfterToolCallContext:
     """afterToolCall 专用 context（对齐 TS AfterToolCallContext）。"""
+
     assistant_message: AssistantMessage  # 触发工具调用的 assistant 消息
-    tool_call: ToolCall                  # 原始 toolCall 块
-    args: Any                            # 校验后的参数
-    result: AgentToolResult              # afterToolCall 覆盖前的执行结果
-    is_error: bool                       # 当前是否按错误处理
-    context: AgentContext                # 当前 Agent 上下文
+    tool_call: ToolCall  # 原始 toolCall 块
+    args: Any  # 校验后的参数
+    result: AgentToolResult  # afterToolCall 覆盖前的执行结果
+    is_error: bool  # 当前是否按错误处理
+    context: AgentContext  # 当前 Agent 上下文
 
 
 @dataclass(slots=True)
 class AgentLoopTurnUpdate:
     """prepareNextTurn 返回值，替换下一轮状态。"""
+
     context: AgentContext | None = None
     model: Model | None = None
     thinking_level: ThinkingLevel | None = None
@@ -360,17 +371,14 @@ class AgentLoopConfig:
     配置:
         tool_execution: 工具执行模式（最小核心仅 "sequential"）
     """
+
     model: Model
     convert_to_llm: Callable[[list[AgentMessage]], list[Message]]
 
     # 可选钩子
-    transform_context: (
-        Callable[[list[AgentMessage]], Awaitable[list[AgentMessage]]] | None
-    ) = None
+    transform_context: Callable[[list[AgentMessage]], Awaitable[list[AgentMessage]]] | None = None
     get_api_key: Callable[[str], str | None] | None = None
-    should_stop_after_turn: (
-        Callable[[AgentContext], bool | Awaitable[bool]] | None
-    ) = None
+    should_stop_after_turn: Callable[[AgentContext], bool | Awaitable[bool]] | None = None
     prepare_next_turn: (
         Callable[
             [AgentContext],
@@ -388,21 +396,15 @@ class AgentLoopConfig:
     after_tool_call: (
         Callable[
             [AfterToolCallContext],
-            AfterToolCallResult
-            | Awaitable[AfterToolCallResult | None]
-            | None,
+            AfterToolCallResult | Awaitable[AfterToolCallResult | None] | None,
         ]
         | None
     ) = None
 
     # 消息队列轮询钩子（双重嵌套循环 1.1 的核心输入）。
     # 每次调用返回待注入的 AgentMessage 列表；无消息时返回 []。
-    get_steering_messages: (
-        Callable[[], Awaitable[list[AgentMessage]]] | None
-    ) = None
-    get_follow_up_messages: (
-        Callable[[], Awaitable[list[AgentMessage]]] | None
-    ) = None
+    get_steering_messages: Callable[[], Awaitable[list[AgentMessage]]] | None = None
+    get_follow_up_messages: Callable[[], Awaitable[list[AgentMessage]]] | None = None
 
     # 配置
     # 默认并行（对齐 TS Agent.toolExecution 默认值）。

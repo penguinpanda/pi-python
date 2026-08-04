@@ -95,9 +95,8 @@ async def _poll_device_auth(
             )
         if response.is_success:
             data = response.json()
-            if (
-                isinstance(data.get("authorization_code"), str)
-                and isinstance(data.get("code_verifier"), str)
+            if isinstance(data.get("authorization_code"), str) and isinstance(
+                data.get("code_verifier"), str
             ):
                 return {
                     "status": "complete",
@@ -219,9 +218,7 @@ async def _login(interaction: AuthInteraction) -> OAuthCredential:
     return _credentials_from_token(token)
 
 
-async def _refresh(
-    credential: OAuthCredential, signal: Any = None
-) -> OAuthCredential:
+async def _refresh(credential: OAuthCredential, signal: Any = None) -> OAuthCredential:
     token = await refresh_access_token(credential["refresh"])
     return _credentials_from_token(token)
 

@@ -10,14 +10,10 @@ def test_generate_pkce_verifier_format():
     verifier, challenge = generate_pkce()
     # verifier: 43 字符 base64url（32 随机字节）
     assert len(verifier) == 43
-    assert set(verifier) <= set(
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-    )
+    assert set(verifier) <= set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
     # challenge: verifier 的 SHA-256 base64url（无 padding）
     expected = (
-        base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
-        .rstrip(b"=")
-        .decode()
+        base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
     )
     assert challenge == expected
 

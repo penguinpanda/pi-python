@@ -67,9 +67,7 @@ def _length_stop_msg(input_tokens: int, cache_read: int, output: int) -> Assista
 
 
 def test_detects_explicit_ollama_prompt_too_long():
-    message = _error_msg(
-        "400 `prompt too long; exceeded max context length by 100918 tokens`"
-    )
+    message = _error_msg("400 `prompt too long; exceeded max context length by 100918 tokens`")
     assert is_context_overflow(message, 32768) is True
 
 
@@ -116,21 +114,30 @@ def test_detects_ds4_configured_context_size_errors():
 
 
 def test_detects_anthropic_and_google_patterns():
-    assert is_context_overflow(
-        _error_msg("prompt is too long: 213462 tokens > 200000 maximum"), 200_000
-    ) is True
-    assert is_context_overflow(
-        _error_msg(
-            '413 {"error":{"type":"request_too_large","message":"Request exceeds the maximum size"}}'
-        ),
-        200_000,
-    ) is True
-    assert is_context_overflow(
-        _error_msg(
-            "The input token count (1196265) exceeds the maximum number of tokens allowed (1048575)"
-        ),
-        1_048_576,
-    ) is True
+    assert (
+        is_context_overflow(
+            _error_msg("prompt is too long: 213462 tokens > 200000 maximum"), 200_000
+        )
+        is True
+    )
+    assert (
+        is_context_overflow(
+            _error_msg(
+                '413 {"error":{"type":"request_too_large","message":"Request exceeds the maximum size"}}'
+            ),
+            200_000,
+        )
+        is True
+    )
+    assert (
+        is_context_overflow(
+            _error_msg(
+                "The input token count (1196265) exceeds the maximum number of tokens allowed (1048575)"
+            ),
+            1_048_576,
+        )
+        is True
+    )
 
 
 def test_detects_xai_grok_pattern():

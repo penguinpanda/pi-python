@@ -26,9 +26,7 @@ def _emit_json(obj: dict) -> None:
     print(json.dumps(obj, ensure_ascii=False, default=str), flush=True)
 
 
-async def run_print_mode(
-    session: AgentSession, message: str, images: list | None = None
-) -> int:
+async def run_print_mode(session: AgentSession, message: str, images: list | None = None) -> int:
     """运行 Print 模式：发送消息 → 等待完成 → 提取文本 → 输出到 stdout。
 
     Returns:

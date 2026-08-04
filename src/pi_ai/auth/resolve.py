@@ -7,13 +7,12 @@
 
 from typing import Any
 
-from ..types.common import ProviderEnv, now_ms
+from ..types.common import now_ms
 from .context import AuthContext
 from .types import (
     AuthResult,
     Credential,
     CredentialStore,
-    ModelAuth,
     OAuthAuth,
     credential_type,
 )
@@ -99,6 +98,7 @@ async def resolve_stored_oauth(
     credential = stored
 
     if _expires_soon(credential, minimum_validity_ms):
+
         async def _refresh(current: Credential | None) -> Credential | None:
             if current is None or credential_type(current) != "oauth":
                 return None  # 期间被 logout
@@ -126,9 +126,7 @@ async def resolve_stored_oauth(
             return None  # 期间被 logout
         credential = post
         # 显式调用方要求刷新后仍有足够有效期。
-        if min_oauth_validity_ms is not None and _expires_soon(
-            credential, min_oauth_validity_ms
-        ):
+        if min_oauth_validity_ms is not None and _expires_soon(credential, min_oauth_validity_ms):
             raise ModelsError(
                 "oauth",
                 f"OAuth refresh returned a token that expires too soon for {provider_id}",

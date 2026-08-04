@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -26,7 +25,6 @@ from pi_agent import AgentMessage
 from pi_ai import now_ms
 
 from ._types import (
-    ActiveToolsChangeEntry,
     BranchSummaryEntry,
     CURRENT_SESSION_VERSION,
     CompactionEntry,
@@ -63,6 +61,7 @@ class SessionInfo:
     cwd: str
     modified: float
 
+
 # ---------------------------------------------------------------------------
 # SessionManager
 # ---------------------------------------------------------------------------
@@ -88,9 +87,7 @@ class SessionManager:
         self._entries: list[SessionMessageEntry] = entries or []
         self._session_name: str | None = None
         # 跟踪最新的 parentId（单链尾）
-        self._leaf_parent_id: str | None = (
-            self._entries[-1]["id"] if self._entries else None
-        )
+        self._leaf_parent_id: str | None = self._entries[-1]["id"] if self._entries else None
 
     # ------------------------------------------------------------------
     # 工厂方法
@@ -406,6 +403,7 @@ class SessionManager:
                 parent.children.append(node)
             else:
                 roots.append(node)
+
         # 子节点按时间戳排序。
         def _sort(nodes_to_sort: list[SessionTreeNode]) -> None:
             for node in nodes_to_sort:
@@ -660,6 +658,7 @@ class SessionManager:
 def _default_sessions_dir() -> Path:
     """默认会话目录。"""
     from ._config import get_sessions_dir
+
     return get_sessions_dir()
 
 
@@ -679,7 +678,9 @@ def _entry_ts(entry: SessionEntry | None) -> float:
         return 0.0
 
 
-def _write_jsonl_sync(filepath: Path, header: dict[str, Any], entries: list[dict[str, Any]]) -> None:
+def _write_jsonl_sync(
+    filepath: Path, header: dict[str, Any], entries: list[dict[str, Any]]
+) -> None:
     """重写会话文件（header + entries）。"""
     filepath.parent.mkdir(parents=True, exist_ok=True)
     with open(filepath, "w", encoding="utf-8") as f:
@@ -707,7 +708,7 @@ def _migrate_v1_to_v2(header: dict[str, Any], entries: list[SessionEntry]) -> No
     header["version"] = 2
     ids: set[str] = set()
     prev_id: str | None = None
-    for index, entry in enumerate(entries):
+    for entry in entries:
         entry["id"] = _generate_entry_id(ids)
         entry["parentId"] = prev_id
         prev_id = entry.get("id")
@@ -734,9 +735,7 @@ def _migrate_v2_to_v3(header: dict[str, Any], entries: list[SessionEntry]) -> No
             message["role"] = "custom"
 
 
-def migrate_session_entries(
-    header: dict[str, Any], entries: list[SessionEntry]
-) -> bool:
+def migrate_session_entries(header: dict[str, Any], entries: list[SessionEntry]) -> bool:
     """按版本迁移条目到 CURRENT_SESSION_VERSION；返回是否发生迁移。"""
     version = header.get("version", 1)
     if version >= CURRENT_SESSION_VERSION:

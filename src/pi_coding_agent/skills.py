@@ -155,7 +155,9 @@ def _validate_description(description: str | None) -> list[str]:
     if not description or not description.strip():
         errors.append("description is required")
     elif len(description) > MAX_DESCRIPTION_LENGTH:
-        errors.append(f"description exceeds {MAX_DESCRIPTION_LENGTH} characters ({len(description)})")
+        errors.append(
+            f"description exceeds {MAX_DESCRIPTION_LENGTH} characters ({len(description)})"
+        )
     return errors
 
 
@@ -164,14 +166,18 @@ def _validate_description(description: str | None) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def _load_skill_from_file(file_path: Path, source: str) -> tuple[Skill | None, list[ResourceDiagnostic]]:
+def _load_skill_from_file(
+    file_path: Path, source: str
+) -> tuple[Skill | None, list[ResourceDiagnostic]]:
     diagnostics: list[ResourceDiagnostic] = []
     try:
         raw_content = file_path.read_text(encoding="utf-8")
         frontmatter, _body = parse_frontmatter(raw_content)
     except OSError as exc:
         diagnostics.append(
-            ResourceDiagnostic(type="warning", message=str(exc), path=str(file_path), code="read_failed")
+            ResourceDiagnostic(
+                type="warning", message=str(exc), path=str(file_path), code="read_failed"
+            )
         )
         return None, diagnostics
 
@@ -180,13 +186,21 @@ def _load_skill_from_file(file_path: Path, source: str) -> tuple[Skill | None, l
         description = None
     for error in _validate_description(description):
         diagnostics.append(
-            ResourceDiagnostic(type="warning", message=error, path=str(file_path), code="invalid_metadata")
+            ResourceDiagnostic(
+                type="warning", message=error, path=str(file_path), code="invalid_metadata"
+            )
         )
     frontmatter_name = frontmatter.get("name")
-    name = frontmatter_name if isinstance(frontmatter_name, str) and frontmatter_name else file_path.parent.name
+    name = (
+        frontmatter_name
+        if isinstance(frontmatter_name, str) and frontmatter_name
+        else file_path.parent.name
+    )
     for error in _validate_name(name):
         diagnostics.append(
-            ResourceDiagnostic(type="warning", message=error, path=str(file_path), code="invalid_metadata")
+            ResourceDiagnostic(
+                type="warning", message=error, path=str(file_path), code="invalid_metadata"
+            )
         )
     if not description or not description.strip():
         return None, diagnostics
@@ -361,9 +375,7 @@ class SkillLoader:
         """格式化为系统提示中的 <available_skills> XML 块。"""
         return format_skills_for_prompt(self.all())
 
-    def format_invocation(
-        self, skill: Skill, additional_instructions: str | None = None
-    ) -> str:
+    def format_invocation(self, skill: Skill, additional_instructions: str | None = None) -> str:
         """展开 /skill:name 调用块（复用 pi_agent 格式化）。"""
         try:
             body = parse_frontmatter(Path(skill.file_path).read_text(encoding="utf-8"))[1].strip()

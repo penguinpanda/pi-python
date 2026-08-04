@@ -58,13 +58,9 @@ def calculate_context_tokens(usage: Usage) -> int:
 
     total_tokens 优先；缺失或为 0 时按 input/output/cache_read/cache_write 求和。
     """
-    return (
-        usage.get("total_tokens")
-        or usage.get("input", 0)
-        + usage.get("output", 0)
-        + usage.get("cache_read", 0)
-        + usage.get("cache_write", 0)
-    )
+    return usage.get("total_tokens") or usage.get("input", 0) + usage.get("output", 0) + usage.get(
+        "cache_read", 0
+    ) + usage.get("cache_write", 0)
 
 
 def _safe_json_stringify(value: object) -> str:
@@ -234,9 +230,8 @@ def estimate_context_tokens(context: Context | list[Message]) -> ContextUsageEst
         )
 
     prefix_tokens = (
-        (estimate_text_tokens(context.system_prompt) if context.system_prompt else 0)
-        + estimate_tools_tokens(context.tools)
-    )
+        estimate_text_tokens(context.system_prompt) if context.system_prompt else 0
+    ) + estimate_tools_tokens(context.tools)
     return ContextUsageEstimate(
         tokens=estimate.tokens + prefix_tokens,
         usage_tokens=estimate.usage_tokens,

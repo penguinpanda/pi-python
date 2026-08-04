@@ -35,11 +35,7 @@ pytestmark = pytest.mark.skipif(
 
 
 def _extract_text(result) -> str:
-    return "".join(
-        block["text"]
-        for block in result["content"]
-        if block["type"] == "text"
-    )
+    return "".join(block["text"] for block in result["content"] if block["type"] == "text")
 
 
 class TestOllamaLive:

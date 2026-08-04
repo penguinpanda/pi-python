@@ -11,7 +11,9 @@ from .path_utils import resolve_tool_path
 
 
 def create_write_tool() -> AgentTool:
-    async def execute(tool_call_id, params, signal=None, on_update=None, context=None) -> AgentToolResult:
+    async def execute(
+        tool_call_id, params, signal=None, on_update=None, context=None
+    ) -> AgentToolResult:
         env = context.env
         path = params["path"]
         content = params["content"]
@@ -24,7 +26,11 @@ def create_write_tool() -> AgentTool:
             if signal is not None and signal.is_set():
                 raise ValueError("Operation aborted")
             return AgentToolResult(
-                content=[TextContent(type="text", text=f"Successfully wrote {len(content)} bytes to {path}")],
+                content=[
+                    TextContent(
+                        type="text", text=f"Successfully wrote {len(content)} bytes to {path}"
+                    )
+                ],
                 details=None,
             )
 
@@ -40,7 +46,10 @@ def create_write_tool() -> AgentTool:
         input_schema={
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "Path to the file to write (relative or absolute)"},
+                "path": {
+                    "type": "string",
+                    "description": "Path to the file to write (relative or absolute)",
+                },
                 "content": {"type": "string", "description": "Content to write to the file"},
             },
             "required": ["path", "content"],

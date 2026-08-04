@@ -29,7 +29,7 @@ class TestFork:
         mgr = SessionManager.create(cwd="/tmp/proj", sessions_dir=str(tmp_path))
         e1 = asyncio.run(mgr.append_message(_user("one")))
         e2 = asyncio.run(mgr.append_message(_user("two")))
-        e3 = asyncio.run(mgr.append_message(_user("three")))
+        asyncio.run(mgr.append_message(_user("three")))
 
         forked = mgr.fork(e2)
         assert forked.session_id != mgr.session_id
@@ -82,8 +82,8 @@ class TestMoveToAndBranchSummary:
     def test_move_to_sets_leaf_and_builds_context(self, tmp_path):
         mgr = SessionManager.in_memory(cwd="/tmp")
         e1 = asyncio.run(mgr.append_message(_user("one")))
-        e2 = asyncio.run(mgr.append_message(_user("two")))
-        e3 = asyncio.run(mgr.append_message(_user("three")))
+        asyncio.run(mgr.append_message(_user("two")))
+        asyncio.run(mgr.append_message(_user("three")))
 
         asyncio.run(mgr.move_to(e1))
         assert mgr.get_leaf_id() == e1
@@ -100,10 +100,12 @@ class TestMoveToAndBranchSummary:
         e1 = asyncio.run(mgr.append_message(_user("one")))
         asyncio.run(mgr.append_message(_user("two")))
 
-        result = asyncio.run(mgr.move_to(
-            e1,
-            {"summary": "branch summary text", "details": {"readFiles": []}},
-        ))
+        result = asyncio.run(
+            mgr.move_to(
+                e1,
+                {"summary": "branch summary text", "details": {"readFiles": []}},
+            )
+        )
         assert result is not None
         entries = mgr.get_entries()
         assert entries[-1]["type"] == "branch_summary"
@@ -167,12 +169,31 @@ class TestMigration:
     def test_v1_to_v3(self, tmp_path):
         path = tmp_path / "old.jsonl"
         path.write_text(
-            "\n".join([
-                json.dumps({"type": "session", "version": 1, "id": "s1", "timestamp": "t", "cwd": "/tmp"}),
-                json.dumps({"type": "message", "message": {"role": "user", "content": "hi"}}),
-                json.dumps({"type": "compaction", "summary": "sum", "firstKeptEntryIndex": 1, "tokensBefore": 10}),
-                json.dumps({"type": "message", "message": {"role": "hookMessage", "content": "x"}}),
-            ]),
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "type": "session",
+                            "version": 1,
+                            "id": "s1",
+                            "timestamp": "t",
+                            "cwd": "/tmp",
+                        }
+                    ),
+                    json.dumps({"type": "message", "message": {"role": "user", "content": "hi"}}),
+                    json.dumps(
+                        {
+                            "type": "compaction",
+                            "summary": "sum",
+                            "firstKeptEntryIndex": 1,
+                            "tokensBefore": 10,
+                        }
+                    ),
+                    json.dumps(
+                        {"type": "message", "message": {"role": "hookMessage", "content": "x"}}
+                    ),
+                ]
+            ),
             encoding="utf-8",
         )
         mgr = SessionManager.open(path)
@@ -194,16 +215,28 @@ class TestMigration:
     def test_v2_to_v3(self, tmp_path):
         path = tmp_path / "v2.jsonl"
         path.write_text(
-            "\n".join([
-                json.dumps({"type": "session", "version": 2, "id": "s2", "timestamp": "t", "cwd": "/tmp"}),
-                json.dumps({
-                    "type": "message",
-                    "id": "a",
-                    "parentId": None,
-                    "timestamp": "t",
-                    "message": {"role": "hookMessage", "content": "y"},
-                }),
-            ]),
+            "\n".join(
+                [
+                    json.dumps(
+                        {
+                            "type": "session",
+                            "version": 2,
+                            "id": "s2",
+                            "timestamp": "t",
+                            "cwd": "/tmp",
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "type": "message",
+                            "id": "a",
+                            "parentId": None,
+                            "timestamp": "t",
+                            "message": {"role": "hookMessage", "content": "y"},
+                        }
+                    ),
+                ]
+            ),
             encoding="utf-8",
         )
         mgr = SessionManager.open(path)

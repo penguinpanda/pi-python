@@ -41,11 +41,13 @@ def _make_runtime(model_count: int = 3) -> ModelRuntime:
 def _make_session(runtime: ModelRuntime, tmp_path: Path) -> AgentSession:
     model = runtime.get_model("faux", "faux-1")
     assert model is not None
-    agent = Agent(AgentOptions(
-        system_prompt="You are a helpful coding assistant.",
-        model=model,
-        stream_fn=runtime.stream,
-    ))
+    agent = Agent(
+        AgentOptions(
+            system_prompt="You are a helpful coding assistant.",
+            model=model,
+            stream_fn=runtime.stream,
+        )
+    )
     return AgentSession(
         agent=agent,
         session_manager=SessionManager.in_memory(cwd=str(tmp_path)),
@@ -63,11 +65,13 @@ def _make_handler(runtime: ModelRuntime, tmp_path: Path, **kwargs) -> RpcMessage
 def _rebuild_session(runtime: ModelRuntime, manager, tmp_path: Path) -> AgentSession:
     model = runtime.get_model("faux", "faux-1")
     assert model is not None
-    agent = Agent(AgentOptions(
-        system_prompt="You are a helpful coding assistant.",
-        model=model,
-        stream_fn=runtime.stream,
-    ))
+    agent = Agent(
+        AgentOptions(
+            system_prompt="You are a helpful coding assistant.",
+            model=model,
+            stream_fn=runtime.stream,
+        )
+    )
     return AgentSession(
         agent=agent,
         session_manager=manager,
@@ -109,12 +113,14 @@ class TestModelCommands:
     async def test_set_model(self, tmp_path):
         runtime = _make_runtime()
         handler = _make_handler(runtime, tmp_path)
-        response = await handler.handle_command({
-            "id": "1",
-            "type": "set_model",
-            "provider": "faux",
-            "modelId": "faux-2",
-        })
+        response = await handler.handle_command(
+            {
+                "id": "1",
+                "type": "set_model",
+                "provider": "faux",
+                "modelId": "faux-2",
+            }
+        )
         assert response["success"] is True
         assert response["data"]["id"] == "faux-2"
         assert handler.session.model.id == "faux-2"
@@ -122,12 +128,14 @@ class TestModelCommands:
     async def test_set_model_not_found(self, tmp_path):
         runtime = _make_runtime()
         handler = _make_handler(runtime, tmp_path)
-        response = await handler.handle_command({
-            "id": "1",
-            "type": "set_model",
-            "provider": "faux",
-            "modelId": "missing",
-        })
+        response = await handler.handle_command(
+            {
+                "id": "1",
+                "type": "set_model",
+                "provider": "faux",
+                "modelId": "missing",
+            }
+        )
         assert response["success"] is False
         assert "Model not found" in response["error"]
 
@@ -154,29 +162,33 @@ class TestThinkingCommands:
         runtime = _make_runtime()
         handler = _make_handler(runtime, tmp_path)
         # faux-1 非 reasoning → clamp 到 off，不报错。
-        response = await handler.handle_command({
-            "id": "1",
-            "type": "set_thinking_level",
-            "level": "medium",
-        })
+        response = await handler.handle_command(
+            {
+                "id": "1",
+                "type": "set_thinking_level",
+                "level": "medium",
+            }
+        )
         assert response["success"] is True
 
     async def test_get_available_thinking_levels(self, tmp_path):
         runtime = _make_runtime()
         handler = _make_handler(runtime, tmp_path)
-        response = await handler.handle_command({
-            "id": "1",
-            "type": "get_available_thinking_levels",
-        })
+        response = await handler.handle_command(
+            {
+                "id": "1",
+                "type": "get_available_thinking_levels",
+            }
+        )
         assert response["success"] is True
         assert response["data"]["levels"] == ["off"]
 
     async def test_cycle_thinking_level_on_reasoning_model(self, tmp_path):
         runtime = _make_runtime()
         handler = _make_handler(runtime, tmp_path)
-        await handler.handle_command({
-            "id": "1", "type": "set_model", "provider": "faux", "modelId": "faux-2"
-        })
+        await handler.handle_command(
+            {"id": "1", "type": "set_model", "provider": "faux", "modelId": "faux-2"}
+        )
         response = await handler.handle_command({"id": "2", "type": "cycle_thinking_level"})
         assert response["success"] is True
         # set_model 将级别设为 medium → 一次 cycle 到 high。
@@ -187,15 +199,15 @@ class TestQueueAndSettingsCommands:
     async def test_set_steering_mode(self, tmp_path):
         runtime = _make_runtime()
         handler = _make_handler(runtime, tmp_path)
-        response = await handler.handle_command({
-            "id": "1", "type": "set_steering_mode", "mode": "all"
-        })
+        response = await handler.handle_command(
+            {"id": "1", "type": "set_steering_mode", "mode": "all"}
+        )
         assert response["success"] is True
         assert handler.session.steering_mode == "all"
 
-        response = await handler.handle_command({
-            "id": "2", "type": "set_steering_mode", "mode": "bogus"
-        })
+        response = await handler.handle_command(
+            {"id": "2", "type": "set_steering_mode", "mode": "bogus"}
+        )
         assert response["success"] is False
 
     async def test_set_follow_up_mode(self, tmp_path):
@@ -219,24 +231,22 @@ class TestPromptAndQueue:
     async def test_steer_and_follow_up_enqueue(self, tmp_path):
         runtime = _make_runtime()
         handler = _make_handler(runtime, tmp_path)
-        response = await handler.handle_command({
-            "id": "1", "type": "steer", "message": "interrupt"
-        })
+        response = await handler.handle_command(
+            {"id": "1", "type": "steer", "message": "interrupt"}
+        )
         assert response["success"] is True
         assert handler.session.pending_message_count == 1
 
-        response = await handler.handle_command({
-            "id": "2", "type": "follow_up", "message": "then this"
-        })
+        response = await handler.handle_command(
+            {"id": "2", "type": "follow_up", "message": "then this"}
+        )
         assert response["success"] is True
         assert handler.session.pending_message_count == 2
 
     async def test_prompt_background(self, tmp_path):
         runtime = _make_runtime()
         handler = _make_handler(runtime, tmp_path)
-        response = await handler.handle_command({
-            "id": "1", "type": "prompt", "message": "hi"
-        })
+        response = await handler.handle_command({"id": "1", "type": "prompt", "message": "hi"})
         assert response["success"] is True
         # 等待后台 prompt 完成（faux 无脚本响应 → 立即返回 error）。
         for _ in range(100):
@@ -258,9 +268,9 @@ class TestBashAndStats:
     async def test_bash(self, tmp_path):
         runtime = _make_runtime()
         handler = _make_handler(runtime, tmp_path)
-        response = await handler.handle_command({
-            "id": "1", "type": "bash", "command": "echo rpc-ok"
-        })
+        response = await handler.handle_command(
+            {"id": "1", "type": "bash", "command": "echo rpc-ok"}
+        )
         assert response["success"] is True
         assert "rpc-ok" in response["data"]["output"]
         assert response["data"]["exit_code"] == 0
@@ -317,18 +327,16 @@ class TestSessionCommands:
             await asyncio.sleep(0.01)
         entries = handler.session.session_manager.get_entries()
         first_id = entries[0]["id"]
-        response = await handler.handle_command({
-            "id": "2", "type": "get_entries", "since": first_id
-        })
+        response = await handler.handle_command(
+            {"id": "2", "type": "get_entries", "since": first_id}
+        )
         assert response["success"] is True
         assert response["data"]["entries"] == entries[1:]
 
     async def test_get_entries_since_missing(self, tmp_path):
         runtime = _make_runtime()
         handler = _make_handler(runtime, tmp_path)
-        response = await handler.handle_command({
-            "id": "1", "type": "get_entries", "since": "nope"
-        })
+        response = await handler.handle_command({"id": "1", "type": "get_entries", "since": "nope"})
         assert response["success"] is False
 
     async def test_set_session_name(self, tmp_path):
@@ -336,7 +344,9 @@ class TestSessionCommands:
         handler = _make_handler(runtime, tmp_path)
         await handler.handle_command({"id": "1", "type": "set_session_name", "name": "  My Task  "})
         assert handler.session.session_name == "My Task"
-        response = await handler.handle_command({"id": "2", "type": "set_session_name", "name": " "})
+        response = await handler.handle_command(
+            {"id": "2", "type": "set_session_name", "name": " "}
+        )
         assert response["success"] is False
 
     async def test_get_last_assistant_text(self, tmp_path):
@@ -383,9 +393,7 @@ class TestSessionCommands:
                 )
             },
         )
-        runner = ExtensionRunner(
-            [extension], cwd=str(tmp_path), model_runtime=runtime
-        )
+        runner = ExtensionRunner([extension], cwd=str(tmp_path), model_runtime=runtime)
 
         skills_dir = tmp_path / "skills"
         (skills_dir / "alpha").mkdir(parents=True)
@@ -407,11 +415,13 @@ class TestSessionCommands:
 
         model = runtime.get_model("faux", "faux-1")
         assert model is not None
-        agent = Agent(AgentOptions(
-            system_prompt="You are a helpful coding assistant.",
-            model=model,
-            stream_fn=runtime.stream,
-        ))
+        agent = Agent(
+            AgentOptions(
+                system_prompt="You are a helpful coding assistant.",
+                model=model,
+                stream_fn=runtime.stream,
+            )
+        )
         session = AgentSession(
             agent=agent,
             session_manager=SessionManager.in_memory(cwd=str(tmp_path)),
@@ -432,23 +442,21 @@ class TestSessionCommands:
         assert sources == {"extension", "prompt", "skill"}
         hello = next(command for command in commands if command["name"] == "hello")
         assert hello["sourceInfo"]["path"] == str(extension_path)
-        shorten = next(
-            command for command in commands if command["name"] == "shorten"
-        )
+        shorten = next(command for command in commands if command["name"] == "shorten")
         assert shorten["sourceInfo"]["path"].endswith("shorten.md")
-        alpha = next(
-            command for command in commands if command["name"] == "skill:alpha"
-        )
+        alpha = next(command for command in commands if command["name"] == "skill:alpha")
         assert alpha["sourceInfo"]["path"].endswith("SKILL.md")
 
     async def test_export_html(self, tmp_path):
         runtime = _make_runtime()
         handler = _make_handler(runtime, tmp_path)
-        response = await handler.handle_command({
-            "id": "1",
-            "type": "export_html",
-            "outputPath": str(tmp_path / "session.html"),
-        })
+        response = await handler.handle_command(
+            {
+                "id": "1",
+                "type": "export_html",
+                "outputPath": str(tmp_path / "session.html"),
+            }
+        )
         assert response["success"] is True
         assert (tmp_path / "session.html").exists()
 
@@ -474,9 +482,9 @@ class TestDagCommands:
         entries = session.session_manager.get_entries()
         first_entry = entries[0]
 
-        response = await handler.handle_command({
-            "id": "2", "type": "fork", "entryId": first_entry["id"]
-        })
+        response = await handler.handle_command(
+            {"id": "2", "type": "fork", "entryId": first_entry["id"]}
+        )
         assert response["success"] is True
         assert response["data"]["text"] == "first"
         assert handler.session is not session

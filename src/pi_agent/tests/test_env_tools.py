@@ -83,9 +83,7 @@ class TestExecutionEnv:
         env = PythonExecutionEnv(str(tmp_path))
         if not await _shell_available(env):
             pytest.skip("No bash shell available")
-        command = (
-            "ping -n 10 127.0.0.1 > nul" if os.name == "nt" else "sleep 10"
-        )
+        command = "ping -n 10 127.0.0.1 > nul" if os.name == "nt" else "sleep 10"
         result = await env.exec(
             command,
             ShellExecOptions(timeout=0.2),
@@ -117,10 +115,14 @@ class TestReadTool:
 
     @pytest.mark.asyncio
     async def test_read_with_offset_limit(self, tmp_path):
-        (tmp_path / "file.txt").write_text("\n".join(f"line{i}" for i in range(10)), encoding="utf-8")
+        (tmp_path / "file.txt").write_text(
+            "\n".join(f"line{i}" for i in range(10)), encoding="utf-8"
+        )
         env = PythonExecutionEnv(str(tmp_path))
         tool = create_read_tool()
-        result = await tool.execute("t1", {"path": "file.txt", "offset": 2, "limit": 2}, None, None, _tool_context(env))
+        result = await tool.execute(
+            "t1", {"path": "file.txt", "offset": 2, "limit": 2}, None, None, _tool_context(env)
+        )
         text = result.content[0]["text"]
         assert "line1" in text and "line2" in text
         assert "more lines" in text
@@ -140,9 +142,7 @@ class TestReadTool:
         env = PythonExecutionEnv(str(tmp_path))
         tool = create_read_tool()
         with pytest.raises(ValueError) as excinfo:
-            await tool.execute(
-                "t1", {"path": "missing.txt"}, None, None, _tool_context(env)
-            )
+            await tool.execute("t1", {"path": "missing.txt"}, None, None, _tool_context(env))
         assert "do not search the whole disk" in str(excinfo.value)
 
     def test_read_description_scoped_to_working_directory(self):
@@ -156,7 +156,9 @@ class TestWriteTool:
     async def test_write_creates_parent_dirs(self, tmp_path):
         env = PythonExecutionEnv(str(tmp_path))
         tool = create_write_tool()
-        result = await tool.execute("t1", {"path": "a/b/c.txt", "content": "data"}, None, None, _tool_context(env))
+        result = await tool.execute(
+            "t1", {"path": "a/b/c.txt", "content": "data"}, None, None, _tool_context(env)
+        )
         assert "Successfully wrote 4 bytes" in result.content[0]["text"]
         assert (tmp_path / "a" / "b" / "c.txt").read_text(encoding="utf-8") == "data"
 
@@ -200,7 +202,10 @@ class TestEditTool:
         tool = create_edit_tool()
         await tool.execute(
             "t1",
-            {"path": "f.txt", "edits": [{"oldText": 'say \u201chello\u201d', "newText": 'say "hi"'}]},
+            {
+                "path": "f.txt",
+                "edits": [{"oldText": "say \u201chello\u201d", "newText": 'say "hi"'}],
+            },
             None,
             None,
             _tool_context(env),
@@ -252,11 +257,11 @@ class TestBashTool:
         if not await _shell_available(env):
             pytest.skip("No bash shell available")
         tool = create_bash_tool()
-        command = (
-            "ping -n 10 127.0.0.1 > nul" if os.name == "nt" else "sleep 10"
-        )
+        command = "ping -n 10 127.0.0.1 > nul" if os.name == "nt" else "sleep 10"
         with pytest.raises(ValueError, match="timed out"):
-            await tool.execute("t1", {"command": command, "timeout": 0.2}, None, None, _tool_context(env))
+            await tool.execute(
+                "t1", {"command": command, "timeout": 0.2}, None, None, _tool_context(env)
+            )
 
 
 class TestFileMutationQueue:

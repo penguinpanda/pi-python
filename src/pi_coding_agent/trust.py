@@ -132,9 +132,7 @@ def has_trust_requiring_project_resources(cwd: str) -> bool:
         current = current.parent
 
 
-def get_project_trust_options(
-    cwd: str, *, include_session_only: bool = False
-) -> list[dict]:
+def get_project_trust_options(cwd: str, *, include_session_only: bool = False) -> list[dict]:
     """项目信任选项（对齐 TS getProjectTrustOptions）。"""
     canonical = str(Path(cwd).expanduser().resolve())
     parent = str(Path(canonical).parent)

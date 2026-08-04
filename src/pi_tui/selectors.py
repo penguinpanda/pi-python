@@ -98,9 +98,7 @@ class ModelSelector(ModalScreen):
             self.call_after_refresh(self._rebuild)
             return
         list_view.clear()
-        current_key = (
-            f"{self._current.provider}/{self._current.id}" if self._current else None
-        )
+        current_key = f"{self._current.provider}/{self._current.id}" if self._current else None
         for model in self._filtered():
             key = f"{model.provider}/{model.id}"
             marker = ">" if key == current_key else " "
@@ -152,12 +150,8 @@ class SessionPicker(ModalScreen):
 
         list_view = self.query_one("#session-list", ListView)
         for session in self._sessions:
-            when = datetime.fromtimestamp(session["modified"]).strftime(
-                "%Y-%m-%d %H:%M"
-            )
-            list_view.append(
-                ListItem(Label(f"{session['session_id']}  [dim]{when}[/dim]"))
-            )
+            when = datetime.fromtimestamp(session["modified"]).strftime("%Y-%m-%d %H:%M")
+            list_view.append(ListItem(Label(f"{session['session_id']}  [dim]{when}[/dim]")))
         if len(list_view.children) > 0:
             list_view.index = 0
 
@@ -196,9 +190,7 @@ def _flatten_tree(
         marker = ">" if node.id == leaf_id else " "
         entry_type = node.entry.get("type", "?") if node.entry is not None else "?"
         label = f" [{node.label}]" if node.label else ""
-        rows.append(
-            (depth, connector, f"{marker} {node.id[:8]} {entry_type}{label}", node.id)
-        )
+        rows.append((depth, connector, f"{marker} {node.id[:8]} {entry_type}{label}", node.id))
         rows.extend(_flatten_tree(node.children, leaf_id, depth + 1))
     return rows
 
@@ -223,7 +215,7 @@ class TreeSelector(ModalScreen):
 
     def on_mount(self) -> None:
         list_view = self.query_one("#tree-list", ListView)
-        for depth, connector, label, node_id in self._rows:
+        for depth, connector, label, _node_id in self._rows:
             indent = "  " * depth
             prefix = f"{indent}{connector} " if connector else indent
             list_view.append(ListItem(Label(f"{prefix}{label}")))
@@ -512,9 +504,7 @@ class OAuthSelector(ModalScreen):
         for index, (provider_id, name, logged_in) in enumerate(self._providers):
             marker = ">" if index == self._selected else " "
             status = "logged in" if logged_in else "not logged in"
-            list_view.append(
-                ListItem(Label(f"{marker} {name} ({provider_id}) [{status}]"))
-            )
+            list_view.append(ListItem(Label(f"{marker} {name} ({provider_id}) [{status}]")))
         if len(list_view.children) > 0:
             list_view.index = 0
         list_view.focus()
@@ -558,9 +548,7 @@ class ScopedModelsSelector(ModalScreen):
 
     def compose(self) -> ComposeResult:
         with Vertical():
-            yield Label(
-                "Scoped models (Enter: toggle, Esc: save)", classes="selector-title"
-            )
+            yield Label("Scoped models (Enter: toggle, Esc: save)", classes="selector-title")
             yield ListView(id="scoped-list")
 
     def on_mount(self) -> None:
@@ -569,9 +557,7 @@ class ScopedModelsSelector(ModalScreen):
             key = self._key(model)
             check = " ✓" if key in self._selected else ""
             marker = ">" if self._current is not None and key == self._key(self._current) else " "
-            list_view.append(
-                ListItem(Label(f"{marker} {model.provider}/{model.id}{check}"))
-            )
+            list_view.append(ListItem(Label(f"{marker} {model.provider}/{model.id}{check}")))
         if len(list_view.children) > 0:
             list_view.index = 0
         list_view.focus()
@@ -672,10 +658,9 @@ class TrustSelector(ModalScreen):
         self._selected = 0
         if saved_decision is not None:
             for index, option in enumerate(self._options):
-                if (
-                    option.get("savedPath") == saved_decision.get("path")
-                    and option.get("trusted") == saved_decision.get("decision")
-                ):
+                if option.get("savedPath") == saved_decision.get("path") and option.get(
+                    "trusted"
+                ) == saved_decision.get("decision"):
                     self._selected = index
                     break
 
@@ -704,9 +689,12 @@ class TrustSelector(ModalScreen):
         list_view = self.query_one("#trust-list", ListView)
         for index, option in enumerate(self._options):
             marker = ">" if index == self._selected else " "
-            check = " ✓" if option.get("savedPath") == self._saved_decision and (
-                option.get("trusted") == self._saved_decision.get("decision")
-            ) else ""
+            check = (
+                " ✓"
+                if option.get("savedPath") == self._saved_decision
+                and (option.get("trusted") == self._saved_decision.get("decision"))
+                else ""
+            )
             list_view.append(ListItem(Label(f"{marker} {option['label']}{check}")))
         if len(list_view.children) > 0:
             list_view.index = self._selected

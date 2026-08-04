@@ -35,11 +35,13 @@ def _make_runtime(record: dict):
 def _make_session(models: Models, tmp_path: Path, manager: SessionManager) -> AgentSession:
     model = models.get_model("faux", "faux-1")
     assert model is not None
-    agent = Agent(AgentOptions(
-        system_prompt="You are a helpful coding assistant.",
-        model=model,
-        stream_fn=models.stream,
-    ))
+    agent = Agent(
+        AgentOptions(
+            system_prompt="You are a helpful coding assistant.",
+            model=model,
+            stream_fn=models.stream,
+        )
+    )
     return AgentSession(
         agent=agent,
         session_manager=manager,

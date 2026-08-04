@@ -6,7 +6,7 @@ import base64
 import json
 import re
 
-from pi_ai._types import AssistantMessage, TextContent, UserMessage
+from pi_ai._types import TextContent, UserMessage
 
 from pi_coding_agent._session_manager import SessionManager
 from pi_coding_agent.export_html import export_session_to_html
@@ -17,13 +17,17 @@ def _make_session(tmp_path):
     import asyncio
 
     asyncio.run(manager.append_message(UserMessage(role="user", content="hello")))
-    asyncio.run(manager.append_message({
-        "role": "assistant",
-        "content": [TextContent(type="text", text="```python\nprint('hi')\n```")],
-        "api": "openai-completions",
-        "provider": "faux",
-        "model": "faux-1",
-    }))
+    asyncio.run(
+        manager.append_message(
+            {
+                "role": "assistant",
+                "content": [TextContent(type="text", text="```python\nprint('hi')\n```")],
+                "api": "openai-completions",
+                "provider": "faux",
+                "model": "faux-1",
+            }
+        )
+    )
     return manager
 
 

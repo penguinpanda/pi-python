@@ -164,17 +164,14 @@ def qwen_provider() -> Provider:
     return create_provider(
         id="qwen",
         name="Qwen",
-
         # API Key 优先从 Credential Store，其次环境变量读取。
         auth=env_api_key_auth(
             "Qwen (DashScope) API key",
             ["DASHSCOPE_API_KEY", "QWEN_API_KEY"],
         ),
         models=QWEN_MODELS,
-
         # DashScope OpenAI 兼容模式使用 Chat Completions API。
         api_kind="completions",
-
         # DashScope OpenAI Compatible API 地址（/v1 结尾，
         # 客户端会自动追加 /chat/completions）。
         base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",

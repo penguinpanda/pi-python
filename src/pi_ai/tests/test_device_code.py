@@ -35,9 +35,7 @@ async def test_slow_down_uses_server_interval():
             return {"status": "slow_down", "interval_seconds": 0.001}
         return {"status": "complete", "value": 42}
 
-    assert await poll_oauth_device_code_flow(
-        poll, interval_seconds=5, expires_in_seconds=10
-    ) == 42
+    assert await poll_oauth_device_code_flow(poll, interval_seconds=5, expires_in_seconds=10) == 42
 
 
 @pytest.mark.asyncio

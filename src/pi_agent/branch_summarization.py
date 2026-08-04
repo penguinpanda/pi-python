@@ -6,7 +6,6 @@ target 前，收集差异条目并生成结构化摘要。
 
 from __future__ import annotations
 
-import math
 from typing import Any
 
 from pi_ai.types import AgentMessage
@@ -18,10 +17,13 @@ from .compaction_utils import (
     estimate_tokens,
     extract_file_ops_from_message,
     format_file_operations,
-    get_message_from_entry,
     serialize_conversation,
 )
-from .session.session import _create_branch_summary_message, _create_compaction_summary_message, _create_custom_message
+from .session.session import (
+    _create_branch_summary_message,
+    _create_compaction_summary_message,
+    _create_custom_message,
+)
 from .session.types import SessionError, SessionTreeEntry
 
 
@@ -97,7 +99,11 @@ def prepare_branch_entries(
     file_ops = create_file_ops()
     total_tokens = 0
     for entry in entries:
-        if entry["type"] == "branch_summary" and not entry.get("fromHook") and isinstance(entry.get("details"), dict):
+        if (
+            entry["type"] == "branch_summary"
+            and not entry.get("fromHook")
+            and isinstance(entry.get("details"), dict)
+        ):
             details = entry["details"]
             if isinstance(details.get("readFiles"), list):
                 for file_path in details["readFiles"]:
@@ -211,7 +217,9 @@ async def generate_branch_summary(
     )
     stop_reason = response.get("stop_reason")
     if stop_reason == "aborted":
-        return False, BranchSummaryError("aborted", response.get("error_message") or "Branch summary aborted")
+        return False, BranchSummaryError(
+            "aborted", response.get("error_message") or "Branch summary aborted"
+        )
     if stop_reason == "error":
         return False, BranchSummaryError(
             "summarization_failed",

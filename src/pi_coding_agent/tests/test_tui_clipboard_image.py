@@ -42,7 +42,7 @@ class TestProcess:
     def test_invalid_data_raises(self):
         import pytest
 
-        with pytest.raises(Exception):
+        with pytest.raises(Exception):  # noqa: B017 - 验证非法输入会抛异常即可
             ClipboardImage.process(b"not an image")
 
 

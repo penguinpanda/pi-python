@@ -76,9 +76,7 @@ class TestLoadSettings:
         assert _config.load_settings(str(project_a))["defaultModel"] == "model-a"
         assert _config.load_settings(str(project_b))["defaultModel"] == "model-b"
 
-    async def test_invalid_project_json_falls_back_to_global(
-        self, tmp_path, monkeypatch
-    ):
+    async def test_invalid_project_json_falls_back_to_global(self, tmp_path, monkeypatch):
         """项目 JSON 损坏时不崩溃，回退全局配置。"""
         global_path = _global_settings(tmp_path)
         monkeypatch.setattr(_config, "get_settings_path", lambda: global_path)
@@ -109,6 +107,4 @@ class TestPaths:
         )
 
     def test_project_settings_under_cwd(self, tmp_path):
-        assert _config.get_project_settings_path(tmp_path) == (
-            tmp_path / ".pi" / "settings.json"
-        )
+        assert _config.get_project_settings_path(tmp_path) == (tmp_path / ".pi" / "settings.json")

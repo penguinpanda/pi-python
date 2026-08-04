@@ -22,7 +22,6 @@ from pi_ai.types import (
     ImageContent,
     Message,
     Model,
-    StreamOptions,
     TextContent,
     UserMessage,
     now_ms,
@@ -113,9 +112,7 @@ class AgentOptions:
         messages: list[AgentMessage] | None = None,
         stream_fn: StreamFn | None = None,
         convert_to_llm: Callable[[list[AgentMessage]], list[Message]] | None = None,
-        transform_context: (
-            Callable[[list[AgentMessage]], list[AgentMessage]] | None
-        ) = None,
+        transform_context: (Callable[[list[AgentMessage]], list[AgentMessage]] | None) = None,
         get_api_key: Callable[[str], str | None] | None = None,
         before_tool_call: (
             Callable[
@@ -131,9 +128,7 @@ class AgentOptions:
             ]
             | None
         ) = None,
-        prepare_next_turn: (
-            Callable[[AgentContext], Any] | None
-        ) = None,
+        prepare_next_turn: (Callable[[AgentContext], Any] | None) = None,
         should_stop_after_turn: Callable[[AgentContext], bool] | None = None,
         tool_execution: ToolExecutionMode = "parallel",
         # 消息队列消费策略（1.2 前置；默认逐条消费）
@@ -198,9 +193,9 @@ class Agent:
         self.convert_to_llm: Callable[[list[AgentMessage]], list[Message]] = (
             opts.convert_to_llm or _default_convert_to_llm
         )
-        self.transform_context: (
-            Callable[[list[AgentMessage]], list[AgentMessage]] | None
-        ) = _maybe_async(opts.transform_context)
+        self.transform_context: Callable[[list[AgentMessage]], list[AgentMessage]] | None = (
+            _maybe_async(opts.transform_context)
+        )
         self.stream_function: StreamFn | None = opts.stream_fn
         self.get_api_key: Callable[[str], str | None] | None = opts.get_api_key
         self.before_tool_call = opts.before_tool_call
@@ -279,8 +274,7 @@ class Agent:
                 return
 
             raise RuntimeError(
-                "Cannot continue: last message is an assistant message. "
-                "Use prompt() instead."
+                "Cannot continue: last message is an assistant message. Use prompt() instead."
             )
 
         await self._run_continue()
@@ -418,10 +412,12 @@ class Agent:
             pass
         except Exception:
             # 意外异常 → 合成 agent_end
-            await self._process_event({
-                "type": "agent_end",
-                "messages": list(self._state._messages),
-            })
+            await self._process_event(
+                {
+                    "type": "agent_end",
+                    "messages": list(self._state._messages),
+                }
+            )
             raise
         finally:
             self._state.is_streaming = False
@@ -456,10 +452,12 @@ class Agent:
         except asyncio.CancelledError:
             pass
         except Exception:
-            await self._process_event({
-                "type": "agent_end",
-                "messages": list(self._state._messages),
-            })
+            await self._process_event(
+                {
+                    "type": "agent_end",
+                    "messages": list(self._state._messages),
+                }
+            )
             raise
         finally:
             self._state.is_streaming = False
@@ -587,9 +585,7 @@ def _normalize_input(
 
 
 # 压缩/分支摘要消息包装（对齐 TS coding-agent messages.ts）。
-COMPACTION_SUMMARY_PREFIX = (
-    "The conversation history before this point was compacted into the following summary:\n\n<summary>\n"
-)
+COMPACTION_SUMMARY_PREFIX = "The conversation history before this point was compacted into the following summary:\n\n<summary>\n"
 COMPACTION_SUMMARY_SUFFIX = "\n</summary>"
 BRANCH_SUMMARY_PREFIX = (
     "The following is a summary of a branch that this conversation came back from:\n\n<summary>\n"
@@ -619,11 +615,13 @@ def _default_convert_to_llm(
             suffix = (
                 COMPACTION_SUMMARY_SUFFIX if role == "compactionSummary" else BRANCH_SUMMARY_SUFFIX
             )
-            result.append({
-                "role": "user",
-                "content": prefix + summary + suffix,
-                "timestamp": m.get("timestamp"),
-            })
+            result.append(
+                {
+                    "role": "user",
+                    "content": prefix + summary + suffix,
+                    "timestamp": m.get("timestamp"),
+                }
+            )
     return result
 
 

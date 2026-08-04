@@ -102,9 +102,7 @@ async def _async_main(args: list[str] | None = None) -> int:
         and trust_manager.is_trusted(cwd) is None
         and settings.get("defaultProjectTrust", "ask") == "ask"
     )
-    project_trusted = await resolve_project_trusted(
-        cwd, trust_manager, settings, ui=None
-    )
+    project_trusted = await resolve_project_trusted(cwd, trust_manager, settings, ui=None)
     settings_manager.set_project_trusted(project_trusted)
     settings = settings_manager.as_dict()
     if needs_trust_decision and not project_trusted and parsed.mode != "tui":
@@ -150,9 +148,7 @@ async def _async_main(args: list[str] | None = None) -> int:
     # Phase 4：技能 / 提示模板加载器（全局 + 项目；未信任项目不加载 .pi 资源）。
     project_skills_dir = Path(cwd) / ".pi" / "skills" if project_trusted else None
     project_prompts_dir = Path(cwd) / ".pi" / "prompts" if project_trusted else None
-    project_extensions_dir = (
-        Path(cwd) / ".pi" / "extensions" if project_trusted else None
-    )
+    project_extensions_dir = Path(cwd) / ".pi" / "extensions" if project_trusted else None
     skill_loader = SkillLoader(
         global_dir=get_agent_dir() / "skills",
         project_dir=project_skills_dir,
@@ -173,9 +169,7 @@ async def _async_main(args: list[str] | None = None) -> int:
     default_tools = create_all_tools(cwd)
     tool_snippets = tool_snippets_for(default_tools)
     tools_include = (
-        [part.strip() for part in parsed.tools.split(",") if part.strip()]
-        if parsed.tools
-        else None
+        [part.strip() for part in parsed.tools.split(",") if part.strip()] if parsed.tools else None
     )
     tools_exclude = (
         [part.strip() for part in parsed.exclude_tools.split(",") if part.strip()]
@@ -201,15 +195,17 @@ async def _async_main(args: list[str] | None = None) -> int:
         append_parts = settings_manager.get_append_system_prompt()
         if parsed.append_system_prompt:
             append_parts.append(parsed.append_system_prompt)
-        return build_system_prompt(BuildSystemPromptOptions(
-            cwd=cwd,
-            custom_prompt=custom_prompt,
-            selected_tools=selected_tools,
-            tool_snippets=tool_snippets,
-            append_system_prompt="\n".join(append_parts) if append_parts else None,
-            context_files=load_project_context_files(cwd, get_agent_dir()),
-            skills=skill_loader.all(),
-        ))
+        return build_system_prompt(
+            BuildSystemPromptOptions(
+                cwd=cwd,
+                custom_prompt=custom_prompt,
+                selected_tools=selected_tools,
+                tool_snippets=tool_snippets,
+                append_system_prompt="\n".join(append_parts) if append_parts else None,
+                context_files=load_project_context_files(cwd, get_agent_dir()),
+                skills=skill_loader.all(),
+            )
+        )
 
     system_prompt = system_prompt_builder()
 
@@ -247,12 +243,14 @@ async def _async_main(args: list[str] | None = None) -> int:
                 include=tools_include,
                 exclude=tools_exclude,
             )
-        agent = Agent(AgentOptions(
-            system_prompt=system_prompt,
-            model=session_model,
-            # 会话标识透传给 provider，启用提示缓存（prompt_cache_key）
-            session_id=sm.session_id,
-        ))
+        agent = Agent(
+            AgentOptions(
+                system_prompt=system_prompt,
+                model=session_model,
+                # 会话标识透传给 provider，启用提示缓存（prompt_cache_key）
+                session_id=sm.session_id,
+            )
+        )
         return AgentSession(
             agent=agent,
             session_manager=sm,
@@ -318,7 +316,9 @@ async def _async_main(args: list[str] | None = None) -> int:
     # 运行 print 模式
     message = parsed.message or _read_stdin()
     if not message:
-        print("Error: No input message provided. Use -p 'message' or pipe via stdin.", file=sys.stderr)
+        print(
+            "Error: No input message provided. Use -p 'message' or pipe via stdin.", file=sys.stderr
+        )
         return 1
 
     # @file 注入（文本 / 图片）。
@@ -460,7 +460,8 @@ def _create_parser() -> argparse.ArgumentParser:
 
     # 运行模式
     p.add_argument(
-        "-p", "--print",
+        "-p",
+        "--print",
         action="store_true",
         help="Single-shot print mode (default if message is provided)",
     )
@@ -482,12 +483,18 @@ def _create_parser() -> argparse.ArgumentParser:
     )
 
     # 模型选择
-    p.add_argument("--model", type=str, help="Model ID (e.g., deepseek-v4-flash, gpt-5-chat-latest)")
-    p.add_argument("--provider", type=str, help="Provider ID (e.g., deepseek, openai, ollama, faux)")
-    p.add_argument("--models", type=str,
-                   help="Comma-separated model scope list for cycling (e.g., 'deepseek-v4-flash,openai/gpt-5-chat-latest')")
-    p.add_argument("--list-models", action="store_true",
-                   help="List all available models and exit")
+    p.add_argument(
+        "--model", type=str, help="Model ID (e.g., deepseek-v4-flash, gpt-5-chat-latest)"
+    )
+    p.add_argument(
+        "--provider", type=str, help="Provider ID (e.g., deepseek, openai, ollama, faux)"
+    )
+    p.add_argument(
+        "--models",
+        type=str,
+        help="Comma-separated model scope list for cycling (e.g., 'deepseek-v4-flash,openai/gpt-5-chat-latest')",
+    )
+    p.add_argument("--list-models", action="store_true", help="List all available models and exit")
 
     # 系统提示
     p.add_argument("--system-prompt", type=str, help="Override system prompt")
@@ -495,8 +502,13 @@ def _create_parser() -> argparse.ArgumentParser:
 
     # 会话
     p.add_argument("--session", type=str, help="Path to existing session file to continue")
-    p.add_argument("-c", "--continue", dest="continue_session", action="store_true",
-                   help="Continue the most recent session")
+    p.add_argument(
+        "-c",
+        "--continue",
+        dest="continue_session",
+        action="store_true",
+        help="Continue the most recent session",
+    )
     p.add_argument("--no-session", action="store_true", help="Don't persist session to disk")
 
     # 工具控制

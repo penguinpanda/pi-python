@@ -22,16 +22,14 @@ from .repo import (
     get_path_to_root_or_compaction,
 )
 from .search import ScanningSessionSearch
-from .session import _get_label, _get_session_name, _get_session_stats
+from .session import _get_session_name, _get_session_stats
 from .types import (
     JsonlSessionMetadata,
     LeafEntry,
-    SessionCreateOptions,
     SessionEntryCursorOptions,
     SessionError,
     SessionForkOptions,
     SessionSnapshot,
-    SessionStorage,
     SessionTreeEntry,
 )
 
@@ -75,7 +73,9 @@ def _leaf_id_after_entry(entry: SessionTreeEntry) -> str | None:
     return entry["targetId"] if entry["type"] == "leaf" else entry["id"]
 
 
-def _invalid_session(file_path: str, message: str, cause: BaseException | None = None) -> SessionError:
+def _invalid_session(
+    file_path: str, message: str, cause: BaseException | None = None
+) -> SessionError:
     return SessionError(
         "invalid_session",
         f"Invalid JSONL session file {file_path}: {message}",
@@ -83,7 +83,9 @@ def _invalid_session(file_path: str, message: str, cause: BaseException | None =
     )
 
 
-def _invalid_entry(file_path: str, line_number: int, message: str, cause: BaseException | None = None) -> SessionError:
+def _invalid_entry(
+    file_path: str, line_number: int, message: str, cause: BaseException | None = None
+) -> SessionError:
     return SessionError(
         "invalid_entry",
         f"Invalid JSONL session file {file_path}: line {line_number} {message}",
@@ -95,7 +97,9 @@ def _parse_header_line(line: str, file_path: str) -> dict[str, Any]:
     try:
         parsed = json.loads(line)
     except json.JSONDecodeError as error:
-        raise _invalid_session(file_path, "first line is not a valid session header", error)
+        raise _invalid_session(
+            file_path, "first line is not a valid session header", error
+        ) from error
     if not isinstance(parsed, dict):
         raise _invalid_session(file_path, "first line is not a valid session header")
     if parsed.get("type") != "session":
@@ -117,7 +121,7 @@ def _parse_entry_line(line: str, file_path: str, line_number: int) -> SessionTre
     try:
         parsed = json.loads(line)
     except json.JSONDecodeError as error:
-        raise _invalid_entry(file_path, line_number, "is not valid JSON", error)
+        raise _invalid_entry(file_path, line_number, "is not valid JSON", error) from error
     if not isinstance(parsed, dict):
         raise _invalid_entry(file_path, line_number, "is not a valid session entry")
     if not isinstance(parsed.get("type"), str):
@@ -262,9 +266,7 @@ class JsonlSessionStorage:
     async def get_session_stats(self):
         return _get_session_stats(self._entries)
 
-    async def get_path_to_root_or_compaction(
-        self, leaf_id: str | None
-    ) -> list[SessionTreeEntry]:
+    async def get_path_to_root_or_compaction(self, leaf_id: str | None) -> list[SessionTreeEntry]:
         return get_path_to_root_or_compaction(self._entries, leaf_id)
 
     async def get_entries(
@@ -297,9 +299,7 @@ class JsonlSessionStore:
         safe_timestamp = timestamp.replace(":", "-").replace(".", "-")
         return self._session_dir(cwd) / f"{safe_timestamp}_{session_id}.jsonl"
 
-    async def create(
-        self, options: dict[str, Any] | None = None
-    ) -> JsonlSessionMetadata:
+    async def create(self, options: dict[str, Any] | None = None) -> JsonlSessionMetadata:
         options = options or {}
         cwd = options["cwd"]
         session_id = options.get("id") or create_session_id()
@@ -334,11 +334,7 @@ class JsonlSessionStore:
         else:
             if not self._sessions_root.exists():
                 return []
-            dirs = [
-                entry
-                for entry in self._sessions_root.iterdir()
-                if entry.is_dir()
-            ]
+            dirs = [entry for entry in self._sessions_root.iterdir() if entry.is_dir()]
         sessions: list[JsonlSessionMetadata] = []
         for directory in dirs:
             if not directory.exists():

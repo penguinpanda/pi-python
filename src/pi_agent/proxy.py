@@ -28,7 +28,7 @@ from typing import Any
 
 import httpx
 
-from pi_ai.types import AssistantMessage, Context, Model, ToolCall, now_ms
+from pi_ai.types import AssistantMessage, Context, Model, now_ms
 from pi_ai.utils._event_stream import AssistantMessageEventStream
 from pi_ai.utils.partial_json import partial_json
 
@@ -96,7 +96,11 @@ def process_proxy_event(
 
     if event_type == "text_start":
         _set_content(proxy_event["contentIndex"], {"type": "text", "text": ""})
-        return {"type": "text_start", "content_index": proxy_event["contentIndex"], "partial": partial}
+        return {
+            "type": "text_start",
+            "content_index": proxy_event["contentIndex"],
+            "partial": partial,
+        }
 
     if event_type == "text_delta":
         block = content[proxy_event["contentIndex"]]
@@ -125,7 +129,11 @@ def process_proxy_event(
 
     if event_type == "thinking_start":
         _set_content(proxy_event["contentIndex"], {"type": "thinking", "thinking": ""})
-        return {"type": "thinking_start", "content_index": proxy_event["contentIndex"], "partial": partial}
+        return {
+            "type": "thinking_start",
+            "content_index": proxy_event["contentIndex"],
+            "partial": partial,
+        }
 
     if event_type == "thinking_delta":
         block = content[proxy_event["contentIndex"]]
@@ -153,14 +161,21 @@ def process_proxy_event(
         }
 
     if event_type == "toolcall_start":
-        _set_content(proxy_event["contentIndex"], {
-            "type": "toolCall",
-            "id": proxy_event["id"],
-            "name": proxy_event["toolName"],
-            "arguments": {},
-            "partialJson": "",
-        })
-        return {"type": "toolcall_start", "content_index": proxy_event["contentIndex"], "partial": partial}
+        _set_content(
+            proxy_event["contentIndex"],
+            {
+                "type": "toolCall",
+                "id": proxy_event["id"],
+                "name": proxy_event["toolName"],
+                "arguments": {},
+                "partialJson": "",
+            },
+        )
+        return {
+            "type": "toolcall_start",
+            "content_index": proxy_event["contentIndex"],
+            "partial": partial,
+        }
 
     if event_type == "toolcall_delta":
         block = content[proxy_event["contentIndex"]]
@@ -267,11 +282,13 @@ async def _consume_proxy_stream(
         reason = "aborted" if (signal is not None and signal.is_set()) else "error"
         partial["stop_reason"] = reason
         partial["error_message"] = str(error)
-        stream.push({
-            "type": "error",
-            "reason": reason,
-            "error": partial,
-        })
+        stream.push(
+            {
+                "type": "error",
+                "reason": reason,
+                "error": partial,
+            }
+        )
         stream.end()
 
 

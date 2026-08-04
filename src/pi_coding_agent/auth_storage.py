@@ -210,7 +210,9 @@ class AuthStorage:
         async def _locked(current: str | None) -> LockResult:
             current_data = _parse_data(current)
             current_credential = (
-                _from_raw(current_data[provider]) if isinstance(current_data.get(provider), dict) else None
+                _from_raw(current_data[provider])
+                if isinstance(current_data.get(provider), dict)
+                else None
             )
             next_value = await fn(current_credential)
             if next_value is None:

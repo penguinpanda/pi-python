@@ -116,7 +116,7 @@ def _create_client(
 
     都可以通过 base_url 指定。
     """
-    
+
     kwargs: dict[str, Any] = dict(
         api_key=api_key,
         base_url=base_url.rstrip("/"),
@@ -278,16 +278,12 @@ async def chat_completions_stream(
             #   prompt_cache_key：官方 OpenAI 且非 none，或 long 且支持长缓存时发送
             #     （session_id 截断到 64 字符）
             #   prompt_cache_retention：long 且支持长缓存时发送 "24h"
-            cache_retention = resolve_cache_retention(
-                opts.get("cache_retention"), opts.get("env")
-            )
+            cache_retention = resolve_cache_retention(opts.get("cache_retention"), opts.get("env"))
             supports_long = supports_long_cache_retention(model)
-            if (
-                "api.openai.com" in base_url and cache_retention != "none"
-            ) or (cache_retention == "long" and supports_long):
-                kwargs["prompt_cache_key"] = clamp_openai_prompt_cache_key(
-                    opts.get("session_id")
-                )
+            if ("api.openai.com" in base_url and cache_retention != "none") or (
+                cache_retention == "long" and supports_long
+            ):
+                kwargs["prompt_cache_key"] = clamp_openai_prompt_cache_key(opts.get("session_id"))
             if cache_retention == "long" and supports_long:
                 kwargs["prompt_cache_retention"] = "24h"
 
@@ -331,22 +327,26 @@ async def chat_completions_stream(
                 nonlocal current_kind, current_index, current_tool_id
                 if current_kind == "text" and current_index is not None:
                     block = cast(TextContent, content_blocks[current_index])
-                    stream.push(TextEndEvent(
-                        type="text_end",
-                        content_index=current_index,
-                        content=block["text"],
-                        partial=_partial(),
-                    ))
+                    stream.push(
+                        TextEndEvent(
+                            type="text_end",
+                            content_index=current_index,
+                            content=block["text"],
+                            partial=_partial(),
+                        )
+                    )
                 elif current_kind == "toolCall" and current_index is not None:
                     block = cast(ToolCall, content_blocks[current_index])
                     block["raw_arguments"] = current_raw_args
                     block["arguments"] = parse_tool_arguments(current_raw_args)
-                    stream.push(ToolCallEndEvent(
-                        type="toolcall_end",
-                        content_index=current_index,
-                        tool_call=block,
-                        partial=_partial(),
-                    ))
+                    stream.push(
+                        ToolCallEndEvent(
+                            type="toolcall_end",
+                            content_index=current_index,
+                            tool_call=block,
+                            partial=_partial(),
+                        )
+                    )
                 current_kind = None
                 current_index = None
                 current_tool_id = None
@@ -368,18 +368,27 @@ async def chat_completions_stream(
                 # 流式收尾 chunk 可能只带 usage、没有 choices（如 DashScope
                 # 兼容模式），必须在 choices 检查之前处理，否则 usage 会丢失。
                 if chunk.usage:
-                    cached_tokens = getattr(
-                        getattr(chunk.usage, "prompt_tokens_details", None),
-                        "cached_tokens",
-                        0,
-                    ) or 0
+                    cached_tokens = (
+                        getattr(
+                            getattr(chunk.usage, "prompt_tokens_details", None),
+                            "cached_tokens",
+                            0,
+                        )
+                        or 0
+                    )
                     usage = Usage(
                         input=chunk.usage.prompt_tokens or 0,
                         output=chunk.usage.completion_tokens or 0,
                         cache_read=cached_tokens,
                         cache_write=0,
                         total_tokens=chunk.usage.total_tokens or 0,
-                        cost={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0},
+                        cost={
+                            "input": 0,
+                            "output": 0,
+                            "cache_read": 0,
+                            "cache_write": 0,
+                            "total": 0,
+                        },
                     )
 
                 if not chunk.choices:
@@ -400,20 +409,24 @@ async def chat_completions_stream(
                         current_kind = "text"
                         content_blocks.append(TextContent(type="text", text=""))
                         current_index = len(content_blocks) - 1
-                        stream.push(TextStartEvent(
-                            type="text_start",
-                            content_index=current_index,
-                            partial=_partial(),
-                        ))
+                        stream.push(
+                            TextStartEvent(
+                                type="text_start",
+                                content_index=current_index,
+                                partial=_partial(),
+                            )
+                        )
                     idx = cast(int, current_index)
                     block = cast(TextContent, content_blocks[idx])
                     block["text"] += delta.content
-                    stream.push(TextDeltaEvent(
-                        type="text_delta",
-                        content_index=idx,
-                        delta=delta.content,
-                        partial=_partial(),
-                    ))
+                    stream.push(
+                        TextDeltaEvent(
+                            type="text_delta",
+                            content_index=idx,
+                            delta=delta.content,
+                            partial=_partial(),
+                        )
+                    )
 
                 # Tool Calling 增量。
                 #
@@ -433,19 +446,23 @@ async def chat_completions_stream(
                             current_kind = "toolCall"
                             current_tool_id = tc_id
                             current_raw_args = ""
-                            content_blocks.append(ToolCall(
-                                type="toolCall",
-                                id=tc_id or "",
-                                name=tc_name or "",
-                                raw_arguments="",
-                                arguments=None,
-                            ))
+                            content_blocks.append(
+                                ToolCall(
+                                    type="toolCall",
+                                    id=tc_id or "",
+                                    name=tc_name or "",
+                                    raw_arguments="",
+                                    arguments=None,
+                                )
+                            )
                             current_index = len(content_blocks) - 1
-                            stream.push(ToolCallStartEvent(
-                                type="toolcall_start",
-                                content_index=current_index,
-                                partial=_partial(),
-                            ))
+                            stream.push(
+                                ToolCallStartEvent(
+                                    type="toolcall_start",
+                                    content_index=current_index,
+                                    partial=_partial(),
+                                )
+                            )
 
                         block = cast(ToolCall, content_blocks[cast(int, current_index)])
 
@@ -455,12 +472,14 @@ async def chat_completions_stream(
 
                         if tc_args:
                             current_raw_args += tc_args
-                            stream.push(ToolCallDeltaEvent(
-                                type="toolcall_delta",
-                                content_index=cast(int, current_index),
-                                delta=tc_args,
-                                partial=_partial(),
-                            ))
+                            stream.push(
+                                ToolCallDeltaEvent(
+                                    type="toolcall_delta",
+                                    content_index=cast(int, current_index),
+                                    delta=tc_args,
+                                    partial=_partial(),
+                                )
+                            )
 
                 # Finish reason
                 if choice.finish_reason:
@@ -487,11 +506,13 @@ async def chat_completions_stream(
             #
             # content_filter 等映射为 "error" 的罕见情况
             # 仍以 done 事件结束（保持既有行为）。
-            stream.push({
-                "type": "done",
-                "reason": cast(Any, msg["stop_reason"]),
-                "message": msg,
-            })
+            stream.push(
+                {
+                    "type": "done",
+                    "reason": cast(Any, msg["stop_reason"]),
+                    "message": msg,
+                }
+            )
             # stream.end(msg)
 
         except asyncio.CancelledError:

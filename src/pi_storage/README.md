@@ -33,17 +33,24 @@ $env:PI_PG_DSN="postgresql://pi:pi@127.0.0.1:5432/pi"
 import asyncio
 from pi_storage import PostgresSessionStore
 
+
 async def main():
     store = PostgresSessionStore("postgresql://pi:pi@127.0.0.1:5432/pi")
     await store.open()
     await store.migrate()
 
     meta = await store.create_session("/tmp/proj")
-    await store.append_entry(meta.id, {
-        "id": "e1", "type": "message", "timestamp": "2026-08-04T00:00:00+00:00",
-    })
+    await store.append_entry(
+        meta.id,
+        {
+            "id": "e1",
+            "type": "message",
+            "timestamp": "2026-08-04T00:00:00+00:00",
+        },
+    )
     hits = await store.search_session_ids("hello")
     await store.close()
+
 
 asyncio.run(main())
 ```

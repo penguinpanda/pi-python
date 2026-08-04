@@ -116,6 +116,7 @@ def _find_events(events: list[AgentEvent], event_type: str) -> list[AgentEvent]:
 
 def _make_tool(name: str, result_text: str = "ok") -> AgentTool:
     """创建测试用工具。"""
+
     async def _execute(tool_call_id, params, signal=None, on_update=None):
         return AgentToolResult(
             content=[TextContent(type="text", text=result_text)],
@@ -221,10 +222,10 @@ class TestToolCallLoop:
         roles = [m.get("role") for m in result]
         assert "toolResult" in roles
 
-
     @pytest.mark.asyncio
     async def test_tool_execution_error(self):
         """工具执行异常 → 转化为 is_error=true 的结果。"""
+
         async def _failing_execute(tool_call_id, params, signal=None, on_update=None):
             raise ValueError("tool failed")
 
@@ -409,6 +410,7 @@ class TestHooks:
 
         def _before(ctx):
             from pi_agent._types import BeforeToolCallResult
+
             return BeforeToolCallResult(block=True, reason="not allowed")
 
         config = AgentLoopConfig(
@@ -428,7 +430,6 @@ class TestHooks:
         assert len(tool_end) == 1
         assert tool_end[0]["is_error"] is True
 
-
     @pytest.mark.asyncio
     async def test_after_tool_call_override(self):
         """afterToolCall 覆盖工具结果。"""
@@ -447,6 +448,7 @@ class TestHooks:
 
         def _after(ctx):
             from pi_agent._types import AfterToolCallResult
+
             return AfterToolCallResult(
                 content=[TextContent(type="text", text="overridden!")],
                 terminate=True,
@@ -474,6 +476,7 @@ class TestTerminate:
     @pytest.mark.asyncio
     async def test_terminate_stops_loop(self):
         """工具返回 terminate=true → 不再继续下一轮。"""
+
         async def _terminating_execute(tool_call_id, params, signal=None, on_update=None):
             result = AgentToolResult(
                 content=[TextContent(type="text", text="done")],
@@ -579,9 +582,7 @@ class TestLLMError:
         prompts = [UserMessage(role="user", content="Hi")]
         context = AgentContext(system_prompt="test", messages=[])
 
-        error_msg = faux_assistant_message(
-            [], stop_reason="error", error_message="API call failed"
-        )
+        error_msg = faux_assistant_message([], stop_reason="error", error_message="API call failed")
         stream_fn = _make_stream_fn(error_msg)
 
         config = AgentLoopConfig(
@@ -690,6 +691,7 @@ class TestToolLifecycle:
     @pytest.mark.asyncio
     async def test_after_execute_replaces_result(self):
         """after_execute 返回的新值应替换最终工具结果。"""
+
         async def _execute(tool_call_id, params, signal=None, on_update=None):
             return AgentToolResult(
                 content=[TextContent(type="text", text="original")],
@@ -725,9 +727,7 @@ class TestToolLifecycle:
         # toolResult 消息应包含 after_execute 替换后的文本
         tr_messages = [m for m in result if m.get("role") == "toolResult"]
         assert len(tr_messages) == 1
-        text = "".join(
-            b["text"] for b in tr_messages[0]["content"] if b["type"] == "text"
-        )
+        text = "".join(b["text"] for b in tr_messages[0]["content"] if b["type"] == "text")
         assert text == "post-processed"
 
 
@@ -794,10 +794,12 @@ class TestFollowUpLoop:
         prompts = [UserMessage(role="user", content="Hi")]
         context = AgentContext(system_prompt="test", messages=[])
 
-        stream_fn = _make_counting_stream_fn([
-            _make_llm_text_response("First answer"),
-            _make_llm_text_response("Second answer"),
-        ])
+        stream_fn = _make_counting_stream_fn(
+            [
+                _make_llm_text_response("First answer"),
+                _make_llm_text_response("Second answer"),
+            ]
+        )
 
         follow_up_msg = UserMessage(role="user", content="And then?")
         poll_count = 0
@@ -829,11 +831,13 @@ class TestFollowUpLoop:
         prompts = [UserMessage(role="user", content="First")]
         context = AgentContext(system_prompt="test", messages=[], tools=[tool])
 
-        stream_fn = _make_counting_stream_fn([
-            _make_llm_text_response("First answer"),
-            _make_llm_tool_response("search", {"q": "X"}),
-            _make_llm_text_response("Final answer"),
-        ])
+        stream_fn = _make_counting_stream_fn(
+            [
+                _make_llm_text_response("First answer"),
+                _make_llm_tool_response("search", {"q": "X"}),
+                _make_llm_text_response("Final answer"),
+            ]
+        )
 
         follow_up_msg = UserMessage(role="user", content="Now search")
         poll_count = 0
@@ -889,10 +893,12 @@ class TestSteeringLoop:
         prompts = [UserMessage(role="user", content="Hi")]
         context = AgentContext(system_prompt="test", messages=[])
 
-        stream_fn = _make_counting_stream_fn([
-            _make_llm_text_response("A1"),
-            _make_llm_text_response("A2"),
-        ])
+        stream_fn = _make_counting_stream_fn(
+            [
+                _make_llm_text_response("A1"),
+                _make_llm_text_response("A2"),
+            ]
+        )
 
         steering_msg = UserMessage(role="user", content="nudge")
         poll_count = 0
@@ -920,10 +926,12 @@ class TestSteeringLoop:
         prompts = [UserMessage(role="user", content="Search")]
         context = AgentContext(system_prompt="test", messages=[], tools=[tool])
 
-        stream_fn = _make_counting_stream_fn([
-            _make_llm_tool_response("search", {"q": "X"}),
-            _make_llm_text_response("done"),
-        ])
+        stream_fn = _make_counting_stream_fn(
+            [
+                _make_llm_tool_response("search", {"q": "X"}),
+                _make_llm_text_response("done"),
+            ]
+        )
 
         steering_msg = UserMessage(role="user", content="Wait, refine")
         poll_count = 0
@@ -1139,7 +1147,11 @@ class TestParallelToolExecution:
 
         # b 在 a 结束后才启动（顺序回退，无并发）
         assert trace == [
-            "a:start", "a:end", "b:start", "b:saw_a_done=True", "b:end",
+            "a:start",
+            "a:end",
+            "b:start",
+            "b:saw_a_done=True",
+            "b:end",
         ]
         assert len(_find_events(events, "tool_execution_end")) == 2
 
@@ -1186,7 +1198,11 @@ class TestParallelToolExecution:
         await _collect_events(prompts, context, config, stream_fn)
 
         assert trace == [
-            "a:start", "a:end", "b:start", "b:saw_a_done=True", "b:end",
+            "a:start",
+            "a:end",
+            "b:start",
+            "b:saw_a_done=True",
+            "b:end",
         ]
 
 

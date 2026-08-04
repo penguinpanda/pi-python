@@ -41,13 +41,16 @@ def _llm_ok(text: str = "ok"):
     return faux_assistant_message(text)
 
 
+_DEFAULT_AGENT_RETRY_POLICY = RetryPolicy(enabled=False)
+
+
 def _make_session(
     models: Models,
     session_manager: SessionManager,
     cwd: str | Path,
     *,
     turn_retry_policy: RetryPolicy | None = None,
-    agent_retry_policy: RetryPolicy | None = RetryPolicy(enabled=False),
+    agent_retry_policy: RetryPolicy | None = _DEFAULT_AGENT_RETRY_POLICY,
 ) -> AgentSession:
     """构建 Agent + AgentSession。
 
@@ -55,11 +58,13 @@ def _make_session(
     """
     model = models.get_model("faux", "faux-1")
     assert model is not None
-    agent = Agent(AgentOptions(
-        system_prompt="You are a helpful coding assistant.",
-        model=model,
-        retry_policy=agent_retry_policy,
-    ))
+    agent = Agent(
+        AgentOptions(
+            system_prompt="You are a helpful coding assistant.",
+            model=model,
+            retry_policy=agent_retry_policy,
+        )
+    )
     return AgentSession(
         agent=agent,
         session_manager=session_manager,
@@ -87,11 +92,11 @@ class TestSessionTurnRetry:
         models, core = faux_env
         core.set_responses([_llm_error("500 Internal Server Error"), _llm_ok("retried ok")])
 
-        mgr = SessionManager.create(
-            cwd=str(tmp_path), sessions_dir=str(tmp_path / "sessions")
-        )
+        mgr = SessionManager.create(cwd=str(tmp_path), sessions_dir=str(tmp_path / "sessions"))
         session = _make_session(
-            models, mgr, tmp_path,
+            models,
+            mgr,
+            tmp_path,
             turn_retry_policy=RetryPolicy(max_retries=3, base_delay_ms=1, jitter=False),
         )
 
@@ -116,17 +121,19 @@ class TestSessionTurnRetry:
     async def test_turn_retry_exhausted_ends_with_error(self, faux_env, tmp_path):
         """重试耗尽 → 仍以错误结束，且状态机保持最后一条错误消息。"""
         models, core = faux_env
-        core.set_responses([
-            _llm_error("503 Service Unavailable"),
-            _llm_error("503 Service Unavailable"),
-            _llm_error("503 Service Unavailable"),
-        ])
-
-        mgr = SessionManager.create(
-            cwd=str(tmp_path), sessions_dir=str(tmp_path / "sessions")
+        core.set_responses(
+            [
+                _llm_error("503 Service Unavailable"),
+                _llm_error("503 Service Unavailable"),
+                _llm_error("503 Service Unavailable"),
+            ]
         )
+
+        mgr = SessionManager.create(cwd=str(tmp_path), sessions_dir=str(tmp_path / "sessions"))
         session = _make_session(
-            models, mgr, tmp_path,
+            models,
+            mgr,
+            tmp_path,
             turn_retry_policy=RetryPolicy(max_retries=2, base_delay_ms=1, jitter=False),
         )
 
@@ -148,11 +155,11 @@ class TestSessionTurnRetry:
         models, core = faux_env
         core.set_responses([_llm_error("500 Internal Server Error")])
 
-        mgr = SessionManager.create(
-            cwd=str(tmp_path), sessions_dir=str(tmp_path / "sessions")
-        )
+        mgr = SessionManager.create(cwd=str(tmp_path), sessions_dir=str(tmp_path / "sessions"))
         session = _make_session(
-            models, mgr, tmp_path,
+            models,
+            mgr,
+            tmp_path,
             turn_retry_policy=RetryPolicy(enabled=False),
         )
 
@@ -171,11 +178,11 @@ class TestSessionTurnRetry:
         models, core = faux_env
         core.set_responses([_llm_error("insufficient_quota")])
 
-        mgr = SessionManager.create(
-            cwd=str(tmp_path), sessions_dir=str(tmp_path / "sessions")
-        )
+        mgr = SessionManager.create(cwd=str(tmp_path), sessions_dir=str(tmp_path / "sessions"))
         session = _make_session(
-            models, mgr, tmp_path,
+            models,
+            mgr,
+            tmp_path,
             turn_retry_policy=RetryPolicy(max_retries=3, base_delay_ms=1, jitter=False),
         )
 
@@ -195,11 +202,11 @@ class TestSessionTurnRetry:
         # 长退避：保证 prompt() 停在退避等待中
         core.set_responses([_llm_error("500 Internal Server Error"), _llm_ok("ok")])
 
-        mgr = SessionManager.create(
-            cwd=str(tmp_path), sessions_dir=str(tmp_path / "sessions")
-        )
+        mgr = SessionManager.create(cwd=str(tmp_path), sessions_dir=str(tmp_path / "sessions"))
         session = _make_session(
-            models, mgr, tmp_path,
+            models,
+            mgr,
+            tmp_path,
             turn_retry_policy=RetryPolicy(max_retries=3, base_delay_ms=60000, jitter=False),
         )
 

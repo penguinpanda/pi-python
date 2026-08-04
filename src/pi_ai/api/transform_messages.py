@@ -61,6 +61,7 @@ NON_VISION_TOOL_IMAGE_PLACEHOLDER = "(tool image omitted: model does not support
 # short_hash — 确定性 32 位哈希（移植 TS utils/hash.ts）
 # ==========================================================
 
+
 def _to_base36(n: int) -> str:
     """将非负整数转换为 base36 字符串（对齐 JS Number.toString(36)）。"""
 
@@ -97,14 +98,10 @@ def short_hash(s: str) -> str:
         h1 = ((h1 ^ ch) * 2654435761) & 0xFFFFFFFF
         h2 = ((h2 ^ ch) * 1597334677) & 0xFFFFFFFF
 
-    h1 = (
-        (((h1 ^ (h1 >> 16)) & 0xFFFFFFFF) * 2246822507) & 0xFFFFFFFF
-    ) ^ (
+    h1 = ((((h1 ^ (h1 >> 16)) & 0xFFFFFFFF) * 2246822507) & 0xFFFFFFFF) ^ (
         (((h2 ^ (h2 >> 13)) & 0xFFFFFFFF) * 3266489909) & 0xFFFFFFFF
     )
-    h2 = (
-        (((h2 ^ (h2 >> 16)) & 0xFFFFFFFF) * 2246822507) & 0xFFFFFFFF
-    ) ^ (
+    h2 = ((((h2 ^ (h2 >> 16)) & 0xFFFFFFFF) * 2246822507) & 0xFFFFFFFF) ^ (
         (((h1 ^ (h1 >> 13)) & 0xFFFFFFFF) * 3266489909) & 0xFFFFFFFF
     )
 
@@ -114,6 +111,7 @@ def short_hash(s: str) -> str:
 # ==========================================================
 # 图片降级
 # ==========================================================
+
 
 def replace_images_with_placeholder(
     content: list[dict[str, Any]],
@@ -136,9 +134,7 @@ def replace_images_with_placeholder(
             continue
 
         result.append(block)
-        previous_was_placeholder = (
-            block["type"] == "text" and block.get("text") == placeholder
-        )
+        previous_was_placeholder = block["type"] == "text" and block.get("text") == placeholder
 
     return result
 
@@ -189,6 +185,7 @@ def downgrade_unsupported_images(
 # ==========================================================
 # Tool Call ID 规范化
 # ==========================================================
+
 
 def normalize_tool_call_id(
     id_: str,
@@ -277,8 +274,7 @@ def normalize_responses_tool_call_id(
     call_id, _, item_id = id_.partition("|")
     normalized_call_id = normalize_id_part(call_id)
     is_foreign_tool_call = (
-        source.get("provider") != model.provider
-        or source.get("api") != model.api
+        source.get("provider") != model.provider or source.get("api") != model.api
     )
     if is_foreign_tool_call:
         normalized_item_id = build_foreign_responses_item_id(item_id)
@@ -294,6 +290,7 @@ def normalize_responses_tool_call_id(
 # ==========================================================
 # 主转换函数
 # ==========================================================
+
 
 def transform_messages(
     messages: list[Message],
@@ -322,8 +319,7 @@ def transform_messages(
     # 可能违反类型契约；统一归一化，下游可依赖 content 是列表。
     # --------------------------------------------------
     normalized_messages = [
-        {**msg, "content": []} if msg.get("content") is None else msg
-        for msg in messages
+        {**msg, "content": []} if msg.get("content") is None else msg for msg in messages
     ]
 
     image_aware_messages = downgrade_unsupported_images(normalized_messages, model)
@@ -414,9 +410,7 @@ def transform_messages(
                     if same_model:
                         transformed_content.append(block)
                     else:
-                        transformed_content.append(
-                            {"type": "text", "text": block.get("text", "")}
-                        )
+                        transformed_content.append({"type": "text", "text": block.get("text", "")})
                     continue
 
                 # Tool Call 块：
@@ -432,9 +426,7 @@ def transform_messages(
                         normalized_tool_call.pop("thought_signature", None)
 
                     if not same_model and normalize_tool_call_id_fn is not None:
-                        normalized_id = normalize_tool_call_id_fn(
-                            tool_call["id"], model, asst
-                        )
+                        normalized_id = normalize_tool_call_id_fn(tool_call["id"], model, asst)
                         if normalized_id != tool_call["id"]:
                             tool_call_id_map[tool_call["id"]] = normalized_id
                             if normalized_tool_call is tool_call:
@@ -473,14 +465,16 @@ def transform_messages(
         if pending_tool_calls:
             for tc in pending_tool_calls:
                 if tc["id"] not in existing_tool_result_ids:
-                    result.append({
-                        "role": "toolResult",
-                        "tool_call_id": tc["id"],
-                        "tool_name": tc["name"],
-                        "content": [{"type": "text", "text": "No result provided"}],
-                        "is_error": True,
-                        "timestamp": now_ms(),
-                    })  # type: ignore[arg-type]
+                    result.append(
+                        {
+                            "role": "toolResult",
+                            "tool_call_id": tc["id"],
+                            "tool_name": tc["name"],
+                            "content": [{"type": "text", "text": "No result provided"}],
+                            "is_error": True,
+                            "timestamp": now_ms(),
+                        }
+                    )  # type: ignore[arg-type]
             pending_tool_calls = []
             existing_tool_result_ids = set()
 
@@ -502,7 +496,9 @@ def transform_messages(
 
             # 记录本轮的 tool call，供后续匹配 toolResult。
             tool_calls = [
-                b for b in msg["content"] if b["type"] == "toolCall"  # type: ignore[typeddict-item]
+                b
+                for b in msg["content"]
+                if b["type"] == "toolCall"  # type: ignore[typeddict-item]
             ]
             if tool_calls:
                 pending_tool_calls = tool_calls  # type: ignore[assignment]

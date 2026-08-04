@@ -23,11 +23,13 @@ def _make_session(tmp_path, responses=None):
     runtime = ModelRuntime(models, store)
     model = runtime.get_model("faux", "faux-1")
     assert model is not None
-    agent = Agent(AgentOptions(
-        system_prompt="You are a helpful coding assistant.",
-        model=model,
-        stream_fn=runtime.stream,
-    ))
+    agent = Agent(
+        AgentOptions(
+            system_prompt="You are a helpful coding assistant.",
+            model=model,
+            stream_fn=runtime.stream,
+        )
+    )
     return AgentSession(
         agent=agent,
         session_manager=SessionManager.in_memory(cwd=str(tmp_path)),

@@ -21,7 +21,7 @@ from pi_ai.providers import (
     openai_provider,
     qwen_provider,
 )
-from pi_ai.providers.ollama import _merge_ollama_models, discover_ollama_models
+from pi_ai.providers.ollama import _merge_ollama_models
 
 import httpx
 
@@ -225,7 +225,9 @@ class TestModelMetadata:
 
     def test_reasoning_and_image_input(self):
         m = Model(
-            id="x", provider="p", api="a",
+            id="x",
+            provider="p",
+            api="a",
             reasoning=True,
             input=["text", "image"],
         )
@@ -239,7 +241,9 @@ class TestModelMetadata:
 
     def test_text_only(self):
         m = Model(
-            id="x", provider="p", api="a",
+            id="x",
+            provider="p",
+            api="a",
             reasoning=True,
             input=["text"],
         )
@@ -322,7 +326,8 @@ class TestOllamaDiscovery:
         discovered = _merge_ollama_models(["qwen3:30b", "brand-new:latest"])
         provider = ollama_provider(models=discovered)
         assert [m.id for m in provider.get_models()] == [
-            "qwen3:30b", "brand-new:latest",
+            "qwen3:30b",
+            "brand-new:latest",
         ]
 
     async def test_discover_success(self, monkeypatch):
@@ -349,7 +354,8 @@ class TestOllamaDiscovery:
                 return self._response
 
         monkeypatch.setattr(
-            ollama_mod.httpx, "AsyncClient",
+            ollama_mod.httpx,
+            "AsyncClient",
             lambda **kw: _FakeClient(_FakeResponse()),
         )
 
@@ -370,9 +376,7 @@ class TestOllamaDiscovery:
             async def get(self, url):
                 raise httpx.ConnectError("connection refused")
 
-        monkeypatch.setattr(
-            ollama_mod.httpx, "AsyncClient", lambda **kw: _FakeClient()
-        )
+        monkeypatch.setattr(ollama_mod.httpx, "AsyncClient", lambda **kw: _FakeClient())
 
         assert await ollama_mod.discover_ollama_models() is None
 
@@ -392,8 +396,6 @@ class TestOllamaDiscovery:
             async def get(self, url):
                 return _FakeResponse()
 
-        monkeypatch.setattr(
-            ollama_mod.httpx, "AsyncClient", lambda **kw: _FakeClient()
-        )
+        monkeypatch.setattr(ollama_mod.httpx, "AsyncClient", lambda **kw: _FakeClient())
 
         assert await ollama_mod.discover_ollama_models() is None

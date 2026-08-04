@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from pi_coding_agent.modes.interactive.slash_commands import (
     SlashCommandRegistry,
@@ -99,6 +98,7 @@ class TestRegistry:
         await registry.execute("/help", context)
         assert "/model" in notifications[0]
         assert "/quit" in notifications[0]
+
 
 class FakeSession:
     """极简 session 桩（Phase 7 命令用）。"""
@@ -372,9 +372,7 @@ class TestPhase7Commands:
 
         session = FakeSession(cwd=str(tmp_path))
         extension = Extension(path="/tmp/ext.py", resolved_path="/tmp/ext.py")
-        session.extension_runner = type(
-            "Runner", (), {"extensions": [extension]}
-        )()
+        session.extension_runner = type("Runner", (), {"extensions": [extension]})()
         registry = _make_registry()
         notifications: list[str] = []
         context = SlashContext(session=session, notify=notifications.append)
@@ -396,8 +394,7 @@ class TestPhase7Commands:
 
     async def test_changelog_renders_entries(self, tmp_path):
         (tmp_path / "CHANGELOG.md").write_text(
-            "## [0.2.0]\n\n### Added\n\n- thing\n\n"
-            "## [0.1.0]\n\n### Fixed\n\n- bug\n",
+            "## [0.2.0]\n\n### Added\n\n- thing\n\n## [0.1.0]\n\n### Fixed\n\n- bug\n",
             encoding="utf-8",
         )
         session = FakeSession(cwd=str(tmp_path))
@@ -411,8 +408,7 @@ class TestPhase7Commands:
 
     async def test_changelog_version_filter(self, tmp_path):
         (tmp_path / "CHANGELOG.md").write_text(
-            "## [0.2.0]\n\n### Added\n\n- thing\n\n"
-            "## [0.1.0]\n\n### Fixed\n\n- bug\n",
+            "## [0.2.0]\n\n### Added\n\n- thing\n\n## [0.1.0]\n\n### Fixed\n\n- bug\n",
             encoding="utf-8",
         )
         session = FakeSession(cwd=str(tmp_path))
@@ -453,10 +449,12 @@ class TestPhase7Commands:
         from pi_coding_agent.model_runtime import ModelRuntime
 
         models = Models(credentials=AuthStorage.in_memory())
-        core = faux_provider(models=[
-            Model(id="faux-1", provider="faux", api="openai-completions"),
-            Model(id="faux-2", provider="faux", api="openai-completions"),
-        ])
+        core = faux_provider(
+            models=[
+                Model(id="faux-1", provider="faux", api="openai-completions"),
+                Model(id="faux-2", provider="faux", api="openai-completions"),
+            ]
+        )
         models.add_provider(core.provider)
         runtime = ModelRuntime(models, AuthStorage.in_memory())
 
@@ -609,7 +607,7 @@ class TestBuiltinHandlers:
         assert "compacted" in notifications[0]
 
     async def test_model_with_runtime(self):
-        from pi_ai import Model, Models
+        from pi_ai import Models
         from pi_coding_agent.auth_storage import AuthStorage
         from pi_coding_agent.model_runtime import ModelRuntime
         from pi_ai.providers.faux import faux_provider

@@ -5,7 +5,6 @@ import asyncio
 import pytest
 
 from pi_ai.auth import env_api_key_auth
-from pi_ai.auth.context import AuthContext
 from pi_ai.auth.credential_store import InMemoryCredentialStore
 from pi_ai.auth.resolve import (
     ModelsError,
@@ -96,7 +95,9 @@ async def test_resolve_stored_oauth_min_validity_enforced():
     expired = _oauth_credential(now_ms() - 1000)
     await store.write("p", expired)
     with pytest.raises(ModelsError) as excinfo:
-        await resolve_stored_oauth(store, "p", _ShortLivedOAuth(), expired, min_oauth_validity_ms=5 * 60_000)
+        await resolve_stored_oauth(
+            store, "p", _ShortLivedOAuth(), expired, min_oauth_validity_ms=5 * 60_000
+        )
     assert excinfo.value.code == "oauth"
 
 
@@ -120,9 +121,7 @@ async def test_resolve_provider_auth_stored_then_env():
     assert result.auth["api_key"] == "sk-stored"
 
     store2 = InMemoryCredentialStore()
-    result = await resolve_provider_auth(
-        provider, store2, _FakeAuthContext({"TEST_KEY": "sk-env"})
-    )
+    result = await resolve_provider_auth(provider, store2, _FakeAuthContext({"TEST_KEY": "sk-env"}))
     assert result.auth["api_key"] == "sk-env"
     assert result.source == "TEST_KEY"
 

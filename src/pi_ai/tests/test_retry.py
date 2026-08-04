@@ -277,9 +277,7 @@ async def test_retry_signal_aborts_during_sleep() -> None:
     policy = RetryPolicy(max_retries=3, base_delay_ms=10000, jitter=False)
 
     async def _run() -> asyncio.Task[AssistantMessage]:
-        task = asyncio.create_task(
-            retry_assistant_call(produce, policy=policy, signal=signal)
-        )
+        task = asyncio.create_task(retry_assistant_call(produce, policy=policy, signal=signal))
         # 等第一次调用完成进入 sleep 后中止
         while len(calls) < 1:
             await asyncio.sleep(0)
@@ -307,12 +305,12 @@ async def test_retry_callbacks_invoked() -> None:
         return _ok_msg()
 
     callbacks = RetryCallbacks(
-        on_retry_scheduled=lambda attempt, max_attempts, delay_ms, error_message: (
-            scheduled.append((attempt, max_attempts, delay_ms, error_message))
+        on_retry_scheduled=lambda attempt, max_attempts, delay_ms, error_message: scheduled.append(
+            (attempt, max_attempts, delay_ms, error_message)
         ),
         on_retry_attempt_start=lambda: attempt_starts.append(len(attempt_starts) + 1),
-        on_retry_finished=lambda success, attempt, final_error: (
-            finished.append((success, attempt, final_error))
+        on_retry_finished=lambda success, attempt, final_error: finished.append(
+            (success, attempt, final_error)
         ),
     )
 
@@ -336,8 +334,8 @@ async def test_retry_callbacks_finished_on_exhaustion() -> None:
         return _error_msg("503 Service Unavailable")
 
     callbacks = RetryCallbacks(
-        on_retry_finished=lambda success, attempt, final_error: (
-            finished.append((success, attempt, final_error))
+        on_retry_finished=lambda success, attempt, final_error: finished.append(
+            (success, attempt, final_error)
         ),
     )
 

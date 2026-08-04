@@ -6,7 +6,6 @@ Set OPENAI_API_KEY or DEEPSEEK_API_KEY to run.
 """
 
 import os
-import sys
 
 import pytest
 
@@ -62,9 +61,7 @@ async def test_deepseek_chat_complete():
     msg = await models.complete(model, context, {"max_tokens": 20})
     assert msg["role"] == "assistant"
     assert len(msg["content"]) > 0
-    text = "".join(
-        block["text"] for block in msg["content"] if block["type"] == "text"
-    )
+    text = "".join(block["text"] for block in msg["content"] if block["type"] == "text")
     assert "ok" in text.lower()
 
 
@@ -126,9 +123,7 @@ async def test_tool_calling():
     assert msg["role"] == "assistant"
 
     # Check for tool calls in content
-    tool_calls = [
-        block for block in msg["content"] if block["type"] == "toolCall"
-    ]
+    tool_calls = [block for block in msg["content"] if block["type"] == "toolCall"]
     if tool_calls:
         tc = tool_calls[0]
         assert tc["name"] == "get_weather"

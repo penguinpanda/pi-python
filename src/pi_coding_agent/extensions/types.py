@@ -49,9 +49,7 @@ class UIContext(Protocol):
         self, title: str, options: list[str], timeout: float | None = None
     ) -> str | None: ...
 
-    async def confirm(
-        self, title: str, message: str, timeout: float | None = None
-    ) -> bool: ...
+    async def confirm(self, title: str, message: str, timeout: float | None = None) -> bool: ...
 
     async def input(
         self, title: str, placeholder: str | None = None, timeout: float | None = None
@@ -236,9 +234,7 @@ class ExtensionAPI:
         definition = tool if isinstance(tool, ToolDefinition) else ToolDefinition(**tool)
         self._extension.tools[definition.name] = definition
 
-    def register_command(
-        self, name: str, options: dict | None = None
-    ) -> None:
+    def register_command(self, name: str, options: dict | None = None) -> None:
         options = dict(options or {})
         options["name"] = name
         options["source_info"] = {"source": self._extension.source, "path": self._extension.path}

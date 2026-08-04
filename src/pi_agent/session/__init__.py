@@ -3,8 +3,18 @@
 DAG 会话树模型 + 持久化存储 + 会话搜索。
 """
 
-from .jsonl import JsonlSessionStorage, JsonlSessionStore, create_jsonl_session_repo, create_jsonl_session_store
-from .memory import InMemorySessionStorage, InMemorySessionStore, create_in_memory_session_repo, create_in_memory_session_store
+from .jsonl import (
+    JsonlSessionStorage,
+    JsonlSessionStore,
+    create_jsonl_session_repo,
+    create_jsonl_session_store,
+)
+from .memory import (
+    InMemorySessionStorage,
+    InMemorySessionStore,
+    create_in_memory_session_repo,
+    create_in_memory_session_store,
+)
 from .repo import (
     SessionRepo,
     create_session_id,
@@ -16,7 +26,12 @@ from .repo import (
     to_store_session,
 )
 from .search import ScanningSessionSearch, rebuild_session_search_index
-from .session import Session, build_context_entries, build_session_context, default_context_entry_transform
+from .session import (
+    Session,
+    build_context_entries,
+    build_session_context,
+    default_context_entry_transform,
+)
 from .types import (
     ActiveToolsChangeEntry,
     BranchSummaryEntry,

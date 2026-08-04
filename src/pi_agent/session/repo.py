@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import Any, Generic, Protocol, TypeVar
+from typing import Any, Generic, TypeVar
 
 from pi_ai.utils.uuid import uuidv7
 
@@ -27,7 +27,6 @@ from .types import (
     SessionMetadata,
     SessionSearch,
     SessionSearchHit,
-    SessionSnapshot,
     SessionStats,
     SessionStorage,
     SessionStore,
@@ -65,12 +64,14 @@ def find_session_entry_matches(
         payload = json.dumps(entry, ensure_ascii=False)
         if normalized not in payload.lower():
             continue
-        hits.append({
-            "metadata": metadata,
-            "entryId": entry["id"],
-            "timestamp": entry["timestamp"],
-            "snippet": payload,
-        })
+        hits.append(
+            {
+                "metadata": metadata,
+                "entryId": entry["id"],
+                "timestamp": entry["timestamp"],
+                "snippet": payload,
+            }
+        )
     return hits
 
 
@@ -84,9 +85,7 @@ async def get_entries_to_fork(
         return await storage.get_entries()
     target = await storage.get_entry(options["entryId"])
     if target is None:
-        raise SessionError(
-            "invalid_fork_target", f"Entry {options['entryId']} not found"
-        )
+        raise SessionError("invalid_fork_target", f"Entry {options['entryId']} not found")
     position = options.get("position", "before")
     if position == "at":
         effective_leaf_id = target["id"]
@@ -110,7 +109,9 @@ def to_store_session(
     metadata: SessionMetadata,
 ) -> Session:
     """把 store + metadata 包装成 Session（每次操作实时读 store）。"""
-    load = lambda: store.load(metadata)
+
+    def load():
+        return store.load(metadata)
 
     class _StoreBackedStorage:
         async def get_metadata(self) -> SessionMetadata:
@@ -132,11 +133,7 @@ def to_store_session(
             return _entries_by_id((await load())["entries"]).get(entry_id)
 
         async def find_entries(self, entry_type: str) -> list[SessionTreeEntry]:
-            return [
-                entry
-                for entry in (await load())["entries"]
-                if entry["type"] == entry_type
-            ]
+            return [entry for entry in (await load())["entries"] if entry["type"] == entry_type]
 
         async def get_label(self, entry_id: str) -> str | None:
             return _get_label((await load())["entries"], entry_id)
@@ -186,15 +183,11 @@ class SessionRepo(Generic[TMetadata, TCreateOptions, TListOptions]):
     async def delete(self, metadata: TMetadata) -> None:
         await self._store.delete(metadata)
 
-    async def fork(
-        self, source: TMetadata, options: SessionForkOptions
-    ) -> Session:
+    async def fork(self, source: TMetadata, options: SessionForkOptions) -> Session:
         metadata = await self._store.fork(source, options)
         return to_store_session(self._store, metadata)
 
-    async def search(
-        self, options: dict[str, Any]
-    ) -> list[SessionSearchHit]:
+    async def search(self, options: dict[str, Any]) -> list[SessionSearchHit]:
         if self._search_backend is None:
             return []
         return await self._search_backend.search(options)

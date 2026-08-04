@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pi_agent import Agent, AgentOptions
@@ -54,11 +55,13 @@ def _make_runtime(
 def _make_session(runtime: ModelRuntime, tmp_path: Path) -> AgentSession:
     model = runtime.get_model("faux", "faux-1")
     assert model is not None
-    agent = Agent(AgentOptions(
-        system_prompt="You are a helpful coding assistant.",
-        model=model,
-        stream_fn=runtime.stream,
-    ))
+    agent = Agent(
+        AgentOptions(
+            system_prompt="You are a helpful coding assistant.",
+            model=model,
+            stream_fn=runtime.stream,
+        )
+    )
     return AgentSession(
         agent=agent,
         session_manager=SessionManager.in_memory(cwd=str(tmp_path)),
@@ -68,16 +71,16 @@ def _make_session(runtime: ModelRuntime, tmp_path: Path) -> AgentSession:
     )
 
 
-def _make_session_with_manager(
-    runtime: ModelRuntime, manager, tmp_path: Path
-) -> AgentSession:
+def _make_session_with_manager(runtime: ModelRuntime, manager, tmp_path: Path) -> AgentSession:
     model = runtime.get_model("faux", "faux-1")
     assert model is not None
-    agent = Agent(AgentOptions(
-        system_prompt="You are a helpful coding assistant.",
-        model=model,
-        stream_fn=runtime.stream,
-    ))
+    agent = Agent(
+        AgentOptions(
+            system_prompt="You are a helpful coding assistant.",
+            model=model,
+            stream_fn=runtime.stream,
+        )
+    )
     return AgentSession(
         agent=agent,
         session_manager=manager,
@@ -109,7 +112,7 @@ async def test_app_mounts_and_footer(tmp_path):
     runtime = _make_runtime()
     session = _make_session(runtime, tmp_path)
     app = PiTuiApp(session, runtime)
-    async with app.run_test() as pilot:
+    async with app.run_test():
         assert app._editor.has_focus
         footer_text = app._footer.content
         assert "faux/faux-1" in str(footer_text)
@@ -140,12 +143,10 @@ async def test_bindings_wired(tmp_path):
 
 @pytest.mark.asyncio
 async def test_prompt_renders_user_and_assistant(tmp_path):
-    runtime = _make_runtime(
-        responses=[faux_assistant_message("tui assistant reply")]
-    )
+    runtime = _make_runtime(responses=[faux_assistant_message("tui assistant reply")])
     session = _make_session(runtime, tmp_path)
     app = PiTuiApp(session, runtime)
-    async with app.run_test() as pilot:
+    async with app.run_test():
         app._editor.text = "hello tui"
         app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "hello tui"))
         await _wait_until(
@@ -168,15 +169,11 @@ async def test_slash_command_name(tmp_path):
     runtime = _make_runtime()
     session = _make_session(runtime, tmp_path)
     app = PiTuiApp(session, runtime)
-    async with app.run_test() as pilot:
+    async with app.run_test():
         app._editor.text = "/name tui-session"
         app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "/name tui-session"))
-        await _wait_until(
-            lambda: session.session_name == "tui-session"
-        )
-        await _wait_until(
-            lambda: "tui-session" in str(app._footer.content)
-        )
+        await _wait_until(lambda: session.session_name == "tui-session")
+        await _wait_until(lambda: "tui-session" in str(app._footer.content))
 
 
 @pytest.mark.asyncio
@@ -184,11 +181,9 @@ async def test_cycle_model_shortcut(tmp_path):
     runtime = _make_runtime(model_count=2)
     session = _make_session(runtime, tmp_path)
     app = PiTuiApp(session, runtime)
-    async with app.run_test() as pilot:
+    async with app.run_test():
         app.action_cycle_model_forward()
-        await _wait_until(
-            lambda: session.model is not None and session.model.id == "faux-2"
-        )
+        await _wait_until(lambda: session.model is not None and session.model.id == "faux-2")
         assert "faux/faux-2" in str(app._footer.content)
 
 
@@ -264,8 +259,7 @@ async def test_model_selector_keyboard_navigation():
     from textual.app import App
 
     models = [
-        Model(id=f"faux-{index}", provider="faux", api="openai-completions")
-        for index in (1, 2, 3)
+        Model(id=f"faux-{index}", provider="faux", api="openai-completions") for index in (1, 2, 3)
     ]
     dismissed: list[Any] = []
 
@@ -405,8 +399,16 @@ async def test_session_picker_mounts_with_sessions():
     from textual.app import App
 
     sessions = [
-        {"path": "/home/pi/.pi/agent/sessions/aaa.jsonl", "session_id": "aaa", "modified": 1785839617},
-        {"path": "/home/pi/.pi/agent/sessions/bbb.jsonl", "session_id": "bbb", "modified": 1785839618},
+        {
+            "path": "/home/pi/.pi/agent/sessions/aaa.jsonl",
+            "session_id": "aaa",
+            "modified": 1785839617,
+        },
+        {
+            "path": "/home/pi/.pi/agent/sessions/bbb.jsonl",
+            "session_id": "bbb",
+            "modified": 1785839618,
+        },
     ]
     picked: list[str] = []
 
@@ -437,7 +439,7 @@ async def test_exit_with_empty_editor(tmp_path):
     runtime = _make_runtime()
     session = _make_session(runtime, tmp_path)
     app = PiTuiApp(session, runtime)
-    async with app.run_test() as pilot:
+    async with app.run_test():
         app.exit()
     assert app._exit is not None
 
@@ -447,7 +449,7 @@ async def test_follow_up_and_clear(tmp_path):
     runtime = _make_runtime()
     session = _make_session(runtime, tmp_path)
     app = PiTuiApp(session, runtime)
-    async with app.run_test() as pilot:
+    async with app.run_test():
         app._editor.text = "queued follow-up"
         app.action_follow_up()
         await _wait_until(lambda: session.pending_message_count == 1)
@@ -466,7 +468,7 @@ async def test_new_session_factory(tmp_path):
         return _make_session(runtime, tmp_path)
 
     app = PiTuiApp(original, runtime, session_factory=factory)
-    async with app.run_test() as pilot:
+    async with app.run_test():
         app.action_new_session()
         await _wait_until(lambda: app._session is not original)
         assert app._session.session_id != original.session_id
@@ -478,9 +480,7 @@ async def test_slash_tree_in_app(tmp_path):
     session = _make_session(runtime, tmp_path)
     from pi_ai._types import UserMessage
 
-    entry_id = await session.session_manager.append_message(
-        UserMessage(role="user", content="hi")
-    )
+    entry_id = await session.session_manager.append_message(UserMessage(role="user", content="hi"))
     app = PiTuiApp(session, runtime)
     async with app.run_test() as pilot:
         app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "/tree"))
@@ -672,9 +672,7 @@ async def test_branch_summary_rendered_from_entries(tmp_path):
     session = _make_session(runtime, tmp_path)
     from pi_ai._types import UserMessage
 
-    await session.session_manager.append_message(
-        UserMessage(role="user", content="a")
-    )
+    await session.session_manager.append_message(UserMessage(role="user", content="a"))
     await session.session_manager.append_branch_summary(
         session.session_manager.get_leaf_id(), "summarized branch"
     )
@@ -697,9 +695,7 @@ async def test_slash_scoped_models_comma_separated(tmp_path):
     session = _make_session(runtime, tmp_path)
     app = PiTuiApp(session, runtime)
     async with app.run_test() as pilot:
-        app.on_pi_editor_submitted(
-            PiEditor.Submitted(app._editor, "/scoped-models faux-1,faux-2")
-        )
+        app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "/scoped-models faux-1,faux-2"))
         await _wait_until(
             lambda: len(session.scoped_models) == 2,
             pilot=pilot,
@@ -717,8 +713,7 @@ async def test_slash_login_unknown_provider(tmp_path):
         app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "/login bogus"))
         await _wait_until(
             lambda: any(
-                "Unknown provider" in str(entry.entry_text)
-                for entry in app.query(MessageEntry)
+                "Unknown provider" in str(entry.entry_text) for entry in app.query(MessageEntry)
             ),
             pilot=pilot,
             message="unknown provider message",
@@ -734,22 +729,19 @@ async def test_tui_auth_interaction_notify_routes_to_chat(tmp_path):
     session = _make_session(runtime, tmp_path)
     app = PiTuiApp(session, runtime)
     async with app.run_test() as pilot:
-        _TuiAuthInteraction(app).notify({
-            "type": "device_code",
-            "verificationUri": "https://example.com/device",
-            "userCode": "ABCD-1234",
-        })
+        _TuiAuthInteraction(app).notify(
+            {
+                "type": "device_code",
+                "verificationUri": "https://example.com/device",
+                "userCode": "ABCD-1234",
+            }
+        )
         await _wait_until(
-            lambda: any(
-                "ABCD-1234" in str(entry.entry_text)
-                for entry in app.query(MessageEntry)
-            ),
+            lambda: any("ABCD-1234" in str(entry.entry_text) for entry in app.query(MessageEntry)),
             pilot=pilot,
             message="device code shown in chat",
         )
-        assert any(
-            "剪贴板" in str(entry.entry_text) for entry in app.query(MessageEntry)
-        )
+        assert any("剪贴板" in str(entry.entry_text) for entry in app.query(MessageEntry))
 
 
 @pytest.mark.asyncio
@@ -786,21 +778,15 @@ async def test_slash_fork_in_app(tmp_path):
     session = _make_session(runtime, tmp_path)
     from pi_ai._types import UserMessage
 
-    e1 = await session.session_manager.append_message(
-        UserMessage(role="user", content="a")
-    )
-    await session.session_manager.append_message(
-        UserMessage(role="user", content="b")
-    )
+    e1 = await session.session_manager.append_message(UserMessage(role="user", content="a"))
+    await session.session_manager.append_message(UserMessage(role="user", content="b"))
 
     def rebuilder(manager):
         return _make_session_with_manager(runtime, manager, tmp_path)
 
     app = PiTuiApp(session, runtime, session_rebuilder=rebuilder)
     async with app.run_test() as pilot:
-        app.on_pi_editor_submitted(
-            PiEditor.Submitted(app._editor, f"/fork {e1}")
-        )
+        app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, f"/fork {e1}"))
         await _wait_until(
             lambda: app._session is not session,
             pilot=pilot,
@@ -816,12 +802,8 @@ async def test_slash_fork_no_args_opens_selector(tmp_path):
     session = _make_session(runtime, tmp_path)
     from pi_ai._types import UserMessage
 
-    await session.session_manager.append_message(
-        UserMessage(role="user", content="a")
-    )
-    await session.session_manager.append_message(
-        UserMessage(role="user", content="b")
-    )
+    await session.session_manager.append_message(UserMessage(role="user", content="a"))
+    await session.session_manager.append_message(UserMessage(role="user", content="b"))
 
     def rebuilder(manager):
         return _make_session_with_manager(runtime, manager, tmp_path)
@@ -863,18 +845,18 @@ async def test_slash_reload_reloads_resources(tmp_path):
 
     theme_colors = dict(BUILTIN_THEMES["dark"])
     theme_colors["accent"] = "#111111"
-    (themes_dir / "custom.json").write_text(
-        _json.dumps(theme_colors), encoding="utf-8"
-    )
+    (themes_dir / "custom.json").write_text(_json.dumps(theme_colors), encoding="utf-8")
 
     runtime = _make_runtime()
     model = runtime.get_model("faux", "faux-1")
     assert model is not None
-    agent = Agent(AgentOptions(
-        system_prompt="You are a helpful coding assistant.",
-        model=model,
-        stream_fn=runtime.stream,
-    ))
+    agent = Agent(
+        AgentOptions(
+            system_prompt="You are a helpful coding assistant.",
+            model=model,
+            stream_fn=runtime.stream,
+        )
+    )
     skill_loader = SkillLoader(global_dir=skills_dir)
     template_loader = PromptTemplateLoader(global_dir=prompts_dir)
     session = AgentSession(
@@ -885,13 +867,9 @@ async def test_slash_reload_reloads_resources(tmp_path):
         model_runtime=runtime,
         skill_loader=skill_loader,
         template_loader=template_loader,
-        extension_runner=ExtensionRunner(
-            [], cwd=str(tmp_path), model_runtime=runtime
-        ),
+        extension_runner=ExtensionRunner([], cwd=str(tmp_path), model_runtime=runtime),
     )
-    extension_loader = ExtensionLoader(
-        global_dir=extensions_dir, cwd=str(tmp_path)
-    )
+    extension_loader = ExtensionLoader(global_dir=extensions_dir, cwd=str(tmp_path))
     settings: dict = {}
     app = PiTuiApp(
         session,
@@ -919,19 +897,13 @@ async def test_slash_reload_reloads_resources(tmp_path):
             '{"description": "Hello", "handler": lambda ctx, args: "hi"})\n',
             encoding="utf-8",
         )
-        (extensions_dir / "bad.py").write_text(
-            "def create_extension(api\n", encoding="utf-8"
-        )
+        (extensions_dir / "bad.py").write_text("def create_extension(api\n", encoding="utf-8")
         theme_colors["accent"] = "#abcdef"
-        (themes_dir / "custom.json").write_text(
-            _json.dumps(theme_colors), encoding="utf-8"
-        )
+        (themes_dir / "custom.json").write_text(_json.dumps(theme_colors), encoding="utf-8")
         settings["keybindings"] = {"app.model.select": "ctrl+m"}
 
         app._editor.text = "/reload"
-        app.on_pi_editor_submitted(
-            PiEditor.Submitted(app._editor, "/reload")
-        )
+        app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "/reload"))
         await _wait_until(
             lambda: (
                 session.skill_loader is not None
@@ -955,8 +927,7 @@ async def test_slash_reload_reloads_resources(tmp_path):
         assert app._keybindings.get_action_key("app.model.select") == "ctrl+m"
         assert app._slash_registry.get("hello") is not None
         assert any(
-            binding.key == "ctrl+m" and binding.action == "select_model"
-            for binding in app.BINDINGS
+            binding.key == "ctrl+m" and binding.action == "select_model" for binding in app.BINDINGS
         )
 
         # 重载后的快捷键真实可分发（打开模型选择器）。

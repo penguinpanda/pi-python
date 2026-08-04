@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import re
-import os
 from typing import Any
 
 from .env import ExecutionEnv
@@ -114,7 +113,9 @@ async def _load_templates_from_dir(
     diagnostics: list[PromptTemplateDiagnostic] = []
     list_result = await env.list_dir(directory)
     if not list_result[0]:
-        diagnostics.append(PromptTemplateDiagnostic("list_failed", list_result[1].message, directory))
+        diagnostics.append(
+            PromptTemplateDiagnostic("list_failed", list_result[1].message, directory)
+        )
         return templates, diagnostics
     for entry in sorted(list_result[1], key=lambda e: e.name):
         if entry.kind != "file" or not entry.name.endswith(".md"):
@@ -133,11 +134,13 @@ async def load_prompt_templates(
     """从文件或目录加载模板，返回 {promptTemplates, diagnostics}。"""
     templates: list[dict[str, Any]] = []
     diagnostics: list[PromptTemplateDiagnostic] = []
-    for path in ([paths] if isinstance(paths, str) else paths):
+    for path in [paths] if isinstance(paths, str) else paths:
         info = await env.file_info(path)
         if not info[0]:
             if info[1].code != "not_found":
-                diagnostics.append(PromptTemplateDiagnostic("file_info_failed", info[1].message, path))
+                diagnostics.append(
+                    PromptTemplateDiagnostic("file_info_failed", info[1].message, path)
+                )
             continue
         if info[1].kind == "directory":
             result, result_diagnostics = await _load_templates_from_dir(env, info[1].path)

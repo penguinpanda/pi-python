@@ -6,8 +6,17 @@ from pathlib import Path
 from ..models_store import model_from_dict
 from ...types import Model
 
-GENERATED_AT = '2026-08-03T03:25:21.904808+00:00'
-MODEL_PROVIDERS: list[str] = ['ant-ling', 'azure-openai-responses', 'deepseek', 'mistral', 'openai', 'openai-codex', 'openrouter', 'vercel-ai-gateway']
+GENERATED_AT = "2026-08-03T03:25:21.904808+00:00"
+MODEL_PROVIDERS: list[str] = [
+    "ant-ling",
+    "azure-openai-responses",
+    "deepseek",
+    "mistral",
+    "openai",
+    "openai-codex",
+    "openrouter",
+    "vercel-ai-gateway",
+]
 
 
 def load_generated_models() -> dict[str, list[Model]]:

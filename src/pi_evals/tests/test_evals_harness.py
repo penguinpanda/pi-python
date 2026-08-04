@@ -66,10 +66,12 @@ async def test_run_steps_support_reload():
         runtime=runtime,
         model={"provider": "faux", "id": "faux-1"},
     )
-    result = await harness.run([
-        {"type": "reload"},
-        {"type": "prompt", "content": "hi"},
-    ])
+    result = await harness.run(
+        [
+            {"type": "reload"},
+            {"type": "prompt", "content": "hi"},
+        ]
+    )
     assert result.errors == []
     assert result.output.strip() == "Paris"
 
@@ -77,10 +79,12 @@ async def test_run_steps_support_reload():
 def test_report_results():
     from pi_evals.harness import EvalResult
 
-    text = report_results([
-        EvalResult(output="ok", usage={"totalTokens": 10}, duration_ms=5),
-        EvalResult(output="bad", errors=["boom"], usage={"totalTokens": 0}, duration_ms=2),
-    ])
+    text = report_results(
+        [
+            EvalResult(output="ok", usage={"totalTokens": 10}, duration_ms=5),
+            EvalResult(output="bad", errors=["boom"], usage={"totalTokens": 0}, duration_ms=2),
+        ]
+    )
     assert "Eval summary" in text
     assert "Failed runs: [2]" in text
     assert "boom" in text

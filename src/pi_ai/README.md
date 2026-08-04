@@ -133,13 +133,7 @@ async def main():
 
     # 非流式调用：等待完整结果
     msg = await models.complete(model, context)
-    print(
-        "".join(
-            block["text"]
-            for block in msg["content"]
-            if block["type"] == "text"
-        )
-    )
+    print("".join(block["text"] for block in msg["content"] if block["type"] == "text"))
 
     # 流式调用：逐 Token 输出
     async for event in await models.stream(model, context):
@@ -292,6 +286,7 @@ msg = await models.complete(model, context, options)
 import asyncio
 from pi_ai import create_default_models, Context, Tool
 
+
 async def main():
     models = create_default_models()
     model = models.get_model("deepseek", "deepseek-v4-flash")
@@ -303,9 +298,7 @@ async def main():
             description="获取指定城市的天气",
             input_schema={
                 "type": "object",
-                "properties": {
-                    "city": {"type": "string", "description": "城市名称"}
-                },
+                "properties": {"city": {"type": "string", "description": "城市名称"}},
                 "required": ["city"],
             },
         ),
@@ -327,21 +320,18 @@ async def main():
 
     # 第二轮：将工具执行结果返回给模型
     context.messages.append(msg)  # assistant 消息
-    context.messages.append({
-        "role": "toolResult",
-        "tool_call_id": msg["content"][0]["id"],
-        "tool_name": "get_weather",
-        "content": [{"type": "text", "text": "北京今天晴，25°C"}],
-    })
+    context.messages.append(
+        {
+            "role": "toolResult",
+            "tool_call_id": msg["content"][0]["id"],
+            "tool_name": "get_weather",
+            "content": [{"type": "text", "text": "北京今天晴，25°C"}],
+        }
+    )
 
     final_msg = await models.complete(model, context)
-    print(
-        "".join(
-            block["text"]
-            for block in final_msg["content"]
-            if block["type"] == "text"
-        )
-    )
+    print("".join(block["text"] for block in final_msg["content"] if block["type"] == "text"))
+
 
 asyncio.run(main())
 ```
@@ -423,11 +413,13 @@ API 协议实现通过注册表按 `model.api` 分发（对齐 TS `apiProviderRe
 ```python
 from pi_ai import ApiProvider, register_api_provider
 
-register_api_provider(ApiProvider(
-    api="my-api",
-    stream=my_stream,             # (model, context, options) -> EventStream
-    streamSimple=my_stream_simple,
-))
+register_api_provider(
+    ApiProvider(
+        api="my-api",
+        stream=my_stream,  # (model, context, options) -> EventStream
+        streamSimple=my_stream_simple,
+    )
+)
 ```
 
 内置注册：`openai-completions`、`openai-responses`、`pi-messages`。

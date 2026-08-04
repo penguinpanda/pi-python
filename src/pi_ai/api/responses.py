@@ -158,11 +158,7 @@ def _to_jsonable(obj: Any) -> Any:
     if hasattr(obj, "model_dump"):
         return _to_jsonable(obj.model_dump())
     if hasattr(obj, "__dict__"):
-        return {
-            k: _to_jsonable(v)
-            for k, v in vars(obj).items()
-            if not k.startswith("_")
-        }
+        return {k: _to_jsonable(v) for k, v in vars(obj).items() if not k.startswith("_")}
     return str(obj)
 
 
@@ -190,11 +186,13 @@ def _convert_tool_result_output(
         output.append({"type": "input_text", "text": text_result})
     for image in images:
         mime = image.get("mime_type") or "image/png"
-        output.append({
-            "type": "input_image",
-            "detail": "auto",
-            "image_url": f"data:{mime};base64,{image.get('data') or ''}",
-        })
+        output.append(
+            {
+                "type": "input_image",
+                "detail": "auto",
+                "image_url": f"data:{mime};base64,{image.get('data') or ''}",
+            }
+        )
     return output
 
 
@@ -330,12 +328,13 @@ def _to_responses_input(
                 for block in content:
                     if block["type"] == "text":
                         parts.append({"type": "input_text", "text": block["text"]})
-                    elif block["type"] == "image" and (model is None or "image" in (model.input or [])):
+                    elif block["type"] == "image" and (
+                        model is None or "image" in (model.input or [])
+                    ):
                         img: dict[str, Any] = {"type": "input_image"}
                         if block.get("url"):
                             img["image_url"] = block["url"]
                         elif block.get("data"):
-
                             # Base64 图片
                             #
                             # 转换为 Data URL。
@@ -407,11 +406,13 @@ def _to_responses_input(
                     text_item: dict[str, Any] = {
                         "type": "message",
                         "role": "assistant",
-                        "content": [{
-                            "type": "output_text",
-                            "text": block["text"],
-                            "annotations": [],
-                        }],
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": block["text"],
+                                "annotations": [],
+                            }
+                        ],
                         "status": "completed",
                         "id": msg_id,
                     }
@@ -429,9 +430,7 @@ def _to_responses_input(
                     # OpenAI 会校验 fc_xxx 与 rs_xxx reasoning 的配对；
                     # 跨模型消息省略 id 可避开该校验（与跨 provider 一致）。
                     keep_item_id = (
-                        item_id is not None
-                        and item_id.startswith("fc_")
-                        and not is_different_model
+                        item_id is not None and item_id.startswith("fc_") and not is_different_model
                     )
                     if not keep_item_id:
                         item_id = None
@@ -462,16 +461,17 @@ def _to_responses_input(
         elif role == "toolResult":
             # 双段 ID（call_id|fc_item_id）只保留 call_id。
             call_id = msg["tool_call_id"].partition("|")[0]
-            items.append({
-                "type": "function_call_output",
-                "call_id": call_id,
-                "output": _convert_tool_result_output(model, msg["content"]),
-            })
+            items.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": _convert_tool_result_output(model, msg["content"]),
+                }
+            )
 
         msg_index += 1
 
     return items
-
 
 
 async def responses_stream(
@@ -558,9 +558,7 @@ async def responses_stream(
             transformed_messages = transform_messages(
                 context.messages, model, normalize_responses_tool_call_id
             )
-            input_items = _to_responses_input(
-                transformed_messages, context.system_prompt, model
-            )
+            input_items = _to_responses_input(transformed_messages, context.system_prompt, model)
             tools = (
                 to_openai_tools(
                     context.tools,
@@ -603,14 +601,10 @@ async def responses_stream(
             # 提示缓存（Prompt Cache，对齐 TS openai-responses.ts）：
             #   prompt_cache_key：cache_retention != none 时发送（session_id 截断 64 字符）
             #   prompt_cache_retention：long 且支持长缓存时发送 "24h"
-            cache_retention = resolve_cache_retention(
-                opts.get("cache_retention"), opts.get("env")
-            )
+            cache_retention = resolve_cache_retention(opts.get("cache_retention"), opts.get("env"))
             supports_long = supports_long_cache_retention(model)
             if cache_retention != "none":
-                kwargs["prompt_cache_key"] = clamp_openai_prompt_cache_key(
-                    opts.get("session_id")
-                )
+                kwargs["prompt_cache_key"] = clamp_openai_prompt_cache_key(opts.get("session_id"))
             if cache_retention == "long" and supports_long:
                 kwargs["prompt_cache_retention"] = "24h"
 
@@ -653,30 +647,36 @@ async def responses_stream(
                 nonlocal current_kind, current_index, current_tool_id
                 if current_kind == "text" and current_index is not None:
                     block = content_blocks[current_index]
-                    stream.push(TextEndEvent(
-                        type="text_end",
-                        content_index=current_index,
-                        content=block["text"],
-                        partial=_partial(),
-                    ))
+                    stream.push(
+                        TextEndEvent(
+                            type="text_end",
+                            content_index=current_index,
+                            content=block["text"],
+                            partial=_partial(),
+                        )
+                    )
                 elif current_kind == "thinking" and current_index is not None:
                     block = content_blocks[current_index]
-                    stream.push(ThinkingEndEvent(
-                        type="thinking_end",
-                        content_index=current_index,
-                        content=block["thinking"],
-                        partial=_partial(),
-                    ))
+                    stream.push(
+                        ThinkingEndEvent(
+                            type="thinking_end",
+                            content_index=current_index,
+                            content=block["thinking"],
+                            partial=_partial(),
+                        )
+                    )
                 elif current_kind == "toolCall" and current_index is not None:
                     block = content_blocks[current_index]
                     block["raw_arguments"] = current_raw_args
                     block["arguments"] = parse_tool_arguments(current_raw_args)
-                    stream.push(ToolCallEndEvent(
-                        type="toolcall_end",
-                        content_index=current_index,
-                        tool_call=cast(ToolCall, block),
-                        partial=_partial(),
-                    ))
+                    stream.push(
+                        ToolCallEndEvent(
+                            type="toolcall_end",
+                            content_index=current_index,
+                            tool_call=cast(ToolCall, block),
+                            partial=_partial(),
+                        )
+                    )
                 current_kind = None
                 current_index = None
                 current_tool_id = ""
@@ -689,11 +689,13 @@ async def responses_stream(
                     current_kind = "text"
                     content_blocks.append(TextContent(type="text", text=""))
                     current_index = len(content_blocks) - 1
-                    stream.push(TextStartEvent(
-                        type="text_start",
-                        content_index=current_index,
-                        partial=_partial(),
-                    ))
+                    stream.push(
+                        TextStartEvent(
+                            type="text_start",
+                            content_index=current_index,
+                            partial=_partial(),
+                        )
+                    )
                 return current_index  # type: ignore[return-value]
 
             def _begin_thinking() -> int:
@@ -704,11 +706,13 @@ async def responses_stream(
                     current_kind = "thinking"
                     content_blocks.append(ThinkingContent(type="thinking", thinking=""))
                     current_index = len(content_blocks) - 1
-                    stream.push(ThinkingStartEvent(
-                        type="thinking_start",
-                        content_index=current_index,
-                        partial=_partial(),
-                    ))
+                    stream.push(
+                        ThinkingStartEvent(
+                            type="thinking_start",
+                            content_index=current_index,
+                            partial=_partial(),
+                        )
+                    )
                 return current_index  # type: ignore[return-value]
 
             # 流开始事件。
@@ -727,12 +731,14 @@ async def responses_stream(
                     delta = getattr(event, "delta", "")
                     idx = _begin_text()
                     content_blocks[idx]["text"] += delta
-                    stream.push(TextDeltaEvent(
-                        type="text_delta",
-                        content_index=idx,
-                        delta=delta,
-                        partial=_partial(),
-                    ))
+                    stream.push(
+                        TextDeltaEvent(
+                            type="text_delta",
+                            content_index=idx,
+                            delta=delta,
+                            partial=_partial(),
+                        )
+                    )
 
                 # 新 Tool Call。
                 elif event_type == "response.output_item.added":
@@ -747,30 +753,36 @@ async def responses_stream(
                         current_tool_id = f"{call_id}|{item_id}" if item_id else call_id
                         current_tool_name = getattr(item, "name", "") or ""
                         current_raw_args = ""
-                        content_blocks.append(ToolCall(
-                            type="toolCall",
-                            id=current_tool_id,
-                            name=current_tool_name,
-                            raw_arguments="",
-                            arguments=None,
-                        ))
+                        content_blocks.append(
+                            ToolCall(
+                                type="toolCall",
+                                id=current_tool_id,
+                                name=current_tool_name,
+                                raw_arguments="",
+                                arguments=None,
+                            )
+                        )
                         current_index = len(content_blocks) - 1
-                        stream.push(ToolCallStartEvent(
-                            type="toolcall_start",
-                            content_index=current_index,
-                            partial=_partial(),
-                        ))
+                        stream.push(
+                            ToolCallStartEvent(
+                                type="toolcall_start",
+                                content_index=current_index,
+                                partial=_partial(),
+                            )
+                        )
 
                 # Tool 参数增量。
                 elif event_type == "response.function_call_arguments.delta":
                     delta = getattr(event, "delta", "")
                     current_raw_args += delta
-                    stream.push(ToolCallDeltaEvent(
-                        type="toolcall_delta",
-                        content_index=current_index or 0,
-                        delta=delta,
-                        partial=_partial(),
-                    ))
+                    stream.push(
+                        ToolCallDeltaEvent(
+                            type="toolcall_delta",
+                            content_index=current_index or 0,
+                            delta=delta,
+                            partial=_partial(),
+                        )
+                    )
 
                 # Tool 参数结束。
                 elif event_type == "response.function_call_arguments.done":
@@ -796,22 +808,20 @@ async def responses_stream(
                         block = cast(dict[str, Any], content_blocks[current_index])
                         summary = getattr(item, "summary", None) or []
                         content = getattr(item, "content", None) or []
-                        summary_text = "\n\n".join(
-                            getattr(p, "text", "") or "" for p in summary
-                        )
-                        content_text = "\n\n".join(
-                            getattr(p, "text", "") or "" for p in content
-                        )
+                        summary_text = "\n\n".join(getattr(p, "text", "") or "" for p in summary)
+                        content_text = "\n\n".join(getattr(p, "text", "") or "" for p in content)
                         block["thinking"] = summary_text or content_text or block["thinking"]
                         block["thinking_signature"] = json.dumps(
                             _to_jsonable(item), ensure_ascii=False
                         )
-                        stream.push(ThinkingEndEvent(
-                            type="thinking_end",
-                            content_index=current_index,
-                            content=block["thinking"],
-                            partial=_partial(),
-                        ))
+                        stream.push(
+                            ThinkingEndEvent(
+                                type="thinking_end",
+                                content_index=current_index,
+                                content=block["thinking"],
+                                partial=_partial(),
+                            )
+                        )
                         current_kind = None
                         current_index = None
 
@@ -822,23 +832,27 @@ async def responses_stream(
                         text = getattr(summary, "text", "")
                         idx = _begin_thinking()
                         content_blocks[idx]["thinking"] += text
-                        stream.push(ThinkingDeltaEvent(
-                            type="thinking_delta",
-                            content_index=idx,
-                            delta=text,
-                            partial=_partial(),
-                        ))
+                        stream.push(
+                            ThinkingDeltaEvent(
+                                type="thinking_delta",
+                                content_index=idx,
+                                delta=text,
+                                partial=_partial(),
+                            )
+                        )
 
                 elif event_type == "response.reasoning_text.delta":
                     delta = getattr(event, "delta", "")
                     idx = _begin_thinking()
                     content_blocks[idx]["thinking"] += delta
-                    stream.push(ThinkingDeltaEvent(
-                        type="thinking_delta",
-                        content_index=idx,
-                        delta=delta,
-                        partial=_partial(),
-                    ))
+                    stream.push(
+                        ThinkingDeltaEvent(
+                            type="thinking_delta",
+                            content_index=idx,
+                            delta=delta,
+                            partial=_partial(),
+                        )
+                    )
 
                 # 整个 Responses 请求结束。
                 elif event_type == "response.completed":
@@ -855,17 +869,21 @@ async def responses_stream(
                                 current_kind = "text"
                                 content_blocks.append(TextContent(type="text", text=output_text))
                                 current_index = len(content_blocks) - 1
-                                stream.push(TextStartEvent(
-                                    type="text_start",
-                                    content_index=current_index,
-                                    partial=_partial(),
-                                ))
-                                stream.push(TextEndEvent(
-                                    type="text_end",
-                                    content_index=current_index,
-                                    content=output_text,
-                                    partial=_partial(),
-                                ))
+                                stream.push(
+                                    TextStartEvent(
+                                        type="text_start",
+                                        content_index=current_index,
+                                        partial=_partial(),
+                                    )
+                                )
+                                stream.push(
+                                    TextEndEvent(
+                                        type="text_end",
+                                        content_index=current_index,
+                                        content=output_text,
+                                        partial=_partial(),
+                                    )
+                                )
 
                         # Extract usage
                         if hasattr(resp, "usage") and resp.usage:
@@ -875,7 +893,13 @@ async def responses_stream(
                                 cache_read=0,
                                 cache_write=0,
                                 total_tokens=resp.usage.total_tokens or 0,
-                                cost={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0},
+                                cost={
+                                    "input": 0,
+                                    "output": 0,
+                                    "cache_read": 0,
+                                    "cache_write": 0,
+                                    "total": 0,
+                                },
                             )
 
             # 所有事件已处理完成，
@@ -896,11 +920,13 @@ async def responses_stream(
             )
             # reason 与 stop_reason 一致；Responses API 无独立 error 映射，
             # 未知情况仍以 done 事件结束（保持既有行为）。
-            stream.push({
-                "type": "done",
-                "reason": cast(Any, stop_reason),
-                "message": msg,
-            })
+            stream.push(
+                {
+                    "type": "done",
+                    "reason": cast(Any, stop_reason),
+                    "message": msg,
+                }
+            )
             # stream.end(msg)
 
         except asyncio.CancelledError:

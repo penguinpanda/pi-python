@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -44,11 +43,13 @@ def _session_factory(runtime):
     def factory(cwd):
         model = runtime.get_model("faux", "faux-1")
         assert model is not None
-        agent = Agent(AgentOptions(
-            system_prompt="You are a helpful coding assistant.",
-            model=model,
-            stream_fn=runtime.stream,
-        ))
+        agent = Agent(
+            AgentOptions(
+                system_prompt="You are a helpful coding assistant.",
+                model=model,
+                stream_fn=runtime.stream,
+            )
+        )
         return AgentSession(
             agent=agent,
             session_manager=SessionManager.in_memory(cwd=cwd),
@@ -70,18 +71,14 @@ def _server(runtime=None, token="t"):
 
 
 async def _request(server, command: dict, request_id="q1") -> list[dict]:
-    envelope = RequestEnvelope(
-        type="request", id=request_id, request=command
-    )
+    envelope = RequestEnvelope(type="request", id=request_id, request=command)
     return await server.handle_message(envelope)
 
 
 class TestHello:
     async def test_hello_returns_server_hello(self):
         server = _server()
-        messages = await server.handle_message(
-            ClientHello(type="hello", version=2, token="t")
-        )
+        messages = await server.handle_message(ClientHello(type="hello", version=2, token="t"))
         parsed = parse_server_message(messages[0])
         assert isinstance(parsed, ServerHello)
         assert parsed.version == PROTOCOL_VERSION
@@ -90,18 +87,14 @@ class TestHello:
 
     async def test_hello_wrong_version(self):
         server = _server()
-        messages = await server.handle_message(
-            ClientHello(type="hello", version=1, token="t")
-        )
+        messages = await server.handle_message(ClientHello(type="hello", version=1, token="t"))
         parsed = parse_server_message(messages[0])
         assert isinstance(parsed, ServerHelloError)
         assert parsed.error.code == "version"
 
     async def test_hello_wrong_token(self):
         server = _server()
-        messages = await server.handle_message(
-            ClientHello(type="hello", version=2, token="bad")
-        )
+        messages = await server.handle_message(ClientHello(type="hello", version=2, token="bad"))
         parsed = parse_server_message(messages[0])
         assert isinstance(parsed, ServerHelloError)
         assert parsed.error.code == "auth"
@@ -115,7 +108,6 @@ class TestCommands:
         assert isinstance(response, ResponseEnvelope)
         assert response.ok is True
         assert response.result.command == "create"
-        session_id = response.result.session.id
         event_types = [decode_frame(encode_frame(m))["event"]["type"] for m in messages[1:]]
         assert "session_snapshot" in event_types
 
@@ -172,14 +164,16 @@ class TestCommands:
     async def test_set_thinking(self, tmp_path):
         store = AuthStorage.in_memory()
         models = Models(credentials=store)
-        core = faux_provider(models=[
-            Model(
-                id="faux-1",
-                provider="faux",
-                api="openai-completions",
-                reasoning=True,
-            )
-        ])
+        core = faux_provider(
+            models=[
+                Model(
+                    id="faux-1",
+                    provider="faux",
+                    api="openai-completions",
+                    reasoning=True,
+                )
+            ]
+        )
         core.set_responses([faux_assistant_message("ok")])
         models.add_provider(core.provider)
         runtime = ModelRuntime(models, store)
@@ -198,9 +192,7 @@ class TestCommands:
 
     async def test_unknown_session_not_found(self):
         server = _server()
-        messages = await _request(
-            server, {"command": "prompt", "sessionId": "nope", "text": "hi"}
-        )
+        messages = await _request(server, {"command": "prompt", "sessionId": "nope", "text": "hi"})
         response = parse_server_message(messages[0])
         assert response.ok is False
         assert response.error.code == "not_found"
@@ -275,14 +267,24 @@ async def test_stdio_server_subprocess(tmp_path):
     assert hello["type"] == "hello"
     assert hello["version"] == 2
 
-    create = await _send({"type": "request", "id": "1", "request": {"command": "create", "cwd": str(tmp_path)}})
+    create = await _send(
+        {"type": "request", "id": "1", "request": {"command": "create", "cwd": str(tmp_path)}}
+    )
     assert create["ok"] is True
     session_id = create["result"]["session"]["id"]
 
-    attach = await _send({"type": "request", "id": "2", "request": {"command": "attach", "sessionId": session_id}})
+    attach = await _send(
+        {"type": "request", "id": "2", "request": {"command": "attach", "sessionId": session_id}}
+    )
     assert attach["ok"] is True
 
-    prompt = await _send({"type": "request", "id": "3", "request": {"command": "prompt", "sessionId": session_id, "text": "hi"}})
+    prompt = await _send(
+        {
+            "type": "request",
+            "id": "3",
+            "request": {"command": "prompt", "sessionId": session_id, "text": "hi"},
+        }
+    )
     assert prompt["ok"] is True
     roles = [item["role"] for item in prompt["result"]["session"]["transcript"]]
     assert "assistant" in roles
@@ -294,7 +296,10 @@ async def test_stdio_server_subprocess(tmp_path):
         if not line:
             break
         event = json.loads(line)
-        if event.get("type") == "event" and event.get("event", {}).get("type") == "session_snapshot":
+        if (
+            event.get("type") == "event"
+            and event.get("event", {}).get("type") == "session_snapshot"
+        ):
             seen_session_snapshot = True
             break
     assert seen_session_snapshot

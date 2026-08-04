@@ -131,10 +131,7 @@ def _migrate_settings(raw: dict) -> dict:
         provider = retry.get("provider")
         if not isinstance(provider, dict):
             provider = {}
-        if (
-            retry.get("maxDelayMs") is not None
-            and provider.get("maxRetryDelayMs") is None
-        ):
+        if retry.get("maxDelayMs") is not None and provider.get("maxRetryDelayMs") is None:
             provider["maxRetryDelayMs"] = retry["maxDelayMs"]
             retry["provider"] = provider
         retry.pop("maxDelayMs", None)
@@ -157,11 +154,7 @@ def _deep_merge_settings(base: dict, override: dict) -> dict:
     """深度合并（数组/标量直接覆盖，嵌套 dict 递归）。"""
     result = dict(base)
     for key, value in override.items():
-        if (
-            key in result
-            and isinstance(result[key], dict)
-            and isinstance(value, dict)
-        ):
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
             result[key] = _deep_merge_settings(result[key], value)
         else:
             result[key] = value
@@ -217,9 +210,7 @@ class SettingsManager:
         global_settings, global_error = cls._load_scope(storage, "global", True)
         if global_error is not None:
             errors.append(SettingsError("global", global_error))
-        project_settings, project_error = cls._load_scope(
-            storage, "project", project_trusted
-        )
+        project_settings, project_error = cls._load_scope(storage, "project", project_trusted)
         if project_error is not None:
             errors.append(SettingsError("project", project_error))
         return cls(
@@ -304,9 +295,7 @@ class SettingsManager:
             if error is not None:
                 self._errors.append(SettingsError("project", error))
             self._project_settings = loaded
-        self._settings = _deep_merge_settings(
-            self._global_settings, self._project_settings
-        )
+        self._settings = _deep_merge_settings(self._global_settings, self._project_settings)
 
     def reload(self) -> None:
         """从存储重新加载 global + project。"""
@@ -324,9 +313,7 @@ class SettingsManager:
             self._errors.append(SettingsError("project", project_error))
         self._modified_global.clear()
         self._modified_project.clear()
-        self._settings = _deep_merge_settings(
-            self._global_settings, self._project_settings
-        )
+        self._settings = _deep_merge_settings(self._global_settings, self._project_settings)
 
     def apply_overrides(self, overrides: dict) -> None:
         """在当前合并结果之上应用额外覆盖（不持久化）。"""
@@ -367,9 +354,7 @@ class SettingsManager:
         self._set_project(key, value)
 
     def _save_global(self) -> None:
-        self._settings = _deep_merge_settings(
-            self._global_settings, self._project_settings
-        )
+        self._settings = _deep_merge_settings(self._global_settings, self._project_settings)
         snapshot = dict(self._global_settings)
         modified = set(self._modified_global)
 
@@ -396,9 +381,7 @@ class SettingsManager:
 
     def _save_project(self) -> None:
         self._assert_project_trusted()
-        self._settings = _deep_merge_settings(
-            self._global_settings, self._project_settings
-        )
+        self._settings = _deep_merge_settings(self._global_settings, self._project_settings)
         snapshot = dict(self._project_settings)
         modified = set(self._modified_project)
 
@@ -544,8 +527,10 @@ class SettingsManager:
             return configured
         import os
 
-        return os.environ.get("VISUAL") or os.environ.get("EDITOR") or (
-            "notepad" if os.name == "nt" else "nano"
+        return (
+            os.environ.get("VISUAL")
+            or os.environ.get("EDITOR")
+            or ("notepad" if os.name == "nt" else "nano")
         )
 
     def get_shell_path(self) -> str | None:
@@ -664,9 +649,7 @@ class SettingsManager:
         return int(self._settings.get("editorPaddingX", 0))
 
     def set_editor_padding_x(self, padding: int) -> None:
-        self._set_global(
-            "editorPaddingX", max(0, min(3, int(padding)))
-        )
+        self._set_global("editorPaddingX", max(0, min(3, int(padding))))
 
     def get_output_pad(self) -> int:
         return 0 if self._settings.get("outputPad") == 0 else 1
@@ -678,9 +661,7 @@ class SettingsManager:
         return int(self._settings.get("autocompleteMaxVisible", 5))
 
     def set_autocomplete_max_visible(self, max_visible: int) -> None:
-        self._set_global(
-            "autocompleteMaxVisible", max(3, min(20, int(max_visible)))
-        )
+        self._set_global("autocompleteMaxVisible", max(3, min(20, int(max_visible))))
 
     def get_warnings(self) -> dict:
         warnings = self._settings.get("warnings")

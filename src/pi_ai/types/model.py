@@ -29,19 +29,15 @@ from .common import ThinkingLevelMap
 ApiId: TypeAlias = str
 ProviderId: TypeAlias = str
 
-ModelInput = Literal[
-    "text",
-    "image"
-]
+ModelInput = Literal["text", "image"]
 
-ModelOutput = Literal[
-    "text",
-]
+ModelOutput = Literal["text",]
 
 
 # =========================================================
 # 模型成本（对齐 TS ModelCost）
 # =========================================================
+
 
 @dataclass(slots=True)
 class ModelCostRates:
@@ -79,21 +75,21 @@ class Model:
     - 是否支持图片
     """
 
-    id: str             # 模型唯一 ID
+    id: str  # 模型唯一 ID
     provider: ProviderId
-    api: ApiId            # API 类型
-    name: str = ""      # 模型名称
-    input: list[ModelInput] = field(default_factory=list)           # 输入能力
-    output: list[ModelOutput] = field(default_factory=list)         # 输出能力
+    api: ApiId  # API 类型
+    name: str = ""  # 模型名称
+    input: list[ModelInput] = field(default_factory=list)  # 输入能力
+    output: list[ModelOutput] = field(default_factory=list)  # 输出能力
     cost: ModelCost = field(default_factory=ModelCost)  # Token 成本
-    max_tokens: int = 4096               # 最大 Token
-    base_url: str = ""                                   # 模型级 base url（可选覆盖 Provider 级）
-    context_window: int = 0                              # 上下文窗口 token 数
-    headers: dict[str, str] | None = None               # 模型级自定义头
-    compat: ModelCompat | None = None                   # 各 API 的兼容配置
+    max_tokens: int = 4096  # 最大 Token
+    base_url: str = ""  # 模型级 base url（可选覆盖 Provider 级）
+    context_window: int = 0  # 上下文窗口 token 数
+    headers: dict[str, str] | None = None  # 模型级自定义头
+    compat: ModelCompat | None = None  # 各 API 的兼容配置
     thinking_level_map: ThinkingLevelMap | None = None  # pi 思考级别 -> provider 值映射
-    reasoning: bool = False                             # 是否支持推理（Thinking）
-    deprecated: bool = False                            # 已下架/停售标记（保留以兼容旧会话）
+    reasoning: bool = False  # 是否支持推理（Thinking）
+    deprecated: bool = False  # 已下架/停售标记（保留以兼容旧会话）
 
 
 __all__ = [

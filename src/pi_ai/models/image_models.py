@@ -51,9 +51,7 @@ OPENROUTER_IMAGE_MODELS: list[ImagesModel] = [
 
 
 def get_image_model(provider: str, model_id: str) -> ImagesModel | None:
-    return next(
-        (m for m in get_image_models(provider) if m.id == model_id), None
-    )
+    return next((m for m in get_image_models(provider) if m.id == model_id), None)
 
 
 def get_image_providers() -> list[str]:

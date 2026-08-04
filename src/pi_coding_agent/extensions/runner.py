@@ -57,14 +57,10 @@ class ExtensionContext:
         return self._runner.session.thinking_level
 
     def is_idle(self) -> bool:
-        return not (
-            self._runner.session is not None and self._runner.session.is_streaming
-        )
+        return not (self._runner.session is not None and self._runner.session.is_streaming)
 
     def has_pending_messages(self) -> bool:
-        return bool(
-            self._runner.session is not None and self._runner.session.pending_message_count
-        )
+        return bool(self._runner.session is not None and self._runner.session.pending_message_count)
 
     def abort(self) -> None:
         self._runner.abort()
@@ -186,7 +182,9 @@ class ExtensionRunner:
             lambda content, options: self._action_send_user_message(session, content, options),
         )
         self.runtime.set_action("get_active_tools", lambda: self._get_active_tools(session))
-        self.runtime.set_action("set_active_tools", lambda names: self._set_active_tools(session, names))
+        self.runtime.set_action(
+            "set_active_tools", lambda names: self._set_active_tools(session, names)
+        )
         self.runtime.set_action("get_all_tools", lambda: self._get_all_tools(session))
         self.runtime.set_action("get_commands", self.get_registered_commands)
         self.apply_providers()
@@ -218,13 +216,9 @@ class ExtensionRunner:
     # ------------------------------------------------------------------
 
     def has_handlers(self, event_type: str) -> bool:
-        return any(
-            extension.handlers.get(event_type) for extension in self.extensions
-        )
+        return any(extension.handlers.get(event_type) for extension in self.extensions)
 
-    async def emit_event(
-        self, event_type: str, data: dict | None = None
-    ) -> list[Any]:
+    async def emit_event(self, event_type: str, data: dict | None = None) -> list[Any]:
         """按注册顺序分发事件，收集处理器返回值（单个失败不中断）。"""
         context = self.create_context()
         event = {"type": event_type, **(data or {})}
@@ -325,9 +319,7 @@ class ExtensionRunner:
     async def _command_action(self, name: str, *args):
         handler = self._command_handlers.get(name)
         if handler is None:
-            raise NotImplementedError(
-                f"Command action '{name}' is not available in this mode"
-            )
+            raise NotImplementedError(f"Command action '{name}' is not available in this mode")
         result = handler(*args)
         if inspect.isawaitable(result):
             return await result
@@ -364,7 +356,9 @@ class ExtensionRunner:
         for command in commands:
             occurrence = seen.get(command.name, 0) + 1
             seen[command.name] = occurrence
-            invocation = command.name if counts[command.name] == 1 else f"{command.name}:{occurrence}"
+            invocation = (
+                command.name if counts[command.name] == 1 else f"{command.name}:{occurrence}"
+            )
             result.append(
                 RegisteredCommand(
                     name=invocation,
@@ -440,9 +434,7 @@ class ExtensionRunner:
             return
         current = session._agent.state.tools
         by_name = {tool.name: tool for tool in current}
-        session._agent.state.tools = [
-            by_name[name] for name in tool_names if name in by_name
-        ]
+        session._agent.state.tools = [by_name[name] for name in tool_names if name in by_name]
 
     def _get_all_tools(self, session) -> list[dict]:
         if session is None:

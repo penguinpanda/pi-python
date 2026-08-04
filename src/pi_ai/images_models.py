@@ -95,12 +95,8 @@ class ImagesModels:
                 pass
         return models
 
-    def get_model(
-        self, provider: str, model_id: str
-    ) -> ImagesModel | None:
-        return next(
-            (m for m in self.get_models(provider) if m.id == model_id), None
-        )
+    def get_model(self, provider: str, model_id: str) -> ImagesModel | None:
+        return next((m for m in self.get_models(provider) if m.id == model_id), None)
 
     # 动态刷新
 
@@ -138,9 +134,7 @@ class ImagesModels:
         overrides: dict[str, Any] | None = None,
     ):
         provider_id = (
-            provider_or_model
-            if isinstance(provider_or_model, str)
-            else provider_or_model.provider
+            provider_or_model if isinstance(provider_or_model, str) else provider_or_model.provider
         )
         provider = self._providers.get(provider_id)
         if provider is None:

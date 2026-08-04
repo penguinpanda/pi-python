@@ -177,10 +177,12 @@ async def main():
     set_default_stream_fn(models.stream)
 
     model = models.get_model("deepseek", "deepseek-v4-flash")
-    agent = Agent(AgentOptions(
-        system_prompt="You are a helpful coding assistant.",
-        model=model,
-    ))
+    agent = Agent(
+        AgentOptions(
+            system_prompt="You are a helpful coding assistant.",
+            model=model,
+        )
+    )
 
     session_manager = SessionManager.create(cwd=".")
     session = AgentSession(
@@ -202,8 +204,8 @@ asyncio.run(main())
 ### 会话工厂
 
 ```python
-SessionManager.create(cwd=".")                          # 新建持久化会话
-SessionManager.in_memory(cwd=".")                       # 内存会话
+SessionManager.create(cwd=".")  # 新建持久化会话
+SessionManager.in_memory(cwd=".")  # 内存会话
 SessionManager.open("~/.pi/agent/sessions/abc.jsonl", cwd_override=".")
 ```
 

@@ -23,7 +23,7 @@ _WINDOWS_SCRIPT = (
 )
 
 _MACOS_SCRIPT = (
-    "set png_path to (POSIX file (do shell script \"mktemp /tmp/pi-clipboard-XXXX.png\") as text)\n"
+    'set png_path to (POSIX file (do shell script "mktemp /tmp/pi-clipboard-XXXX.png") as text)\n'
     "try\n"
     "  set the clipboard to (read (clipboard info) as «class PNGf»)\n"
     "on error\n"
@@ -51,9 +51,7 @@ class ClipboardImage:
         if data:
             return data
         if sys.platform.startswith("linux"):
-            data = await _run_command(
-                ["xclip", "-selection", "clipboard", "-t", "image/png", "-o"]
-            )
+            data = await _run_command(["xclip", "-selection", "clipboard", "-t", "image/png", "-o"])
             if data:
                 return data
         return None
@@ -61,9 +59,7 @@ class ClipboardImage:
     @staticmethod
     def process(data: bytes) -> bytes:
         """格式转换 + EXIF 校正 + 缩放 → PNG bytes。"""
-        result = process_image_sync(
-            data, auto_resize=True, max_dimension=MAX_IMAGE_DIMENSION
-        )
+        result = process_image_sync(data, auto_resize=True, max_dimension=MAX_IMAGE_DIMENSION)
         if not result["ok"]:
             raise ValueError(result["message"])
         return result["data"]

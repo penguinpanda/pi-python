@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 import pytest
@@ -62,9 +61,18 @@ def _usage(input_: int, output: int = 100) -> dict:
 
 def _realistic_model(context_window: int = 128_000) -> Model:
     return Model(
-        id="faux-1", provider="faux", api="openai-completions", name="Faux",
-        input=["text"], output=["text"], context_window=context_window, max_tokens=16384,
+        id="faux-1",
+        provider="faux",
+        api="openai-completions",
+        name="Faux",
+        input=["text"],
+        output=["text"],
+        context_window=context_window,
+        max_tokens=16384,
     )
+
+
+_DEFAULT_AGENT_RETRY_POLICY = RetryPolicy(enabled=False)
 
 
 def _make_session(
@@ -74,7 +82,7 @@ def _make_session(
     *,
     model: Model | None = None,
     compaction_settings: CompactionSettings | None = None,
-    agent_retry_policy: RetryPolicy | None = RetryPolicy(enabled=False),
+    agent_retry_policy: RetryPolicy | None = _DEFAULT_AGENT_RETRY_POLICY,
 ) -> AgentSession:
     """构建 Agent + AgentSession。
 
@@ -82,11 +90,13 @@ def _make_session(
     """
     model = model or models.get_model("faux", "faux-1")
     assert model is not None
-    agent = Agent(AgentOptions(
-        system_prompt="You are a helpful coding assistant.",
-        model=model,
-        retry_policy=agent_retry_policy,
-    ))
+    agent = Agent(
+        AgentOptions(
+            system_prompt="You are a helpful coding assistant.",
+            model=model,
+            retry_policy=agent_retry_policy,
+        )
+    )
     return AgentSession(
         agent=agent,
         session_manager=session_manager,
@@ -119,16 +129,20 @@ class TestOverflowCompaction:
     async def test_overflow_compacts_and_retries(self, faux_env, tmp_path):
         """溢出错误 → 移除错误消息 → 压缩 → continue_() 重试成功。"""
         models, core = faux_env
-        core.set_responses([
-            _llm_error("prompt is too long: 213462 tokens > 200000 maximum"),
-            faux_assistant_message("## Goal\ncompacted summary"),
-            _llm_ok("retried ok"),
-        ])
+        core.set_responses(
+            [
+                _llm_error("prompt is too long: 213462 tokens > 200000 maximum"),
+                faux_assistant_message("## Goal\ncompacted summary"),
+                _llm_ok("retried ok"),
+            ]
+        )
 
         mgr = SessionManager.create(cwd=str(tmp_path), sessions_dir=str(tmp_path / "sessions"))
         await _preload_history(mgr)
         session = _make_session(
-            models, mgr, tmp_path,
+            models,
+            mgr,
+            tmp_path,
             model=_realistic_model(),
             compaction_settings=CompactionSettings(keep_recent_tokens=40),
         )
@@ -168,16 +182,20 @@ class TestOverflowCompaction:
     async def test_overflow_recovery_single_attempt(self, faux_env, tmp_path):
         """重试仍溢出 → 第二次压缩+重试被阻止（单次尝试保护）。"""
         models, core = faux_env
-        core.set_responses([
-            _llm_error("prompt is too long: 213462 tokens > 200000 maximum"),
-            faux_assistant_message("## Goal\nfirst compact"),
-            _llm_error("prompt is too long: 213462 tokens > 200000 maximum"),
-        ])
+        core.set_responses(
+            [
+                _llm_error("prompt is too long: 213462 tokens > 200000 maximum"),
+                faux_assistant_message("## Goal\nfirst compact"),
+                _llm_error("prompt is too long: 213462 tokens > 200000 maximum"),
+            ]
+        )
 
         mgr = SessionManager.create(cwd=str(tmp_path), sessions_dir=str(tmp_path / "sessions"))
         await _preload_history(mgr)
         session = _make_session(
-            models, mgr, tmp_path,
+            models,
+            mgr,
+            tmp_path,
             model=_realistic_model(),
             compaction_settings=CompactionSettings(keep_recent_tokens=40),
         )
@@ -210,9 +228,11 @@ class TestThresholdCompaction:
     async def test_threshold_compacts_without_retry(self, faux_env, tmp_path):
         """usage 超阈值 → 压缩，不重试（状态保留在错误/溢出消息之外）。"""
         models, core = faux_env
-        core.set_responses([
-            faux_assistant_message("## Goal\nthreshold compacted"),
-        ])
+        core.set_responses(
+            [
+                faux_assistant_message("## Goal\nthreshold compacted"),
+            ]
+        )
 
         mgr = SessionManager.in_memory(cwd=str(tmp_path))
         # 历史 + 一条带大 usage 的 assistant（触发阈值）
@@ -221,7 +241,9 @@ class TestThresholdCompaction:
 
         model = _realistic_model(context_window=2_000)
         session = _make_session(
-            models, mgr, tmp_path,
+            models,
+            mgr,
+            tmp_path,
             model=model,
             compaction_settings=CompactionSettings(reserve_tokens=100, keep_recent_tokens=40),
         )
@@ -258,7 +280,9 @@ class TestThresholdCompaction:
         mgr = SessionManager.in_memory(cwd=str(tmp_path))
         await _preload_history(mgr, count=3)
         session = _make_session(
-            models, mgr, tmp_path,
+            models,
+            mgr,
+            tmp_path,
             model=_realistic_model(),
             compaction_settings=CompactionSettings(keep_recent_tokens=40),
         )
@@ -279,14 +303,18 @@ class TestThresholdCompaction:
     async def test_compaction_disabled(self, faux_env, tmp_path):
         """compaction_settings.enabled=False → 溢出也不压缩。"""
         models, core = faux_env
-        core.set_responses([
-            _llm_error("prompt is too long: 213462 tokens > 200000 maximum"),
-        ])
+        core.set_responses(
+            [
+                _llm_error("prompt is too long: 213462 tokens > 200000 maximum"),
+            ]
+        )
 
         mgr = SessionManager.create(cwd=str(tmp_path), sessions_dir=str(tmp_path / "sessions"))
         await _preload_history(mgr)
         session = _make_session(
-            models, mgr, tmp_path,
+            models,
+            mgr,
+            tmp_path,
             model=_realistic_model(),
             compaction_settings=CompactionSettings(enabled=False),
         )

@@ -58,7 +58,9 @@ def create_find_tool(cwd: str) -> AgentTool:
 
         if not search_path.exists():
             return AgentToolResult(
-                content=[TextContent(type="text", text=f"Error: Path not found: {search_path_str}")],
+                content=[
+                    TextContent(type="text", text=f"Error: Path not found: {search_path_str}")
+                ],
                 details={},
             )
 

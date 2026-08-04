@@ -30,9 +30,7 @@ def exif_orientation(data: bytes) -> bytes:
         return data
 
 
-def resize_image(
-    data: bytes, max_dimension: int = MAX_IMAGE_DIMENSION
-) -> bytes:
+def resize_image(data: bytes, max_dimension: int = MAX_IMAGE_DIMENSION) -> bytes:
     """等比缩放到 max_dimension 内，返回原格式字节。"""
     try:
         with Image.open(io.BytesIO(data)) as image:
@@ -47,9 +45,7 @@ def resize_image(
         return data
 
 
-def convert_image(
-    data: bytes, target_format: str = "PNG"
-) -> tuple[bytes, str]:
+def convert_image(data: bytes, target_format: str = "PNG") -> tuple[bytes, str]:
     """转换为目标格式；返回 (bytes, mime_type)。"""
     with Image.open(io.BytesIO(data)) as image:
         image = ImageOps.exif_transpose(image)
@@ -60,9 +56,7 @@ def convert_image(
         buffer = io.BytesIO()
         output.save(buffer, format=target_format)
         mime_type = (
-            "image/png"
-            if target_format.upper() == "PNG"
-            else f"image/{target_format.lower()}"
+            "image/png" if target_format.upper() == "PNG" else f"image/{target_format.lower()}"
         )
         return buffer.getvalue(), mime_type
 
@@ -86,9 +80,7 @@ def process_image_sync(
             hints: list[str] = []
             if auto_resize and max(image.size) > max_dimension:
                 image.thumbnail((max_dimension, max_dimension))
-                hints.append(
-                    f"Image resized to fit within {max_dimension}x{max_dimension}"
-                )
+                hints.append(f"Image resized to fit within {max_dimension}x{max_dimension}")
             has_alpha = image.mode in ("RGBA", "LA") or (
                 image.mode == "P" and "transparency" in image.info
             )

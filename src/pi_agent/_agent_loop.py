@@ -221,19 +221,17 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import cast
 
 from pi_ai.types import (
     AssistantMessage,
     DoneEvent,
     ErrorEvent,
-    Message,
     StartEvent,
     StreamOptions,
     TextContent,
     ToolCall,
     ToolResultMessage,
-    UserMessage,
     now_ms,
 )
 from pi_ai.utils.retry import (
@@ -248,6 +246,7 @@ from ._types import (
     AfterToolCallContext,
     AfterToolCallResult,
     AgentContext,
+    AgentEvent,
     AgentEventSink,
     AgentLoopConfig,
     AgentLoopTurnUpdate,
@@ -258,9 +257,6 @@ from ._types import (
     BeforeToolCallResult,
     StreamFn,
 )
-
-if TYPE_CHECKING:
-    pass
 
 
 # ============================================================================
@@ -358,49 +354,6 @@ async def run_agent_loop(
     messages: list[AgentMessage] = list(context.messages)
     tools = list(context.tools) if context.tools else []
 
-    
-    """
-    将 解释：
-
-    用户消息加入 Agent 历史：
-
-    例如：
-
-    之前:
-    [
-    assistant:
-    "你好"
-    ]
-
-    加入：
-
-    user:
-    "帮我查天气"
-
-    变成：
-
-    [
-    assistant:
-    "你好",
-
-    user:
-    "帮我查天气"
-    ]
-
-    然后通知外部：
-
-    await emit({
-        "type":"message_start",
-        "message":p
-    })
-
-    作用：
-
-    UI 可以显示：
-
-    User:
-    帮我查天气
-    """
     # 注入新提示
     for p in prompts:
         messages.append(p)
@@ -602,22 +555,20 @@ async def _run_loop(
             # 检查错误/中止
             stop_reason = assistant_msg.get("stop_reason", "stop")
             if stop_reason in ("error", "aborted"):
-                await emit({
-                    "type": "turn_end",
-                    "message": assistant_msg,
-                    "tool_results": [],
-                })
+                await emit(
+                    {
+                        "type": "turn_end",
+                        "message": assistant_msg,
+                        "tool_results": [],
+                    }
+                )
                 await emit({"type": "agent_end", "messages": messages})
                 return messages
 
             # -- 提取工具调用 --
             tool_calls: list[ToolCall] = cast(
                 list[ToolCall],
-                [
-                    c
-                    for c in assistant_msg.get("content", [])
-                    if c.get("type") == "toolCall"
-                ],
+                [c for c in assistant_msg.get("content", []) if c.get("type") == "toolCall"],
             )
 
             tool_results: list[ToolResultMessage] = []
@@ -651,11 +602,13 @@ async def _run_loop(
                     await emit({"type": "message_end", "message": tr})
 
             # -- turn_end --
-            await emit({
-                "type": "turn_end",
-                "message": assistant_msg,
-                "tool_results": tool_results,
-            })
+            await emit(
+                {
+                    "type": "turn_end",
+                    "message": assistant_msg,
+                    "tool_results": tool_results,
+                }
+            )
 
             # -- prepare_next_turn --
             if config.prepare_next_turn is not None:
@@ -845,17 +798,25 @@ async def _stream_assistant_response(
                     temp_msg = cast(StartEvent, event)["partial"]
 
                 elif event_type in (
-                    "text_start", "text_delta", "text_end",
-                    "thinking_start", "thinking_delta", "thinking_end",
-                    "toolcall_start", "toolcall_delta", "toolcall_end",
+                    "text_start",
+                    "text_delta",
+                    "text_end",
+                    "thinking_start",
+                    "thinking_delta",
+                    "thinking_end",
+                    "toolcall_start",
+                    "toolcall_delta",
+                    "toolcall_end",
                 ):
                     partial = event["partial"]
                     temp_msg = partial
-                    await emit({
-                        "type": "message_update",
-                        "message": temp_msg,
-                        "assistant_message_event": event,
-                    })
+                    await emit(
+                        {
+                            "type": "message_update",
+                            "message": temp_msg,
+                            "assistant_message_event": event,
+                        }
+                    )
 
                 elif event_type == "done":
                     done_event = cast(DoneEvent, event)
@@ -902,25 +863,29 @@ async def _stream_assistant_response(
         delay_ms: float,
         error_message: str,
     ) -> None:
-        await emit({
-            "type": "auto_retry_start",
-            "attempt": attempt,
-            "max_attempts": max_attempts,
-            "delay_ms": delay_ms,
-            "error_message": error_message,
-        })
+        await emit(
+            {
+                "type": "auto_retry_start",
+                "attempt": attempt,
+                "max_attempts": max_attempts,
+                "delay_ms": delay_ms,
+                "error_message": error_message,
+            }
+        )
 
     async def _on_retry_finished(
         success: bool,
         attempt: int,
         final_error: str | None,
     ) -> None:
-        await emit({
-            "type": "auto_retry_end",
-            "success": success,
-            "attempt": attempt,
-            "final_error": final_error,
-        })
+        await emit(
+            {
+                "type": "auto_retry_end",
+                "success": success,
+                "attempt": attempt,
+                "final_error": final_error,
+            }
+        )
 
     result = await retry_assistant_call(
         _produce,
@@ -995,11 +960,17 @@ async def _execute_tool_calls_sequential(
         prepared = await _prepare_tool_call(tc, assistant_msg, context, config, signal)
         if isinstance(prepared, _ImmediateToolOutcome):
             await _emit_tool_lifecycle(
-                emit, prepared.tc["id"], prepared.tc["name"], prepared.args,
-                prepared.result, prepared.is_error,
+                emit,
+                prepared.tc["id"],
+                prepared.tc["name"],
+                prepared.args,
+                prepared.result,
+                prepared.is_error,
             )
             tr_msg = _make_tool_result_message(
-                prepared.tc["id"], prepared.tc["name"], prepared.result,
+                prepared.tc["id"],
+                prepared.tc["name"],
+                prepared.result,
                 prepared.is_error,
             )
             tool_result_messages.append(tr_msg)
@@ -1009,11 +980,17 @@ async def _execute_tool_calls_sequential(
         executed = await _execute_tool_call(prepared, emit, signal)
         finalized = await _finalize_tool_call(prepared, executed, config)
         await _emit_tool_lifecycle(
-            emit, finalized.tc["id"], finalized.tc["name"], executed.args,
-            finalized.result, finalized.is_error,
+            emit,
+            finalized.tc["id"],
+            finalized.tc["name"],
+            executed.args,
+            finalized.result,
+            finalized.is_error,
         )
         tr_msg = _make_tool_result_message(
-            finalized.tc["id"], finalized.tc["name"], finalized.result,
+            finalized.tc["id"],
+            finalized.tc["name"],
+            finalized.result,
             finalized.is_error,
         )
         tool_result_messages.append(tr_msg)
@@ -1044,20 +1021,24 @@ async def _execute_tool_calls_parallel(
         prepared = await _prepare_tool_call(tc, assistant_msg, context, config, signal)
         if isinstance(prepared, _ImmediateToolOutcome):
             await _emit_tool_lifecycle(
-                emit, prepared.tc["id"], prepared.tc["name"], prepared.args,
-                prepared.result, prepared.is_error,
+                emit,
+                prepared.tc["id"],
+                prepared.tc["name"],
+                prepared.args,
+                prepared.result,
+                prepared.is_error,
             )
             entries.append((index, prepared))
         else:
-            entries.append((
-                index,
-                asyncio.create_task(
-                    _execute_and_finalize(prepared, config, emit, signal)
-                ),
-            ))
+            entries.append(
+                (
+                    index,
+                    asyncio.create_task(_execute_and_finalize(prepared, config, emit, signal)),
+                )
+            )
 
-    ordered_results: list[_FinalizedToolOutcome | _ImmediateToolOutcome | None] = (
-        [None] * len(tool_calls)
+    ordered_results: list[_FinalizedToolOutcome | _ImmediateToolOutcome | None] = [None] * len(
+        tool_calls
     )
     for index, entry in entries:
         if not isinstance(entry, asyncio.Task):
@@ -1066,17 +1047,17 @@ async def _execute_tool_calls_parallel(
     exec_tasks = [(i, t) for i, t in entries if isinstance(t, asyncio.Task)]
     if exec_tasks:
         done = await asyncio.gather(*(t for _, t in exec_tasks))
-        for (index, _), outcome in zip(exec_tasks, done):
+        for (index, _), outcome in zip(exec_tasks, done, strict=True):
             ordered_results[index] = cast(_FinalizedToolOutcome, outcome)
 
     tool_result_messages: list[ToolResultMessage] = []
     all_terminate = True
     for outcome in ordered_results:
-        finalized = cast(
-            _FinalizedToolOutcome | _ImmediateToolOutcome, outcome
-        )
+        finalized = cast(_FinalizedToolOutcome | _ImmediateToolOutcome, outcome)
         tr_msg = _make_tool_result_message(
-            finalized.tc["id"], finalized.tc["name"], finalized.result,
+            finalized.tc["id"],
+            finalized.tc["name"],
+            finalized.result,
             finalized.is_error,
         )
         tool_result_messages.append(tr_msg)
@@ -1180,14 +1161,17 @@ async def _execute_tool_call(
         if replaced is not None:
             args = replaced
 
-    await emit({
-        "type": "tool_execution_start",
-        "tool_call_id": tc_id,
-        "tool_name": tc_name,
-        "args": args,
-    })
+    await emit(
+        {
+            "type": "tool_execution_start",
+            "tool_call_id": tc_id,
+            "tool_name": tc_name,
+            "args": args,
+        }
+    )
 
     try:
+
         def _on_update(partial: AgentToolResult) -> None:
             # 注意：这是同步回调，不能 await emit
             pass  # 简化：最小核心不做流式 tool update
@@ -1227,8 +1211,12 @@ async def _execute_and_finalize(
     executed = await _execute_tool_call(prepared, emit, signal)
     finalized = await _finalize_tool_call(prepared, executed, config)
     await _emit_tool_lifecycle(
-        emit, finalized.tc["id"], finalized.tc["name"], executed.args,
-        finalized.result, finalized.is_error,
+        emit,
+        finalized.tc["id"],
+        finalized.tc["name"],
+        executed.args,
+        finalized.result,
+        finalized.is_error,
     )
     return finalized
 
@@ -1275,6 +1263,7 @@ async def _finalize_tool_call(
 @dataclass(slots=True)
 class _PreparedToolCall:
     """准备阶段通过：携带执行与 finalize 所需的全部上下文。"""
+
     tc: ToolCall
     tool: AgentTool
     args: dict
@@ -1285,6 +1274,7 @@ class _PreparedToolCall:
 @dataclass(slots=True)
 class _ImmediateToolOutcome:
     """准备阶段直接失败（未找到/校验失败/block/中止）。"""
+
     tc: ToolCall
     args: dict
     result: AgentToolResult
@@ -1294,6 +1284,7 @@ class _ImmediateToolOutcome:
 @dataclass(slots=True)
 class _ExecutedToolOutcome:
     """执行阶段产物（afterToolCall 覆盖之前）。"""
+
     tc: ToolCall
     args: dict
     result: AgentToolResult
@@ -1303,6 +1294,7 @@ class _ExecutedToolOutcome:
 @dataclass(slots=True)
 class _FinalizedToolOutcome:
     """afterToolCall 已应用后的最终结果。"""
+
     tc: ToolCall
     result: AgentToolResult
     is_error: bool
@@ -1339,14 +1331,16 @@ def _fail_tool_calls_from_truncated(
             f"Tool call arguments may be truncated because the model response "
             f"reached its max output length. Tool '{tc_name}' was not executed."
         )
-        results.append(ToolResultMessage(
-            role="toolResult",
-            tool_call_id=tc_id,
-            tool_name=tc_name,
-            content=[TextContent(type="text", text=error_text)],
-            is_error=True,
-            timestamp=now_ms(),
-        ))
+        results.append(
+            ToolResultMessage(
+                role="toolResult",
+                tool_call_id=tc_id,
+                tool_name=tc_name,
+                content=[TextContent(type="text", text=error_text)],
+                is_error=True,
+                timestamp=now_ms(),
+            )
+        )
     return results
 
 
@@ -1379,13 +1373,15 @@ async def _emit_tool_lifecycle(
     is_error: bool,
 ) -> None:
     """发出 tool_execution_end 事件。"""
-    await emit({
-        "type": "tool_execution_end",
-        "tool_call_id": tc_id,
-        "tool_name": tc_name,
-        "result": result,
-        "is_error": is_error,
-    })
+    await emit(
+        {
+            "type": "tool_execution_end",
+            "tool_call_id": tc_id,
+            "tool_name": tc_name,
+            "result": result,
+            "is_error": is_error,
+        }
+    )
 
 
 def _tools_to_pi_ai(tools: list) -> list:
@@ -1394,11 +1390,13 @@ def _tools_to_pi_ai(tools: list) -> list:
 
     result: list[PiAiTool] = []
     for t in tools:
-        result.append(PiAiTool(
-            name=t.name,
-            description=t.description,
-            input_schema=t.input_schema,
-            before_execute=t.before_execute,
-            after_execute=t.after_execute,
-        ))
+        result.append(
+            PiAiTool(
+                name=t.name,
+                description=t.description,
+                input_schema=t.input_schema,
+                before_execute=t.before_execute,
+                after_execute=t.after_execute,
+            )
+        )
     return result

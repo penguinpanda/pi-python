@@ -233,9 +233,8 @@ def coerce_with_json_schema(value: Any, schema: dict[str, Any]) -> Any:
 
     schema_types = _schema_types(schema)
     # 联合类型：只要匹配任一成员则不再转换；否则尝试第一个能产生变化的转换。
-    matches_union_member = (
-        len(schema_types) > 1
-        and any(_matches_json_type(next_value, t) for t in schema_types)
+    matches_union_member = len(schema_types) > 1 and any(
+        _matches_json_type(next_value, t) for t in schema_types
     )
     if schema_types and not matches_union_member:
         for schema_type in schema_types:
@@ -304,9 +303,7 @@ def _check_schema(
         if isinstance(properties, dict):
             for key, property_schema in properties.items():
                 if key in value:
-                    errors.extend(
-                        _check_schema(value[key], property_schema, _join_path(path, key))
-                    )
+                    errors.extend(_check_schema(value[key], property_schema, _join_path(path, key)))
 
         required = schema.get("required")
         if isinstance(required, list):
@@ -324,9 +321,7 @@ def _check_schema(
             for key, property_value in value.items():
                 if key in defined_keys:
                     continue
-                errors.extend(
-                    _check_schema(property_value, additional, _join_path(path, key))
-                )
+                errors.extend(_check_schema(property_value, additional, _join_path(path, key)))
 
     # array
     if isinstance(value, list):
@@ -430,11 +425,7 @@ def _format_validation_error(
         indent=2,
         ensure_ascii=False,
     )
-    return (
-        f'Validation failed for tool "{tool_name}":\n'
-        f"{lines}\n\n"
-        f"Received arguments:\n{received}"
-    )
+    return f'Validation failed for tool "{tool_name}":\n{lines}\n\nReceived arguments:\n{received}'
 
 
 def validate_arguments(

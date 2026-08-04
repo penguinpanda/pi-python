@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import json
 import sys
+from pathlib import Path
 from typing import Any, Callable
 
 from textual.app import App, ComposeResult
@@ -342,10 +343,12 @@ class PiTuiApp(App):
                 self._set_status("Working")
             elif event_type == "skill_invocation":
                 skill = event.get("skill", "")
-                self._chat.add_message_agent({
-                    "role": "skillInvocation",
-                    "content": f"Invoked skill: {skill}",
-                })
+                self._chat.add_message_agent(
+                    {
+                        "role": "skillInvocation",
+                        "content": f"Invoked skill: {skill}",
+                    }
+                )
         except Exception:
             pass
 
@@ -599,9 +602,7 @@ class PiTuiApp(App):
             self._settings_manager.set_project_trusted(self._project_trusted)
             self._settings = self._settings_manager.as_dict()
         label = option.get("label", "Trust")
-        self._notify(
-            f"{label}: saved. Project resources load on /reload or restart."
-        )
+        self._notify(f"{label}: saved. Project resources load on /reload or restart.")
 
     def _open_settings_selector(self) -> None:
         items = [
@@ -713,7 +714,7 @@ class PiTuiApp(App):
         if provider_id is None:
             return
         self._run_task(
-            self._exec_slash(f"/{ 'logout' if mode == 'logout' else 'login' } {provider_id}")
+            self._exec_slash(f"/{'logout' if mode == 'logout' else 'login'} {provider_id}")
         )
 
     async def _open_scoped_models_selector(self) -> None:
@@ -722,8 +723,7 @@ class PiTuiApp(App):
             self._notify("No models available")
             return
         selected = {
-            (scoped.model.provider, scoped.model.id)
-            for scoped in self._session.scoped_models
+            (scoped.model.provider, scoped.model.id) for scoped in self._session.scoped_models
         }
         self.push_screen(
             ScopedModelsSelector(models, selected, current=self._session.model),
@@ -743,11 +743,7 @@ class PiTuiApp(App):
             (model.provider, model.id): model
             for model in self._model_runtime.get_available_snapshot()
         }
-        scoped = [
-            ScopedModel(model=by_key[key])
-            for key in selected
-            if key in by_key
-        ]
+        scoped = [ScopedModel(model=by_key[key]) for key in selected if key in by_key]
         self._session.set_scoped_models(scoped)
         self._notify(f"Scoped {len(scoped)} models")
 
@@ -765,10 +761,12 @@ class PiTuiApp(App):
             label = _Path(path).name if _Path(path).name else path
             commands = getattr(extension, "commands", None) or {}
             tools = getattr(extension, "tools", None) or {}
-            entries.append({
-                "path": path,
-                "label": f"{label} ({len(commands)} commands, {len(tools)} tools)",
-            })
+            entries.append(
+                {
+                    "path": path,
+                    "label": f"{label} ({len(commands)} commands, {len(tools)} tools)",
+                }
+            )
         self.push_screen(
             ExtensionSelector(entries),
             callback=self._on_extension_selected,
@@ -778,10 +776,12 @@ class PiTuiApp(App):
         if entry is None:
             return
         self._notify(f"Extension: {entry['path']}")
-        self._chat.add_message_agent({
-            "role": "system",
-            "content": f"Extension: {entry['path']}",
-        })
+        self._chat.add_message_agent(
+            {
+                "role": "system",
+                "content": f"Extension: {entry['path']}",
+            }
+        )
 
     def _on_fork_selected(self, entry_id) -> None:
         if entry_id is None:
@@ -810,9 +810,7 @@ class PiTuiApp(App):
         self._rerender_chat()
 
     def _rerender_chat(self) -> None:
-        self._chat.set_visibility(
-            show_tools=self._show_tools, show_thinking=self._show_thinking
-        )
+        self._chat.set_visibility(show_tools=self._show_tools, show_thinking=self._show_thinking)
         self._chat.clear_messages()
         for message in self._session.get_messages():
             self._chat.add_message_agent(message)
@@ -887,9 +885,7 @@ class PiTuiApp(App):
         if skill_loader is not None:
             try:
                 skill_loader.set_project_dir(
-                    Path(session.cwd) / ".pi" / "skills"
-                    if self._project_trusted
-                    else None
+                    Path(session.cwd) / ".pi" / "skills" if self._project_trusted else None
                 )
                 result = skill_loader.reload()
                 details.append(f"{len(result.skills)} skills")
@@ -899,9 +895,7 @@ class PiTuiApp(App):
         if template_loader is not None:
             try:
                 template_loader.set_project_dir(
-                    Path(session.cwd) / ".pi" / "prompts"
-                    if self._project_trusted
-                    else None
+                    Path(session.cwd) / ".pi" / "prompts" if self._project_trusted else None
                 )
                 templates = template_loader.reload()
                 details.append(f"{len(templates)} prompts")
@@ -919,9 +913,7 @@ class PiTuiApp(App):
                     pass
             try:
                 self._extension_loader.set_project_dir(
-                    Path(session.cwd) / ".pi" / "extensions"
-                    if self._project_trusted
-                    else None
+                    Path(session.cwd) / ".pi" / "extensions" if self._project_trusted else None
                 )
                 result = await self._extension_loader.load()
                 new_runner = ExtensionRunner(
@@ -934,9 +926,7 @@ class PiTuiApp(App):
                 details.append(f"{len(result.extensions)} extensions")
                 for error in result.errors:
                     message = error.error.replace("\n", " ")
-                    details.append(
-                        f"extension error: {message} ({error.extension_path})"
-                    )
+                    details.append(f"extension error: {message} ({error.extension_path})")
             except Exception as exc:
                 details.append(f"extensions failed: {exc}")
         elif session.extension_runner is not None:
@@ -1046,10 +1036,12 @@ class PiTuiApp(App):
                 if entry_id in self._rendered_summary_ids:
                     continue
                 self._rendered_summary_ids.add(entry_id)
-                self._chat.add_message_agent({
-                    "role": "branchSummary",
-                    "summary": entry.get("summary", ""),
-                })
+                self._chat.add_message_agent(
+                    {
+                        "role": "branchSummary",
+                        "summary": entry.get("summary", ""),
+                    }
+                )
         except Exception:
             pass
 
@@ -1091,9 +1083,7 @@ def _list_sessions() -> list[dict[str, Any]]:
                 session_id = header["id"]
         except (OSError, json.JSONDecodeError):
             pass
-        results.append(
-            {"path": str(path), "session_id": session_id, "modified": modified}
-        )
+        results.append({"path": str(path), "session_id": session_id, "modified": modified})
     results.sort(key=lambda entry: entry["modified"], reverse=True)
     return results
 
@@ -1104,9 +1094,7 @@ def _copy_text(text: str) -> None:
         if sys.platform == "win32":
             import subprocess
 
-            subprocess.run(
-                ["clip"], input=text.encode("utf-16-le") + b"\x00\x00", check=False
-            )
+            subprocess.run(["clip"], input=text.encode("utf-16-le") + b"\x00\x00", check=False)
         elif sys.platform == "darwin":
             import subprocess
 

@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from pi_agent import Agent, AgentOptions
-from pi_ai import Model, Models
+from pi_ai import Models
 from pi_ai.providers.faux import faux_provider
 
 from pi_coding_agent._session import AgentSession
@@ -30,9 +30,7 @@ def resolve_model_selection(
     provider = (explicit or {}).get("provider") or env.get("PI_PROVIDER")
     model_id = (explicit or {}).get("id") or env.get("PI_MODEL")
     if not provider or not model_id:
-        raise ValueError(
-            "Select a harness model explicitly or set both PI_PROVIDER and PI_MODEL."
-        )
+        raise ValueError("Select a harness model explicitly or set both PI_PROVIDER and PI_MODEL.")
     return {"provider": provider.strip(), "id": model_id.strip()}
 
 
@@ -63,35 +61,43 @@ def _transcript_events(messages: list[dict]) -> list[dict]:
     for message in messages:
         role = message.get("role")
         if role == "user":
-            events.append({
-                "type": "message",
-                "role": "user",
-                "content": _content_text(message.get("content")),
-            })
+            events.append(
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": _content_text(message.get("content")),
+                }
+            )
         elif role == "assistant":
             text = _content_text(message.get("content"))
             if text:
-                events.append({
-                    "type": "message",
-                    "role": "assistant",
-                    "content": text,
-                })
+                events.append(
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": text,
+                    }
+                )
             for block in message.get("content", []):
                 if isinstance(block, dict) and block.get("type") == "toolCall":
-                    events.append({
-                        "type": "tool_call",
-                        "id": block.get("id"),
-                        "name": block.get("name"),
-                        "arguments": block.get("arguments"),
-                    })
+                    events.append(
+                        {
+                            "type": "tool_call",
+                            "id": block.get("id"),
+                            "name": block.get("name"),
+                            "arguments": block.get("arguments"),
+                        }
+                    )
         elif role == "toolResult":
-            events.append({
-                "type": "tool_result",
-                "toolCallId": message.get("tool_call_id"),
-                "name": message.get("tool_name"),
-                "content": _content_text(message.get("content")),
-                "isError": bool(message.get("is_error")),
-            })
+            events.append(
+                {
+                    "type": "tool_result",
+                    "toolCallId": message.get("tool_call_id"),
+                    "name": message.get("tool_name"),
+                    "content": _content_text(message.get("content")),
+                    "isError": bool(message.get("is_error")),
+                }
+            )
     return events
 
 
@@ -154,9 +160,7 @@ class PiCodingAgentHarness:
         if self._session_factory is not None:
             return self._session_factory()
         runtime = self._make_runtime()
-        model = runtime.get_model(
-            self._model_selection["provider"], self._model_selection["id"]
-        )
+        model = runtime.get_model(self._model_selection["provider"], self._model_selection["id"])
         if model is None:
             raise ValueError(
                 f"Eval model not found: {self._model_selection['provider']}/"
@@ -165,12 +169,14 @@ class PiCodingAgentHarness:
         system_prompt = "You are a helpful coding assistant."
         if self._transform_system_prompt is not None:
             system_prompt = self._transform_system_prompt(system_prompt)
-        agent = Agent(AgentOptions(
-            system_prompt=system_prompt,
-            model=model,
-            stream_fn=runtime.stream,
-            tools=[] if self.no_tools else None,
-        ))
+        agent = Agent(
+            AgentOptions(
+                system_prompt=system_prompt,
+                model=model,
+                stream_fn=runtime.stream,
+                tools=[] if self.no_tools else None,
+            )
+        )
         return AgentSession(
             agent=agent,
             session_manager=SessionManager.in_memory(cwd="."),
@@ -226,10 +232,12 @@ class PiCodingAgentHarness:
         }
         if self._output_fn is not None:
             try:
-                output = self._output_fn({
-                    "response": last_output,
-                    "session": session,
-                })
+                output = self._output_fn(
+                    {
+                        "response": last_output,
+                        "session": session,
+                    }
+                )
             except Exception as exc:
                 errors.append(f"output fn failed: {exc}")
                 output = last_output

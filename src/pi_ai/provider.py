@@ -66,7 +66,7 @@ Provider 本身不负责：
 import asyncio
 
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Literal, Protocol
+from typing import Any, Awaitable, Callable, Literal
 
 from .utils._event_stream import AssistantMessageEventStream
 from .types import (
@@ -86,7 +86,6 @@ from .auth import EnvApiKeyAuth, InMemoryCredentialStore, resolve_api_key
 from .models.models_store import (
     ModelsStoreEntry,
     ProviderModelsStore,
-    provider_models_store,
 )
 from .types import now_ms
 
@@ -121,6 +120,7 @@ class RefreshModelsContext:
     force: bool = False
     # 可选中止信号（asyncio.Event；set 即中止）。
     signal: asyncio.Event | None = None
+
 
 # 自定义流函数类型（定义已上移到 _types.py，此处从 _types 导入）。
 #
@@ -256,10 +256,10 @@ class Provider:
         return merged
 
     async def stream(
-            self,
-            model: Model,
-            context: Context,
-            options: StreamOptions | None = None,
+        self,
+        model: Model,
+        context: Context,
+        options: StreamOptions | None = None,
     ) -> AssistantMessageEventStream:
         """
         发送流式聊天请求。
@@ -354,10 +354,10 @@ class Provider:
         return await invoke_api_stream(entry.stream, model, context, request_options)
 
     async def complete(
-            self,
-            model: Model,
-            context: Context,
-            options: StreamOptions | None = None,
+        self,
+        model: Model,
+        context: Context,
+        options: StreamOptions | None = None,
     ) -> AssistantMessage:
         """
         非流式调用。
@@ -382,17 +382,16 @@ class Provider:
         stream = await self.stream(model, context, options)
         return await stream.result()
 
+
 def create_provider(
-        id: str,
-        name: str,
-        auth: EnvApiKeyAuth | None,
-        models: list[Model],
-        api_kind: ApiKind = "completions",
-        base_url: str | None = None,
-        stream_fn: StreamFunction | None = None,
-        fetch_models: (
-            Callable[[RefreshModelsContext], Awaitable[list[Model]]] | None
-        ) = None,
+    id: str,
+    name: str,
+    auth: EnvApiKeyAuth | None,
+    models: list[Model],
+    api_kind: ApiKind = "completions",
+    base_url: str | None = None,
+    stream_fn: StreamFunction | None = None,
+    fetch_models: (Callable[[RefreshModelsContext], Awaitable[list[Model]]] | None) = None,
 ) -> Provider:
     """
     创建 Provider。

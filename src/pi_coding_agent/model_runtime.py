@@ -203,12 +203,14 @@ def _model_from_json(
     provider_config: ProviderOverride | None,
     defaults: Model | None,
 ) -> Model:
-    api = definition.api or (provider_config.api if provider_config else None) or (
-        defaults.api if defaults else None
+    api = (
+        definition.api
+        or (provider_config.api if provider_config else None)
+        or (defaults.api if defaults else None)
     )
     if not api:
         raise ValueError(
-            f"Provider {provider_id}, model {definition.id}: no \"api\" specified. "
+            f'Provider {provider_id}, model {definition.id}: no "api" specified. '
             "Set at provider or model level."
         )
     base_url = (
@@ -218,7 +220,7 @@ def _model_from_json(
     )
     if not base_url:
         raise ValueError(
-            f"Provider {provider_id}: \"baseUrl\" is required when defining custom models."
+            f'Provider {provider_id}: "baseUrl" is required when defining custom models.'
         )
     cost = definition.cost
     return Model(
@@ -228,10 +230,14 @@ def _model_from_json(
         name=definition.name or definition.id,
         input=list(definition.input) if definition.input is not None else ["text"],
         output=["text"],
-        cost=_cost_config_to_model_cost(cost) if cost is not None else (defaults.cost if defaults else None),
+        cost=_cost_config_to_model_cost(cost)
+        if cost is not None
+        else (defaults.cost if defaults else None),
         max_tokens=definition.max_tokens if definition.max_tokens is not None else 16384,
         base_url=base_url,
-        context_window=definition.context_window if definition.context_window is not None else 128000,
+        context_window=definition.context_window
+        if definition.context_window is not None
+        else 128000,
         headers=definition.headers,
         compat=_merge_compat(
             provider_config.compat if provider_config else None,
@@ -312,7 +318,9 @@ def _apply_models_json(
             (index for index, model in enumerate(models) if model.id == definition.id),
             -1,
         )
-        defaults = models[existing_index] if existing_index >= 0 else (models[0] if models else None)
+        defaults = (
+            models[existing_index] if existing_index >= 0 else (models[0] if models else None)
+        )
         model = _model_from_json(provider_id, definition, config, defaults)
         if existing_index >= 0:
             models[existing_index] = model
@@ -367,8 +375,10 @@ def _apply_extension(
                 f'Provider {provider_id}, model {definition.get("id")}: no "api" specified. '
                 "Set at provider or model level."
             )
-        base_url = definition.get("base_url") or extension_base_url or (
-            defaults.base_url if defaults else None
+        base_url = (
+            definition.get("base_url")
+            or extension_base_url
+            or (defaults.base_url if defaults else None)
         )
         if not base_url:
             raise ValueError(
@@ -382,11 +392,11 @@ def _apply_extension(
                 name=definition.get("name") or definition.get("id"),
                 input=list(definition.get("input") or ["text"]),
                 output=["text"],
-        cost=(
-            definition.get("cost")
-            if isinstance(definition.get("cost"), dict)
-            else (defaults.cost if defaults else None)
-        ),
+                cost=(
+                    definition.get("cost")
+                    if isinstance(definition.get("cost"), dict)
+                    else (defaults.cost if defaults else None)
+                ),
                 max_tokens=definition.get("max_tokens", 16384),
                 base_url=base_url,
                 context_window=definition.get("context_window", 128000),
@@ -544,6 +554,7 @@ class ModelRuntime:
         # 始终先计算可用性快照（不依赖网络；auth.json/环境变量即时生效）。
         await runtime._run_availability_refresh()
         if allow_model_network:
+
             async def _refresh_with_timeout() -> None:
                 try:
                     await asyncio.wait_for(
@@ -561,9 +572,12 @@ class ModelRuntime:
     # ------------------------------------------------------------------
 
     def _provider_ids(self) -> set[str]:
-        return set(self._builtins) | set(self._native_extension_providers) | set(
-            self._config.get_provider_ids()
-        ) | set(self._extension_providers)
+        return (
+            set(self._builtins)
+            | set(self._native_extension_providers)
+            | set(self._config.get_provider_ids())
+            | set(self._extension_providers)
+        )
 
     def compose_model_provider(self, provider_id: str) -> Provider:
         """合并基础 provider + models.json 覆盖 + 扩展覆盖。"""
@@ -590,10 +604,14 @@ class ModelRuntime:
             else (config.base_url if config is not None else None)
         ) or (base.base_url if base is not None else None)
         name = (
-            extension.get("name")
-            if extension is not None and extension.get("name") is not None
-            else (config.name if config is not None else None)
-        ) or (base.name if base is not None else None) or provider_id
+            (
+                extension.get("name")
+                if extension is not None and extension.get("name") is not None
+                else (config.name if config is not None else None)
+            )
+            or (base.name if base is not None else None)
+            or provider_id
+        )
 
         raw_headers = _configured_headers(config, extension)
         auth_header = bool(
@@ -660,7 +678,9 @@ class ModelRuntime:
             if base is not None and base._stream_fn is not None:
                 return await base._stream_fn(model, context, opts)
             api_id = model.api or (
-                _API_KIND_IDS.get(base._api_kind, base._api_kind) if base is not None else "openai-completions"
+                _API_KIND_IDS.get(base._api_kind, base._api_kind)
+                if base is not None
+                else "openai-completions"
             )
             entry = get_api_provider(api_id)
             if entry is None:
@@ -941,9 +961,7 @@ class ModelRuntime:
                 )
             except ValueError:
                 return None
-            headers = self._resolve_configured_headers(
-                model, env, raw_headers, auth_header, key
-            )
+            headers = self._resolve_configured_headers(model, env, raw_headers, auth_header, key)
             return AuthResult(
                 auth={"api_key": key, "headers": headers},
                 env=env or None,
@@ -964,9 +982,7 @@ class ModelRuntime:
             return None
 
         if auth is None:
-            headers = self._resolve_configured_headers(
-                model, env, raw_headers, auth_header, None
-            )
+            headers = self._resolve_configured_headers(model, env, raw_headers, auth_header, None)
             return AuthResult(auth={"headers": headers}, source="no auth required")
         return None
 
@@ -981,12 +997,10 @@ class ModelRuntime:
         )
         credentials = await self._credentials.list()
         self._auth_checks = {
-            provider.id: check for provider, check in zip(providers, checks)
+            provider.id: check for provider, check in zip(providers, checks, strict=True)
         }
         self._configured_providers = {
-            provider_id
-            for provider_id, check in self._auth_checks.items()
-            if check is not None
+            provider_id for provider_id, check in self._auth_checks.items() if check is not None
         }
         self._stored_providers = {info["provider_id"] for info in credentials}
         all_models = self._models.get_models()

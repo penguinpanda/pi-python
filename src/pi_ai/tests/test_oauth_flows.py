@@ -1,7 +1,5 @@
 """OAuth 流程测试（mock HTTP）。"""
 
-import json
-
 import httpx
 import pytest
 
@@ -73,12 +71,12 @@ async def test_github_copilot_login(monkeypatch):
 
 def test_copilot_base_url_from_token():
     assert (
-        github_copilot.get_base_url_from_token(
-            "x;proxy-ep=proxy.individual.githubcopilot.com;y"
-        )
+        github_copilot.get_base_url_from_token("x;proxy-ep=proxy.individual.githubcopilot.com;y")
         == "https://api.individual.githubcopilot.com"
     )
-    assert github_copilot.get_github_copilot_base_url() == "https://api.individual.githubcopilot.com"
+    assert (
+        github_copilot.get_github_copilot_base_url() == "https://api.individual.githubcopilot.com"
+    )
 
 
 # ---------------- OpenAI Codex ----------------
@@ -98,7 +96,9 @@ async def test_openai_codex_device_login(monkeypatch):
         if path == "/api/accounts/deviceauth/token":
             polls["n"] += 1
             if polls["n"] == 1:
-                return httpx.Response(403, json={"error": {"code": "deviceauth_authorization_pending"}})
+                return httpx.Response(
+                    403, json={"error": {"code": "deviceauth_authorization_pending"}}
+                )
             return httpx.Response(
                 200,
                 json={"authorization_code": "auth-code", "code_verifier": "verifier"},
@@ -148,9 +148,7 @@ async def test_openrouter_login_manual_paste(monkeypatch):
         "_AsyncClient",
         lambda **kwargs: _mock_client(handler),
     )
-    interaction = _FakeInteraction(
-        prompt_result="https://openrouter.ai/auth/callback?code=abc123"
-    )
+    interaction = _FakeInteraction(prompt_result="https://openrouter.ai/auth/callback?code=abc123")
     credential = await openrouter.open_router_oauth.login(interaction)
     assert credential["type"] == "oauth"
     assert credential["access"] == "sk-or-key"
@@ -159,12 +157,7 @@ async def test_openrouter_login_manual_paste(monkeypatch):
 
 
 def test_openrouter_parse_authorization_input():
-    assert (
-        openrouter._parse_authorization_input(
-            "https://x.dev/cb?code=abc"
-        )
-        == "abc"
-    )
+    assert openrouter._parse_authorization_input("https://x.dev/cb?code=abc") == "abc"
     assert openrouter._parse_authorization_input("code=xyz&state=s") == "xyz"
     assert openrouter._parse_authorization_input("raw-code") == "raw-code"
     assert openrouter._parse_authorization_input("") is None

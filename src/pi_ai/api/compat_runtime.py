@@ -36,9 +36,7 @@ def supports_reasoning_effort(model: Model) -> bool:
 
 def requires_reasoning_content_on_assistant_messages(model: Model) -> bool:
     """DeepSeek 等要求历史 assistant 消息携带 reasoning_content。"""
-    return bool(
-        compat_value(model, "requiresReasoningContentOnAssistantMessages", False)
-    )
+    return bool(compat_value(model, "requiresReasoningContentOnAssistantMessages", False))
 
 
 def thinking_format(model: Model) -> str:

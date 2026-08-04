@@ -37,9 +37,7 @@ class ExtensionLoader:
         *,
         cwd: str = "",
     ) -> None:
-        self._global_dir = (
-            Path(global_dir) if global_dir else get_agent_dir() / "extensions"
-        )
+        self._global_dir = Path(global_dir) if global_dir else get_agent_dir() / "extensions"
         self._project_dir = Path(project_dir) if project_dir else None
         self._cwd = cwd
 
@@ -129,13 +127,9 @@ class ExtensionLoader:
             finally:
                 sys.modules.pop(module_name, None)
         except Exception as exc:
-            return None, ExtensionError(
-                str(path), "load", f"Failed to load extension: {exc}"
-            )
+            return None, ExtensionError(str(path), "load", f"Failed to load extension: {exc}")
 
-        factory = getattr(module, "create_extension", None) or getattr(
-            module, "factory", None
-        )
+        factory = getattr(module, "create_extension", None) or getattr(module, "factory", None)
         if not callable(factory):
             return None, ExtensionError(
                 str(path),
@@ -165,9 +159,7 @@ class ExtensionLoader:
             )
         return extension, None
 
-    async def load(
-        self, explicit_paths: list[str] | None = None
-    ) -> LoadExtensionsResult:
+    async def load(self, explicit_paths: list[str] | None = None) -> LoadExtensionsResult:
         """发现并加载全部扩展，返回结果（错误不中断其它扩展）。"""
         runtime = ExtensionRuntime()
         event_bus = EventBus()

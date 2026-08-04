@@ -17,9 +17,7 @@ from pi_storage.store import PostgresSessionStore, create_session_id
 
 
 def _dsn() -> str:
-    return os.environ.get(
-        "PI_PG_DSN", "postgresql://pi:pi@localhost:5432/pi_test"
-    )
+    return os.environ.get("PI_PG_DSN", "postgresql://pi:pi@localhost:5432/pi_test")
 
 
 async def _probe() -> bool:
@@ -34,6 +32,7 @@ async def _probe() -> bool:
 
 
 PG_AVAILABLE = asyncio.run(_probe())
+
 
 @pytest.fixture
 async def store():
@@ -93,11 +92,19 @@ class TestPostgresStore:
         meta = await store.create_session("/tmp/proj")
         seq1 = await store.append_entry(
             meta.id,
-            {"id": create_session_id(), "type": "message", "timestamp": "2026-01-01T00:00:00+00:00"},
+            {
+                "id": create_session_id(),
+                "type": "message",
+                "timestamp": "2026-01-01T00:00:00+00:00",
+            },
         )
         seq2 = await store.append_entry(
             meta.id,
-            {"id": create_session_id(), "type": "message", "timestamp": "2026-01-01T00:00:01+00:00"},
+            {
+                "id": create_session_id(),
+                "type": "message",
+                "timestamp": "2026-01-01T00:00:01+00:00",
+            },
         )
         assert seq2 == seq1 + 1
         entries = await store.get_entries(meta.id)

@@ -10,12 +10,10 @@ from typing import Protocol
 from .repo import find_session_entry_matches
 from .types import (
     SessionMetadata,
-    SessionSearch,
     SessionSearchHit,
     SessionSearchIndex,
     SessionSearchOptions,
     SessionSnapshot,
-    SessionTreeEntry,
 )
 
 
@@ -33,9 +31,7 @@ class ScanningSessionSearch:
     def __init__(self, source: SessionSearchSource) -> None:
         self._source = source
 
-    async def search(
-        self, options: SessionSearchOptions
-    ) -> list[SessionSearchHit]:
+    async def search(self, options: SessionSearchOptions) -> list[SessionSearchHit]:
         hits: list[SessionSearchHit] = []
         for metadata in await self._source.list():
             cwd = metadata.get("cwd")
@@ -43,9 +39,7 @@ class ScanningSessionSearch:
                 continue
             state = await self._source.load(metadata)
             hits.extend(
-                find_session_entry_matches(
-                    metadata, state["entries"], options.get("text", "")
-                )
+                find_session_entry_matches(metadata, state["entries"], options.get("text", ""))
             )
         return hits
 

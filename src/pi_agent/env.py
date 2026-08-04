@@ -12,10 +12,9 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
-import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Literal, Protocol, Tuple, TypeAlias
+from typing import Any, Callable, Literal, Protocol, Tuple, TypeAlias
 
 
 # ---------------------------------------------------------------------------
@@ -185,9 +184,7 @@ class FileSystem(Protocol):
 
     async def read_text_file(self, path: str, signal: asyncio.Event | None = None) -> Result: ...
 
-    async def read_text_lines(
-        self, path: str, options: dict[str, Any] | None = None
-    ) -> Result: ...
+    async def read_text_lines(self, path: str, options: dict[str, Any] | None = None) -> Result: ...
 
     async def read_binary_file(self, path: str, signal: asyncio.Event | None = None) -> Result: ...
 
@@ -211,11 +208,11 @@ class FileSystem(Protocol):
 
     async def remove(self, path: str, options: dict[str, Any] | None = None) -> Result: ...
 
-    async def create_temp_dir(self, prefix: str = "tmp-", signal: asyncio.Event | None = None) -> Result: ...
-
-    async def create_temp_file(
-        self, options: dict[str, Any] | None = None
+    async def create_temp_dir(
+        self, prefix: str = "tmp-", signal: asyncio.Event | None = None
     ) -> Result: ...
+
+    async def create_temp_file(self, options: dict[str, Any] | None = None) -> Result: ...
 
     async def cleanup(self) -> None: ...
 
@@ -317,9 +314,7 @@ class PythonExecutionEnv:
         except BaseException as error:
             return (False, to_file_error(error, resolved))
 
-    async def read_text_lines(
-        self, path: str, options: dict[str, Any] | None = None
-    ) -> Result:
+    async def read_text_lines(self, path: str, options: dict[str, Any] | None = None) -> Result:
         resolved = self._resolve_path(path)
         options = options or {}
         signal = options.get("abortSignal")
@@ -363,9 +358,7 @@ class PythonExecutionEnv:
             # read_text_file 按字节读取并保留原始行尾（\r\n / \r / \n），
             # 因此文本写入同样禁用换行翻译（newline=""），避免 Windows 上
             # 把内容里已有的 \r\n 再次翻译成 \r\r\n。
-            kwargs = (
-                {} if isinstance(content, bytes) else {"encoding": "utf-8", "newline": ""}
-            )
+            kwargs = {} if isinstance(content, bytes) else {"encoding": "utf-8", "newline": ""}
             await asyncio.to_thread(self._write_plain, resolved, content, mode, kwargs)
             return (True, None)
         except BaseException as error:
@@ -386,9 +379,7 @@ class PythonExecutionEnv:
         try:
             Path(resolved).parent.mkdir(parents=True, exist_ok=True)
             mode = "ab" if isinstance(content, bytes) else "a"
-            kwargs = (
-                {} if isinstance(content, bytes) else {"encoding": "utf-8", "newline": ""}
-            )
+            kwargs = {} if isinstance(content, bytes) else {"encoding": "utf-8", "newline": ""}
             await asyncio.to_thread(self._write_plain, resolved, content, mode, kwargs)
             return (True, None)
         except BaseException as error:
@@ -410,13 +401,16 @@ class PythonExecutionEnv:
                 kind = "file"
             else:
                 return (False, FileError("invalid", "Unsupported file type", resolved))
-            return (True, FileInfo(
-                name=os.path.basename(resolved.rstrip("/\\")) or resolved,
-                path=resolved,
-                kind=kind,
-                size=stats.st_size,
-                mtime_ms=stats.st_mtime * 1000,
-            ))
+            return (
+                True,
+                FileInfo(
+                    name=os.path.basename(resolved.rstrip("/\\")) or resolved,
+                    path=resolved,
+                    kind=kind,
+                    size=stats.st_size,
+                    mtime_ms=stats.st_mtime * 1000,
+                ),
+            )
         except BaseException as error:
             return (False, to_file_error(error, resolved))
 
@@ -441,13 +435,15 @@ class PythonExecutionEnv:
                         kind = "file"
                     else:
                         continue
-                    infos.append(FileInfo(
-                        name=name,
-                        path=entry_path,
-                        kind=kind,
-                        size=stats.st_size,
-                        mtime_ms=stats.st_mtime * 1000,
-                    ))
+                    infos.append(
+                        FileInfo(
+                            name=name,
+                            path=entry_path,
+                            kind=kind,
+                            size=stats.st_size,
+                            mtime_ms=stats.st_mtime * 1000,
+                        )
+                    )
                 except BaseException as error:
                     return (False, to_file_error(error, entry_path))
             return (True, infos)
@@ -488,7 +484,9 @@ class PythonExecutionEnv:
         except BaseException as error:
             return (False, to_file_error(error, resolved))
 
-    async def create_temp_dir(self, prefix: str = "tmp-", signal: asyncio.Event | None = None) -> Result:
+    async def create_temp_dir(
+        self, prefix: str = "tmp-", signal: asyncio.Event | None = None
+    ) -> Result:
         aborted = self._aborted(signal)
         if aborted:
             return aborted
@@ -563,7 +561,10 @@ class PythonExecutionEnv:
             return (False, ExecutionError("aborted", "aborted"))
         timeout = options.timeout
         if timeout is not None and (timeout <= 0 or not isinstance(timeout, (int, float))):
-            return (False, ExecutionError("timeout", "Invalid timeout: must be a finite number of seconds"))
+            return (
+                False,
+                ExecutionError("timeout", "Invalid timeout: must be a finite number of seconds"),
+            )
 
         cwd = self._resolve_path(options.cwd) if options.cwd else self.cwd
         if not os.path.isdir(cwd):
@@ -597,8 +598,9 @@ class PythonExecutionEnv:
                 if options.on_stdout:
                     options.on_stdout(chunk)
             except BaseException as error:
-                nonlocal_callback_error = callback_error
-                raise to_execution_error(error)
+                nonlocal callback_error
+                callback_error = to_execution_error(error)
+                raise
 
         creationflags = 0
         start_new_session = os.name != "nt"
@@ -658,6 +660,7 @@ class PythonExecutionEnv:
 
         abort_waiter: asyncio.Task | None = None
         if options.abort_signal is not None:
+
             async def _on_abort() -> None:
                 await options.abort_signal.wait()
                 await _kill_tree()

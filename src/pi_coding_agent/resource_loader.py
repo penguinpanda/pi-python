@@ -36,11 +36,7 @@ class ResourceLoadResult:
     diagnostics: list[ResourceDiagnostic] = field(default_factory=list)
 
     def diagnostics_by_type(self, diagnostic_type: str) -> list[ResourceDiagnostic]:
-        return [
-            diagnostic
-            for diagnostic in self.diagnostics
-            if diagnostic.type == diagnostic_type
-        ]
+        return [diagnostic for diagnostic in self.diagnostics if diagnostic.type == diagnostic_type]
 
 
 class DefaultResourceLoader:

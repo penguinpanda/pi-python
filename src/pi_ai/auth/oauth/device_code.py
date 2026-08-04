@@ -53,9 +53,7 @@ async def poll_oauth_device_code_flow(
     if wait_before_first_poll:
         remaining_ms = deadline - time.time() * 1000
         if remaining_ms > 0:
-            await abortable_sleep(
-                min(interval_ms, remaining_ms), signal, CANCEL_MESSAGE
-            )
+            await abortable_sleep(min(interval_ms, remaining_ms), signal, CANCEL_MESSAGE)
 
     while time.time() * 1000 < deadline:
         if signal is not None and signal.is_set():
@@ -75,9 +73,7 @@ async def poll_oauth_device_code_flow(
                 and math.isfinite(server_interval)
                 and server_interval > 0
             ):
-                interval_ms = max(
-                    MINIMUM_INTERVAL_MS, math.floor(server_interval * 1000)
-                )
+                interval_ms = max(MINIMUM_INTERVAL_MS, math.floor(server_interval * 1000))
             else:
                 interval_ms = max(
                     MINIMUM_INTERVAL_MS, interval_ms + SLOW_DOWN_INTERVAL_INCREMENT_MS
@@ -86,13 +82,9 @@ async def poll_oauth_device_code_flow(
         remaining_ms = deadline - time.time() * 1000
         if remaining_ms <= 0:
             break
-        await abortable_sleep(
-            min(interval_ms, remaining_ms), signal, CANCEL_MESSAGE
-        )
+        await abortable_sleep(min(interval_ms, remaining_ms), signal, CANCEL_MESSAGE)
 
-    raise RuntimeError(
-        SLOW_DOWN_TIMEOUT_MESSAGE if slow_down_responses > 0 else TIMEOUT_MESSAGE
-    )
+    raise RuntimeError(SLOW_DOWN_TIMEOUT_MESSAGE if slow_down_responses > 0 else TIMEOUT_MESSAGE)
 
 
 __all__ = [

@@ -104,13 +104,14 @@ def test_estimate_text_and_image_content_tokens():
     # 字符串内容
     assert estimate_text_and_image_content_tokens("x" * 8) == 2
     # 文本块
-    assert (
-        estimate_text_and_image_content_tokens([{"type": "text", "text": "x" * 8}]) == 2
-    )
+    assert estimate_text_and_image_content_tokens([{"type": "text", "text": "x" * 8}]) == 2
     # 图片块按固定估算值（4800 字符）
     assert (
         estimate_text_and_image_content_tokens(
-            [{"type": "text", "text": "x"}, {"type": "image", "url": "http://x", "data": None, "mime_type": "image/png"}]
+            [
+                {"type": "text", "text": "x"},
+                {"type": "image", "url": "http://x", "data": None, "mime_type": "image/png"},
+            ]
         )
         == (1 + 4800 + 4 - 1) // 4
     )
@@ -139,7 +140,13 @@ def test_estimate_message_tokens_assistant_blocks():
         "content": [
             {"type": "text", "text": "abcd"},
             {"type": "thinking", "thinking": "wxyz"},
-            {"type": "toolCall", "id": "c1", "name": "foo", "raw_arguments": "{}", "arguments": {"a": 1}},
+            {
+                "type": "toolCall",
+                "id": "c1",
+                "name": "foo",
+                "raw_arguments": "{}",
+                "arguments": {"a": 1},
+            },
         ],
         "api": "responses",
         "provider": "openai",
@@ -158,7 +165,13 @@ def test_estimate_message_tokens_unserializable_arguments():
     msg = {
         "role": "assistant",
         "content": [
-            {"type": "toolCall", "id": "c1", "name": "foo", "raw_arguments": "{}", "arguments": {"bad": {1, 2}}},
+            {
+                "type": "toolCall",
+                "id": "c1",
+                "name": "foo",
+                "raw_arguments": "{}",
+                "arguments": {"bad": {1, 2}},
+            },
         ],
         "api": "responses",
         "provider": "openai",
@@ -179,8 +192,14 @@ def test_estimate_tools_tokens_empty_and_non_empty():
 def test_clamp_max_tokens_without_context_window():
     """模型未声明 context_window（<=0）时不收敛，原样返回（含下限保护）。"""
     model = Model(
-        id="m", provider="p", api="openai-completions", name="m",
-        input=["text"], output=["text"], context_window=0, max_tokens=8_000,
+        id="m",
+        provider="p",
+        api="openai-completions",
+        name="m",
+        input=["text"],
+        output=["text"],
+        context_window=0,
+        max_tokens=8_000,
     )
     context = Context(messages=[{"role": "user", "content": "hi"}])
     assert clamp_max_tokens_to_context(model, context, 8_000) == 8_000
@@ -190,8 +209,14 @@ def test_clamp_max_tokens_without_context_window():
 def test_clamp_max_tokens_floor_when_context_full():
     """上下文接近窗口时 available 为负，仍保留 MIN_MAX_TOKENS 下限。"""
     model = Model(
-        id="m", provider="p", api="openai-completions", name="m",
-        input=["text"], output=["text"], context_window=100, max_tokens=8_000,
+        id="m",
+        provider="p",
+        api="openai-completions",
+        name="m",
+        input=["text"],
+        output=["text"],
+        context_window=100,
+        max_tokens=8_000,
     )
     # 消息估算 96 tokens → available = 100 - 96 - 4096 < 0 → 收敛到 1
     context = Context(messages=[{"role": "user", "content": "x" * 384}])
@@ -215,7 +240,10 @@ def test_ignores_stale_assistant_usage_after_newer_message_inserted():
     )
 
     assert estimate_context_tokens(context) == ContextUsageEstimate(
-        tokens=1_005, usage_tokens=0, trailing_tokens=1_005, last_usage_index=None,
+        tokens=1_005,
+        usage_tokens=0,
+        trailing_tokens=1_005,
+        last_usage_index=None,
     )
     assert clamp_max_tokens_to_context(_model(), context, 8_000) == 4_899
 
@@ -232,7 +260,10 @@ def test_uses_assistant_usage_again_after_response_to_inserted_context():
     )
 
     assert estimate_context_tokens(context) == ContextUsageEstimate(
-        tokens=2_001, usage_tokens=2_000, trailing_tokens=1, last_usage_index=3,
+        tokens=2_001,
+        usage_tokens=2_000,
+        trailing_tokens=1,
+        last_usage_index=3,
     )
 
 
@@ -242,7 +273,9 @@ def test_skips_aborted_and_error_usage():
     error = _assistant(200, 9_500)
     error["stop_reason"] = "error"
 
-    context = Context(messages=[aborted, error, {"role": "user", "content": "tail", "timestamp": 300}])
+    context = Context(
+        messages=[aborted, error, {"role": "user", "content": "tail", "timestamp": 300}]
+    )
     estimate = estimate_context_tokens(context)
     assert estimate.last_usage_index is None
     assert estimate.usage_tokens == 0
@@ -254,7 +287,10 @@ def test_estimates_message_list_directly():
         {"role": "user", "content": "tail", "timestamp": 200},
     ]
     assert estimate_context_tokens(messages) == ContextUsageEstimate(
-        tokens=2_001, usage_tokens=2_000, trailing_tokens=1, last_usage_index=0,
+        tokens=2_001,
+        usage_tokens=2_000,
+        trailing_tokens=1,
+        last_usage_index=0,
     )
 
 
@@ -275,9 +311,7 @@ def test_counts_tool_definitions_marked_after_latest_usage_checkpoint():
         "timestamp": 300,
         "added_tool_names": ["late_tool"],
     }
-    marked = estimate_context_tokens(
-        Context(messages=[assistant, tool_result], tools=[late_tool])
-    )
+    marked = estimate_context_tokens(Context(messages=[assistant, tool_result], tools=[late_tool]))
 
     assert marked.tokens > plain.tokens + 500
     assert marked.trailing_tokens > plain.trailing_tokens + 500
@@ -297,7 +331,5 @@ def test_added_tool_names_unknown_tool_not_counted():
         "timestamp": 200,
         "added_tool_names": ["ghost"],
     }
-    estimate = estimate_context_tokens(
-        Context(messages=[assistant, tool_result], tools=[])
-    )
+    estimate = estimate_context_tokens(Context(messages=[assistant, tool_result], tools=[]))
     assert estimate.tokens == 100 + 1  # usage 100 + toolResult "ok"(1)

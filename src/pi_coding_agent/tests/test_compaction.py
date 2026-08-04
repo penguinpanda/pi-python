@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-from pathlib import Path
 
 import pytest
 from pi_agent import set_default_stream_fn
@@ -78,7 +76,9 @@ def _user(content: str, ts: int = 1) -> dict:
     return {"role": "user", "content": content, "timestamp": ts}
 
 
-def _assistant(content: str, ts: int = 2, usage: dict | None = None, stop_reason: str = "stop") -> dict:
+def _assistant(
+    content: str, ts: int = 2, usage: dict | None = None, stop_reason: str = "stop"
+) -> dict:
     msg = {
         "role": "assistant",
         "content": [{"type": "text", "text": content}],
@@ -141,7 +141,13 @@ class TestEstimateTokens:
             "content": [
                 {"type": "text", "text": "abcd"},
                 {"type": "thinking", "thinking": "wxyz"},
-                {"type": "toolCall", "id": "c1", "name": "foo", "raw_arguments": "{}", "arguments": {"a": 1}},
+                {
+                    "type": "toolCall",
+                    "id": "c1",
+                    "name": "foo",
+                    "raw_arguments": "{}",
+                    "arguments": {"a": 1},
+                },
             ],
             "api": "openai-completions",
             "provider": "faux",
@@ -183,13 +189,17 @@ class TestEstimateContextTokens:
     def test_no_usage_estimates_all(self):
         messages = [_user("x" * 4), _assistant("y" * 8)]
         estimate = estimate_context_tokens(messages)
-        assert estimate == ContextUsageEstimate(tokens=3, usage_tokens=0, trailing_tokens=3, last_usage_index=None)
+        assert estimate == ContextUsageEstimate(
+            tokens=3, usage_tokens=0, trailing_tokens=3, last_usage_index=None
+        )
 
     def test_uses_last_assistant_usage(self):
         messages = [_user("x" * 4), _assistant("ok", usage=_usage(100)), _user("tail")]
         estimate = estimate_context_tokens(messages)
         # usage 100 + tail "tail"(4 字符→1 token)
-        assert estimate == ContextUsageEstimate(tokens=101, usage_tokens=100, trailing_tokens=1, last_usage_index=1)
+        assert estimate == ContextUsageEstimate(
+            tokens=101, usage_tokens=100, trailing_tokens=1, last_usage_index=1
+        )
 
     def test_skips_aborted_error_and_zero_usage(self):
         aborted = _assistant("a", stop_reason="aborted", usage=_usage(50))
@@ -200,7 +210,11 @@ class TestEstimateContextTokens:
         assert estimate.last_usage_index is None
 
     def test_get_last_assistant_usage(self):
-        messages = [_assistant("a", usage=_usage(10)), _user("x"), _assistant("b", usage=_usage(20))]
+        messages = [
+            _assistant("a", usage=_usage(10)),
+            _user("x"),
+            _assistant("b", usage=_usage(20)),
+        ]
         usage = get_last_assistant_usage(messages)
         assert usage is not None
         assert usage["total_tokens"] == 20
@@ -244,8 +258,13 @@ class TestCutPoint:
 
     def test_find_cut_point_keeps_recent(self):
         # 5 条 user 消息，每条估算 1 token；keep_recent_tokens=2 → 保留最后 2 条
-        entries = [_entry(_user("a"), "e0"), _entry(_user("b"), "e1"), _entry(_user("c"), "e2"),
-                   _entry(_user("d"), "e3"), _entry(_user("e"), "e4")]
+        entries = [
+            _entry(_user("a"), "e0"),
+            _entry(_user("b"), "e1"),
+            _entry(_user("c"), "e2"),
+            _entry(_user("d"), "e3"),
+            _entry(_user("e"), "e4"),
+        ]
         cut = find_cut_point(entries, 0, len(entries), 2)
         assert cut.first_kept_entry_index == 3
         assert cut.is_split_turn is False
@@ -254,8 +273,17 @@ class TestCutPoint:
         entries = [
             _entry(_user("a"), "e0"),
             _entry(_assistant("t1"), "e1"),
-            _entry({"role": "toolResult", "tool_call_id": "c1", "tool_name": "t",
-                    "content": [{"type": "text", "text": "r"}], "is_error": False, "timestamp": 3}, "e2"),
+            _entry(
+                {
+                    "role": "toolResult",
+                    "tool_call_id": "c1",
+                    "tool_name": "t",
+                    "content": [{"type": "text", "text": "r"}],
+                    "is_error": False,
+                    "timestamp": 3,
+                },
+                "e2",
+            ),
             _entry(_user("b"), "e3"),
         ]
         # 预算很小：期望在 e3（user）切割，绝不落在 toolResult
@@ -272,14 +300,23 @@ class TestCutPoint:
         entries = [
             _entry(_user("a"), "e0"),
             _entry(_assistant("tool call"), "e1"),
-            _entry({"role": "toolResult", "tool_call_id": "c1", "tool_name": "t",
-                    "content": [{"type": "text", "text": "res"}], "is_error": False, "timestamp": 3}, "e2"),
+            _entry(
+                {
+                    "role": "toolResult",
+                    "tool_call_id": "c1",
+                    "tool_name": "t",
+                    "content": [{"type": "text", "text": "res"}],
+                    "is_error": False,
+                    "timestamp": 3,
+                },
+                "e2",
+            ),
             _entry(_user("b"), "e3"),
         ]
         # e3(1) + e2(1) = 2 < 3；e1(3) → 5 ≥ 3 → 切在 e1（assistant）
         cut = find_cut_point(entries, 0, 4, 3)
         assert cut.first_kept_entry_index == 1  # 切在 assistant 上
-        assert cut.turn_start_index == 0        # 轮次起点 e0
+        assert cut.turn_start_index == 0  # 轮次起点 e0
         assert cut.is_split_turn is True
 
 
@@ -294,10 +331,34 @@ class TestFileOps:
         msg = {
             "role": "assistant",
             "content": [
-                {"type": "toolCall", "id": "c1", "name": "read", "raw_arguments": "{}", "arguments": {"path": "a.py"}},
-                {"type": "toolCall", "id": "c2", "name": "edit", "raw_arguments": "{}", "arguments": {"path": "b.py"}},
-                {"type": "toolCall", "id": "c3", "name": "write", "raw_arguments": "{}", "arguments": {"path": "c.py"}},
-                {"type": "toolCall", "id": "c4", "name": "read", "raw_arguments": "{}", "arguments": {"path": "c.py"}},
+                {
+                    "type": "toolCall",
+                    "id": "c1",
+                    "name": "read",
+                    "raw_arguments": "{}",
+                    "arguments": {"path": "a.py"},
+                },
+                {
+                    "type": "toolCall",
+                    "id": "c2",
+                    "name": "edit",
+                    "raw_arguments": "{}",
+                    "arguments": {"path": "b.py"},
+                },
+                {
+                    "type": "toolCall",
+                    "id": "c3",
+                    "name": "write",
+                    "raw_arguments": "{}",
+                    "arguments": {"path": "c.py"},
+                },
+                {
+                    "type": "toolCall",
+                    "id": "c4",
+                    "name": "read",
+                    "raw_arguments": "{}",
+                    "arguments": {"path": "c.py"},
+                },
             ],
             "api": "openai-completions",
             "provider": "faux",
@@ -332,8 +393,14 @@ class TestSerializeConversation:
         messages = [
             _user("hello"),
             _assistant("hi there"),
-            {"role": "toolResult", "tool_call_id": "c1", "tool_name": "t",
-             "content": [{"type": "text", "text": "result"}], "is_error": False, "timestamp": 3},
+            {
+                "role": "toolResult",
+                "tool_call_id": "c1",
+                "tool_name": "t",
+                "content": [{"type": "text", "text": "result"}],
+                "is_error": False,
+                "timestamp": 3,
+            },
         ]
         text = serialize_conversation(messages)
         assert "[User]: hello" in text
@@ -342,8 +409,14 @@ class TestSerializeConversation:
 
     def test_serialize_tool_result_truncated(self):
         long = "x" * 5000
-        msg = {"role": "toolResult", "tool_call_id": "c1", "tool_name": "t",
-               "content": [{"type": "text", "text": long}], "is_error": False, "timestamp": 3}
+        msg = {
+            "role": "toolResult",
+            "tool_call_id": "c1",
+            "tool_name": "t",
+            "content": [{"type": "text", "text": long}],
+            "is_error": False,
+            "timestamp": 3,
+        }
         text = serialize_conversation([msg])
         assert "more characters truncated" in text
         assert len(text) < 5000
@@ -358,8 +431,15 @@ class TestPrepareCompaction:
     def test_returns_none_when_last_entry_is_compaction(self):
         entries = [
             _entry(_user("a"), "e0"),
-            {"type": "compaction", "id": "c0", "parentId": "e0", "timestamp": "t",
-             "summary": "s", "firstKeptEntryId": "e0", "tokensBefore": 10},
+            {
+                "type": "compaction",
+                "id": "c0",
+                "parentId": "e0",
+                "timestamp": "t",
+                "summary": "s",
+                "firstKeptEntryId": "e0",
+                "tokensBefore": 10,
+            },
         ]
         preparation = prepare_compaction(entries, [_user("a")], DEFAULT_COMPACTION_SETTINGS)
         assert preparation is None
@@ -380,7 +460,9 @@ class TestPrepareCompaction:
     def test_returns_none_when_nothing_to_summarize(self):
         entries = [_entry(_user("only"), "e0")]
         context = [_user("only")]
-        preparation = prepare_compaction(entries, context, CompactionSettings(keep_recent_tokens=10000))
+        preparation = prepare_compaction(
+            entries, context, CompactionSettings(keep_recent_tokens=10000)
+        )
         assert preparation is None
 
     def test_prepare_compaction_with_previous_summary(self):
@@ -388,15 +470,20 @@ class TestPrepareCompaction:
         entries = [
             _entry(_user("old"), "e0"),
             _entry(_user("mid"), "e1"),
-            {"type": "compaction", "id": "c0", "parentId": "e1", "timestamp": "t",
-             "summary": "prev summary", "firstKeptEntryId": "e1", "tokensBefore": 100},
+            {
+                "type": "compaction",
+                "id": "c0",
+                "parentId": "e1",
+                "timestamp": "t",
+                "summary": "prev summary",
+                "firstKeptEntryId": "e1",
+                "tokensBefore": 100,
+            },
             _entry(_user("new1"), "e2"),
             _entry(_user("new2"), "e3"),
         ]
         context = [_user("new1"), _user("new2")]
-        preparation = prepare_compaction(
-            entries, context, CompactionSettings(keep_recent_tokens=1)
-        )
+        preparation = prepare_compaction(entries, context, CompactionSettings(keep_recent_tokens=1))
         assert preparation is not None
         assert preparation.previous_summary == "prev summary"
         assert preparation.first_kept_entry_id == "e3"
@@ -407,8 +494,15 @@ class TestPrepareCompaction:
         """末条已是压缩条目 → 无可压缩内容。"""
         entries = [
             _entry(_user("a"), "e0"),
-            {"type": "compaction", "id": "c0", "parentId": "e0", "timestamp": "t",
-             "summary": "s", "firstKeptEntryId": "e0", "tokensBefore": 10},
+            {
+                "type": "compaction",
+                "id": "c0",
+                "parentId": "e0",
+                "timestamp": "t",
+                "summary": "s",
+                "firstKeptEntryId": "e0",
+                "tokensBefore": 10,
+            },
         ]
         assert prepare_compaction(entries, [_user("a")], DEFAULT_COMPACTION_SETTINGS) is None
 
@@ -439,9 +533,7 @@ class TestGenerateSummary:
     @pytest.mark.asyncio
     async def test_summarization_error_raises(self, faux_env):
         models, core = faux_env
-        core.set_responses([
-            faux_assistant_message([], stop_reason="error", error_message="boom")
-        ])
+        core.set_responses([faux_assistant_message([], stop_reason="error", error_message="boom")])
         model = models.get_model("faux", "faux-1")
         assert model is not None
         with pytest.raises(RuntimeError, match="Summarization failed"):
@@ -453,10 +545,12 @@ class TestGenerateSummary:
     async def test_compact_split_turn(self, faux_env):
         """split turn：历史摘要 + 轮次前缀摘要两次 LLM 调用，usage 合并。"""
         models, core = faux_env
-        core.set_responses([
-            faux_assistant_message("## Goal\nhistory summary"),
-            faux_assistant_message("prefix summary"),
-        ])
+        core.set_responses(
+            [
+                faux_assistant_message("## Goal\nhistory summary"),
+                faux_assistant_message("prefix summary"),
+            ]
+        )
         model = models.get_model("faux", "faux-1")
         assert model is not None
 
@@ -465,16 +559,28 @@ class TestGenerateSummary:
             _entry(_assistant("old asst"), "e1"),
             _entry(_user("start turn"), "e2"),
             _entry(_assistant("tool call"), "e3"),
-            _entry({"role": "toolResult", "tool_call_id": "c1", "tool_name": "t",
-                    "content": [{"type": "text", "text": "res"}], "is_error": False, "timestamp": 3}, "e4"),
+            _entry(
+                {
+                    "role": "toolResult",
+                    "tool_call_id": "c1",
+                    "tool_name": "t",
+                    "content": [{"type": "text", "text": "res"}],
+                    "is_error": False,
+                    "timestamp": 3,
+                },
+                "e4",
+            ),
             _entry(_user("new"), "e5"),
         ]
-        context = [_user("old"), _assistant("old asst"), _user("start turn"),
-                   _assistant("tool call"), _user("new")]
+        context = [
+            _user("old"),
+            _assistant("old asst"),
+            _user("start turn"),
+            _assistant("tool call"),
+            _user("new"),
+        ]
         # e5(1) + e4(1) = 2 < 3；e3(3) → 5 ≥ 3 → 切在 e3（assistant）→ split turn
-        preparation = prepare_compaction(
-            entries, context, CompactionSettings(keep_recent_tokens=3)
-        )
+        preparation = prepare_compaction(entries, context, CompactionSettings(keep_recent_tokens=3))
         assert preparation is not None
         assert preparation.is_split_turn is True
 

@@ -61,10 +61,12 @@ def _make_session(
     """构建 Agent + AgentSession（走全局默认流函数）。"""
     model = models.get_model("faux", "faux-1")
     assert model is not None
-    agent = Agent(AgentOptions(
-        system_prompt="You are a helpful coding assistant.",
-        model=model,
-    ))
+    agent = Agent(
+        AgentOptions(
+            system_prompt="You are a helpful coding assistant.",
+            model=model,
+        )
+    )
     return AgentSession(
         agent=agent,
         session_manager=session_manager,
@@ -78,11 +80,7 @@ def _final_assistant_text(messages) -> str:
     """提取最后一条 assistant 消息的纯文本。"""
     for msg in reversed(messages):
         if msg.get("role") == "assistant":
-            parts = [
-                b.get("text", "")
-                for b in msg.get("content", [])
-                if b.get("type") == "text"
-            ]
+            parts = [b.get("text", "") for b in msg.get("content", []) if b.get("type") == "text"]
             return "".join(parts)
     return ""
 
@@ -97,9 +95,7 @@ class TestPlainTextSession:
         models, core = faux_env
         core.set_responses([faux_assistant_message("Hello from faux!")])
 
-        mgr = SessionManager.create(
-            cwd=str(tmp_path), sessions_dir=str(tmp_path / "sessions")
-        )
+        mgr = SessionManager.create(cwd=str(tmp_path), sessions_dir=str(tmp_path / "sessions"))
         session = _make_session(models, mgr, tmp_path)
 
         try:
@@ -128,10 +124,12 @@ class TestPlainTextSession:
 
     async def test_multiple_prompts_append(self, faux_env, tmp_path):
         models, core = faux_env
-        core.set_responses([
-            faux_assistant_message("First reply"),
-            faux_assistant_message("Second reply"),
-        ])
+        core.set_responses(
+            [
+                faux_assistant_message("First reply"),
+                faux_assistant_message("Second reply"),
+            ]
+        )
 
         mgr = SessionManager.in_memory(cwd=str(tmp_path))
         session = _make_session(models, mgr, tmp_path)
@@ -161,13 +159,15 @@ class TestToolCallLoop:
         (tmp_path / "notes.txt").write_text("hello world\n", encoding="utf-8")
 
         # Turn 1: 调用 read 工具；Turn 2: 文本回复
-        core.set_responses([
-            faux_assistant_message(
-                [faux_tool_call("read", {"path": "notes.txt"}, tool_call_id="tc-1")],
-                stop_reason="tool_call",
-            ),
-            faux_assistant_message("Read complete. The file contains: hello world"),
-        ])
+        core.set_responses(
+            [
+                faux_assistant_message(
+                    [faux_tool_call("read", {"path": "notes.txt"}, tool_call_id="tc-1")],
+                    stop_reason="tool_call",
+                ),
+                faux_assistant_message("Read complete. The file contains: hello world"),
+            ]
+        )
 
         mgr = SessionManager.in_memory(cwd=str(tmp_path))
         session = _make_session(
@@ -222,11 +222,13 @@ class TestPrintMode:
     async def test_print_mode_error_exit_code(self, faux_env, tmp_path, capsys):
         """LLM 返回 error stop_reason → 退出码 1。"""
         models, core = faux_env
-        core.set_responses([
-            faux_assistant_message(
-                [], stop_reason="error", error_message="No more faux responses queued"
-            ),
-        ])
+        core.set_responses(
+            [
+                faux_assistant_message(
+                    [], stop_reason="error", error_message="No more faux responses queued"
+                ),
+            ]
+        )
 
         mgr = SessionManager.in_memory(cwd=str(tmp_path))
         session = _make_session(models, mgr, tmp_path)
@@ -251,13 +253,9 @@ class TestPrintMode:
         assert len(lines) >= 2
         last = json.loads(lines[-1])
         assert last["type"] == "done"
-        assert any(
-            message.get("role") == "assistant" for message in last["messages"]
-        )
+        assert any(message.get("role") == "assistant" for message in last["messages"])
 
-    async def test_json_print_mode_broken_pipe_quiet(
-        self, faux_env, tmp_path, monkeypatch, capsys
-    ):
+    async def test_json_print_mode_broken_pipe_quiet(self, faux_env, tmp_path, monkeypatch, capsys):
         """下游提前关闭管道（--json | grep -m1）→ 静默退出，不抛 traceback。"""
         from pi_coding_agent import _print_mode as print_mode_module
 
@@ -276,9 +274,7 @@ class TestPrintMode:
         capsys.readouterr()
         assert code == 0
 
-    async def test_print_mode_broken_pipe_quiet(
-        self, faux_env, tmp_path, monkeypatch, capsys
-    ):
+    async def test_print_mode_broken_pipe_quiet(self, faux_env, tmp_path, monkeypatch, capsys):
         """纯文本 print 模式管道被关闭 → 静默退出。"""
         from pi_coding_agent import _print_mode as print_mode_module
 

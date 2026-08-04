@@ -103,8 +103,7 @@ class AsyncHTTPClient(Protocol):
         method: str,
         url: str,
         **kwargs: Any,
-    ) -> Any:
-        ...
+    ) -> Any: ...
 
 
 # Session 亲和性头格式

@@ -107,7 +107,9 @@ def _validate_description(description: str | None) -> list[str]:
     if not description or not description.strip():
         errors.append("description is required")
     elif len(description) > MAX_DESCRIPTION_LENGTH:
-        errors.append(f"description exceeds {MAX_DESCRIPTION_LENGTH} characters ({len(description)})")
+        errors.append(
+            f"description exceeds {MAX_DESCRIPTION_LENGTH} characters ({len(description)})"
+        )
     return errors
 
 
@@ -190,7 +192,9 @@ async def _add_ignore_rules(
         info = await env.file_info(ignore_path)
         if not info[0]:
             if info[1].code != "not_found":
-                diagnostics.append(SkillDiagnostic("file_info_failed", info[1].message, ignore_path))
+                diagnostics.append(
+                    SkillDiagnostic("file_info_failed", info[1].message, ignore_path)
+                )
             continue
         if info[1].kind != "file":
             continue
@@ -314,7 +318,7 @@ async def load_skills(
     """从目录加载技能，返回 {skills, diagnostics}。"""
     skills: list[dict[str, Any]] = []
     diagnostics: list[SkillDiagnostic] = []
-    for directory in ([dirs] if isinstance(dirs, str) else dirs):
+    for directory in [dirs] if isinstance(dirs, str) else dirs:
         info = await env.file_info(directory)
         if not info[0]:
             if info[1].code != "not_found":

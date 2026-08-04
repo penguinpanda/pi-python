@@ -7,7 +7,7 @@
 
 import json
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from ..types import Tool
@@ -40,8 +40,7 @@ def get_grammar_tool_input(
     value = arguments.get(input_property)
     if not isinstance(value, str):
         raise ValueError(
-            f'Grammar tool call "{tool_name}" requires argument '
-            f'"{input_property}" to be a string.'
+            f'Grammar tool call "{tool_name}" requires argument "{input_property}" to be a string.'
         )
     return value
 
@@ -60,13 +59,11 @@ def append_grammar_tool_input_json_delta(
         if close and next_input == buffer.input:
             return None
         raise ValueError(
-            f'grammar tool input for property "{input_property}" '
-            "changed after it was closed"
+            f'grammar tool input for property "{input_property}" changed after it was closed'
         )
     if not next_input.startswith(buffer.input):
         raise ValueError(
-            f'grammar tool input for property "{input_property}" '
-            "changed non-monotonically"
+            f'grammar tool input for property "{input_property}" changed non-monotonically'
         )
 
     input_delta = next_input[len(buffer.input) :]

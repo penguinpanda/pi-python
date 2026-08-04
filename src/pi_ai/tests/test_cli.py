@@ -51,9 +51,7 @@ class TestList:
 
 
 class TestLogin:
-    def test_login_with_provider_persists(
-        self, fake_providers, monkeypatch, tmp_path, capsys
-    ):
+    def test_login_with_provider_persists(self, fake_providers, monkeypatch, tmp_path, capsys):
         monkeypatch.chdir(tmp_path)
         assert cli.main(["login", "fake"]) == 0
         assert "Credentials saved to auth.json" in capsys.readouterr().out
@@ -62,9 +60,7 @@ class TestLogin:
         assert raw["fake"]["access"] == "sk-fake"
         assert raw["fake"]["refresh"] == "rf-fake"
 
-    def test_login_select_provider(
-        self, fake_providers, monkeypatch, tmp_path, capsys
-    ):
+    def test_login_select_provider(self, fake_providers, monkeypatch, tmp_path, capsys):
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr("builtins.input", lambda _prompt: "1")
         assert cli.main(["login"]) == 0

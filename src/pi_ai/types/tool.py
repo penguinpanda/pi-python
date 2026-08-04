@@ -25,9 +25,9 @@ class Tool:
     - 生命周期钩子（before_execute / after_execute）—— Agent 层可选调用
     """
 
-    name: str           # 工具名称
-    description: str    # 工具说明
-    input_schema: dict[str, Any]   # JSON Schema
+    name: str  # 工具名称
+    description: str  # 工具说明
+    input_schema: dict[str, Any]  # JSON Schema
 
     # 受约束采样配置（json_schema / grammar）；False 或 None 表示关闭
     constrained_sampling: Literal[False] | ConstrainedSamplingConfig | None = None

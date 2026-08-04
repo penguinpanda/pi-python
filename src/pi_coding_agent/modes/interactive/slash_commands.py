@@ -270,11 +270,7 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
 
     async def _help(context: SlashContext, _args: str) -> str:
         lines = ["Available commands:"]
-        commands = (
-            context.slash_registry.list()
-            if context.slash_registry is not None
-            else []
-        )
+        commands = context.slash_registry.list() if context.slash_registry is not None else []
         for command in sorted(commands, key=lambda c: c.name):
             hint = f" {command.argument_hint}" if command.argument_hint else ""
             lines.append(f"  /{command.name}{hint} — {command.description}")
@@ -401,7 +397,6 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
             context.open_settings_selector()
             return ""
         from ..._config import (
-            _deep_merge,
             _load_json,
             get_project_settings_path,
             get_settings_path,
@@ -493,12 +488,7 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
             )
         from ...model_resolver import resolve_model_scope
 
-        patterns = [
-            part
-            for piece in shlex.split(args_str)
-            for part in piece.split(",")
-            if part
-        ]
+        patterns = [part for piece in shlex.split(args_str) for part in piece.split(",") if part]
         scoped = await resolve_model_scope(patterns, context.model_runtime)
         context.session.set_scoped_models(scoped)
         return f"Scoped {len(scoped)} models"
@@ -541,9 +531,7 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
         provider_id = args.strip() or None
         if provider_id is None:
             return f"Usage: /login <provider>. Available: {available}"
-        match = next(
-            (provider for provider in providers if provider[0] == provider_id), None
-        )
+        match = next((provider for provider in providers if provider[0] == provider_id), None)
         if match is None:
             return f"Unknown provider: {provider_id}. Available: {available}"
         _pid, _name, flow = match
@@ -558,6 +546,7 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
             credential = await flow.login(interaction)
         except Exception as exc:
             return f"Login failed: {exc}"
+
         async def _set(_current):
             return credential
 
@@ -589,11 +578,7 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
                     json={
                         "description": f"pi session {context.session.session_id}",
                         "public": False,
-                        "files": {
-                            f"session-{context.session.session_id}.md": {
-                                "content": text
-                            }
-                        },
+                        "files": {f"session-{context.session.session_id}.md": {"content": text}},
                     },
                 )
         except Exception as exc:
@@ -634,7 +619,12 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
     builtins: list[tuple[str, Callable, str, str | None]] = [
         ("model", _model, "Select model (opens selector UI)", "<provider/model>"),
         ("thinking", _thinking, "Set thinking level (opens selector UI)", "[level]"),
-        ("oauth", _oauth, "Configure provider authentication (opens selector UI)", "[login|logout]"),
+        (
+            "oauth",
+            _oauth,
+            "Configure provider authentication (opens selector UI)",
+            "[login|logout]",
+        ),
         ("extensions", _extensions, "List installed extensions (opens selector UI)", ""),
         ("name", _name, "Set session display name", "<name>"),
         ("compact", _compact, "Manually compact the session context", "[instructions]"),
@@ -652,7 +642,12 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
         ("fork", _fork, "Create a new fork from a previous message", "<entryId>"),
         ("clone", _clone, "Duplicate the current session", ""),
         ("settings", _settings, "Show or edit settings", "[key=value]"),
-        ("scoped-models", _scoped_models, "Enable/disable models for Ctrl+P cycling", "[pattern...]"),
+        (
+            "scoped-models",
+            _scoped_models,
+            "Enable/disable models for Ctrl+P cycling",
+            "[pattern...]",
+        ),
         ("login", _login, "Configure provider authentication", "<provider>"),
         ("logout", _logout, "Remove provider authentication", "<provider>"),
         ("share", _share, "Share session as a secret GitHub gist", ""),
@@ -746,7 +741,9 @@ class _TerminalAuthInteraction:
         if event.get("type") == "auth_url":
             print(f"\nOpen this URL in your browser:\n{event['url']}")
         elif event.get("type") == "device_code":
-            print(f"\nOpen {event.get('verificationUri', '')} and enter: {event.get('userCode', '')}")
+            print(
+                f"\nOpen {event.get('verificationUri', '')} and enter: {event.get('userCode', '')}"
+            )
         elif event.get("message"):
             print(event["message"])
 

@@ -1,24 +1,33 @@
 """
 Unit tests for completions.py — Chat Completions API helpers.
 """
+
 import pytest
 from pi_ai.api.completions import _map_stop_reason
 
+
 class TestMapStopReason:
-    @pytest.mark.parametrize('raw,expected', [
-        ('stop', 'stop'), ('end', 'stop'), ('length', 'length'),
-        ('tool_calls', 'tool_call'), ('function_call', 'tool_call'),
-        ('content_filter', 'error'), ('network_error', 'error'),
-        ('some_unknown_reason', 'error'),
-    ])
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("stop", "stop"),
+            ("end", "stop"),
+            ("length", "length"),
+            ("tool_calls", "tool_call"),
+            ("function_call", "tool_call"),
+            ("content_filter", "error"),
+            ("network_error", "error"),
+            ("some_unknown_reason", "error"),
+        ],
+    )
     def test_mapping(self, raw, expected):
         assert _map_stop_reason(raw) == expected
 
     def test_empty_string(self):
-        assert _map_stop_reason('') == 'stop'
+        assert _map_stop_reason("") == "stop"
 
     def test_none_string(self):
-        assert _map_stop_reason('None') == 'error'
+        assert _map_stop_reason("None") == "error"
 
 
 # ===========================================================================
@@ -47,27 +56,35 @@ def _make_model(
     api: str = "openai-completions",
 ) -> Model:
     return Model(
-        id=model_id, provider=provider, api=api, name=model_id,
-        input=["text"], output=["text"],
+        id=model_id,
+        provider=provider,
+        api=api,
+        name=model_id,
+        input=["text"],
+        output=["text"],
     )
 
 
 def _async_iter(items):
     """将一个列表包装成异步可迭代对象（模拟 OpenAI streaming response）。"""
+
     async def gen():
         for item in items:
             yield item
+
     return gen()
 
 
 def _chunk(content=None, tool_calls=None, finish_reason=None, usage=None):
     """构造一个假的 OpenAI Streaming Chunk。"""
     return SimpleNamespace(
-        choices=[SimpleNamespace(
-            index=0,
-            delta=SimpleNamespace(content=content, tool_calls=tool_calls),
-            finish_reason=finish_reason,
-        )],
+        choices=[
+            SimpleNamespace(
+                index=0,
+                delta=SimpleNamespace(content=content, tool_calls=tool_calls),
+                finish_reason=finish_reason,
+            )
+        ],
         usage=usage,
     )
 
@@ -91,7 +108,11 @@ def _mock_client(chunks):
 def _empty_usage_dict():
     """与 _shared.empty_usage() 一致的完整空 Usage（含 cost）。"""
     return {
-        "input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total_tokens": 0,
+        "input": 0,
+        "output": 0,
+        "cache_read": 0,
+        "cache_write": 0,
+        "total_tokens": 0,
         "cost": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0},
     }
 
@@ -156,7 +177,12 @@ class TestCompletionsStream:
 
         events, _ = await _collect_events(model, context, client)
         assert [e["type"] for e in events] == [
-            "start", "text_start", "text_delta", "text_delta", "text_end", "done",
+            "start",
+            "text_start",
+            "text_delta",
+            "text_delta",
+            "text_end",
+            "done",
         ]
         assert events[2]["delta"] == "Hello"
         assert events[3]["delta"] == " world"
@@ -233,7 +259,10 @@ class TestCompletionsStream:
 
         with patch("pi_ai.api.completions._create_client", side_effect=_spy):
             stream = await chat_completions_stream(
-                model, context, "sk-test", "https://api.test.com",
+                model,
+                context,
+                "sk-test",
+                "https://api.test.com",
                 options={"max_retries": 5, "timeout_ms": 30000},
             )
             events = [e async for e in stream]
@@ -265,7 +294,10 @@ class TestCompletionsStream:
 
         with patch("pi_ai.api.completions._create_client", side_effect=_spy):
             stream = await chat_completions_stream(
-                model, context, "sk-test", "https://api.test.com",
+                model,
+                context,
+                "sk-test",
+                "https://api.test.com",
             )
             events = [e async for e in stream]
 
@@ -290,10 +322,12 @@ class TestCompletionsStream:
         model = _make_model()
         context = Context(messages=[{"role": "user", "content": "Hi"}])
         # delta 为 None 的 chunk 应被跳过。
-        chunks = [SimpleNamespace(
-            choices=[SimpleNamespace(index=0, delta=None, finish_reason=None)],
-            usage=None,
-        )]
+        chunks = [
+            SimpleNamespace(
+                choices=[SimpleNamespace(index=0, delta=None, finish_reason=None)],
+                usage=None,
+            )
+        ]
         client = _mock_client(chunks)
 
         events, _ = await _collect_events(model, context, client)
@@ -317,7 +351,12 @@ class TestCompletionsStream:
 
         events, _ = await _collect_events(model, context, client)
         assert [e["type"] for e in events] == [
-            "start", "toolcall_start", "toolcall_delta", "toolcall_delta", "toolcall_end", "done",
+            "start",
+            "toolcall_start",
+            "toolcall_delta",
+            "toolcall_delta",
+            "toolcall_end",
+            "done",
         ]
         tool_deltas = [e for e in events if e["type"] == "toolcall_delta"]
         assert len(tool_deltas) == 2
@@ -326,13 +365,15 @@ class TestCompletionsStream:
 
         msg = events[-1]["message"]
         assert msg["stop_reason"] == "tool_call"
-        assert msg["content"] == [{
-            "type": "toolCall",
-            "id": "call_1",
-            "name": "get_weather",
-            "raw_arguments": '{"city":"Beijing"}',
-            "arguments": {"city": "Beijing"},
-        }]
+        assert msg["content"] == [
+            {
+                "type": "toolCall",
+                "id": "call_1",
+                "name": "get_weather",
+                "raw_arguments": '{"city":"Beijing"}',
+                "arguments": {"city": "Beijing"},
+            }
+        ]
 
     @pytest.mark.asyncio
     async def test_usage_extraction(self):
@@ -350,7 +391,10 @@ class TestCompletionsStream:
         events, stream = await _collect_events(model, context, client)
         msg = await stream.result()
         assert msg["usage"] == {
-            "input": 10, "output": 5, "cache_read": 3, "cache_write": 0,
+            "input": 10,
+            "output": 5,
+            "cache_read": 3,
+            "cache_write": 0,
             "total_tokens": 15,
             "cost": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0},
         }
@@ -388,14 +432,16 @@ class TestCompletionsStream:
         assert kwargs["messages"][0] == {"role": "system", "content": "You are helpful"}
         assert kwargs["messages"][1] == {"role": "user", "content": "Hi"}
         # tools 已转换为 OpenAI Tool Schema。
-        assert kwargs["tools"] == [{
-            "type": "function",
-            "function": {
-                "name": "get_weather",
-                "description": "Get weather",
-                "parameters": {"type": "object", "properties": {}},
-            },
-        }]
+        assert kwargs["tools"] == [
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "description": "Get weather",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ]
 
     @pytest.mark.asyncio
     async def test_no_options_no_tools(self):
@@ -426,7 +472,10 @@ class TestCompletionsStream:
         client = _mock_client([_chunk(content="Hi", finish_reason="stop")])
         with patch("pi_ai.api.completions._create_client", return_value=client):
             stream = await chat_completions_stream(
-                model, context, "sk-test", "https://api.test.com",
+                model,
+                context,
+                "sk-test",
+                "https://api.test.com",
                 {"max_tokens": 8_000},
             )
             [e async for e in stream]
@@ -440,9 +489,7 @@ class TestCompletionsStream:
         model = _make_model()
         context = Context(messages=[{"role": "user", "content": "Hi"}])
         client = MagicMock()
-        client.chat.completions.create = AsyncMock(
-            side_effect=RuntimeError("boom")
-        )
+        client.chat.completions.create = AsyncMock(side_effect=RuntimeError("boom"))
 
         events, stream = await _collect_events(model, context, client)
         assert events[-1]["type"] == "error"
@@ -462,9 +509,7 @@ class TestCompletionsStream:
         model = _make_model()
         context = Context(messages=[{"role": "user", "content": "Hi"}])
         client = MagicMock()
-        client.chat.completions.create = AsyncMock(
-            side_effect=asyncio.CancelledError()
-        )
+        client.chat.completions.create = AsyncMock(side_effect=asyncio.CancelledError())
         with patch("pi_ai.api.completions._create_client", return_value=client):
             stream = await chat_completions_stream(
                 model, context, "sk-test", "https://api.test.com"

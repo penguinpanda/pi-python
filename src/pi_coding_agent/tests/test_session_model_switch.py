@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pi_agent import Agent, AgentOptions
 from pi_ai import Model, Models
-from pi_ai.providers.faux import FAUX_MODEL, faux_provider
+from pi_ai.providers.faux import faux_provider
 
 from pi_coding_agent._session import AgentSession
 from pi_coding_agent._session_manager import SessionManager
@@ -42,11 +42,13 @@ def _make_session(
 ) -> AgentSession:
     model = runtime.get_model("faux", "faux-1")
     assert model is not None
-    agent = Agent(AgentOptions(
-        system_prompt="You are a helpful coding assistant.",
-        model=model,
-        thinking_level="off",
-    ))
+    agent = Agent(
+        AgentOptions(
+            system_prompt="You are a helpful coding assistant.",
+            model=model,
+            thinking_level="off",
+        )
+    )
     manager = SessionManager.in_memory(cwd=str(tmp_path))
     return AgentSession(
         agent=agent,
@@ -98,10 +100,7 @@ class TestSetModel:
 class TestCycleModel:
     async def test_cycle_scoped_models(self, tmp_path):
         runtime = _make_runtime_with_models()
-        scoped = [
-            ScopedModel(runtime.get_model("faux", f"faux-{index}"))
-            for index in (1, 2, 3)
-        ]
+        scoped = [ScopedModel(runtime.get_model("faux", f"faux-{index}")) for index in (1, 2, 3)]
         session = _make_session(runtime, tmp_path, scoped_models=scoped)
 
         result = await session.cycle_model(1)

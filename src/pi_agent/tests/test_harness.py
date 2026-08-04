@@ -69,6 +69,7 @@ def _make_harness_tool(
     execute_override=None,
 ) -> AgentTool:
     """harness 工具：execute 接收 context 作第 5 参（对齐 TS AgentHarnessTool）。"""
+
     async def _execute(tool_call_id, params, signal=None, on_update=None, context=None):
         if execute_override is not None:
             return await execute_override(tool_call_id, params, signal, on_update, context)
@@ -92,11 +93,7 @@ def _session_text(harness: AgentHarness) -> str:
             parts.append(content)
         elif isinstance(content, list):
             parts.append(
-                "".join(
-                    str(block.get("text", ""))
-                    for block in content
-                    if isinstance(block, dict)
-                )
+                "".join(str(block.get("text", "")) for block in content if isinstance(block, dict))
             )
     return "\n".join(parts)
 
@@ -150,10 +147,12 @@ class TestHarnessPrompt:
     async def test_prompt_while_busy_raises(self):
         core = faux_provider(tokens_per_second=200)
         core.set_responses([faux_assistant_message("A" * 200)])
-        harness = AgentHarness(AgentHarnessOptions(
-            model=_make_model(),
-            stream_fn=core.stream,
-        ))
+        harness = AgentHarness(
+            AgentHarnessOptions(
+                model=_make_model(),
+                stream_fn=core.stream,
+            )
+        )
 
         first = asyncio.create_task(harness.prompt("Q1"))
         await asyncio.sleep(0.05)
@@ -171,10 +170,12 @@ class TestHarnessPrompt:
     async def test_wait_for_idle(self):
         core = faux_provider(tokens_per_second=200)
         core.set_responses([faux_assistant_message("A" * 100)])
-        harness = AgentHarness(AgentHarnessOptions(
-            model=_make_model(),
-            stream_fn=core.stream,
-        ))
+        harness = AgentHarness(
+            AgentHarnessOptions(
+                model=_make_model(),
+                stream_fn=core.stream,
+            )
+        )
 
         task = asyncio.create_task(harness.prompt("Hi"))
         await harness.wait_for_idle()
@@ -186,7 +187,12 @@ class TestHarnessPrompt:
 class TestHarnessSkillTemplate:
     @pytest.mark.asyncio
     async def test_skill_invocation(self):
-        skill = Skill(name="docs", description="Docs skill", content="Read docs", file_path="/tmp/docs/SKILL.md")
+        skill = Skill(
+            name="docs",
+            description="Docs skill",
+            content="Read docs",
+            file_path="/tmp/docs/SKILL.md",
+        )
         harness = _make_harness(resources=AgentHarnessResources(skills=[skill]))
 
         await harness.skill("docs")
@@ -232,25 +238,25 @@ class TestHarnessDualEvents:
             llm_inputs.append(list(context.messages))
             return await original(model, context, options)
 
-        harness = AgentHarness(AgentHarnessOptions(
-            model=_make_model(),
-            stream_fn=_capturing_stream,
-        ))
+        harness = AgentHarness(
+            AgentHarnessOptions(
+                model=_make_model(),
+                stream_fn=_capturing_stream,
+            )
+        )
 
         async def _context_hook(event):
-            return ContextResult(messages=list(event["messages"]) + [
-                {"role": "user", "content": "injected-by-context"}
-            ])
+            return ContextResult(
+                messages=list(event["messages"])
+                + [{"role": "user", "content": "injected-by-context"}]
+            )
 
         harness.on("context", _context_hook)
         await harness.prompt("Hi")
 
         # transform_context 只影响 LLM 输入，不写入会话
         assert len(llm_inputs) == 1
-        llm_text = "\n".join(
-            str(m.get("content"))
-            for m in llm_inputs[0]
-        )
+        llm_text = "\n".join(str(m.get("content")) for m in llm_inputs[0])
         assert "injected-by-context" in llm_text
 
     @pytest.mark.asyncio
@@ -321,13 +327,17 @@ class TestHarnessDualEvents:
             captured.append(dict(options or {}))
             return await original(model, context, options)
 
-        harness = AgentHarness(AgentHarnessOptions(
-            model=_make_model(),
-            stream_fn=_capturing_stream,
-        ))
+        harness = AgentHarness(
+            AgentHarnessOptions(
+                model=_make_model(),
+                stream_fn=_capturing_stream,
+            )
+        )
 
         def _provider_hook(event):
-            return BeforeProviderRequestResult(stream_options=AgentHarnessStreamOptionsPatch(max_retries=5))
+            return BeforeProviderRequestResult(
+                stream_options=AgentHarnessStreamOptionsPatch(max_retries=5)
+            )
 
         harness.on("before_provider_request", _provider_hook)
         await harness.prompt("Hi")
@@ -338,7 +348,9 @@ class TestHarnessDualEvents:
     async def test_next_turn_emits_queue_update(self):
         harness = _make_harness()
         received: list[dict] = []
-        harness.subscribe(lambda e, signal: received.append(e) if e["type"] == "queue_update" else None)
+        harness.subscribe(
+            lambda e, signal: received.append(e) if e["type"] == "queue_update" else None
+        )
 
         await harness.next_turn("later")
 
@@ -369,11 +381,13 @@ class TestHarnessSavePoint:
             seen_models.append(model.id)
             return await original(model, context, options)
 
-        harness = AgentHarness(AgentHarnessOptions(
-            model=_make_model("model-a"),
-            stream_fn=_capturing_stream,
-            tools=[tool],
-        ))
+        harness = AgentHarness(
+            AgentHarnessOptions(
+                model=_make_model("model-a"),
+                stream_fn=_capturing_stream,
+                tools=[tool],
+            )
+        )
 
         # 第一轮流式输出后工具执行；工具等待测试任务切换模型
         async def _run():
@@ -451,14 +465,18 @@ class TestHarnessQueues:
     @pytest.mark.asyncio
     async def test_steer_during_run_injected(self):
         core = faux_provider(tokens_per_second=200)
-        core.set_responses([
-            faux_assistant_message("A" * 100),
-            faux_assistant_message("B" * 20),
-        ])
-        harness = AgentHarness(AgentHarnessOptions(
-            model=_make_model(),
-            stream_fn=core.stream,
-        ))
+        core.set_responses(
+            [
+                faux_assistant_message("A" * 100),
+                faux_assistant_message("B" * 20),
+            ]
+        )
+        harness = AgentHarness(
+            AgentHarnessOptions(
+                model=_make_model(),
+                stream_fn=core.stream,
+            )
+        )
 
         async def _steer_mid_run():
             await asyncio.sleep(0.05)
@@ -473,14 +491,18 @@ class TestHarnessQueues:
     @pytest.mark.asyncio
     async def test_follow_up_after_stop_injected(self):
         core = faux_provider(tokens_per_second=200)
-        core.set_responses([
-            faux_assistant_message("A" * 50),
-            faux_assistant_message("B" * 20),
-        ])
-        harness = AgentHarness(AgentHarnessOptions(
-            model=_make_model(),
-            stream_fn=core.stream,
-        ))
+        core.set_responses(
+            [
+                faux_assistant_message("A" * 50),
+                faux_assistant_message("B" * 20),
+            ]
+        )
+        harness = AgentHarness(
+            AgentHarnessOptions(
+                model=_make_model(),
+                stream_fn=core.stream,
+            )
+        )
 
         async def _follow_up_mid_run():
             await asyncio.sleep(0.05)
@@ -563,10 +585,12 @@ class TestHarnessAbortShutdown:
     async def test_abort_clears_queues_and_stops_run(self):
         core = faux_provider(tokens_per_second=100)
         core.set_responses([faux_assistant_message("A" * 300)])
-        harness = AgentHarness(AgentHarnessOptions(
-            model=_make_model(),
-            stream_fn=core.stream,
-        ))
+        harness = AgentHarness(
+            AgentHarnessOptions(
+                model=_make_model(),
+                stream_fn=core.stream,
+            )
+        )
 
         run_task = asyncio.create_task(harness.prompt("Q"))
         await asyncio.sleep(0.05)

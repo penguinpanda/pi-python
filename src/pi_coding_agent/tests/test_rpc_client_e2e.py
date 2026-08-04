@@ -14,29 +14,29 @@ def _rpc_env(tmp_path):
     """隔离 ~/.pi 并让子进程可导入本仓库包。"""
     deps = r"C:\Users\pengu\.codex\visualizations\2026\08\03\019fc699-764e-7f70-9ea5-7ffda55746b8\py-deps"
     env = dict(os.environ)
-    env["PYTHONPATH"] = os.pathsep.join(
-        [part for part in [deps, os.path.abspath("src")] if part]
-    )
+    env["PYTHONPATH"] = os.pathsep.join([part for part in [deps, os.path.abspath("src")] if part])
     env["USERPROFILE"] = str(tmp_path)
     env["HOME"] = str(tmp_path)
     return env
 
 
 def _make_client(tmp_path) -> RpcClient:
-    return RpcClient({
-        "command": [
-            sys.executable,
-            "-m",
-            "pi_coding_agent",
-            "--mode",
-            "rpc",
-            "--provider",
-            "faux",
-            "--model",
-            "faux-1",
-        ],
-        "env": _rpc_env(tmp_path),
-    })
+    return RpcClient(
+        {
+            "command": [
+                sys.executable,
+                "-m",
+                "pi_coding_agent",
+                "--mode",
+                "rpc",
+                "--provider",
+                "faux",
+                "--model",
+                "faux-1",
+            ],
+            "env": _rpc_env(tmp_path),
+        }
+    )
 
 
 @pytest.mark.asyncio

@@ -54,9 +54,7 @@ async def exchange_authorization_code(code: str, verifier: str) -> OAuthCredenti
             },
         )
     if not response.is_success:
-        raise RuntimeError(
-            f"OpenRouter OAuth key exchange failed (HTTP {response.status_code})"
-        )
+        raise RuntimeError(f"OpenRouter OAuth key exchange failed (HTTP {response.status_code})")
     body = response.json()
     key = body.get("key") if isinstance(body, dict) else None
     if not isinstance(key, str) or not key:
@@ -106,9 +104,7 @@ async def _login(interaction: AuthInteraction) -> OAuthCredential:
     return await exchange_authorization_code(code, verifier)
 
 
-async def _refresh(
-    credential: OAuthCredential, signal: Any = None
-) -> OAuthCredential:
+async def _refresh(credential: OAuthCredential, signal: Any = None) -> OAuthCredential:
     # OpenRouter 的 key 是永久的，无 refresh 概念。
     return credential
 

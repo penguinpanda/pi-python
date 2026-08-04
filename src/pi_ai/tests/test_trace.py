@@ -14,7 +14,6 @@ from pi_ai.trace import (
     trace_from_dict,
     trace_to_dict,
 )
-from pi_ai.types.trace import TraceSpan
 
 
 class TestTraceTracer:

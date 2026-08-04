@@ -12,7 +12,6 @@ from pi_coding_agent.extensions.runner import ExtensionRunner
 from pi_coding_agent.extensions.types import (
     Extension,
     ExtensionError,
-    ExtensionRuntime,
 )
 from pi_coding_agent.model_runtime import ModelRuntime
 
@@ -45,10 +44,12 @@ class TestEventDispatch:
             calls.append("two")
             return 2
 
-        runner = ExtensionRunner([
-            _make_extension({"agent_start": [handler_one]}),
-            _make_extension({"agent_start": [handler_two]}),
-        ])
+        runner = ExtensionRunner(
+            [
+                _make_extension({"agent_start": [handler_one]}),
+                _make_extension({"agent_start": [handler_two]}),
+            ]
+        )
         results = await runner.emit_event("agent_start", {"prompt": "hi"})
         assert results == [1, 2]
         assert calls == ["one", "two"]
@@ -62,9 +63,11 @@ class TestEventDispatch:
         def good(event, ctx):
             return "ok"
 
-        runner = ExtensionRunner([
-            _make_extension({"agent_start": [bad, good]}),
-        ])
+        runner = ExtensionRunner(
+            [
+                _make_extension({"agent_start": [bad, good]}),
+            ]
+        )
         runner.on_error(errors.append)
         results = await runner.emit_event("agent_start")
         assert results == ["ok"]
@@ -102,10 +105,12 @@ class TestEmitInput:
         def never(event, ctx):
             raise AssertionError("should not run")
 
-        runner = ExtensionRunner([
-            _make_extension({"input": [handled]}),
-            _make_extension({"input": [never]}),
-        ])
+        runner = ExtensionRunner(
+            [
+                _make_extension({"input": [handled]}),
+                _make_extension({"input": [never]}),
+            ]
+        )
         text, action = await runner.emit_input("go")
         assert text == "stop"
         assert action == "handled"
@@ -134,9 +139,11 @@ class TestContext:
     async def test_command_context_new_session(self):
         calls: list[str] = []
         runner = ExtensionRunner()
-        runner.bind(command_handlers={
-            "new_session": lambda options: calls.append("new") or {"cancelled": False},
-        })
+        runner.bind(
+            command_handlers={
+                "new_session": lambda options: calls.append("new") or {"cancelled": False},
+            }
+        )
         context = runner.create_command_context()
         result = await context.new_session()
         assert result == {"cancelled": False}
@@ -154,7 +161,15 @@ class TestRegistrations:
         def make(command_name):
             extension = Extension(path="<inline>", resolved_path="<inline>")
             extension.commands[command_name] = type(
-                "C", (), {"name": command_name, "description": "d", "argument_hint": None, "handler": None, "source_info": None}
+                "C",
+                (),
+                {
+                    "name": command_name,
+                    "description": "d",
+                    "argument_hint": None,
+                    "handler": None,
+                    "source_info": None,
+                },
             )()
             return extension
 
@@ -164,8 +179,22 @@ class TestRegistrations:
 
     def test_flags_and_shortcuts(self):
         extension = Extension(path="<inline>", resolved_path="<inline>")
-        extension.flags["f"] = type("F", (), {"name": "f", "description": "", "type": "boolean", "default": True, "extension_path": "x"})()
-        extension.shortcuts["ctrl+k"] = type("S", (), {"shortcut": "ctrl+k", "description": "s", "handler": None, "extension_path": "x"})()
+        extension.flags["f"] = type(
+            "F",
+            (),
+            {
+                "name": "f",
+                "description": "",
+                "type": "boolean",
+                "default": True,
+                "extension_path": "x",
+            },
+        )()
+        extension.shortcuts["ctrl+k"] = type(
+            "S",
+            (),
+            {"shortcut": "ctrl+k", "description": "s", "handler": None, "extension_path": "x"},
+        )()
         runner = ExtensionRunner([extension])
         assert runner.get_flags()[0].name == "f"
         assert runner.get_shortcuts()[0].shortcut == "ctrl+k"
@@ -173,16 +202,16 @@ class TestRegistrations:
     async def test_provider_application(self):
         runtime = _make_runtime()
         extension = Extension(path="<inline>", resolved_path="<inline>")
-        extension.providers.append((
-            "acme",
-            {
-                "api_key": "sk-acme",
-                "base_url": "https://acme.api/v1",
-                "models": [
-                    {"id": "acme-1", "api": "openai-completions", "reasoning": False}
-                ],
-            },
-        ))
+        extension.providers.append(
+            (
+                "acme",
+                {
+                    "api_key": "sk-acme",
+                    "base_url": "https://acme.api/v1",
+                    "models": [{"id": "acme-1", "api": "openai-completions", "reasoning": False}],
+                },
+            )
+        )
         runner = ExtensionRunner([extension], cwd="/tmp", model_runtime=runtime)
         runner.apply_providers()
         model = runtime.get_model("acme", "acme-1")
@@ -200,10 +229,25 @@ class TestRegistrations:
             return f"ran {args}"
 
         extension.commands["greet"] = type(
-            "C", (), {"name": "greet", "description": "Greet", "argument_hint": "<name>", "handler": handler, "source_info": None}
+            "C",
+            (),
+            {
+                "name": "greet",
+                "description": "Greet",
+                "argument_hint": "<name>",
+                "handler": handler,
+                "source_info": None,
+            },
         )()
         extension.shortcuts["ctrl+k"] = type(
-            "S", (), {"shortcut": "ctrl+k", "description": "Shortcut", "handler": None, "extension_path": "x"}
+            "S",
+            (),
+            {
+                "shortcut": "ctrl+k",
+                "description": "Shortcut",
+                "handler": None,
+                "extension_path": "x",
+            },
         )()
 
         runner = ExtensionRunner([extension], cwd="/tmp")

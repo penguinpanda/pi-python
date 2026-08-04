@@ -21,9 +21,7 @@ def cache_headers(entry: ModelsStoreEntry | None) -> dict[str, str]:
 
 def http_date(unix_ms: int) -> str:
     """Unix 毫秒时间戳 → HTTP-date。"""
-    return format_datetime(
-        datetime.fromtimestamp(unix_ms / 1000, tz=timezone.utc), usegmt=True
-    )
+    return format_datetime(datetime.fromtimestamp(unix_ms / 1000, tz=timezone.utc), usegmt=True)
 
 
 def parse_http_date(value: str | None) -> int | None:
@@ -44,9 +42,7 @@ def extract_cache_metadata(headers: Any) -> tuple[str | None, int | None]:
         get = headers.get if hasattr(headers, "get") else None
         if get is not None:
             etag = get("etag") or get("ETag") or None
-            last_modified = parse_http_date(
-                get("last-modified") or get("Last-Modified") or None
-            )
+            last_modified = parse_http_date(get("last-modified") or get("Last-Modified") or None)
     except Exception:
         pass
     return etag, last_modified

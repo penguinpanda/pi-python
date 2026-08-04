@@ -4,6 +4,8 @@
 
 ### Added
 
+- 引入 ruff（lint + format）与 mypy 配置及依赖
+- GitHub Actions CI：uv sync → ruff lint/format → pytest（含 PostgreSQL 存储测试）
 - `/trust` slash command and CLI startup project-trust resolution (`trust.json` persistence)
 - `/changelog` slash command backed by `CHANGELOG.md` parsing
 - TUI trust selector and settings selector entry points
@@ -19,6 +21,14 @@
 - `pi-evals` harness with smoke and extensions evals (faux provider)
 - TUI tool-execution, skill-invocation, compaction/branch-summary message entries
 - TUI thinking/oauth/scoped-models selectors and extension selector (`/thinking`, `/oauth`, `/extensions`)
+
+### Changed
+
+- `!command` 配置值改为 `shlex.split` 参数数组执行（不再经 shell，消除命令注入边界）
+- 提交 `uv.lock` 锁定依赖；`docs/` 保持不入库；运行时 `.pi/` 目录忽略
+- 修复 `app.py` 中 `/reload` 未导入 `Path` 的运行时错误、`env.py` 回调异常被静默吞掉的问题
+- 清理 `_agent_loop.py` 游离 docstring 与各类 lint 问题（未使用变量/导入、异常链、zip strict 等）
+- 默认 pytest 不再强制开启覆盖率（CI 中显式开启）
 
 ## [0.1.0]
 

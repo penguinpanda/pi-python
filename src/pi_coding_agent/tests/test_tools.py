@@ -66,7 +66,7 @@ class TestReadTool:
 
     def test_read_nonexistent_file(self):
         tool = create_read_tool(str(Path(tempfile.gettempdir())))
-        with pytest.raises(Exception):
+        with pytest.raises(Exception):  # noqa: B017 - 验证错误路径会抛异常即可
             asyncio.run(tool.execute("tc1", {"path": "nonexistent.txt"}))
 
 
@@ -76,9 +76,9 @@ class TestWriteTool:
     def test_write_new_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tool = create_write_tool(tmpdir)
-            result = asyncio.run(tool.execute(
-                "tc1", {"path": "output.txt", "content": "hello world"}
-            ))
+            result = asyncio.run(
+                tool.execute("tc1", {"path": "output.txt", "content": "hello world"})
+            )
             assert "Successfully wrote" in result.content[0]["text"]
             assert (Path(tmpdir) / "output.txt").read_text() == "hello world"
 
@@ -88,9 +88,9 @@ class TestWriteTool:
             file_path.write_text("old content")
 
             tool = create_write_tool(tmpdir)
-            result = asyncio.run(tool.execute(
-                "tc1", {"path": "existing.txt", "content": "new content"}
-            ))
+            result = asyncio.run(
+                tool.execute("tc1", {"path": "existing.txt", "content": "new content"})
+            )
             assert "Successfully wrote" in result.content[0]["text"]
             assert file_path.read_text() == "new content"
 
@@ -104,23 +104,27 @@ class TestEditTool:
             file_path.write_text("def hello():\n    return 'old'\n")
 
             tool = create_edit_tool(tmpdir)
-            result = asyncio.run(tool.execute(
-                "tc1",
-                {
-                    "path": "code.py",
-                    "edits": [{"oldText": "    return 'old'", "newText": "    return 'new'"}],
-                },
-            ))
+            result = asyncio.run(
+                tool.execute(
+                    "tc1",
+                    {
+                        "path": "code.py",
+                        "edits": [{"oldText": "    return 'old'", "newText": "    return 'new'"}],
+                    },
+                )
+            )
             assert "Successfully replaced" in result.content[0]["text"]
             assert "return 'new'" in file_path.read_text()
 
     def test_edit_nonexistent_file(self):
         tool = create_edit_tool(str(Path(tempfile.gettempdir())))
-        with pytest.raises(Exception):
-            asyncio.run(tool.execute(
-                "tc1",
-                {"path": "nonexistent.py", "edits": [{"oldText": "a", "newText": "b"}]},
-            ))
+        with pytest.raises(Exception):  # noqa: B017 - 验证错误路径会抛异常即可
+            asyncio.run(
+                tool.execute(
+                    "tc1",
+                    {"path": "nonexistent.py", "edits": [{"oldText": "a", "newText": "b"}]},
+                )
+            )
 
 
 class TestBashTool:
@@ -202,8 +206,9 @@ class TestLsTool:
             assert "file1.txt" in result.content[0]["text"]
             assert "file2.txt" in result.content[0]["text"]
             # 目录应该有 /
-            assert any("subdir" in line and "/" in line
-                       for line in result.content[0]["text"].split("\n"))
+            assert any(
+                "subdir" in line and "/" in line for line in result.content[0]["text"].split("\n")
+            )
 
     def test_ls_empty_directory(self):
         with tempfile.TemporaryDirectory() as tmpdir:

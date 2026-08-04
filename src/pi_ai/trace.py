@@ -135,9 +135,7 @@ class TraceTracer:
 # 当前 trace 传播（contextvar）
 # ---------------------------------------------------------------------------
 
-_current_trace: ContextVar[Trace | None] = ContextVar(
-    "pi_ai_current_trace", default=None
-)
+_current_trace: ContextVar[Trace | None] = ContextVar("pi_ai_current_trace", default=None)
 
 
 def current_trace() -> Trace | None:

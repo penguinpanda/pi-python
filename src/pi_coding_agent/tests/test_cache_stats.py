@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pi_coding_agent.cache_stats import NOISE_FLOOR_TOKENS, compute_cache_waste
+from pi_coding_agent.cache_stats import compute_cache_waste
 
 
 def _assistant(provider="faux", model="faux-1", usage=None):

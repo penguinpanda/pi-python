@@ -27,28 +27,21 @@ class TestKeybindingsManager:
         assert manager.get_action_key("app.model.cycleForward") == "ctrl+k"
 
     def test_user_bindings_list(self):
-        manager = KeybindingsManager(
-            user_bindings={"app.model.cycleForward": ["ctrl+k", "ctrl+j"]}
-        )
+        manager = KeybindingsManager(user_bindings={"app.model.cycleForward": ["ctrl+k", "ctrl+j"]})
         assert manager.get_action_key("app.model.cycleForward") == "ctrl+k"
         assert manager.resolve("ctrl+j") == "app.model.cycleForward"
 
     def test_user_bindings_disable(self):
-        manager = KeybindingsManager(
-            user_bindings={"app.model.cycleForward": []}
-        )
+        manager = KeybindingsManager(user_bindings={"app.model.cycleForward": []})
         assert manager.is_enabled("app.model.cycleForward") is False
         assert manager.resolve("ctrl+p") is None
         assert all(
-            binding.action_id != "app.model.cycleForward"
-            for binding in manager.all_bindings()
+            binding.action_id != "app.model.cycleForward" for binding in manager.all_bindings()
         )
 
     def test_load_from_settings(self):
         manager = KeybindingsManager()
-        manager.load_from_settings(
-            {"keybindings": {"app.model.select": "ctrl+m"}}
-        )
+        manager.load_from_settings({"keybindings": {"app.model.select": "ctrl+m"}})
         assert manager.resolve("ctrl+m") == "app.model.select"
         assert manager.resolve("ctrl+l") is None
 

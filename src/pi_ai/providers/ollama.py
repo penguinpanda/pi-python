@@ -81,7 +81,6 @@ def _ollama_base_url() -> str:
 # 因为它会原样作为 model 参数发送给 API。
 # ------------------------------------------------------
 OLLAMA_MODELS: list[Model] = [
-
     # Qwen3 30B
     #
     # 通用对话模型。
@@ -103,7 +102,6 @@ OLLAMA_MODELS: list[Model] = [
         reasoning=True,
         cost=ModelCost(),  # 本地运行，无费用
     ),
-
     # Qwen3 30B-A3B（MoE 版本）
     Model(
         id="qwen3:30b-a3b",
@@ -117,7 +115,6 @@ OLLAMA_MODELS: list[Model] = [
         reasoning=True,
         cost=ModelCost(),
     ),
-
     # Qwen3 14B Abliterated（社区去审查版）
     Model(
         id="richardyoung/qwen3-14b-abliterated:Q5_K_M",
@@ -131,7 +128,6 @@ OLLAMA_MODELS: list[Model] = [
         reasoning=True,
         cost=ModelCost(),
     ),
-
     # GPT-OSS 20B
     #
     # OpenAI 开源权重模型。
@@ -152,7 +148,6 @@ OLLAMA_MODELS: list[Model] = [
         reasoning=True,
         cost=ModelCost(),
     ),
-
     # Llama 3.2 Vision
     #
     # 多模态模型。
@@ -172,7 +167,6 @@ OLLAMA_MODELS: list[Model] = [
         context_window=131072,
         cost=ModelCost(),
     ),
-
     # Qwen 2.5 7B Instruct
     Model(
         id="qwen2.5:7b-instruct-q8_0",
@@ -185,7 +179,6 @@ OLLAMA_MODELS: list[Model] = [
         context_window=131072,
         cost=ModelCost(),
     ),
-
     # DeepSeek R1 14B
     #
     # 推理模型。
@@ -262,11 +255,7 @@ async def discover_ollama_models(
         if resp.status_code != 200:
             return None
         data = resp.json()
-        names = [
-            item.get("name", "")
-            for item in data.get("models", [])
-            if item.get("name")
-        ]
+        names = [item.get("name", "") for item in data.get("models", []) if item.get("name")]
         return _merge_ollama_models(names)
     except Exception:
         # 任何网络/解析失败都不阻断调用方，回退静态列表。
@@ -321,15 +310,11 @@ def ollama_provider(models: list[Model] | None = None) -> Provider:
     return create_provider(
         id="ollama",
         name="Ollama",
-
         # 本地服务无需 API Key。
         auth=None,
-
         models=models if models is not None else OLLAMA_MODELS,
-
         # Ollama 提供 OpenAI Chat Completions 兼容接口。
         api_kind="completions",
-
         # Ollama OpenAI Compatible API 地址。
         #
         # 使用 127.0.0.1 而非 localhost，

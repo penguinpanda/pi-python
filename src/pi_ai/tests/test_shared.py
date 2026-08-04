@@ -2,18 +2,10 @@
 Unit tests for _shared.py — shared helper functions.
 """
 
-import pytest
-
 from pi_ai._types import (
-    AssistantMessage,
-    ImageContent,
     Message,
     Model,
-    TextContent,
-    ThinkingContent,
     Tool,
-    ToolCall,
-    Usage,
 )
 from pi_ai.api._shared import (
     build_error_message,
@@ -28,6 +20,7 @@ from pi_ai.api._shared import (
 # ---------------------------------------------------------------------------
 # Test helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_model(
     model_id: str = "test-model",
@@ -48,6 +41,7 @@ def _make_model(
 # ---------------------------------------------------------------------------
 # to_openai_messages
 # ---------------------------------------------------------------------------
+
 
 class TestToOpenaiMessages:
     """Message format conversion: SDK → OpenAI Chat Completions."""
@@ -72,7 +66,12 @@ class TestToOpenaiMessages:
                 "role": "user",
                 "content": [
                     {"type": "text", "text": "What is this?"},
-                    {"type": "image", "url": "https://example.com/img.png", "data": None, "mime_type": None},
+                    {
+                        "type": "image",
+                        "url": "https://example.com/img.png",
+                        "data": None,
+                        "mime_type": None,
+                    },
                 ],
             }
         ]
@@ -108,7 +107,12 @@ class TestToOpenaiMessages:
                 "role": "user",
                 "content": [
                     {"type": "text", "text": "Hi"},
-                    {"type": "image", "url": "https://example.com/img.png", "data": None, "mime_type": None},
+                    {
+                        "type": "image",
+                        "url": "https://example.com/img.png",
+                        "data": None,
+                        "mime_type": None,
+                    },
                 ],
             }
         ]
@@ -151,7 +155,12 @@ class TestToOpenaiMessages:
                 "role": "assistant",
                 "content": [
                     {"type": "text", "text": "Let me search."},
-                    {"type": "toolCall", "id": "call_1", "name": "search", "arguments": {"q": "test"}},
+                    {
+                        "type": "toolCall",
+                        "id": "call_1",
+                        "name": "search",
+                        "arguments": {"q": "test"},
+                    },
                 ],
                 "api": "openai-completions",
                 "provider": "test",
@@ -245,6 +254,7 @@ class TestToOpenaiMessages:
 # to_openai_tools
 # ---------------------------------------------------------------------------
 
+
 class TestToOpenaiTools:
     """Tool schema conversion: SDK Tool → OpenAI function tool."""
 
@@ -282,6 +292,7 @@ class TestToOpenaiTools:
 # empty_usage
 # ---------------------------------------------------------------------------
 
+
 class TestEmptyUsage:
     """Construct zeroed Usage."""
 
@@ -307,6 +318,7 @@ class TestEmptyUsage:
 # ---------------------------------------------------------------------------
 # build_error_message
 # ---------------------------------------------------------------------------
+
 
 class TestBuildErrorMessage:
     """Error AssistantMessage construction."""
@@ -335,6 +347,7 @@ class TestBuildErrorMessage:
 # ---------------------------------------------------------------------------
 # extract_text
 # ---------------------------------------------------------------------------
+
 
 class TestExtractText:
     """Pure-text extraction from ContentBlock list."""
@@ -374,6 +387,7 @@ class TestExtractText:
 # ---------------------------------------------------------------------------
 # parse_tool_arguments
 # ---------------------------------------------------------------------------
+
 
 class TestParseToolArguments:
     """Streaming tool-call raw JSON parsing."""

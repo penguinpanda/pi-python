@@ -173,7 +173,7 @@ class TestCompactionContext:
     async def test_compaction_skips_summarized_entries(self):
         storage = InMemorySessionStorage()
         session = Session(storage)
-        a_id = await session.append_message(_user_message("a"))
+        await session.append_message(_user_message("a"))
         b_id = await session.append_message(_user_message("b"))
         await session.append_message(_user_message("c"))
 

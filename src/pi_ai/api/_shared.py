@@ -58,7 +58,6 @@ from ..types import (
     Model,
     SystemMessage,
     Tool,
-    ToolCall,
     ToolResultMessage,
     Usage,
     UserMessage,
@@ -183,7 +182,6 @@ def to_openai_messages(
                         if block.get("url"):
                             image_part["image_url"] = {"url": block["url"]}
                         elif block.get("data"):
-
                             # Base64 图片需要转换成
                             #
                             # data URL。
@@ -220,17 +218,19 @@ def to_openai_messages(
                 if block["type"] == "text":
                     text_parts.append(block["text"])
                 elif block["type"] == "toolCall":
-                    tool_calls.append({
-                        "id": block["id"],
-                        "type": "function",
-                        "function": {
-                            "name": block["name"],
-                            "arguments": json.dumps(
-                                block["arguments"] if block["arguments"] is not None else {},
-                                ensure_ascii=False,
-                            ),
-                        },
-                    })
+                    tool_calls.append(
+                        {
+                            "id": block["id"],
+                            "type": "function",
+                            "function": {
+                                "name": block["name"],
+                                "arguments": json.dumps(
+                                    block["arguments"] if block["arguments"] is not None else {},
+                                    ensure_ascii=False,
+                                ),
+                            },
+                        }
+                    )
                 elif block["type"] == "thinking":
                     # Skip assistant thinking blocks — replayed as text
                     pass
@@ -261,11 +261,13 @@ def to_openai_messages(
                 if block["type"] == "text":
                     content_str += block["text"]
 
-            result.append({
-                "role": "tool",
-                "tool_call_id": tr_msg["tool_call_id"],
-                "content": content_str,
-            })
+            result.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tr_msg["tool_call_id"],
+                    "content": content_str,
+                }
+            )
 
     return result
 

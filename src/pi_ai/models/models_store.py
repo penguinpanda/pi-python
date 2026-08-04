@@ -9,7 +9,7 @@
 import copy
 import json
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -133,7 +133,7 @@ def model_to_dict(model: Model) -> dict[str, Any]:
 
 def model_from_dict(data: dict[str, Any]) -> Model:
     """字典 → Model（model_to_dict 的逆操作）。"""
-    from ..types import ModelCost, ModelCostTier, ModelCostRates
+    from ..types import ModelCost, ModelCostTier
 
     cost_data = data.get("cost") or {}
     tiers = [

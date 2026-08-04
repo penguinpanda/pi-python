@@ -327,9 +327,7 @@ class AgentSession:
                 tool_results += 1
 
         turn_count = len(self._turn_timings)
-        total_turn_ms = sum(
-            timing.get("durationMs", 0) for timing in self._turn_timings
-        )
+        total_turn_ms = sum(timing.get("durationMs", 0) for timing in self._turn_timings)
         cache_stats = compute_cache_waste(messages, self._model_runtime)
         return {
             "sessionFile": self.session_file,
@@ -351,9 +349,7 @@ class AgentSession:
             "cacheStats": cache_stats,
         }
 
-    async def compact(
-        self, custom_instructions: str | None = None
-    ) -> CompactionResult | None:
+    async def compact(self, custom_instructions: str | None = None) -> CompactionResult | None:
         """手动压缩（RPC compact 命令）。
 
         custom_instructions 预留（当前摘要提示词固定，与 TS 对齐后启用）。
@@ -384,23 +380,27 @@ class AgentSession:
                 result.details,
             )
             self._agent.state.messages = self._session_manager.build_context()
-            self._emit({
-                "type": "compaction_end",
-                "reason": "manual",
-                "result": result,
-                "aborted": False,
-                "willRetry": False,
-            })
+            self._emit(
+                {
+                    "type": "compaction_end",
+                    "reason": "manual",
+                    "result": result,
+                    "aborted": False,
+                    "willRetry": False,
+                }
+            )
             return result
         except Exception as exc:
-            self._emit({
-                "type": "compaction_end",
-                "reason": "manual",
-                "result": None,
-                "aborted": False,
-                "willRetry": False,
-                "error": str(exc),
-            })
+            self._emit(
+                {
+                    "type": "compaction_end",
+                    "reason": "manual",
+                    "result": None,
+                    "aborted": False,
+                    "willRetry": False,
+                    "error": str(exc),
+                }
+            )
             return None
         finally:
             self._is_compacting = False
@@ -461,12 +461,15 @@ class AgentSession:
 
         await manager.move_to(entry_id, summary)
         self._agent.state.messages = manager.build_context()
-        self._emit({
-            "type": "navigated",
-            "entryId": entry_id,
-            "fromEntryId": old_leaf,
-        })
+        self._emit(
+            {
+                "type": "navigated",
+                "entryId": entry_id,
+                "fromEntryId": old_leaf,
+            }
+        )
         return True
+
     async def set_model(self, model: Model) -> None:
         """切换模型：校验认证 → 更新 agent state → 记录会话 → 重算思考级别。"""
         runtime = self._model_runtime
@@ -482,11 +485,13 @@ class AgentSession:
         self._model = model
         self.set_thinking_level(thinking_level)
         if not models_are_equal(previous_model, model):
-            self._emit({
-                "type": "model_changed",
-                "model": model,
-                "previousModel": previous_model,
-            })
+            self._emit(
+                {
+                    "type": "model_changed",
+                    "model": model,
+                    "previousModel": previous_model,
+                }
+            )
 
     async def cycle_model(self, direction: int = 1) -> ModelCycleResult | None:
         """循环切换模型（正数向前 / 负数向后）。"""
@@ -494,9 +499,7 @@ class AgentSession:
             return await self._cycle_scoped_model(direction)
         return await self._cycle_available_model(direction)
 
-    async def _cycle_scoped_model(
-        self, direction: int
-    ) -> ModelCycleResult | None:
+    async def _cycle_scoped_model(self, direction: int) -> ModelCycleResult | None:
         runtime = self._model_runtime
         if runtime is None:
             return None
@@ -505,7 +508,7 @@ class AgentSession:
         )
         scoped = [
             scoped
-            for scoped, check in zip(self._scoped_models, checks)
+            for scoped, check in zip(self._scoped_models, checks, strict=True)
             if check is not None
         ]
         if len(scoped) <= 1:
@@ -528,9 +531,7 @@ class AgentSession:
             else (current_index - 1 + length) % length
         )
         next_scoped = scoped[next_index]
-        thinking_level = self._get_thinking_level_for_model_switch(
-            next_scoped.thinking_level
-        )
+        thinking_level = self._get_thinking_level_for_model_switch(next_scoped.thinking_level)
         previous_model = self._model
         self._agent.state.model = next_scoped.model
         await self._session_manager.append_model_change(
@@ -539,16 +540,16 @@ class AgentSession:
         self._model = next_scoped.model
         self.set_thinking_level(thinking_level)
         if not models_are_equal(previous_model, next_scoped.model):
-            self._emit({
-                "type": "model_changed",
-                "model": next_scoped.model,
-                "previousModel": previous_model,
-            })
+            self._emit(
+                {
+                    "type": "model_changed",
+                    "model": next_scoped.model,
+                    "previousModel": previous_model,
+                }
+            )
         return ModelCycleResult(next_scoped.model, self.thinking_level, True)
 
-    async def _cycle_available_model(
-        self, direction: int
-    ) -> ModelCycleResult | None:
+    async def _cycle_available_model(self, direction: int) -> ModelCycleResult | None:
         runtime = self._model_runtime
         if runtime is None:
             return None
@@ -576,17 +577,17 @@ class AgentSession:
         thinking_level = self._get_thinking_level_for_model_switch()
         previous_model = self._model
         self._agent.state.model = next_model
-        await self._session_manager.append_model_change(
-            next_model.provider, next_model.id
-        )
+        await self._session_manager.append_model_change(next_model.provider, next_model.id)
         self._model = next_model
         self.set_thinking_level(thinking_level)
         if not models_are_equal(previous_model, next_model):
-            self._emit({
-                "type": "model_changed",
-                "model": next_model,
-                "previousModel": previous_model,
-            })
+            self._emit(
+                {
+                    "type": "model_changed",
+                    "model": next_model,
+                    "previousModel": previous_model,
+                }
+            )
         return ModelCycleResult(next_model, self.thinking_level, False)
 
     # ------------------------------------------------------------------
@@ -604,31 +605,25 @@ class AgentSession:
     def set_thinking_level(self, level: ModelThinkingLevel) -> None:
         """设置思考级别（按模型能力收敛；仅在变化时持久化）。"""
         available = self.get_available_thinking_levels()
-        effective = (
-            level
-            if level in available
-            else self._clamp_thinking_level(level, available)
-        )
+        effective = level if level in available else self._clamp_thinking_level(level, available)
         previous = self._agent.state.thinking_level
         if effective == previous:
             return
         self._agent.state.thinking_level = effective
         self._persist_thinking_level_change(effective)
-        self._emit({
-            "type": "thinking_level_changed",
-            "level": effective,
-            "previousLevel": previous,
-        })
+        self._emit(
+            {
+                "type": "thinking_level_changed",
+                "level": effective,
+                "previousLevel": previous,
+            }
+        )
 
     def cycle_thinking_level(self) -> ModelThinkingLevel | None:
         if not self.supports_thinking():
             return None
         levels = self.get_available_thinking_levels()
-        current_index = (
-            levels.index(self.thinking_level)
-            if self.thinking_level in levels
-            else -1
-        )
+        current_index = levels.index(self.thinking_level) if self.thinking_level in levels else -1
         next_index = (current_index + 1) % len(levels)
         next_level = levels[next_index]
         self.set_thinking_level(next_level)
@@ -691,10 +686,12 @@ class AgentSession:
             await self._retry_failed_turn()
         finally:
             self._abort = None
-            self._turn_timings.append({
-                "startedAtMs": started_at_ms,
-                "durationMs": (time.perf_counter() - started) * 1000,
-            })
+            self._turn_timings.append(
+                {
+                    "startedAtMs": started_at_ms,
+                    "durationMs": (time.perf_counter() - started) * 1000,
+                }
+            )
 
     def expand_prompt(self, text: str) -> str:
         """展开 `/skill:name` 与 `/templateName`；未匹配时原样返回。"""
@@ -722,9 +719,7 @@ class AgentSession:
         if skill is None:
             return text
         try:
-            body = strip_frontmatter(
-                Path(skill.file_path).read_text(encoding="utf-8")
-            ).strip()
+            body = strip_frontmatter(Path(skill.file_path).read_text(encoding="utf-8")).strip()
         except OSError:
             return text
         block = (
@@ -818,17 +813,19 @@ class AgentSession:
                 return await self._run_auto_compaction("overflow", False)
 
             if self._overflow_recovery_attempted:
-                self._emit({
-                    "type": "compaction_end",
-                    "reason": "overflow",
-                    "result": None,
-                    "aborted": False,
-                    "willRetry": False,
-                    "errorMessage": (
-                        "Context overflow recovery failed after one compact-and-retry "
-                        "attempt. Try reducing context or switching to a larger-context model."
-                    ),
-                })
+                self._emit(
+                    {
+                        "type": "compaction_end",
+                        "reason": "overflow",
+                        "result": None,
+                        "aborted": False,
+                        "willRetry": False,
+                        "errorMessage": (
+                            "Context overflow recovery failed after one compact-and-retry "
+                            "attempt. Try reducing context or switching to a larger-context model."
+                        ),
+                    }
+                )
                 return False
 
             self._overflow_recovery_attempted = True
@@ -880,14 +877,16 @@ class AgentSession:
                 thinking_level=self._agent.state.thinking_level,
             )
         except Exception as exc:
-            self._emit({
-                "type": "compaction_end",
-                "reason": reason,
-                "result": None,
-                "aborted": False,
-                "willRetry": False,
-                "error": str(exc),
-            })
+            self._emit(
+                {
+                    "type": "compaction_end",
+                    "reason": reason,
+                    "result": None,
+                    "aborted": False,
+                    "willRetry": False,
+                    "error": str(exc),
+                }
+            )
             return False
         finally:
             self._is_compacting = False
@@ -901,13 +900,15 @@ class AgentSession:
         # 重建 agent 上下文（compactionSummary + 保留的近期消息）。
         self._agent.state.messages = self._session_manager.build_context()
 
-        self._emit({
-            "type": "compaction_end",
-            "reason": reason,
-            "result": result,
-            "aborted": False,
-            "willRetry": will_retry,
-        })
+        self._emit(
+            {
+                "type": "compaction_end",
+                "reason": reason,
+                "result": result,
+                "aborted": False,
+                "willRetry": will_retry,
+            }
+        )
 
         if will_retry:
             await self._agent.continue_()
@@ -948,9 +949,7 @@ class AgentSession:
         """等待当前运行结束（含所有事件监听器完成）。"""
         await self._agent.wait_for_idle()
 
-    def subscribe(
-        self, listener: Callable[[AgentEvent], None]
-    ) -> Callable[[], None]:
+    def subscribe(self, listener: Callable[[AgentEvent], None]) -> Callable[[], None]:
         """订阅 Agent 生命周期事件。返回取消订阅函数。"""
         self._listeners.append(listener)
 
@@ -1007,9 +1006,7 @@ class AgentSession:
         # 扩展事件转发（Agent 生命周期 / 消息 / 工具钩子）。
         if self._extension_runner is not None:
             try:
-                await self._extension_runner.emit_event(
-                    event.get("type", ""), event
-                )
+                await self._extension_runner.emit_event(event.get("type", ""), event)
             except Exception:
                 pass
 
@@ -1020,9 +1017,7 @@ class AgentSession:
             msg = event.get("message")
             if msg is not None:
                 # 后台写入 JSONL，跟踪 task 以便 dispose 时等待
-                task = asyncio.create_task(
-                    self._session_manager.append_message(msg)
-                )
+                task = asyncio.create_task(self._session_manager.append_message(msg))
                 self._pending_writes.add(task)
                 task.add_done_callback(self._pending_writes.discard)
 

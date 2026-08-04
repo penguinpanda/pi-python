@@ -7,11 +7,7 @@ from pi_ai import (
     Models,
     Model,
     Context,
-    Tool,
-    Provider,
-    create_provider,
     create_default_models,
-    deepseek_provider,
     openai_provider,
 )
 from pi_ai.auth import env_api_key_auth, InMemoryCredentialStore, ApiKeyCredential, resolve_api_key
@@ -92,7 +88,6 @@ class TestModelsRegistry:
         assert len(models.get_providers()) == 0
 
     def test_unknown_provider_stream_raises(self):
-        import asyncio
 
         models = Models()
         fake_model = Model(
@@ -305,10 +300,12 @@ class TestModelsComplete:
 def asyncio_sync(coro):
     """Helper to run async code in sync tests."""
     import asyncio
+
     try:
-        loop = asyncio.get_running_loop()
+        asyncio.get_running_loop()
         # Already in async context — create a new loop in a thread
         import concurrent.futures
+
         with concurrent.futures.ThreadPoolExecutor() as pool:
             future = pool.submit(asyncio.run, coro)
             return future.result()

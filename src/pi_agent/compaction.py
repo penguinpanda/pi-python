@@ -15,7 +15,6 @@ from pi_ai.types import AgentMessage, Usage
 from pi_ai.utils.retry import RetryPolicy, retry_assistant_call
 
 from .compaction_utils import (
-    calculate_context_tokens,
     compute_file_lists,
     create_file_ops,
     estimate_context_tokens,
@@ -76,7 +75,14 @@ def _find_valid_cut_points(
         if entry["type"] != "message":
             continue
         role = entry["message"].get("role")
-        if role in ("bashExecution", "custom", "branchSummary", "compactionSummary", "user", "assistant"):
+        if role in (
+            "bashExecution",
+            "custom",
+            "branchSummary",
+            "compactionSummary",
+            "user",
+            "assistant",
+        ):
             cut_points.append(index)
     return cut_points
 
@@ -126,7 +132,9 @@ def find_cut_point(
 
     cut_entry = entries[cut_index]
     is_user_message = cut_entry["type"] == "message" and cut_entry["message"].get("role") == "user"
-    turn_start_index = -1 if is_user_message else find_turn_start_index(entries, cut_index, start_index)
+    turn_start_index = (
+        -1 if is_user_message else find_turn_start_index(entries, cut_index, start_index)
+    )
     return CutPointResult(
         cut_index,
         turn_start_index,
@@ -352,7 +360,9 @@ async def generate_summary_with_usage(
     )
     stop_reason = response.get("stop_reason")
     if stop_reason == "aborted":
-        return False, CompactionError("aborted", response.get("error_message") or "Summarization aborted")
+        return False, CompactionError(
+            "aborted", response.get("error_message") or "Summarization aborted"
+        )
     if stop_reason == "error":
         return False, CompactionError(
             "summarization_failed",
@@ -408,11 +418,11 @@ def prepare_compaction(
         boundary_start = first_kept_index if first_kept_index >= 0 else prev_compaction_index + 1
 
     boundary_end = len(path_entries)
-    tokens_before = estimate_context_tokens(
-        build_session_context(path_entries)["messages"]
-    ).tokens
+    tokens_before = estimate_context_tokens(build_session_context(path_entries)["messages"]).tokens
 
-    cut_point = find_cut_point(path_entries, boundary_start, boundary_end, settings.keep_recent_tokens)
+    cut_point = find_cut_point(
+        path_entries, boundary_start, boundary_end, settings.keep_recent_tokens
+    )
     first_kept_entry = path_entries[cut_point.first_kept_entry_index]
     first_kept_entry_id = first_kept_entry.get("id")
     if not first_kept_entry_id:
@@ -421,7 +431,9 @@ def prepare_compaction(
             "First kept entry has no UUID - session may need migration",
         )
 
-    history_end = cut_point.turn_start_index if cut_point.is_split_turn else cut_point.first_kept_entry_index
+    history_end = (
+        cut_point.turn_start_index if cut_point.is_split_turn else cut_point.first_kept_entry_index
+    )
     messages_to_summarize = [
         message
         for index in range(boundary_start, history_end)
@@ -530,7 +542,9 @@ async def _generate_turn_prefix_summary(
     )
     stop_reason = response.get("stop_reason")
     if stop_reason == "aborted":
-        return False, CompactionError("aborted", response.get("error_message") or "Turn prefix summarization aborted")
+        return False, CompactionError(
+            "aborted", response.get("error_message") or "Turn prefix summarization aborted"
+        )
     if stop_reason == "error":
         return False, CompactionError(
             "summarization_failed",

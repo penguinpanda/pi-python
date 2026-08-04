@@ -107,9 +107,7 @@ def find_exact_model_reference_match(
     normalized = trimmed.lower()
 
     canonical = [
-        model
-        for model in available_models
-        if f"{model.provider}/{model.id}".lower() == normalized
+        model for model in available_models if f"{model.provider}/{model.id}".lower() == normalized
     ]
     if len(canonical) == 1:
         return canonical[0]
@@ -132,9 +130,7 @@ def find_exact_model_reference_match(
             if len(provider_matches) > 1:
                 return None
 
-    id_matches = [
-        model for model in available_models if model.id.lower() == normalized
-    ]
+    id_matches = [model for model in available_models if model.id.lower() == normalized]
     return id_matches[0] if len(id_matches) == 1 else None
 
 
@@ -328,9 +324,7 @@ def resolve_cli_model(
         )
 
     provider_map = {model.provider.lower(): model.provider for model in available_models}
-    provider = (
-        provider_map.get(cli_provider.lower()) if cli_provider else None
-    )
+    provider = provider_map.get(cli_provider.lower()) if cli_provider else None
     if cli_provider and not provider:
         return ResolveCliModelResult(
             None,
@@ -357,8 +351,7 @@ def resolve_cli_model(
             (
                 model
                 for model in available_models
-                if model.id.lower() == lower
-                or f"{model.provider}/{model.id}".lower() == lower
+                if model.id.lower() == lower or f"{model.provider}/{model.id}".lower() == lower
             ),
             None,
         )
@@ -382,10 +375,7 @@ def resolve_cli_model(
     )
 
     if parsed.model is not None:
-        if (
-            inferred_provider
-            and not model_runtime.has_configured_auth(parsed.model.provider)
-        ):
+        if inferred_provider and not model_runtime.has_configured_auth(parsed.model.provider):
             raw_exact_matches = [
                 model
                 for model in available_models
@@ -408,8 +398,7 @@ def resolve_cli_model(
             (
                 model
                 for model in available_models
-                if model.id.lower() == lower
-                or f"{model.provider}/{model.id}".lower() == lower
+                if model.id.lower() == lower or f"{model.provider}/{model.id}".lower() == lower
             ),
             None,
         )
@@ -578,9 +567,7 @@ async def restore_model_from_session(
     """从会话恢复模型（不存在 / 未认证时回退）。"""
     restored = model_runtime.get_model(saved_provider, saved_model_id)
     has_auth = (
-        model_runtime.has_configured_auth(restored.provider)
-        if restored is not None
-        else False
+        model_runtime.has_configured_auth(restored.provider) if restored is not None else False
     )
     if restored is not None and has_auth:
         if should_print_messages:
@@ -589,9 +576,7 @@ async def restore_model_from_session(
 
     reason = "model no longer exists" if restored is None else "no auth configured"
     if should_print_messages:
-        print(
-            f"Warning: Could not restore model {saved_provider}/{saved_model_id} ({reason})."
-        )
+        print(f"Warning: Could not restore model {saved_provider}/{saved_model_id} ({reason}).")
     if current_model is not None:
         if should_print_messages:
             print(f"Falling back to: {current_model.provider}/{current_model.id}")

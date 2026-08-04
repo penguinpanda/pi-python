@@ -72,7 +72,12 @@ from .prompt_templates import (
     load_sourced_prompt_templates,
     substitute_args,
 )
-from .proxy import ProxyMessageEventStream, build_proxy_request_options, process_proxy_event, stream_proxy
+from .proxy import (
+    ProxyMessageEventStream,
+    build_proxy_request_options,
+    process_proxy_event,
+    stream_proxy,
+)
 from .session import (
     InMemorySessionStorage,
     InMemorySessionStore,

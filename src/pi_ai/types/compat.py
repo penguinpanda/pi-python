@@ -52,8 +52,16 @@ class OpenAICompletionsCompat(TypedDict, total=False):
     requiresThinkingAsText: bool
     requiresReasoningContentOnAssistantMessages: bool
     thinkingFormat: Literal[
-        "openai", "openrouter", "deepseek", "together", "zai", "qwen",
-        "chat-template", "qwen-chat-template", "string-thinking", "ant-ling",
+        "openai",
+        "openrouter",
+        "deepseek",
+        "together",
+        "zai",
+        "qwen",
+        "chat-template",
+        "qwen-chat-template",
+        "string-thinking",
+        "ant-ling",
     ]
     chatTemplateKwargs: dict[str, ChatTemplateKwargValue]
     openRouterRouting: OpenRouterRouting
@@ -102,10 +110,7 @@ class BedrockCompat(TypedDict, total=False):
 
 # 兼容配置是扩展字段；Model.compat 可为任一种 API 的兼容配置。
 ModelCompat = (
-    OpenAICompletionsCompat
-    | OpenAIResponsesCompat
-    | AnthropicMessagesCompat
-    | BedrockCompat
+    OpenAICompletionsCompat | OpenAIResponsesCompat | AnthropicMessagesCompat | BedrockCompat
 )
 
 

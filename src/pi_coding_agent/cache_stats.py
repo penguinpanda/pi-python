@@ -20,9 +20,7 @@ def _usage_field(usage: dict | None, *keys: str) -> int:
     return 0
 
 
-def _as_previous_request(
-    message: dict, reported_cache: bool
-) -> dict | None:
+def _as_previous_request(message: dict, reported_cache: bool) -> dict | None:
     usage = message.get("usage") or {}
     prompt_tokens = (
         _usage_field(usage, "input")
@@ -56,9 +54,7 @@ def _read_per_token(message: dict, price_source) -> float:
     model = None
     if price_source is not None and hasattr(price_source, "get_model"):
         try:
-            model = price_source.get_model(
-                message.get("provider", ""), message.get("model", "")
-            )
+            model = price_source.get_model(message.get("provider", ""), message.get("model", ""))
         except Exception:
             model = None
     if model is not None:
@@ -69,9 +65,7 @@ def _read_per_token(message: dict, price_source) -> float:
     return 0.0
 
 
-def compute_cache_waste(
-    messages: list[dict], price_source: Any = None
-) -> dict:
+def compute_cache_waste(messages: list[dict], price_source: Any = None) -> dict:
     """统计会话中的缓存浪费（对齐 TS computeCacheWaste）。
 
     返回 {missedTokens, missedCost, missCount}。missedCost 在定价未知时为 0。
@@ -88,14 +82,10 @@ def compute_cache_waste(
             + _usage_field(usage, "cache_read")
             + _usage_field(usage, "cache_write")
         )
-        cache_tokens = _usage_field(usage, "cache_read") + _usage_field(
-            usage, "cache_write"
-        )
+        cache_tokens = _usage_field(usage, "cache_read") + _usage_field(usage, "cache_write")
         reported_cache = prev.get("reportedCache", False) if prev else False
 
-        if prev is not None and prompt_tokens > 0 and (
-            cache_tokens > 0 or reported_cache
-        ):
+        if prev is not None and prompt_tokens > 0 and (cache_tokens > 0 or reported_cache):
             missed_tokens = min(prev["promptTokens"], prompt_tokens) - _usage_field(
                 usage, "cache_read"
             )

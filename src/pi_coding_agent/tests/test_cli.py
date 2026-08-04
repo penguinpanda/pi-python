@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 
 from pi_coding_agent import _cli
 from pi_coding_agent._session_manager import SessionManager
@@ -39,9 +38,7 @@ async def test_unknown_provider_returns_friendly_error(monkeypatch, capsys):
     monkeypatch.setattr(_cli, "_create_runtime", _fake_runtime)
     monkeypatch.setattr(_cli, "_resolve_initial_model", fake_resolve)
 
-    code = await _cli._async_main(
-        ["--provider", "bogus", "--model", "x", "-p", "hi"]
-    )
+    code = await _cli._async_main(["--provider", "bogus", "--model", "x", "-p", "hi"])
 
     captured = capsys.readouterr()
     assert code == 1
@@ -69,9 +66,7 @@ async def test_cli_loads_skills_and_templates_on_startup(tmp_path, monkeypatch):
 
     monkeypatch.setattr(_cli.SkillLoader, "load", skill_load)
     monkeypatch.setattr(_cli.PromptTemplateLoader, "load", template_load)
-    monkeypatch.setattr(
-        _cli.SettingsManager, "create", staticmethod(_fake_settings_manager)
-    )
+    monkeypatch.setattr(_cli.SettingsManager, "create", staticmethod(_fake_settings_manager))
     monkeypatch.setattr(_cli, "_create_runtime", _fake_runtime)
 
     async def fake_resolve(*_args, **_kwargs):
@@ -88,9 +83,7 @@ async def test_cli_loads_skills_and_templates_on_startup(tmp_path, monkeypatch):
 
     monkeypatch.setattr(_cli, "_resolve_initial_model", fake_resolve)
     monkeypatch.setattr(_cli, "run_print_mode", fake_print_mode)
-    monkeypatch.setattr(
-        _cli.SessionManager, "create", staticmethod(fake_session_create)
-    )
+    monkeypatch.setattr(_cli.SessionManager, "create", staticmethod(fake_session_create))
 
     monkeypatch.chdir(tmp_path)
     code = await _cli._async_main(["-p", "hi"])
@@ -103,14 +96,10 @@ async def test_cli_loads_skills_and_templates_on_startup(tmp_path, monkeypatch):
     assert template_load_calls[0]._project_dir == tmp_path / ".pi" / "prompts"
 
 
-async def test_cli_loads_extensions_and_warns_on_syntax_error(
-    tmp_path, monkeypatch, capsys
-):
+async def test_cli_loads_extensions_and_warns_on_syntax_error(tmp_path, monkeypatch, capsys):
     """回归（E-04/P17）：CLI 启动加载项目扩展；语法错误扩展输出 stderr
     Warning 且不崩溃；好扩展在 print 模式仍注册（跨模式一致性）。"""
-    monkeypatch.setattr(
-        _cli.SettingsManager, "create", staticmethod(_fake_settings_manager)
-    )
+    monkeypatch.setattr(_cli.SettingsManager, "create", staticmethod(_fake_settings_manager))
     monkeypatch.setattr(_cli, "_create_runtime", _fake_runtime)
 
     async def fake_resolve(*_args, **_kwargs):
@@ -130,9 +119,7 @@ async def test_cli_loads_extensions_and_warns_on_syntax_error(
 
     monkeypatch.setattr(_cli, "_resolve_initial_model", fake_resolve)
     monkeypatch.setattr(_cli, "run_print_mode", fake_print_mode)
-    monkeypatch.setattr(
-        _cli.SessionManager, "create", staticmethod(fake_session_create)
-    )
+    monkeypatch.setattr(_cli.SessionManager, "create", staticmethod(fake_session_create))
 
     extensions_dir = tmp_path / ".pi" / "extensions"
     extensions_dir.mkdir(parents=True)
@@ -142,9 +129,7 @@ async def test_cli_loads_extensions_and_warns_on_syntax_error(
         '{"handler": lambda ctx, args: "hi", "description": "Say hello"})\n',
         encoding="utf-8",
     )
-    (extensions_dir / "bad.py").write_text(
-        "def create_extension(api\n", encoding="utf-8"
-    )
+    (extensions_dir / "bad.py").write_text("def create_extension(api\n", encoding="utf-8")
 
     monkeypatch.chdir(tmp_path)
     code = await _cli._async_main(["-p", "hi"])

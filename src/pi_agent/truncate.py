@@ -59,7 +59,9 @@ def format_size(size: int) -> str:
     return f"{(size / (1024 * 1024)):.1f}MB"
 
 
-def truncate_head(content: str, max_lines: int = DEFAULT_MAX_LINES, max_bytes: int = DEFAULT_MAX_BYTES) -> TruncationResult:
+def truncate_head(
+    content: str, max_lines: int = DEFAULT_MAX_LINES, max_bytes: int = DEFAULT_MAX_BYTES
+) -> TruncationResult:
     """从头截断（保留开头），绝不返回半行。"""
     total_bytes = utf8_byte_length(content)
     lines = split_lines_for_counting(content)
@@ -127,7 +129,9 @@ def _truncate_string_to_bytes_from_end(text: str, max_bytes: int) -> str:
     return "".join(reversed(result_chars))
 
 
-def truncate_tail(content: str, max_lines: int = DEFAULT_MAX_LINES, max_bytes: int = DEFAULT_MAX_BYTES) -> TruncationResult:
+def truncate_tail(
+    content: str, max_lines: int = DEFAULT_MAX_LINES, max_bytes: int = DEFAULT_MAX_BYTES
+) -> TruncationResult:
     """从尾截断（保留结尾，适合 bash 输出）。可能返回半行。"""
     total_bytes = utf8_byte_length(content)
     lines = split_lines_for_counting(content)

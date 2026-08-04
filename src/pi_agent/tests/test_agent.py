@@ -59,6 +59,7 @@ def _make_modeled_stream_fn(responses: list[str]) -> StreamFn:
 
 def _make_tool(name: str, result_text: str = "tool result") -> AgentTool:
     """创建测试用工具。"""
+
     async def _execute(tool_call_id, params, signal=None, on_update=None):
         return AgentToolResult(
             content=[TextContent(type="text", text=result_text)],
@@ -87,10 +88,12 @@ class TestAgentPrompt:
         stream_fn = _make_faux_stream_fn("Hi there!")
         set_default_stream_fn(stream_fn)
 
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            system_prompt="You are helpful.",
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                system_prompt="You are helpful.",
+            )
+        )
         await agent.prompt("Hello")
 
         # 验证状态：isStreaming 应为 False
@@ -104,10 +107,12 @@ class TestAgentPrompt:
     async def test_prompt_with_explicit_stream_fn(self):
         """显式传 stream_fn 优于全局默认。"""
         stream_fn = _make_faux_stream_fn("explicit!")
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=stream_fn,
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=stream_fn,
+            )
+        )
         await agent.prompt("Hi")
         assert agent.state.is_streaming is False
 
@@ -115,10 +120,12 @@ class TestAgentPrompt:
     async def test_multiple_prompts(self):
         """多次 prompt() 调用。"""
         stream_fn = _make_modeled_stream_fn(["First!", "Second!"])
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=stream_fn,
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=stream_fn,
+            )
+        )
         await agent.prompt("Q1")
         await agent.prompt("Q2")
         roles = [m.get("role") for m in agent.state.messages]
@@ -129,10 +136,12 @@ class TestAgentPrompt:
     async def test_events_subscription(self):
         """subscribe() 接收生命周期事件。"""
         stream_fn = _make_faux_stream_fn("Hello!")
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=stream_fn,
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=stream_fn,
+            )
+        )
 
         received: list[AgentEvent] = []
         agent.subscribe(lambda e, signal: received.append(e))
@@ -147,10 +156,12 @@ class TestAgentPrompt:
     async def test_unsubscribe(self):
         """取消订阅后不再接收事件。"""
         stream_fn = _make_faux_stream_fn("Hello!")
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=stream_fn,
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=stream_fn,
+            )
+        )
 
         received: list[AgentEvent] = []
         unsub = agent.subscribe(lambda e, signal: received.append(e))
@@ -167,10 +178,12 @@ class TestAgentContinue:
     async def test_continue_from_user_message(self):
         """最后一条是 user 消息时可以 continue。"""
         stream_fn = _make_modeled_stream_fn(["First!", "Second!"])
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=stream_fn,
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=stream_fn,
+            )
+        )
         # 先发一条 user 消息但让 prompt 完成（assistant 回复后状态正常）
         await agent.prompt("Q1")
 
@@ -188,10 +201,12 @@ class TestAgentContinue:
     async def test_continue_after_assistant_raises(self):
         """最后一条是 assistant 时 continue 应抛异常。"""
         stream_fn = _make_faux_stream_fn("Hello!")
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=stream_fn,
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=stream_fn,
+            )
+        )
         await agent.prompt("Hi")
         # 现在最后一条是 assistant
         with pytest.raises(RuntimeError, match="Cannot continue"):
@@ -209,10 +224,12 @@ class TestAgentAbort:
         core = faux_provider(tokens_per_second=5)
         core.set_responses([faux_assistant_message("A" * 500)])
 
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=core.stream,
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=core.stream,
+            )
+        )
 
         received: list[AgentEvent] = []
         agent.subscribe(lambda e, signal: received.append(e))
@@ -242,10 +259,12 @@ class TestAgentMutualExclusion:
         core = faux_provider(tokens_per_second=4)
         core.set_responses([faux_assistant_message("A" * 20)])
 
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=core.stream,
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=core.stream,
+            )
+        )
 
         async def _first():
             await agent.prompt("First")
@@ -265,10 +284,12 @@ class TestAgentReset:
     async def test_reset_clears_messages(self):
         """reset() 后 messages 清空。"""
         stream_fn = _make_faux_stream_fn("Hello!")
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=stream_fn,
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=stream_fn,
+            )
+        )
         await agent.prompt("Hi")
         assert len(agent.state.messages) > 0
 
@@ -283,10 +304,12 @@ class TestAgentReset:
         core = faux_provider(tokens_per_second=4)
         core.set_responses([faux_assistant_message("A" * 20)])
 
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=core.stream,
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=core.stream,
+            )
+        )
 
         # 启动 prompt 但不等待
         task = asyncio.create_task(agent.prompt("Hi"))
@@ -309,10 +332,12 @@ class TestAgentState:
     async def test_streaming_flag(self):
         """isStreaming 在 prompt 完成后为 False。"""
         stream_fn = _make_faux_stream_fn("Hello!")
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=stream_fn,
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=stream_fn,
+            )
+        )
         assert agent.state.is_streaming is False
         await agent.prompt("Hi")
         assert agent.state.is_streaming is False
@@ -320,14 +345,18 @@ class TestAgentState:
     @pytest.mark.asyncio
     async def test_error_response_sets_error_message(self):
         """LLM 返回 error stop_reason → agent_end 事件 + state.error_message。"""
-        core = _make_faux([
-            faux_assistant_message([], stop_reason="error", error_message="Boom!"),
-        ])
+        core = _make_faux(
+            [
+                faux_assistant_message([], stop_reason="error", error_message="Boom!"),
+            ]
+        )
 
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=core.stream,
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=core.stream,
+            )
+        )
 
         called: list[str] = []
         agent.subscribe(lambda e, signal: called.append(e["type"]))
@@ -345,10 +374,12 @@ class TestAgentMessageQueues:
 
     def test_queue_api_and_modes(self):
         """steer/follow_up/clear/has_queued_messages + QueueMode setter。"""
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=_make_faux_stream_fn(),
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=_make_faux_stream_fn(),
+            )
+        )
         assert agent.has_queued_messages() is False
 
         agent.steer(UserMessage(role="user", content="s1"))
@@ -370,10 +401,12 @@ class TestAgentMessageQueues:
     async def test_steer_before_prompt_injected_first_turn(self):
         """prompt 前 steer() → 首轮注入。"""
         stream_fn = _make_modeled_stream_fn(["A1"])
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=stream_fn,
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=stream_fn,
+            )
+        )
         agent.steer(UserMessage(role="user", content="nudge"))
         await agent.prompt("Q")
 
@@ -385,10 +418,12 @@ class TestAgentMessageQueues:
     async def test_follow_up_processed_in_same_run(self):
         """prompt 前 follow_up() → agent 停止后自动追加一轮。"""
         stream_fn = _make_modeled_stream_fn(["A1", "A2"])
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=stream_fn,
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=stream_fn,
+            )
+        )
         agent.follow_up(UserMessage(role="user", content="follow up"))
         await agent.prompt("Q")
 
@@ -401,11 +436,13 @@ class TestAgentMessageQueues:
     async def test_one_at_a_time_follow_up_mode(self):
         """one-at-a-time：每个 follow-up 占一轮。"""
         stream_fn = _make_modeled_stream_fn(["A1", "A2", "A3"])
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=stream_fn,
-            follow_up_mode="one-at-a-time",
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=stream_fn,
+                follow_up_mode="one-at-a-time",
+            )
+        )
         agent.follow_up(UserMessage(role="user", content="F1"))
         agent.follow_up(UserMessage(role="user", content="F2"))
         await agent.prompt("Q0")
@@ -418,11 +455,13 @@ class TestAgentMessageQueues:
     async def test_all_follow_up_mode_drains_all(self):
         """all：一次注入全部 follow-up。"""
         stream_fn = _make_modeled_stream_fn(["A1", "A2"])
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=stream_fn,
-            follow_up_mode="all",
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=stream_fn,
+                follow_up_mode="all",
+            )
+        )
         agent.follow_up(UserMessage(role="user", content="F1"))
         agent.follow_up(UserMessage(role="user", content="F2"))
         await agent.prompt("Q0")
@@ -436,10 +475,12 @@ class TestAgentMessageQueues:
     async def test_steer_during_run_injected_next_turn(self):
         """运行中 steer() → 下一个 turn 边界注入（CLI 交互场景）。"""
         core = faux_provider(tokens_per_second=200)
-        core.set_responses([
-            faux_assistant_message("A" * 200),
-            faux_assistant_message("B" * 20),
-        ])
+        core.set_responses(
+            [
+                faux_assistant_message("A" * 200),
+                faux_assistant_message("B" * 20),
+            ]
+        )
         original_stream = core.stream
         steer_done = asyncio.Event()
 
@@ -449,10 +490,12 @@ class TestAgentMessageQueues:
                 await steer_done.wait()
             return await original_stream(model, context, options)
 
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=_delayed_stream,
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=_delayed_stream,
+            )
+        )
 
         async def _steer_while_running():
             await asyncio.sleep(0.01)  # 确保 initial steering poll 已完成
@@ -469,10 +512,12 @@ class TestAgentMessageQueues:
     @pytest.mark.asyncio
     async def test_reset_clears_queues(self):
         """reset() 同时清空双消息队列。"""
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=_make_faux_stream_fn(),
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=_make_faux_stream_fn(),
+            )
+        )
         agent.steer(UserMessage(role="user", content="s"))
         agent.follow_up(UserMessage(role="user", content="f"))
         agent.reset()
@@ -486,10 +531,12 @@ class TestAgentContinueQueues:
     async def test_continue_after_assistant_drains_steering(self):
         """最后一条是 assistant + 有 steering → 作为 prompt 续跑。"""
         stream_fn = _make_modeled_stream_fn(["A1", "A2"])
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=stream_fn,
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=stream_fn,
+            )
+        )
         await agent.prompt("Q")
         assert agent.state.messages[-1].get("role") == "assistant"
 
@@ -506,10 +553,12 @@ class TestAgentContinueQueues:
     async def test_continue_after_assistant_drains_follow_up(self):
         """最后一条是 assistant + 只有 follow-up → 作为 prompt 续跑。"""
         stream_fn = _make_modeled_stream_fn(["A1", "A2"])
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=stream_fn,
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=stream_fn,
+            )
+        )
         await agent.prompt("Q")
 
         agent.follow_up(UserMessage(role="user", content="follow"))
@@ -524,10 +573,12 @@ class TestAgentContinueQueues:
     async def test_continue_steering_one_at_a_time(self):
         """one-at-a-time：continue 只消费一条 steering，其余下一轮注入。"""
         stream_fn = _make_modeled_stream_fn(["A1", "A2", "A3"])
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=stream_fn,
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=stream_fn,
+            )
+        )
         await agent.prompt("Q")
 
         agent.steer(UserMessage(role="user", content="s1"))
@@ -544,11 +595,13 @@ class TestAgentContinueQueues:
     async def test_continue_steering_mode_all(self):
         """all：continue 一次消费全部 steering。"""
         stream_fn = _make_modeled_stream_fn(["A1", "A2"])
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=stream_fn,
-            steering_mode="all",
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=stream_fn,
+                steering_mode="all",
+            )
+        )
         await agent.prompt("Q")
 
         agent.steer(UserMessage(role="user", content="s1"))
@@ -563,10 +616,12 @@ class TestAgentContinueQueues:
     @pytest.mark.asyncio
     async def test_continue_empty_transcript_raises(self):
         """无消息时 continue 抛异常（对齐 TS）。"""
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=_make_faux_stream_fn(),
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=_make_faux_stream_fn(),
+            )
+        )
         with pytest.raises(RuntimeError, match="No messages to continue from"):
             await agent.continue_()
 
@@ -578,10 +633,12 @@ class TestAsyncListeners:
     async def test_async_listener_awaited_in_subscription_order(self):
         """监听器按订阅顺序 await（async 监听器先完成后才调用下一个）。"""
         stream_fn = _make_faux_stream_fn("Hello!")
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=stream_fn,
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=stream_fn,
+            )
+        )
 
         order: list[str] = []
 
@@ -605,10 +662,12 @@ class TestAsyncListeners:
     async def test_listener_receives_abort_signal(self):
         """监听器收到当前运行的 abort signal（运行中非 None）。"""
         stream_fn = _make_faux_stream_fn("Hello!")
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=stream_fn,
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=stream_fn,
+            )
+        )
 
         seen: list[asyncio.Event | None] = []
 
@@ -627,10 +686,12 @@ class TestAsyncListeners:
     async def test_signal_same_object_across_events(self):
         """同一运行内所有事件共享同一个 signal 对象。"""
         stream_fn = _make_faux_stream_fn("Hello!")
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=stream_fn,
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=stream_fn,
+            )
+        )
 
         signals: list[asyncio.Event] = []
 
@@ -650,10 +711,12 @@ class TestAsyncListeners:
         core = faux_provider(tokens_per_second=200)
         core.set_responses([faux_assistant_message("A" * 300)])
 
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=core.stream,
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=core.stream,
+            )
+        )
 
         agent_end_signal_state: list[bool] = []
 
@@ -678,10 +741,12 @@ class TestAsyncListeners:
     async def test_wait_for_idle_waits_for_listener_settlement(self):
         """wait_for_idle 等待 agent_end 监听器 settle（而非仅 _active）。"""
         stream_fn = _make_faux_stream_fn("Hello!")
-        agent = Agent(AgentOptions(
-            model=_make_model(),
-            stream_fn=stream_fn,
-        ))
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=stream_fn,
+            )
+        )
 
         listener_done = asyncio.Event()
 

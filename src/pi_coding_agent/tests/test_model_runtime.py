@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 from pi_ai import Context, Models, UserMessage
 from pi_ai.auth import ApiKeyCredential
 from pi_ai.providers.faux import FAUX_MODEL, faux_assistant_message, faux_provider
@@ -53,6 +52,7 @@ class TestStoredCredentials:
     async def test_stored_credential_configures_provider(self, monkeypatch):
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         store = AuthStorage.in_memory()
+
         async def _set(_current):
             return ApiKeyCredential(key="sk-stored")
 
@@ -77,6 +77,7 @@ class TestStoredCredentials:
     async def test_stored_preferred_over_env(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "sk-env")
         store = AuthStorage.in_memory()
+
         async def _set(_current):
             return ApiKeyCredential(key="sk-stored")
 
@@ -214,7 +215,11 @@ class TestExtensionProviders:
     async def test_unregister_provider(self):
         runtime = await _make_runtime()
         runtime.register_provider(
-            "acme", {"api_key": "sk-acme", "models": [{"id": "m1", "api": "openai-completions", "base_url": "https://x"}]}
+            "acme",
+            {
+                "api_key": "sk-acme",
+                "models": [{"id": "m1", "api": "openai-completions", "base_url": "https://x"}],
+            },
         )
         assert runtime.get_provider("acme") is not None
         runtime.unregister_provider("acme")
@@ -246,6 +251,7 @@ class TestModelRegistry:
     async def test_facade(self, monkeypatch):
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         store = AuthStorage.in_memory()
+
         async def _set(_current):
             return ApiKeyCredential(key="sk-stored")
 
@@ -280,9 +286,7 @@ class TestRuntimeStream:
         stream = await runtime.stream(model, context)
         message = await stream.result()
         text = "".join(
-            block.get("text", "")
-            for block in message["content"]
-            if block.get("type") == "text"
+            block.get("text", "") for block in message["content"] if block.get("type") == "text"
         )
         assert text == "runtime stream ok"
 
@@ -311,8 +315,6 @@ class TestRuntimeStream:
         stream = await runtime.stream(model, context)
         message = await stream.result()
         text = "".join(
-            block.get("text", "")
-            for block in message["content"]
-            if block.get("type") == "text"
+            block.get("text", "") for block in message["content"] if block.get("type") == "text"
         )
         assert text == "with headers ok"

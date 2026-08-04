@@ -31,11 +31,13 @@ def _make_session(tmp_path: Path, skill_loader=None, template_loader=None) -> Ag
     models.add_provider(core.provider)
     model = models.get_model("faux", "faux-1")
     assert model is not None
-    agent = Agent(AgentOptions(
-        system_prompt="You are a helpful coding assistant.",
-        model=model,
-        stream_fn=models.stream,
-    ))
+    agent = Agent(
+        AgentOptions(
+            system_prompt="You are a helpful coding assistant.",
+            model=model,
+            stream_fn=models.stream,
+        )
+    )
     session = AgentSession(
         agent=agent,
         session_manager=SessionManager.in_memory(cwd=str(tmp_path)),
@@ -77,7 +79,7 @@ async def test_skill_command_expansion(tmp_path):
     await session.prompt("/skill:greet please do it")
     await session.wait_for_idle()
     text = _first_user_text(holder["messages"])
-    assert "<skill name=\"greet\"" in text
+    assert '<skill name="greet"' in text
     assert "Skill body content" in text
     assert "please do it" in text
     await session.dispose()

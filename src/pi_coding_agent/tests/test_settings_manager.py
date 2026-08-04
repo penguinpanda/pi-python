@@ -25,17 +25,25 @@ class TestInMemory:
         assert manager.get_enable_skill_commands() is True
 
     def test_merged_settings(self):
-        manager = SettingsManager.in_memory({
-            "global": True,
-            "nested": {"a": 1},
-            "project": 1,
-        }, project_trusted=True)
+        manager = SettingsManager.in_memory(
+            {
+                "global": True,
+                "nested": {"a": 1},
+                "project": 1,
+            },
+            project_trusted=True,
+        )
         storage = manager._storage
         assert isinstance(storage, InMemorySettingsStorage)
-        manager._storage.with_lock("project", lambda _: json.dumps({
-            "project": 2,
-            "nested": {"b": 2},
-        }))
+        manager._storage.with_lock(
+            "project",
+            lambda _: json.dumps(
+                {
+                    "project": 2,
+                    "nested": {"b": 2},
+                }
+            ),
+        )
         manager.reload()
         merged = manager.as_dict()
         assert merged["global"] is True
@@ -90,9 +98,7 @@ class TestFileStorage:
         (project / ".pi" / "settings.json").write_text(
             json.dumps({"defaultProvider": "project"}), encoding="utf-8"
         )
-        manager = SettingsManager.create(
-            project, agent_dir, project_trusted=False
-        )
+        manager = SettingsManager.create(project, agent_dir, project_trusted=False)
         assert manager.get_default_provider() is None
 
     def test_set_project_trusted_reloads(self, tmp_path):
@@ -154,19 +160,19 @@ class TestMigration:
         assert manager.get_transport() == "websocket"
 
     def test_skills_object_migrated(self):
-        manager = SettingsManager.in_memory({
-            "skills": {
-                "enableSkillCommands": False,
-                "customDirectories": ["/x/skills"],
+        manager = SettingsManager.in_memory(
+            {
+                "skills": {
+                    "enableSkillCommands": False,
+                    "customDirectories": ["/x/skills"],
+                }
             }
-        })
+        )
         assert manager.get_enable_skill_commands() is False
         assert manager.get_skills() == ["/x/skills"]
 
     def test_retry_max_delay_migrated(self):
-        manager = SettingsManager.in_memory({
-            "retry": {"maxDelayMs": 120000}
-        })
+        manager = SettingsManager.in_memory({"retry": {"maxDelayMs": 120000}})
         retry = manager.as_dict()["retry"]
         assert retry["provider"]["maxRetryDelayMs"] == 120000
         assert "maxDelayMs" not in retry

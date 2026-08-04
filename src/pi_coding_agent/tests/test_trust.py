@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 
 from pi_coding_agent.trust import (
     TrustManager,
@@ -107,7 +106,11 @@ class TestProjectResources:
     def test_get_project_trust_options(self, tmp_path):
         options = get_project_trust_options(str(tmp_path))
         labels = [option["label"] for option in options]
-        assert labels == ["Trust", f"Trust parent folder ({str(tmp_path.resolve().parent)})", "Do not trust"]
+        assert labels == [
+            "Trust",
+            f"Trust parent folder ({str(tmp_path.resolve().parent)})",
+            "Do not trust",
+        ]
         trust_option = options[0]
         assert trust_option["trusted"] is True
         assert trust_option["updates"][0]["decision"] is True
@@ -131,18 +134,12 @@ class TestResolveProjectTrusted:
         (tmp_path / ".pi" / "skills").mkdir(parents=True)
         manager = TrustManager(tmp_path / "trust.json")
         assert (
-            await resolve_project_trusted(
-                str(tmp_path), manager, {"trustOverride": False}
-            )
-            is False
+            await resolve_project_trusted(str(tmp_path), manager, {"trustOverride": False}) is False
         )
 
     async def test_no_resources_auto_trust(self, tmp_path):
         manager = TrustManager(tmp_path / "trust.json")
-        assert (
-            await resolve_project_trusted(str(tmp_path), manager, {})
-            is True
-        )
+        assert await resolve_project_trusted(str(tmp_path), manager, {}) is True
 
     async def test_stored_decision(self, tmp_path):
         (tmp_path / ".pi" / "skills").mkdir(parents=True)
@@ -154,9 +151,7 @@ class TestResolveProjectTrusted:
         (tmp_path / ".pi" / "skills").mkdir(parents=True)
         manager = TrustManager(tmp_path / "trust.json")
         assert (
-            await resolve_project_trusted(
-                str(tmp_path), manager, {"defaultProjectTrust": "trust"}
-            )
+            await resolve_project_trusted(str(tmp_path), manager, {"defaultProjectTrust": "trust"})
             is True
         )
 
@@ -164,31 +159,21 @@ class TestResolveProjectTrusted:
         (tmp_path / ".pi" / "skills").mkdir(parents=True)
         manager = TrustManager(tmp_path / "trust.json")
         assert (
-            await resolve_project_trusted(
-                str(tmp_path), manager, {"defaultProjectTrust": "block"}
-            )
+            await resolve_project_trusted(str(tmp_path), manager, {"defaultProjectTrust": "block"})
             is False
         )
 
     async def test_ask_with_ui(self, tmp_path):
         (tmp_path / ".pi" / "skills").mkdir(parents=True)
         manager = TrustManager(tmp_path / "trust.json")
-        assert (
-            await resolve_project_trusted(
-                str(tmp_path), manager, {}, ui=_FakeUI(True)
-            )
-            is True
-        )
+        assert await resolve_project_trusted(str(tmp_path), manager, {}, ui=_FakeUI(True)) is True
         # ask 后已持久化。
         assert manager.is_trusted(str(tmp_path)) is True
 
     async def test_ask_without_ui_denies(self, tmp_path):
         (tmp_path / ".pi" / "skills").mkdir(parents=True)
         manager = TrustManager(tmp_path / "trust.json")
-        assert (
-            await resolve_project_trusted(str(tmp_path), manager, {})
-            is False
-        )
+        assert await resolve_project_trusted(str(tmp_path), manager, {}) is False
 
     async def test_extension_decision(self, tmp_path):
         from pi_coding_agent.extensions.runner import ExtensionRunner
@@ -201,9 +186,4 @@ class TestResolveProjectTrusted:
         ]
         runner = ExtensionRunner([extension], cwd=str(tmp_path))
         manager = TrustManager(tmp_path / "trust.json")
-        assert (
-            await resolve_project_trusted(
-                str(tmp_path), manager, {}, extensions=runner
-            )
-            is False
-        )
+        assert await resolve_project_trusted(str(tmp_path), manager, {}, extensions=runner) is False

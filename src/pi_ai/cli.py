@@ -68,8 +68,7 @@ def _auth_store() -> FileCredentialStore:
 
 def _provider_list_text() -> str:
     return "\n".join(
-        f"  {provider_id:<20} {name}"
-        for provider_id, name, _flow in builtin_oauth_providers()
+        f"  {provider_id:<20} {name}" for provider_id, name, _flow in builtin_oauth_providers()
     )
 
 
@@ -80,8 +79,7 @@ def usage() -> str:
         "Commands:\n"
         "  login [provider]  Login to an OAuth provider\n"
         "  list              List available providers\n\n"
-        "Providers:\n"
-        + _provider_list_text()
+        "Providers:\n" + _provider_list_text()
     )
 
 

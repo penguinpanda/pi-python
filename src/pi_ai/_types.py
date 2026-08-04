@@ -39,4 +39,4 @@ from .types import __all__  # noqa: F401
 
 if TYPE_CHECKING:
     # 字符串前向引用需要（_types ↔ utils._event_stream 循环导入规避）。
-    from .utils._event_stream import AssistantMessageEventStream
+    pass

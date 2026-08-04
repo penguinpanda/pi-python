@@ -23,9 +23,7 @@ def _seed_project(tmp_path):
     )
     review_prompt = agent_dir / "prompts" / "review.md"
     review_prompt.parent.mkdir(parents=True)
-    review_prompt.write_text(
-        "---\ndescription: Review\n---\nReview {{0}}", encoding="utf-8"
-    )
+    review_prompt.write_text("---\ndescription: Review\n---\nReview {{0}}", encoding="utf-8")
     global_ext = agent_dir / "extensions" / "global.py"
     global_ext.parent.mkdir(parents=True)
     global_ext.write_text(
@@ -43,9 +41,7 @@ def _seed_project(tmp_path):
     )
     project_prompt = cwd / ".pi" / "prompts" / "project.md"
     project_prompt.parent.mkdir(parents=True)
-    project_prompt.write_text(
-        "---\ndescription: Project\n---\nProject {{0}}", encoding="utf-8"
-    )
+    project_prompt.write_text("---\ndescription: Project\n---\nProject {{0}}", encoding="utf-8")
     project_ext = cwd / ".pi" / "extensions" / "project.py"
     project_ext.parent.mkdir(parents=True)
     project_ext.write_text(
@@ -57,9 +53,7 @@ def _seed_project(tmp_path):
     custom_theme.parent.mkdir(parents=True)
     theme_colors = dict(BUILTIN_THEMES["dark"])
     theme_colors["accent"] = "#111111"
-    custom_theme.write_text(
-        json.dumps(theme_colors), encoding="utf-8"
-    )
+    custom_theme.write_text(json.dumps(theme_colors), encoding="utf-8")
     (cwd / "AGENTS.md").write_text("project rules", encoding="utf-8")
     return agent_dir, cwd
 
@@ -123,14 +117,8 @@ async def test_diagnostics_aggregated(tmp_path):
     types = {diagnostic.type for diagnostic in result.diagnostics}
     assert "error" in types
     assert "warning" in types
-    assert any(
-        diagnostic.code == "extension_load_failed"
-        for diagnostic in result.diagnostics
-    )
-    assert any(
-        diagnostic.code == "theme_load_failed"
-        for diagnostic in result.diagnostics
-    )
+    assert any(diagnostic.code == "extension_load_failed" for diagnostic in result.diagnostics)
+    assert any(diagnostic.code == "theme_load_failed" for diagnostic in result.diagnostics)
 
 
 @pytest.mark.asyncio

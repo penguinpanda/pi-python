@@ -25,14 +25,30 @@ DEFAULT_APP_KEYBINDINGS: dict[str, Keybinding] = {
     "app.interrupt": Keybinding("escape", "app.interrupt", "interrupt", "Cancel or abort"),
     "app.clear": Keybinding("ctrl+c", "app.clear", "clear", "Clear editor"),
     "app.exit": Keybinding("ctrl+d", "app.exit", "exit", "Exit when editor is empty"),
-    "app.thinking.cycle": Keybinding("shift+tab", "app.thinking.cycle", "cycle_thinking", "Cycle thinking level"),
-    "app.model.cycleForward": Keybinding("ctrl+p", "app.model.cycleForward", "cycle_model_forward", "Cycle to next model"),
-    "app.model.cycleBackward": Keybinding("shift+ctrl+p", "app.model.cycleBackward", "cycle_model_backward", "Cycle to previous model"),
-    "app.model.select": Keybinding("ctrl+l", "app.model.select", "select_model", "Open model selector"),
-    "app.tools.expand": Keybinding("ctrl+o", "app.tools.expand", "toggle_tools", "Toggle tool output"),
-    "app.thinking.toggle": Keybinding("ctrl+t", "app.thinking.toggle", "toggle_thinking", "Toggle thinking blocks"),
-    "app.message.followUp": Keybinding("alt+enter", "app.message.followUp", "follow_up", "Queue follow-up message"),
-    "app.message.dequeue": Keybinding("alt+up", "app.message.dequeue", "dequeue", "Restore queued messages"),
+    "app.thinking.cycle": Keybinding(
+        "shift+tab", "app.thinking.cycle", "cycle_thinking", "Cycle thinking level"
+    ),
+    "app.model.cycleForward": Keybinding(
+        "ctrl+p", "app.model.cycleForward", "cycle_model_forward", "Cycle to next model"
+    ),
+    "app.model.cycleBackward": Keybinding(
+        "shift+ctrl+p", "app.model.cycleBackward", "cycle_model_backward", "Cycle to previous model"
+    ),
+    "app.model.select": Keybinding(
+        "ctrl+l", "app.model.select", "select_model", "Open model selector"
+    ),
+    "app.tools.expand": Keybinding(
+        "ctrl+o", "app.tools.expand", "toggle_tools", "Toggle tool output"
+    ),
+    "app.thinking.toggle": Keybinding(
+        "ctrl+t", "app.thinking.toggle", "toggle_thinking", "Toggle thinking blocks"
+    ),
+    "app.message.followUp": Keybinding(
+        "alt+enter", "app.message.followUp", "follow_up", "Queue follow-up message"
+    ),
+    "app.message.dequeue": Keybinding(
+        "alt+up", "app.message.dequeue", "dequeue", "Restore queued messages"
+    ),
     # 对齐 TS：Windows 用 alt+v（避免与终端文本粘贴 ctrl+v 冲突），其他平台用 ctrl+v。
     "app.clipboard.pasteImage": Keybinding(
         "alt+v" if os.name == "nt" else "ctrl+v",
@@ -40,10 +56,18 @@ DEFAULT_APP_KEYBINDINGS: dict[str, Keybinding] = {
         "paste_image",
         "Paste image from clipboard",
     ),
-    "app.session.new": Keybinding("ctrl+n", "app.session.new", "new_session", "Start a new session"),
-    "app.session.resume": Keybinding("ctrl+r", "app.session.resume", "resume_session", "Resume a session"),
-    "app.message.copy": Keybinding("ctrl+x", "app.message.copy", "copy_last_message", "Copy last assistant message"),
-    "app.editor.external": Keybinding("ctrl+g", "app.editor.external", "external_editor", "Open external editor"),
+    "app.session.new": Keybinding(
+        "ctrl+n", "app.session.new", "new_session", "Start a new session"
+    ),
+    "app.session.resume": Keybinding(
+        "ctrl+r", "app.session.resume", "resume_session", "Resume a session"
+    ),
+    "app.message.copy": Keybinding(
+        "ctrl+x", "app.message.copy", "copy_last_message", "Copy last assistant message"
+    ),
+    "app.editor.external": Keybinding(
+        "ctrl+g", "app.editor.external", "external_editor", "Open external editor"
+    ),
 }
 
 
@@ -100,9 +124,7 @@ class KeybindingsManager:
             if action_id not in self._bindings:
                 continue
             self._alt_keys = {
-                key: other
-                for key, other in self._alt_keys.items()
-                if other != action_id
+                key: other for key, other in self._alt_keys.items() if other != action_id
             }
             if value is None:
                 continue  # 保持默认（TS 语义：不设置）

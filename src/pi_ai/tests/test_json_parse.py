@@ -62,5 +62,5 @@ def test_parse_streaming_json(partial, expected):
 
 
 def test_parse_streaming_json_never_raises():
-    for text in [None, "", "}", "{", "{\"a\":", "tru", "123"]:
+    for text in [None, "", "}", "{", '{"a":', "tru", "123"]:
         parse_streaming_json(text)  # 不抛异常即可

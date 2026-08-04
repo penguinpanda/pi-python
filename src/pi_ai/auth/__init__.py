@@ -91,6 +91,7 @@ from typing import Protocol
 
 # 凭证类型
 
+
 @dataclass(slots=True)
 class ApiKeyCredential:
     """
@@ -144,6 +145,7 @@ class CredentialStore(Protocol):
     async def write(self, provider_id: str, credential: ApiKeyCredential) -> None: ...
     async def delete(self, provider_id: str) -> None: ...
 
+
 class InMemoryCredentialStore:
     """
     内存中的凭证存储.
@@ -167,12 +169,12 @@ class InMemoryCredentialStore:
     - Demo
     - 单元测试
     """
-    
+
     def __init__(self) -> None:
         self._store: dict[str, ApiKeyCredential] = {}
 
     async def read(self, provider_id: str) -> ApiKeyCredential | None:
-        return self._store.get(provider_id) 
+        return self._store.get(provider_id)
 
     async def write(self, provider_id: str, credential: ApiKeyCredential) -> None:
         self._store[provider_id] = credential
@@ -180,7 +182,9 @@ class InMemoryCredentialStore:
     async def delete(self, provider_id: str) -> None:
         self._store.pop(provider_id, None)
 
+
 # 凭证解析验证
+
 
 @dataclass(slots=True)
 class ResolvedAuth:
@@ -199,14 +203,12 @@ class ResolvedAuth:
 
         "OPENAI_API_KEY"
     """
-    
-    api_key: str
-    source: str # "stored credential" or env var name
 
-def env_api_key_auth(
-        display_name: str,
-        env_vars: list[str]
-) -> "EnvApiKeyAuth":
+    api_key: str
+    source: str  # "stored credential" or env var name
+
+
+def env_api_key_auth(display_name: str, env_vars: list[str]) -> "EnvApiKeyAuth":
     """
     创建基于环境变量的 API Key 认证策略.
 
@@ -225,6 +227,7 @@ def env_api_key_auth(
     """
 
     return EnvApiKeyAuth(display_name=display_name, env_vars=env_vars)
+
 
 @dataclass(slots=True)
 class EnvApiKeyAuth:
@@ -248,12 +251,13 @@ class EnvApiKeyAuth:
 
     resolve() 时会按顺序查找.
     """
+
     display_name: str
     env_vars: list[str]
 
     def resolve(
-            self,
-            credential: ApiKeyCredential | dict | None = None,
+        self,
+        credential: ApiKeyCredential | dict | None = None,
     ) -> ResolvedAuth | None:
         """
         解析 API Key.
@@ -298,9 +302,9 @@ class EnvApiKeyAuth:
 
 
 async def resolve_api_key(
-        auth: EnvApiKeyAuth,
-        store: InMemoryCredentialStore,
-        provider_id: str,
+    auth: EnvApiKeyAuth,
+    store: InMemoryCredentialStore,
+    provider_id: str,
 ) -> str:
     """
     解析 Provider 使用的 API Key.
@@ -339,8 +343,7 @@ async def resolve_api_key(
     if result is None:
         vars_str = " or ".join(auth.env_vars)
         raise ValueError(
-            f"No API key configured for {auth.display_name}"
-            f"Set {vars_str} environment variable"
+            f"No API key configured for {auth.display_name}Set {vars_str} environment variable"
         )
 
     return result.api_key

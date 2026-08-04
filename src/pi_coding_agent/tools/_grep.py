@@ -92,7 +92,9 @@ def create_grep_tool(cwd: str) -> AgentTool:
                 if count >= max_results:
                     break
                 if regex.search(line):
-                    rel_path = file_path.relative_to(base) if file_path.is_relative_to(base) else file_path
+                    rel_path = (
+                        file_path.relative_to(base) if file_path.is_relative_to(base) else file_path
+                    )
                     results.append(f"{rel_path}:{line_no}:{line}")
                     count += 1
 
@@ -146,6 +148,15 @@ def _collect_files(target: Path, include_glob: str | None) -> list[Path]:
 
 def _is_ignored_dir(path: Path) -> bool:
     """检查路径是否在常见忽略目录中。"""
-    ignored = {".git", "__pycache__", "node_modules", ".venv", "venv", ".tox", ".mypy_cache", ".pytest_cache"}
+    ignored = {
+        ".git",
+        "__pycache__",
+        "node_modules",
+        ".venv",
+        "venv",
+        ".tox",
+        ".mypy_cache",
+        ".pytest_cache",
+    }
     parts = set(path.parts)
     return bool(parts & ignored)

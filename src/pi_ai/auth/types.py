@@ -6,7 +6,7 @@
 - AuthInteraction / AuthPrompt / AuthEvent：交互式登录回调。
 """
 
-from typing import Any, Literal, NotRequired, Protocol, TypedDict
+from typing import Any, Literal, Protocol, TypedDict
 
 from .context import AuthContext
 
@@ -114,9 +114,7 @@ class OAuthAuth(Protocol):
 
     async def login(self, interaction: AuthInteraction) -> OAuthCredential: ...
 
-    async def refresh(
-        self, credential: OAuthCredential, signal: Any = None
-    ) -> OAuthCredential: ...
+    async def refresh(self, credential: OAuthCredential, signal: Any = None) -> OAuthCredential: ...
 
     async def to_auth(self, credential: OAuthCredential) -> ModelAuth: ...
 

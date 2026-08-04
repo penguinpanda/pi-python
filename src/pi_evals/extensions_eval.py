@@ -51,11 +51,13 @@ async def test_extensions_eval(tmp_path):
     )
 
     def factory() -> AgentSession:
-        agent = Agent(AgentOptions(
-            system_prompt="You are a helpful coding assistant.",
-            model=model,
-            stream_fn=runtime.stream,
-        ))
+        agent = Agent(
+            AgentOptions(
+                system_prompt="You are a helpful coding assistant.",
+                model=model,
+                stream_fn=runtime.stream,
+            )
+        )
         return AgentSession(
             agent=agent,
             session_manager=SessionManager.in_memory(cwd=str(tmp_path)),
@@ -73,7 +75,5 @@ async def test_extensions_eval(tmp_path):
     result = await harness.run("run with the extension")
     assert result.errors == []
     assert result.output.strip() == "with extension"
-    command_names = [
-        command.name for command in runner.get_registered_commands()
-    ]
+    command_names = [command.name for command in runner.get_registered_commands()]
     assert "ext-hello" in command_names

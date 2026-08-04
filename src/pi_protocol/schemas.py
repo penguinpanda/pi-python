@@ -19,9 +19,7 @@ Timestamp = Annotated[int, Field(ge=0)]
 _STRICT = ConfigDict(extra="forbid")
 
 ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh", "max"]
-SessionPhase = Literal[
-    "idle", "turn", "compaction", "branch_summary", "retry"
-]
+SessionPhase = Literal["idle", "turn", "compaction", "branch_summary", "retry"]
 StopReason = Literal["stop", "length", "tool_use", "error", "aborted"]
 AssistantStatus = Literal["streaming", "complete", "error", "aborted"]
 ToolStatus = Literal["running", "complete", "error"]
@@ -173,9 +171,7 @@ class ToolTranscriptItem(BaseModel):
     timestamp: Timestamp
 
 
-TranscriptItem = Union[
-    UserTranscriptItem, AssistantTranscriptItem, ToolTranscriptItem
-]
+TranscriptItem = Union[UserTranscriptItem, AssistantTranscriptItem, ToolTranscriptItem]
 
 
 class ItemStartedProgress(BaseModel):
@@ -361,8 +357,15 @@ Command = Union[
     SetThinkingCommand,
 ]
 CommandName = Literal[
-    "list", "create", "attach", "detach", "prompt", "steer", "abort",
-    "set_model", "set_thinking",
+    "list",
+    "create",
+    "attach",
+    "detach",
+    "prompt",
+    "steer",
+    "abort",
+    "set_model",
+    "set_thinking",
 ]
 
 
@@ -544,9 +547,7 @@ class EventEnvelope(BaseModel):
     event: ServerEvent
 
 
-ServerMessage = Union[
-    ServerHello, ServerHelloError, ResponseEnvelope, EventEnvelope
-]
+ServerMessage = Union[ServerHello, ServerHelloError, ResponseEnvelope, EventEnvelope]
 
 
 __all__ = [

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "pi-ai"
 version = "0.1.0"
-description = "Pi monorepo: Unified LLM API (pi-ai) + Agent core loop (pi-agent) — Python port for learning"
+description = "Pi monorepo Python port: unified LLM API (pi-ai), agent loop (pi-agent), coding agent CLI/TUI, protocol v2, storage, server, evals — for learning"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -40,6 +40,8 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "pytest-cov>=6.0",
+    "ruff>=0.8",
+    "mypy>=1.10",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -64,10 +66,8 @@ testpaths = [
     "src/pi_storage/tests",
     "src/pi_server/tests",
     "src/pi_evals/tests",
-    "src/pi_evals",
 ]
 pythonpath = ["src", "."]
-addopts = "--cov=pi_ai --cov=pi_agent --cov=pi_coding_agent --cov-report=term-missing --cov-report=html"
 
 [tool.coverage.run]
 # 只统计 src 下的包代码，不统计测试自身。
@@ -84,3 +84,27 @@ omit = [
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "W", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# 以下文件出于平台/测试原因需要延迟导入（sys.path 调整、可选依赖）。
+"src/pi_ai/_types.py" = ["E402"]
+"src/pi_ai/tests/test_completions_unit.py" = ["E402"]
+"src/pi_ai/tests/test_responses_unit.py" = ["E402"]
+"src/pi_ai/utils/_event_stream.py" = ["E402"]
+"src/pi_agent/env.py" = ["E402"]
+"src/pi_agent/session_resources.py" = ["E402"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+show_error_codes = true
+warn_unused_ignores = false
+exclude = "(tests|generated)/"

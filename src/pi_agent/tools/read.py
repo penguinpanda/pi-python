@@ -33,7 +33,9 @@ class ReadToolOptions:
 def create_read_tool(options: ReadToolOptions | None = None) -> AgentTool:
     options = options or ReadToolOptions()
 
-    async def execute(tool_call_id, params, signal=None, on_update=None, context=None) -> AgentToolResult:
+    async def execute(
+        tool_call_id, params, signal=None, on_update=None, context=None
+    ) -> AgentToolResult:
         env = context.env
         path = params["path"]
         absolute_path = await resolve_read_tool_path(env, path, signal)
@@ -52,29 +54,44 @@ def create_read_tool(options: ReadToolOptions | None = None) -> AgentTool:
         mime_type = detect_supported_image_mime_type(data)
         if mime_type:
             if options.image_processor is not None:
-                processed = await options.image_processor(data, mime_type, {
-                    "autoResizeImages": options.auto_resize_images,
-                })
+                processed = await options.image_processor(
+                    data,
+                    mime_type,
+                    {
+                        "autoResizeImages": options.auto_resize_images,
+                    },
+                )
                 if not processed["ok"]:
                     return AgentToolResult(
-                        content=[TextContent(type="text", text=f"Read image file [{mime_type}]\n{processed['message']}")],
+                        content=[
+                            TextContent(
+                                type="text",
+                                text=f"Read image file [{mime_type}]\n{processed['message']}",
+                            )
+                        ],
                         details=None,
                     )
                 hints = "\n".join(processed["hints"]) if processed["hints"] else ""
-                text = f"Read image file [{processed['mimeType']}]" + (f"\n{hints}" if hints else "")
+                text = f"Read image file [{processed['mimeType']}]" + (
+                    f"\n{hints}" if hints else ""
+                )
                 return AgentToolResult(
                     content=[
                         TextContent(type="text", text=text),
-                        ImageContent(type="image", data=processed["data"], mimeType=processed["mimeType"]),
+                        ImageContent(
+                            type="image", data=processed["data"], mimeType=processed["mimeType"]
+                        ),
                     ],
                     details=None,
                 )
             if mime_type == "image/bmp":
                 return AgentToolResult(
-                    content=[TextContent(
-                        type="text",
-                        text="Read image file [image/bmp]\n[Image omitted: configure an imageProcessor to convert BMP images.]",
-                    )],
+                    content=[
+                        TextContent(
+                            type="text",
+                            text="Read image file [image/bmp]\n[Image omitted: configure an imageProcessor to convert BMP images.]",
+                        )
+                    ],
                     details=None,
                 )
             return AgentToolResult(
@@ -91,7 +108,9 @@ def create_read_tool(options: ReadToolOptions | None = None) -> AgentTool:
         start_line = max(0, (params.get("offset") or 1) - 1)
         start_line_display = start_line + 1
         if start_line >= total_file_lines:
-            raise ValueError(f"Offset {params.get('offset')} is beyond end of file ({total_file_lines} lines total)")
+            raise ValueError(
+                f"Offset {params.get('offset')} is beyond end of file ({total_file_lines} lines total)"
+            )
 
         if "limit" in params:
             end_line = min(start_line + params["limit"], total_file_lines)
@@ -104,7 +123,9 @@ def create_read_tool(options: ReadToolOptions | None = None) -> AgentTool:
         truncation: TruncationResult = truncate_head(selected)
         details: Any = None
         if truncation.first_line_exceeds_limit:
-            first_line_size = format_size(len(all_lines[start_line].encode("utf-8", errors="replace")))
+            first_line_size = format_size(
+                len(all_lines[start_line].encode("utf-8", errors="replace"))
+            )
             output_text = (
                 f"[Line {start_line_display} is {first_line_size}, exceeds {format_size(DEFAULT_MAX_BYTES)} limit. "
                 f"Use bash: sed -n '{start_line_display}p' {path} | head -c {DEFAULT_MAX_BYTES}]"
@@ -152,8 +173,14 @@ def create_read_tool(options: ReadToolOptions | None = None) -> AgentTool:
         input_schema={
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "Path to the file to read (relative or absolute)"},
-                "offset": {"type": "integer", "description": "Line number to start reading from (1-indexed)"},
+                "path": {
+                    "type": "string",
+                    "description": "Path to the file to read (relative or absolute)",
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "Line number to start reading from (1-indexed)",
+                },
                 "limit": {"type": "integer", "description": "Maximum number of lines to read"},
             },
             "required": ["path"],

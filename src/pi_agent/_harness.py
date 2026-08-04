@@ -35,28 +35,21 @@ from ._harness_types import (
     AgentHarnessStreamOptionsPatch,
     AgentHarnessSystemPrompt,
     BeforeAgentStartEvent,
-    BeforeAgentStartResult,
     BeforeProviderRequestEvent,
-    BeforeProviderRequestResult,
     CompactResult,
     ContextEvent,
-    ContextResult,
     ModelUpdateEvent,
     NavigateTreeResult,
     QueueUpdateEvent,
     ResourcesUpdateEvent,
     SavePointEvent,
     SessionBeforeCompactEvent,
-    SessionBeforeCompactResult,
     SessionBeforeTreeEvent,
-    SessionBeforeTreeResult,
     SettledEvent,
     Skill,
     ThinkingLevelUpdateEvent,
     ToolCallEvent,
-    ToolCallResult,
     ToolResultEvent,
-    ToolResultPatch,
     ToolsUpdateEvent,
     apply_stream_options_patch,
 )
@@ -275,7 +268,9 @@ class AgentHarness:
         self._tool_context = options.tool_context
         self._stream_fn: StreamFn | None = options.stream_fn
         self._stream_options: AgentHarnessStreamOptions = (
-            options.stream_options.clone() if options.stream_options is not None else AgentHarnessStreamOptions()
+            options.stream_options.clone()
+            if options.stream_options is not None
+            else AgentHarnessStreamOptions()
         )
 
         # 工具注册表 + 激活列表
@@ -396,14 +391,16 @@ class AgentHarness:
 
         return _unsubscribe
 
-    async def _emit_any(self, event: AgentHarnessEvent, signal: asyncio.Event | None = None) -> None:
+    async def _emit_any(
+        self, event: AgentHarnessEvent, signal: asyncio.Event | None = None
+    ) -> None:
         for listener in list(self._handlers.get(_SUBSCRIBER_EVENT_TYPE, ())):
             try:
                 result = listener(event, signal)
                 if result is not None:
                     await result
             except BaseException as error:
-                raise _normalize_harness_error(error, "hook")
+                raise _normalize_harness_error(error, "hook") from error
 
     async def _emit_own(self, event: Any) -> None:
         await self._emit_any(cast(AgentHarnessEvent, event))
@@ -422,7 +419,7 @@ class AgentHarness:
                 if result is not None:
                     last_result = result
             except BaseException as error:
-                raise _normalize_harness_error(error, "hook")
+                raise _normalize_harness_error(error, "hook") from error
         return last_result
 
     # ------------------------------------------------------------------
@@ -471,8 +468,7 @@ class AgentHarness:
             system_prompt=system_prompt or turn_state.system_prompt,
             messages=list(turn_state.messages),
             tools=[
-                self._bind_tool(tool, turn_state.tool_context)
-                for tool in turn_state.active_tools
+                self._bind_tool(tool, turn_state.tool_context) for tool in turn_state.active_tools
             ],
         )
 
@@ -483,21 +479,21 @@ class AgentHarness:
         tool_context = await self._resolve_tool_context()
         tools = list(self._tools.values())
         active_tools = [
-            self._tools[name]
-            for name in self._active_tool_names
-            if name in self._tools
+            self._tools[name] for name in self._active_tool_names if name in self._tools
         ]
         system_prompt = "You are a helpful assistant."
         if isinstance(self._system_prompt_src, str):
             system_prompt = self._system_prompt_src
         elif callable(self._system_prompt_src):
-            system_prompt = await self._system_prompt_src({
-                "session": self._session,
-                "model": self._model,
-                "thinking_level": self._thinking_level,
-                "active_tools": list(active_tools),
-                "resources": resources,
-            })
+            system_prompt = await self._system_prompt_src(
+                {
+                    "session": self._session,
+                    "model": self._model,
+                    "thinking_level": self._thinking_level,
+                    "active_tools": list(active_tools),
+                    "resources": resources,
+                }
+            )
         return _TurnState(
             messages=messages,
             resources=resources,
@@ -552,48 +548,58 @@ class AgentHarness:
             return current
         for handler in list(handlers):
             try:
-                result = handler(BeforeProviderRequestEvent(
-                    type="before_provider_request",
-                    model=model,
-                    session_id=session_id,
-                    stream_options=current.clone(),
-                ))
+                result = handler(
+                    BeforeProviderRequestEvent(
+                        type="before_provider_request",
+                        model=model,
+                        session_id=session_id,
+                        stream_options=current.clone(),
+                    )
+                )
                 if asyncio.iscoroutine(result):
                     result = await result
                 if result is not None and result.stream_options is not None:
                     current = apply_stream_options_patch(current, result.stream_options)
             except BaseException as error:
-                raise _normalize_harness_error(error, "hook")
+                raise _normalize_harness_error(error, "hook") from error
         return current
 
     async def _transform_context(self, messages: list[AgentMessage]) -> list[AgentMessage]:
-        result = await self._emit_hook("context", ContextEvent(type="context", messages=list(messages)))
+        result = await self._emit_hook(
+            "context", ContextEvent(type="context", messages=list(messages))
+        )
         if result is not None and result.messages is not None:
             return list(result.messages)
         return messages
 
     async def _before_tool_call(self, ctx: Any) -> BeforeToolCallResult | None:
-        result = await self._emit_hook("tool_call", ToolCallEvent(
-            type="tool_call",
-            tool_call_id=ctx.tool_call["id"],
-            tool_name=ctx.tool_call["name"],
-            input=dict(ctx.args) if isinstance(ctx.args, dict) else {},
-        ))
+        result = await self._emit_hook(
+            "tool_call",
+            ToolCallEvent(
+                type="tool_call",
+                tool_call_id=ctx.tool_call["id"],
+                tool_name=ctx.tool_call["name"],
+                input=dict(ctx.args) if isinstance(ctx.args, dict) else {},
+            ),
+        )
         if result is None:
             return None
         return BeforeToolCallResult(block=result.block, reason=result.reason)
 
     async def _after_tool_call(self, ctx: Any) -> AfterToolCallResult | None:
-        result = await self._emit_hook("tool_result", ToolResultEvent(
-            type="tool_result",
-            tool_call_id=ctx.tool_call["id"],
-            tool_name=ctx.tool_call["name"],
-            input=dict(ctx.args) if isinstance(ctx.args, dict) else {},
-            content=list(ctx.result.content),
-            details=ctx.result.details,
-            is_error=ctx.is_error,
-            usage=ctx.result.usage,
-        ))
+        result = await self._emit_hook(
+            "tool_result",
+            ToolResultEvent(
+                type="tool_result",
+                tool_call_id=ctx.tool_call["id"],
+                tool_name=ctx.tool_call["name"],
+                input=dict(ctx.args) if isinstance(ctx.args, dict) else {},
+                content=list(ctx.result.content),
+                details=ctx.result.details,
+                is_error=ctx.is_error,
+                usage=ctx.result.usage,
+            ),
+        )
         if result is None:
             return None
         return AfterToolCallResult(
@@ -646,12 +652,14 @@ class AgentHarness:
     # ------------------------------------------------------------------
 
     async def _emit_queue_update(self) -> None:
-        await self._emit_own(QueueUpdateEvent(
-            type="queue_update",
-            steer=list(self._steer_queue),
-            follow_up=list(self._follow_up_queue),
-            next_turn=list(self._next_turn_queue),
-        ))
+        await self._emit_own(
+            QueueUpdateEvent(
+                type="queue_update",
+                steer=list(self._steer_queue),
+                follow_up=list(self._follow_up_queue),
+                next_turn=list(self._next_turn_queue),
+            )
+        )
 
     async def _drain_queue(
         self,
@@ -671,7 +679,7 @@ class AgentHarness:
             return messages
         except BaseException as error:
             queue[:0] = messages
-            raise _normalize_harness_error(error, "hook")
+            raise _normalize_harness_error(error, "hook") from error
 
     async def _drain_steering(self) -> list[AgentMessage]:
         return await self._drain_queue(self._steer_queue, self._steering_mode)
@@ -715,10 +723,12 @@ class AgentHarness:
                 event_error = error
             had_pending = self._pending_mutations > 0 or bool(self._pending_message_writes)
             await self._flush_pending_writes()
-            await self._emit_own(SavePointEvent(
-                type="save_point",
-                had_pending_mutations=had_pending,
-            ))
+            await self._emit_own(
+                SavePointEvent(
+                    type="save_point",
+                    had_pending_mutations=had_pending,
+                )
+            )
             if event_error is not None:
                 raise event_error
             return
@@ -727,10 +737,12 @@ class AgentHarness:
             await self._flush_pending_writes()
             self._phase = "idle"
             await self._emit_any(event, signal)
-            await self._emit_own(SettledEvent(
-                type="settled",
-                next_turn_count=len(self._next_turn_queue),
-            ))
+            await self._emit_own(
+                SettledEvent(
+                    type="settled",
+                    next_turn_count=len(self._next_turn_queue),
+                )
+            )
             return
 
         await self._emit_any(event, signal)
@@ -743,7 +755,9 @@ class AgentHarness:
     ) -> list[AgentMessage]:
         aborted = signal is not None and signal.is_set()
         failure_message = _create_failure_message(model, error, aborted)
-        await self._handle_agent_event({"type": "message_start", "message": failure_message}, signal)
+        await self._handle_agent_event(
+            {"type": "message_start", "message": failure_message}, signal
+        )
         await self._handle_agent_event({"type": "message_end", "message": failure_message}, signal)
         await self._handle_agent_event(
             {"type": "turn_end", "message": failure_message, "tool_results": []}, signal
@@ -797,16 +811,19 @@ class AgentHarness:
                 await self._emit_queue_update()
             except BaseException as error:
                 self._next_turn_queue = queued + self._next_turn_queue
-                raise _normalize_harness_error(error, "hook")
+                raise _normalize_harness_error(error, "hook") from error
             messages = queued + messages
 
-        before_result = await self._emit_hook("before_agent_start", BeforeAgentStartEvent(
-            type="before_agent_start",
-            prompt=text,
-            images=images,
-            system_prompt=turn_state.system_prompt,
-            resources=turn_state.resources,
-        ))
+        before_result = await self._emit_hook(
+            "before_agent_start",
+            BeforeAgentStartEvent(
+                type="before_agent_start",
+                prompt=text,
+                images=images,
+                system_prompt=turn_state.system_prompt,
+                resources=turn_state.resources,
+            ),
+        )
         self._assert_not_shut_down()
         if before_result is not None and before_result.messages:
             messages = messages + list(before_result.messages)
@@ -862,7 +879,7 @@ class AgentHarness:
             return await self._execute_turn(turn_state, text, abort_event, images)
         except BaseException as error:
             self._phase = "idle"
-            raise _normalize_harness_error(error, "unknown")
+            raise _normalize_harness_error(error, "unknown") from error
         finally:
             finish()
 
@@ -892,7 +909,7 @@ class AgentHarness:
             )
         except BaseException as error:
             self._phase = "idle"
-            raise _normalize_harness_error(error, "unknown")
+            raise _normalize_harness_error(error, "unknown") from error
         finally:
             finish()
 
@@ -914,9 +931,7 @@ class AgentHarness:
                 None,
             )
             if template is None:
-                raise AgentHarnessError(
-                    "invalid_argument", f"Unknown prompt template: {name}"
-                )
+                raise AgentHarnessError("invalid_argument", f"Unknown prompt template: {name}")
             return await self._execute_turn(
                 turn_state,
                 _format_template_invocation(template.content, args or []),
@@ -924,7 +939,7 @@ class AgentHarness:
             )
         except BaseException as error:
             self._phase = "idle"
-            raise _normalize_harness_error(error, "unknown")
+            raise _normalize_harness_error(error, "unknown") from error
         finally:
             finish()
 
@@ -984,12 +999,15 @@ class AgentHarness:
         abort_event, finish = self._start_operation()
         try:
             branch_entries = self._session.get_branch()
-            hook_result = await self._emit_hook("session_before_compact", SessionBeforeCompactEvent(
-                type="session_before_compact",
-                preparation=None,
-                branch_entries=branch_entries,
-                custom_instructions=custom_instructions,
-            ))
+            hook_result = await self._emit_hook(
+                "session_before_compact",
+                SessionBeforeCompactEvent(
+                    type="session_before_compact",
+                    preparation=None,
+                    branch_entries=branch_entries,
+                    custom_instructions=custom_instructions,
+                ),
+            )
             if hook_result is not None and hook_result.cancel:
                 raise AgentHarnessError("compaction", "Compaction cancelled")
             provided = hook_result.compaction if hook_result is not None else None
@@ -998,7 +1016,7 @@ class AgentHarness:
             # Phase 2 无 token 预估/摘要生成：与 TS 小上下文行为一致
             raise AgentHarnessError("compaction", "Nothing to compact")
         except BaseException as error:
-            raise _normalize_harness_error(error, "compaction")
+            raise _normalize_harness_error(error, "compaction") from error
         finally:
             self._phase = "idle"
             finish()
@@ -1018,14 +1036,17 @@ class AgentHarness:
                 return NavigateTreeResult(cancelled=False)
             if self._session.get_entry(target_id) is None:
                 raise AgentHarnessError("invalid_argument", f"Entry {target_id} not found")
-            hook_result = await self._emit_hook("session_before_tree", SessionBeforeTreeEvent(
-                type="session_before_tree",
-                target_id=target_id,
-                old_leaf_id=old_leaf_id,
-                summarize=summarize,
-                custom_instructions=None,
-                label=None,
-            ))
+            hook_result = await self._emit_hook(
+                "session_before_tree",
+                SessionBeforeTreeEvent(
+                    type="session_before_tree",
+                    target_id=target_id,
+                    old_leaf_id=old_leaf_id,
+                    summarize=summarize,
+                    custom_instructions=None,
+                    label=None,
+                ),
+            )
             if hook_result is not None and hook_result.cancel:
                 return NavigateTreeResult(cancelled=True)
             raise AgentHarnessError(
@@ -1033,7 +1054,7 @@ class AgentHarness:
                 "navigateTree DAG branching requires Phase 3 (Session)",
             )
         except BaseException as error:
-            raise _normalize_harness_error(error, "branch_summary")
+            raise _normalize_harness_error(error, "branch_summary") from error
         finally:
             self._phase = "idle"
             finish()
@@ -1057,11 +1078,13 @@ class AgentHarness:
         except BaseException as error:
             errors.append(error)
         try:
-            await self._emit_own(AbortEvent(
-                type="abort",
-                cleared_steer=cleared_steer,
-                cleared_follow_up=cleared_follow_up,
-            ))
+            await self._emit_own(
+                AbortEvent(
+                    type="abort",
+                    cleared_steer=cleared_steer,
+                    cleared_follow_up=cleared_follow_up,
+                )
+            )
         except BaseException as error:
             errors.append(error)
         if errors:
@@ -1098,12 +1121,14 @@ class AgentHarness:
         if self._phase != "idle":
             self._pending_mutations += 1
         self._model = model
-        await self._emit_own(ModelUpdateEvent(
-            type="model_update",
-            model=model,
-            previous_model=previous_model,
-            source="set",
-        ))
+        await self._emit_own(
+            ModelUpdateEvent(
+                type="model_update",
+                model=model,
+                previous_model=previous_model,
+                source="set",
+            )
+        )
 
     def get_thinking_level(self) -> ThinkingLevel:
         return self._thinking_level
@@ -1117,11 +1142,13 @@ class AgentHarness:
         if self._phase != "idle":
             self._pending_mutations += 1
         self._thinking_level = level
-        await self._emit_own(ThinkingLevelUpdateEvent(
-            type="thinking_level_update",
-            level=level,
-            previous_level=previous_level,
-        ))
+        await self._emit_own(
+            ThinkingLevelUpdateEvent(
+                type="thinking_level_update",
+                level=level,
+                previous_level=previous_level,
+            )
+        )
 
     def get_tools(self) -> list[AgentTool]:
         return list(self._tools.values())
@@ -1161,14 +1188,16 @@ class AgentHarness:
             self._pending_mutations += 1
         self._tools = next_tools
         self._active_tool_names = next_active
-        await self._emit_own(ToolsUpdateEvent(
-            type="tools_update",
-            tool_names=list(self._tools.keys()),
-            previous_tool_names=previous_names,
-            active_tool_names=list(self._active_tool_names),
-            previous_active_tool_names=previous_active,
-            source="set",
-        ))
+        await self._emit_own(
+            ToolsUpdateEvent(
+                type="tools_update",
+                tool_names=list(self._tools.keys()),
+                previous_tool_names=previous_names,
+                active_tool_names=list(self._active_tool_names),
+                previous_active_tool_names=previous_active,
+                source="set",
+            )
+        )
 
     def get_active_tools(self) -> list[AgentTool]:
         return [self._tools[name] for name in self._active_tool_names if name in self._tools]
@@ -1184,14 +1213,16 @@ class AgentHarness:
         if self._phase != "idle":
             self._pending_mutations += 1
         self._active_tool_names = list(tool_names)
-        await self._emit_own(ToolsUpdateEvent(
-            type="tools_update",
-            tool_names=list(self._tools.keys()),
-            previous_tool_names=previous_names,
-            active_tool_names=list(self._active_tool_names),
-            previous_active_tool_names=previous_active,
-            source="set",
-        ))
+        await self._emit_own(
+            ToolsUpdateEvent(
+                type="tools_update",
+                tool_names=list(self._tools.keys()),
+                previous_tool_names=previous_names,
+                active_tool_names=list(self._active_tool_names),
+                previous_active_tool_names=previous_active,
+                source="set",
+            )
+        )
 
     def get_resources(self) -> AgentHarnessResources:
         return self._resources.clone()
@@ -1200,11 +1231,13 @@ class AgentHarness:
         self._assert_not_shut_down()
         previous_resources = self._resources.clone()
         self._resources = resources.clone()
-        await self._emit_own(ResourcesUpdateEvent(
-            type="resources_update",
-            resources=self._resources.clone(),
-            previous_resources=previous_resources,
-        ))
+        await self._emit_own(
+            ResourcesUpdateEvent(
+                type="resources_update",
+                resources=self._resources.clone(),
+                previous_resources=previous_resources,
+            )
+        )
 
     def get_stream_options(self) -> AgentHarnessStreamOptions:
         return self._stream_options.clone()

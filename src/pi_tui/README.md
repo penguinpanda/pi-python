@@ -43,7 +43,7 @@ from pi_tui.theme import ThemeLoader
 class MyApp(App):
     def __init__(self) -> None:
         self._keybindings = KeybindingsManager()
-        self._theme = ThemeLoader().resolve("auto")   # None/"auto" 按终端背景选择
+        self._theme = ThemeLoader().resolve("auto")  # None/"auto" 按终端背景选择
         super().__init__()
 
     def compose(self) -> ComposeResult:
@@ -53,9 +53,7 @@ class MyApp(App):
         yield PiFooter("", id="pi-footer")
 
     def on_pi_editor_submitted(self, message: PiEditor.Submitted) -> None:
-        self.query_one(PiChatContainer).add_message_agent(
-            {"role": "user", "content": message.text}
-        )
+        self.query_one(PiChatContainer).add_message_agent({"role": "user", "content": message.text})
 
 
 MyApp().run()
@@ -67,7 +65,7 @@ MyApp().run()
 
 ```python
 theme = ThemeLoader().load("dark")
-vars_ = theme.css_variables()          # {"pi-bg": "#1e1e2e", ...}
+vars_ = theme.css_variables()  # {"pi-bg": "#1e1e2e", ...}
 ```
 
 ---
@@ -238,8 +236,8 @@ theme = loader.load("my-theme")
 import asyncio
 from pi_tui.clipboard_image import ClipboardImage
 
-data = await ClipboardImage.read()      # PNG bytes | None
-png = ClipboardImage.process(data)      # 规范化 → PNG bytes
+data = await ClipboardImage.read()  # PNG bytes | None
+png = ClipboardImage.process(data)  # 规范化 → PNG bytes
 ```
 
 ---

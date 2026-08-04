@@ -156,9 +156,7 @@ def _estimate_entry_tokens(entry: dict[str, Any]) -> int:
     return estimate_tokens(entry["message"])
 
 
-def find_turn_start_index(
-    entries: list[dict[str, Any]], entry_index: int, start_index: int
-) -> int:
+def find_turn_start_index(entries: list[dict[str, Any]], entry_index: int, start_index: int) -> int:
     """向前（旧）查找包含 entry_index 所在轮次的 user-like 起点；找不到返回 -1。"""
     for i in range(entry_index, start_index - 1, -1):
         if is_turn_start_entry(entries[i]):
@@ -178,9 +176,7 @@ def find_cut_point(
     可在 user 或 assistant 消息处切割（绝不切在 toolResult）；
     切在 assistant 消息中间时视为 split turn，其后跟随的 toolResult 会被保留。
     """
-    cut_points = [
-        i for i in range(start_index, end_index) if is_cut_point_entry(entries[i])
-    ]
+    cut_points = [i for i in range(start_index, end_index) if is_cut_point_entry(entries[i])]
     if not cut_points:
         return CutPointResult(start_index, -1, False)
 
@@ -292,7 +288,11 @@ def _content_text(content: Any, default: str = "") -> str:
         return content
     if not isinstance(content, list):
         return default
-    parts = [block["text"] for block in content if isinstance(block, dict) and block.get("type") == "text"]
+    parts = [
+        block["text"]
+        for block in content
+        if isinstance(block, dict) and block.get("type") == "text"
+    ]
     return "".join(parts) or default
 
 
@@ -336,7 +336,9 @@ def serialize_conversation(messages: list[AgentMessage]) -> str:
         elif role == "toolResult":
             content = _content_text(msg.get("content"), "")
             if content:
-                parts.append(f"[Tool result]: {truncate_for_summary(content, TOOL_RESULT_MAX_CHARS)}")
+                parts.append(
+                    f"[Tool result]: {truncate_for_summary(content, TOOL_RESULT_MAX_CHARS)}"
+                )
 
     return "\n\n".join(parts)
 
@@ -510,9 +512,7 @@ def prepare_compaction(
 
     history_end = cut.turn_start_index if cut.is_split_turn else cut.first_kept_entry_index
     messages_to_summarize = [
-        e["message"]
-        for e in entries[boundary_start:history_end]
-        if e.get("type") == "message"
+        e["message"] for e in entries[boundary_start:history_end] if e.get("type") == "message"
     ]
     turn_prefix_messages: list[AgentMessage] = []
     if cut.is_split_turn:
@@ -538,6 +538,7 @@ def prepare_compaction(
 
 def _combine_usage(first: Usage, second: Usage) -> Usage:
     """合并两次摘要调用的 usage。"""
+
     def _g(u: Usage, key: str) -> int:
         return u.get(key, 0) or 0
 
@@ -658,7 +659,9 @@ async def generate_summary_with_usage(
     )
 
     if response.get("stop_reason") == "error":
-        raise RuntimeError(f"Summarization failed: {response.get('error_message') or 'Unknown error'}")
+        raise RuntimeError(
+            f"Summarization failed: {response.get('error_message') or 'Unknown error'}"
+        )
 
     text = _content_text(response.get("content"), "")
     usage = response.get("usage") or empty_usage()
@@ -703,7 +706,9 @@ async def _generate_turn_prefix_summary(
     )
 
     if response.get("stop_reason") == "error":
-        raise RuntimeError(f"Turn prefix summarization failed: {response.get('error_message') or 'Unknown error'}")
+        raise RuntimeError(
+            f"Turn prefix summarization failed: {response.get('error_message') or 'Unknown error'}"
+        )
 
     return _content_text(response.get("content"), ""), response.get("usage") or empty_usage()
 

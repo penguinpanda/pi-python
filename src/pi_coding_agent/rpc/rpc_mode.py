@@ -106,9 +106,7 @@ class RpcUiContext:
         return await self._request(
             {"method": "select", "title": title, "options": list(options)},
             default=None,
-            parse=lambda response: (
-                response.get("value") if "value" in response else None
-            ),
+            parse=lambda response: response.get("value") if "value" in response else None,
             timeout=timeout,
         )
 
@@ -121,11 +119,7 @@ class RpcUiContext:
         return await self._request(
             {"method": "confirm", "title": title, "message": message},
             default=False,
-            parse=lambda response: (
-                response.get("confirmed")
-                if "confirmed" in response
-                else False
-            ),
+            parse=lambda response: response.get("confirmed") if "confirmed" in response else False,
             timeout=timeout,
         )
 
@@ -138,9 +132,7 @@ class RpcUiContext:
         return await self._request(
             {"method": "input", "title": title, "placeholder": placeholder},
             default=None,
-            parse=lambda response: (
-                response.get("value") if "value" in response else None
-            ),
+            parse=lambda response: response.get("value") if "value" in response else None,
             timeout=timeout,
         )
 
@@ -148,45 +140,51 @@ class RpcUiContext:
         return await self._request(
             {"method": "editor", "title": title, "prefill": prefill},
             default=None,
-            parse=lambda response: (
-                response.get("value") if "value" in response else None
-            ),
+            parse=lambda response: response.get("value") if "value" in response else None,
         )
 
     def notify(self, message: str, notify_type: str | None = None) -> None:
         """fire-and-forget 通知（无需响应）。"""
-        self._emit({
-            "type": "extension_ui_request",
-            "id": self._new_id(),
-            "method": "notify",
-            "message": message,
-            "notifyType": notify_type,
-        })
+        self._emit(
+            {
+                "type": "extension_ui_request",
+                "id": self._new_id(),
+                "method": "notify",
+                "message": message,
+                "notifyType": notify_type,
+            }
+        )
 
     def set_status(self, key: str, text: str | None) -> None:
-        self._emit({
-            "type": "extension_ui_request",
-            "id": self._new_id(),
-            "method": "setStatus",
-            "statusKey": key,
-            "statusText": text,
-        })
+        self._emit(
+            {
+                "type": "extension_ui_request",
+                "id": self._new_id(),
+                "method": "setStatus",
+                "statusKey": key,
+                "statusText": text,
+            }
+        )
 
     def set_title(self, title: str) -> None:
-        self._emit({
-            "type": "extension_ui_request",
-            "id": self._new_id(),
-            "method": "setTitle",
-            "title": title,
-        })
+        self._emit(
+            {
+                "type": "extension_ui_request",
+                "id": self._new_id(),
+                "method": "setTitle",
+                "title": title,
+            }
+        )
 
     def set_editor_text(self, text: str) -> None:
-        self._emit({
-            "type": "extension_ui_request",
-            "id": self._new_id(),
-            "method": "set_editor_text",
-            "text": text,
-        })
+        self._emit(
+            {
+                "type": "extension_ui_request",
+                "id": self._new_id(),
+                "method": "set_editor_text",
+                "text": text,
+            }
+        )
 
     def resolve_response(self, response: dict[str, Any]) -> None:
         """处理客户端返回的 extension_ui_response。"""
@@ -387,9 +385,7 @@ class RpcMessageHandler:
             },
         )
 
-    async def _handle_get_available_models(
-        self, _cmd: dict, command_id: str | None
-    ) -> dict:
+    async def _handle_get_available_models(self, _cmd: dict, command_id: str | None) -> dict:
         models = await self.model_runtime.get_available()
         return success_response(
             command_id,
@@ -408,15 +404,11 @@ class RpcMessageHandler:
         self.session.set_thinking_level(level)
         return success_response(command_id, "set_thinking_level")
 
-    async def _handle_cycle_thinking_level(
-        self, _cmd: dict, command_id: str | None
-    ) -> dict:
+    async def _handle_cycle_thinking_level(self, _cmd: dict, command_id: str | None) -> dict:
         level = self.session.cycle_thinking_level()
         if level is None:
             return success_response(command_id, "cycle_thinking_level", None)
-        return success_response(
-            command_id, "cycle_thinking_level", {"level": level}
-        )
+        return success_response(command_id, "cycle_thinking_level", {"level": level})
 
     async def _handle_get_available_thinking_levels(
         self, _cmd: dict, command_id: str | None
@@ -456,28 +448,20 @@ class RpcMessageHandler:
     async def _handle_compact(self, cmd: dict, command_id: str | None) -> dict:
         result = await self.session.compact(cmd.get("customInstructions"))
         if result is None:
-            return error_response(
-                command_id, "compact", "Nothing to compact"
-            )
+            return error_response(command_id, "compact", "Nothing to compact")
         return success_response(command_id, "compact", asdict(result))
 
-    async def _handle_set_auto_compaction(
-        self, cmd: dict, command_id: str | None
-    ) -> dict:
+    async def _handle_set_auto_compaction(self, cmd: dict, command_id: str | None) -> dict:
         enabled = cmd.get("enabled")
         if not isinstance(enabled, bool):
-            return error_response(
-                command_id, "set_auto_compaction", "enabled must be a boolean"
-            )
+            return error_response(command_id, "set_auto_compaction", "enabled must be a boolean")
         self.session.set_auto_compaction_enabled(enabled)
         return success_response(command_id, "set_auto_compaction")
 
     async def _handle_set_auto_retry(self, cmd: dict, command_id: str | None) -> dict:
         enabled = cmd.get("enabled")
         if not isinstance(enabled, bool):
-            return error_response(
-                command_id, "set_auto_retry", "enabled must be a boolean"
-            )
+            return error_response(command_id, "set_auto_retry", "enabled must be a boolean")
         self.session.set_auto_retry_enabled(enabled)
         return success_response(command_id, "set_auto_retry")
 
@@ -497,18 +481,20 @@ class RpcMessageHandler:
             from pi_agent import PythonExecutionEnv, ShellExecOptions
 
             env = PythonExecutionEnv(cwd=self.session.cwd)
-            ok, result = await env.exec(
-                command, ShellExecOptions(timeout=120)
-            )
+            ok, result = await env.exec(command, ShellExecOptions(timeout=120))
             if not ok:
                 return error_response(command_id, "bash", str(result))
         except Exception as exc:
             return error_response(command_id, "bash", str(exc))
-        return success_response(command_id, "bash", {
-            "output": (result.stdout or "") + (result.stderr or ""),
-            "exit_code": result.exit_code,
-            "canceled": False,
-        })
+        return success_response(
+            command_id,
+            "bash",
+            {
+                "output": (result.stdout or "") + (result.stderr or ""),
+                "exit_code": result.exit_code,
+                "canceled": False,
+            },
+        )
 
     async def _handle_abort_bash(self, _cmd: dict, command_id: str | None) -> dict:
         # 当前 bash 同步执行（无跟踪进程），no-op 成功。
@@ -518,12 +504,8 @@ class RpcMessageHandler:
     # 会话
     # ------------------------------------------------------------------
 
-    async def _handle_get_session_stats(
-        self, _cmd: dict, command_id: str | None
-    ) -> dict:
-        return success_response(
-            command_id, "get_session_stats", self.session.get_session_stats()
-        )
+    async def _handle_get_session_stats(self, _cmd: dict, command_id: str | None) -> dict:
+        return success_response(command_id, "get_session_stats", self.session.get_session_stats())
 
     async def _handle_export_html(self, cmd: dict, command_id: str | None) -> dict:
         from pathlib import Path
@@ -532,9 +514,7 @@ class RpcMessageHandler:
 
         output_path = cmd.get("outputPath")
         if not isinstance(output_path, str) or not output_path:
-            output_path = str(
-                Path(self.session.cwd) / f"session-{self.session.session_id}.html"
-            )
+            output_path = str(Path(self.session.cwd) / f"session-{self.session.session_id}.html")
         try:
             path = export_session_to_html(
                 self.session.session_manager,
@@ -575,7 +555,9 @@ class RpcMessageHandler:
     async def _handle_clone(self, _cmd: dict, command_id: str | None) -> dict:
         leaf_id = self.session.session_manager.get_leaf_id()
         if leaf_id is None:
-            return error_response(command_id, "clone", "Cannot clone session: no current entry selected")
+            return error_response(
+                command_id, "clone", "Cannot clone session: no current entry selected"
+            )
         forked = self.session.session_manager.fork(leaf_id)
         try:
             new_session = await self._rebuild_session(forked)
@@ -590,9 +572,7 @@ class RpcMessageHandler:
         if not isinstance(session_path, str):
             return error_response(command_id, "switch_session", "sessionPath is required")
         try:
-            manager = self.session.session_manager.open(
-                session_path, cwd_override=self.session.cwd
-            )
+            manager = self.session.session_manager.open(session_path, cwd_override=self.session.cwd)
             new_session = await self._rebuild_session(manager)
         except Exception as exc:
             return error_response(command_id, "switch_session", str(exc))
@@ -642,9 +622,7 @@ class RpcMessageHandler:
             {"entries": entries, "leafId": session_manager.get_leaf_id()},
         )
 
-    async def _handle_get_last_assistant_text(
-        self, _cmd: dict, command_id: str | None
-    ) -> dict:
+    async def _handle_get_last_assistant_text(self, _cmd: dict, command_id: str | None) -> dict:
         return success_response(
             command_id,
             "get_last_assistant_text",
@@ -673,32 +651,38 @@ class RpcMessageHandler:
         runner = session.extension_runner
         if runner is not None:
             for command in runner.get_registered_commands():
-                commands.append({
-                    "name": command.name,
-                    "description": command.description,
-                    "source": "extension",
-                    "sourceInfo": command.source_info or {},
-                })
+                commands.append(
+                    {
+                        "name": command.name,
+                        "description": command.description,
+                        "source": "extension",
+                        "sourceInfo": command.source_info or {},
+                    }
+                )
 
         # 提示模板（Phase 4）。
         if session.template_loader is not None:
             for template in session.template_loader.all():
-                commands.append({
-                    "name": template.name,
-                    "description": template.description,
-                    "source": "prompt",
-                    "sourceInfo": {"path": template.file_path},
-                })
+                commands.append(
+                    {
+                        "name": template.name,
+                        "description": template.description,
+                        "source": "prompt",
+                        "sourceInfo": {"path": template.file_path},
+                    }
+                )
 
         # 技能（Phase 4）。
         if session.skill_loader is not None:
             for skill in session.skill_loader.all():
-                commands.append({
-                    "name": f"skill:{skill.name}",
-                    "description": skill.description,
-                    "source": "skill",
-                    "sourceInfo": {"path": skill.file_path},
-                })
+                commands.append(
+                    {
+                        "name": f"skill:{skill.name}",
+                        "description": skill.description,
+                        "source": "skill",
+                        "sourceInfo": {"path": skill.file_path},
+                    }
+                )
         return success_response(command_id, "get_commands", {"commands": commands})
 
 

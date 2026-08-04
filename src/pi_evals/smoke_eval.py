@@ -28,9 +28,7 @@ async def test_smoke_eval_basic_prompt():
         runtime=runtime,
         model={"provider": "faux", "id": "faux-1"},
     )
-    result = await harness.run(
-        "What's the capital of France? Respond with only the city name."
-    )
+    result = await harness.run("What's the capital of France? Respond with only the city name.")
     assert result.output.strip() == "Paris"
     assert result.errors == []
     assert result.usage["provider"] == "faux"

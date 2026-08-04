@@ -82,10 +82,12 @@ async def main():
     set_default_stream_fn(models.stream)
 
     # 2. 创建 Agent
-    agent = Agent(AgentOptions(
-        system_prompt="You are a concise assistant.",
-        model=models.get_model("deepseek", "deepseek-v4-flash"),
-    ))
+    agent = Agent(
+        AgentOptions(
+            system_prompt="You are a concise assistant.",
+            model=models.get_model("deepseek", "deepseek-v4-flash"),
+        )
+    )
 
     # 3. 订阅事件
     agent.subscribe(lambda e: print(f"[{e['type']}]"))
@@ -157,14 +159,14 @@ AgentOptions(
 @dataclass
 class AgentState:
     system_prompt: str
-    model: Model                       # 当前模型（必填）
+    model: Model  # 当前模型（必填）
     thinking_level: ThinkingLevel = "off"
-    tools: list[AgentTool]             # 赋值时自动防御性复制
-    messages: list[AgentMessage]       # 赋值时自动防御性复制
+    tools: list[AgentTool]  # 赋值时自动防御性复制
+    messages: list[AgentMessage]  # 赋值时自动防御性复制
     is_streaming: bool
     streaming_message: AgentMessage | None
     pending_tool_calls: set[str]
-    error_message: str | None          # 最近一轮 error 的文本
+    error_message: str | None  # 最近一轮 error 的文本
 ```
 
 ---
@@ -176,14 +178,14 @@ class AgentState:
 ```python
 @dataclass(slots=True)
 class AgentTool:
-    name: str                          # 工具名 (LLM 可见)
-    description: str                   # 工具描述 (给 LLM 看)
-    input_schema: dict[str, Any]       # JSON Schema (给 LLM 选择参数 + 本地校验)
-    label: str                         # UI 显示标签
+    name: str  # 工具名 (LLM 可见)
+    description: str  # 工具描述 (给 LLM 看)
+    input_schema: dict[str, Any]  # JSON Schema (给 LLM 选择参数 + 本地校验)
+    label: str  # UI 显示标签
     execute: Callable[..., Awaitable[AgentToolResult]]
-        # 签名: (tool_call_id, params, signal?, on_update?) → AgentToolResult
+    # 签名: (tool_call_id, params, signal?, on_update?) → AgentToolResult
     execution_mode: ToolExecutionMode = "parallel"
-        # 单工具执行模式；批次内任一工具声明 "sequential" → 整批回退顺序执行
+    # 单工具执行模式；批次内任一工具声明 "sequential" → 整批回退顺序执行
     # 生命周期钩子（可选）
     before_execute: Callable[[dict, Any], Awaitable[Any]] | None
     after_execute: Callable[[Any], Awaitable[Any]] | None
@@ -195,10 +197,10 @@ class AgentTool:
 @dataclass(slots=True)
 class AgentToolResult:
     content: list[TextContent | ImageContent]  # 返回给 LLM 的内容
-    details: Any = None                         # 附加详情
-    usage: Usage | None = None                  # token 用量
-    added_tool_names: list[str] | None = None   # 动态添加工具
-    terminate: bool = False                     # True → 停止后续 loop
+    details: Any = None  # 附加详情
+    usage: Usage | None = None  # token 用量
+    added_tool_names: list[str] | None = None  # 动态添加工具
+    terminate: bool = False  # True → 停止后续 loop
 ```
 
 ### 四阶段执行管道
@@ -393,14 +395,20 @@ context = await session.build_context()
 ```python
 from pi_agent.proxy import stream_proxy
 
-agent = Agent(AgentOptions(
-    model=model,
-    stream_fn=lambda model, context, options: stream_proxy(model, context, {
-        **(options or {}),
-        "authToken": token,
-        "proxyUrl": "https://genai.example.com",
-    }),
-))
+agent = Agent(
+    AgentOptions(
+        model=model,
+        stream_fn=lambda model, context, options: stream_proxy(
+            model,
+            context,
+            {
+                **(options or {}),
+                "authToken": token,
+                "proxyUrl": "https://genai.example.com",
+            },
+        ),
+    )
+)
 ```
 
 带宽优化：服务器剥离 `partial` 字段，客户端基于事件流本地重建 partial 消息

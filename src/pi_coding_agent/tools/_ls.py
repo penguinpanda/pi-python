@@ -4,14 +4,11 @@ ls 工具 — 列出目录内容。
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from stat import S_ISDIR
 
 from pi_agent import AgentTool, AgentToolResult
 from pi_ai import TextContent
 
-from ._grep import _is_ignored_dir
 from ._path_utils import resolve_cwd_path
 
 TOOL_SCHEMA = {
@@ -53,7 +50,6 @@ def create_ls_tool(cwd: str) -> AgentTool:
             )
 
         if target.is_file():
-            st = target.stat()
             return AgentToolResult(
                 content=[TextContent(type="text", text=_format_entry(target, target.parent))],
                 details={"is_file": True},
@@ -99,10 +95,8 @@ def _format_entry(entry: Path, base: Path) -> str:
     try:
         st = entry.stat()
         size = st.st_size
-        mtime = st.st_mtime
     except OSError:
         size = 0
-        mtime = 0
 
     # 大小格式化
     if entry.is_dir():

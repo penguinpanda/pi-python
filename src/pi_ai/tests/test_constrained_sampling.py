@@ -12,7 +12,7 @@ from pi_ai.api.constrained_sampling import (
     resolve_json_schema_strict_sampling,
 )
 from pi_ai.api._shared import to_openai_tools
-from pi_ai.types import Model, Tool
+from pi_ai.types import Tool
 
 
 def _grammar_tool() -> Tool:

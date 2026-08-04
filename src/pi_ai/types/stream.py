@@ -20,6 +20,7 @@ from typing import (
     Literal,
     NotRequired,
     Protocol,
+    TYPE_CHECKING,
     TypedDict,
 )
 
@@ -27,7 +28,6 @@ from .common import (
     AsyncHTTPClient,
     CacheRetention,
     ProviderEnv,
-    ProviderHeaders,
     ThinkingBudgets,
     ThinkingLevel,
     Transport,
@@ -36,6 +36,10 @@ from .content import ToolCall
 from .context import Context
 from .message import AssistantMessage
 from .model import Model
+
+if TYPE_CHECKING:
+    # 仅类型检查用；运行时不导入，避免与 utils._event_stream 循环依赖。
+    from ..utils._event_stream import AssistantMessageEventStream
 
 
 # =========================================================

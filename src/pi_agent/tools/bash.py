@@ -33,13 +33,17 @@ def _validate_timeout(timeout: float | None) -> None:
 def create_bash_tool(options: BashToolOptions | None = None) -> AgentTool:
     options = options or BashToolOptions()
 
-    async def execute(tool_call_id, params, signal=None, on_update=None, context=None) -> AgentToolResult:
+    async def execute(
+        tool_call_id, params, signal=None, on_update=None, context=None
+    ) -> AgentToolResult:
         env = context.env
         command = params["command"]
         timeout = params.get("timeout")
         _validate_timeout(timeout)
 
-        execution_command = f"{options.command_prefix}\n{command}" if options.command_prefix else command
+        execution_command = (
+            f"{options.command_prefix}\n{command}" if options.command_prefix else command
+        )
         execution = {
             "command": execution_command,
             "cwd": env.cwd,
@@ -52,14 +56,20 @@ def create_bash_tool(options: BashToolOptions | None = None) -> AgentTool:
         if on_update is not None:
             on_update(AgentToolResult(content=[], details=None))
 
-        capture_result = get_or_throw(await execute_shell_with_capture(env, execution["command"], {
-            "cwd": execution["cwd"],
-            "env": execution["env"],
-            "inheritEnv": execution["inheritEnv"],
-            "timeout": timeout,
-            "abortSignal": signal,
-            "returnExecutionErrors": True,
-        }))
+        capture_result = get_or_throw(
+            await execute_shell_with_capture(
+                env,
+                execution["command"],
+                {
+                    "cwd": execution["cwd"],
+                    "env": execution["env"],
+                    "inheritEnv": execution["inheritEnv"],
+                    "timeout": timeout,
+                    "abortSignal": signal,
+                    "returnExecutionErrors": True,
+                },
+            )
+        )
 
         output_text = capture_result.output
         details: Any = None
@@ -68,7 +78,9 @@ def create_bash_tool(options: BashToolOptions | None = None) -> AgentTool:
                 "truncation": capture_result.truncation,
                 "fullOutputPath": capture_result.full_output_path,
             }
-            start_line = capture_result.truncation.total_lines - capture_result.truncation.output_lines + 1
+            start_line = (
+                capture_result.truncation.total_lines - capture_result.truncation.output_lines + 1
+            )
             end_line = capture_result.truncation.total_lines
             if capture_result.truncation.last_line_partial:
                 last_line_size = format_size(capture_result.last_line_bytes)
@@ -118,7 +130,10 @@ def create_bash_tool(options: BashToolOptions | None = None) -> AgentTool:
             "type": "object",
             "properties": {
                 "command": {"type": "string", "description": "Bash command to execute"},
-                "timeout": {"type": "number", "description": "Timeout in seconds (optional, no default timeout)"},
+                "timeout": {
+                    "type": "number",
+                    "description": "Timeout in seconds (optional, no default timeout)",
+                },
             },
             "required": ["command"],
         },

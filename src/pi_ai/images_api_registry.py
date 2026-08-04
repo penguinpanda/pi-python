@@ -1,6 +1,6 @@
 """图片 API 提供者注册表（对齐 TS images-api-registry.ts）。"""
 
-from typing import Any, Awaitable, Callable
+from typing import Awaitable, Callable
 
 from .types import AssistantImages, ImagesContext, ImagesModel, ImagesOptions
 

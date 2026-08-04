@@ -1,7 +1,5 @@
 """compat_runtime 测试。"""
 
-import pytest
-
 from pi_ai.api.compat_runtime import (
     compat_value,
     max_tokens_field,
@@ -19,14 +17,22 @@ def _model(compat=None) -> Model:
 
 
 def test_compat_value_defaults():
-    assert compat_value(_model(), "maxTokensField", "max_completion_tokens") == "max_completion_tokens"
-    assert compat_value(_model({"maxTokensField": "max_tokens"}), "maxTokensField", "x") == "max_tokens"
+    assert (
+        compat_value(_model(), "maxTokensField", "max_completion_tokens") == "max_completion_tokens"
+    )
+    assert (
+        compat_value(_model({"maxTokensField": "max_tokens"}), "maxTokensField", "x")
+        == "max_tokens"
+    )
 
 
 def test_max_tokens_field():
     assert max_tokens_field(_model()) == "max_tokens"
     assert max_tokens_field(_model({"maxTokensField": "max_tokens"})) == "max_tokens"
-    assert max_tokens_field(_model({"maxTokensField": "max_completion_tokens"})) == "max_completion_tokens"
+    assert (
+        max_tokens_field(_model({"maxTokensField": "max_completion_tokens"}))
+        == "max_completion_tokens"
+    )
 
 
 def test_boolean_compat_defaults():
