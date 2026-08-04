@@ -84,7 +84,7 @@ async def main():
     # 2. 创建 Agent
     agent = Agent(AgentOptions(
         system_prompt="You are a concise assistant.",
-        model=models.get_model("deepseek", "deepseek-chat"),
+        model=models.get_model("deepseek", "deepseek-v4-flash"),
     ))
 
     # 3. 订阅事件
@@ -294,6 +294,14 @@ class AgentToolResult:
 | write | `create_write_tool()` | 创建/覆盖文件，自动创建父目录 |
 | edit | `create_edit_tool()` | 精确文本替换（`edits[].oldText/newText`），兼容 legacy 参数，返回 diff/patch |
 | bash | `create_bash_tool()` | 执行 shell 命令，可设 timeout，输出截断并保存完整输出到临时文件 |
+
+**图片管线**（`pi_agent.tools.image_pipeline`）：read 工具默认接入，提供
+`exif_orientation`（EXIF 方向校正）、`resize_image`（最大 2000×2000 等比缩放）、
+`convert_image` / `process_image`（多格式转 PNG，BMP/JPEG/GIF/WebP 统一归一化），
+剪贴板图片（`pi_tui.ClipboardImage`）复用同一实现。
+
+**工具范围约束**：read/bash 描述声明只操作工作目录内文件、禁止全盘搜索
+（`find /`、`grep -r /`、`locate`）；read 对未找到文件返回"不要扩大搜索范围"指引。
 
 所有工具通过 `ExecutionEnv` 进行 I/O（平台无关）：
 

@@ -81,11 +81,13 @@ vars_ = theme.css_variables()          # {"pi-bg": "#1e1e2e", ...}
 | role | label | 说明 |
 |------|-------|------|
 | `user` | `User` | 字符串或内容块文本 |
-| `toolResult` | `Tool: <tool_name>` | 工具执行结果 |
-| `assistant` | `Thinking` / `Assistant` / `Tool call` | 按 `show_thinking` / `show_tools` 过滤 |
-| `compactionSummary` | `Compaction` | 压缩摘要 |
+| `toolResult` | `Tool: <tool_name>` / `Tool: <tool_name> (error)` | 工具执行结果（错误带标记） |
+| `assistant` | `Thinking` / `Assistant` / `Tool call` | 按 `show_thinking` / `show_tools` 过滤；toolCall 逐条渲染 |
+| `compactionSummary` | `Compaction summary` | 压缩摘要 |
+| `branchSummary` | `Branch summary` | 分支摘要 |
+| `skillInvocation` | `Skill` | 技能调用提示 |
 | `system` | `System` | 系统消息 |
-| 其它（custom / branchSummary） | `Agent` | 降级为文本 |
+| 其它（custom） | `Agent` | 降级为文本 |
 
 内容块支持 `text` / `thinking` / `toolCall` / `image`（`[image]` 占位）。
 
@@ -164,8 +166,17 @@ vars_ = theme.css_variables()          # {"pi-bg": "#1e1e2e", ...}
 
 | 组件 | 触发方式 | 功能 |
 |------|----------|------|
-| `ModelSelector` | `Ctrl+L`（`app.model.select`） | 模型选择：按 provider/id/name 分组显示 + 实时搜索 + 键盘导航，`>` 标记当前模型；Enter 选中（`dismiss(model)`），Escape 取消 |
-| `SessionPicker` | `--resume` / `app.session.resume` | 会话恢复选择：按修改时间倒序，显示 session id + 时间；Enter 返回会话路径 |
+| `ModelSelector` | `Ctrl+L`（`app.model.select`） | 模型选择：按 provider/id/name 分组显示 + 实时搜索 + 键盘导航，`>` 标记当前模型 |
+| `SessionPicker` | `--resume` / `app.session.resume` | 会话恢复选择：按修改时间倒序，显示 session id + 时间 |
+| `TreeSelector` | `/tree` / `/fork` | 会话树导航 / fork 目标选择（ASCII 树 + 键盘导航） |
+| `TextInputDialog` | OAuth 回调等 | 通用文本输入弹层（Enter 提交，Esc 取消） |
+| `ChoiceSelector` | settings 子项 | 通用选项列表弹层 |
+| `SettingsSelector` | `/settings` | 设置菜单（bool/choice/string 三类设置项，落盘项目 `.pi/settings.json`） |
+| `TrustSelector` | `/trust` / 启动未信任项目 | 项目信任决策（Trust / Trust parent / Do not trust 等） |
+| `ThinkingSelector` | `/thinking` | 思考级别选择 |
+| `OAuthSelector` | `/oauth [login|logout]` | OAuth provider 选择（显示登录状态） |
+| `ScopedModelsSelector` | `/scoped-models` | 模型范围多选（Enter 切换，Esc 保存） |
+| `ExtensionSelector` | `/extensions` | 扩展列表（显示命令/工具数量） |
 
 挂载竞态处理：`ModelSelector._rebuild` 在子组件尚未挂载时通过 `call_after_refresh` 延迟重试。
 
@@ -220,7 +231,7 @@ theme = loader.load("my-theme")
 跨平台剪贴板图片读取 + Pillow 处理，对齐 TS `clipboard-image.ts` + `image-process.ts`：
 
 - **读取**：Windows PowerShell（`System.Windows.Forms.Clipboard`）→ macOS `osascript` → Linux `wl-paste`，失败回退 `xclip`；
-- **处理**：EXIF 方向校正（`ImageOps.exif_transpose`）→ 缩放到 `MAX_IMAGE_DIMENSION=2000` 以内 → 转 PNG（保留 alpha）；
+- **处理**：复用 `pi_agent.tools.image_pipeline`（EXIF 方向校正 → 缩放到 `MAX_IMAGE_DIMENSION=2000` 以内 → 转 PNG，保留 alpha）；
 - 超时 10 秒，失败 / 无图片返回 `None`，不抛异常。
 
 ```python

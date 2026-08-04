@@ -10,14 +10,24 @@
 pi-python/
 ├── src/pi_ai/              # LLM API 抽象层（Provider 模式）
 ├── src/pi_agent/           # Agent 循环引擎（纯函数核心 + 有状态包装）
-└── src/pi_coding_agent/    # CLI 编码代理（工具 + 会话 + 配置）
+├── src/pi_coding_agent/    # CLI 编码代理（工具 + 会话 + 配置）
+├── src/pi_tui/             # Textual TUI 组件（主题/快捷键/选择器）
+├── src/pi_protocol/        # protocol v2 线协议（pydantic schema + JSONL framing）
+├── src/pi_storage/         # PostgreSQL 会话存储（asyncpg + 迁移 + 搜索）
+├── src/pi_server/          # 常驻 pi 服务（stdio JSONL，attach/detach + 快照推送）
+└── src/pi_evals/           # 评测 harness（faux provider + smoke/extensions eval）
 ```
 
 | 包 | 文档 | 说明 | 打包 |
 |---|------|------|:---:|
-| `pi_ai` | [README](src/pi_ai/README.md) | 统一 LLM API，Provider 抽象模式。支持 OpenAI (Responses API)、DeepSeek 与 Qwen (Completions API) | ✓ |
-| `pi_agent` | [README](src/pi_agent/readme.md) | 最小核心 Agent 循环。事件驱动、工具调用、循环钩子 | ✓ |
-| `pi_coding_agent` | [README](src/pi_coding_agent/README.md) | CLI 编码代理。7 个编码工具、会话持久化、双层配置 | ✓ |
+| `pi_ai` | [README](src/pi_ai/README.md) | 统一 LLM API，Provider 抽象模式。支持 OpenAI (Responses API)、DeepSeek/Qwen (Completions API)、Ollama 本地与 Faux 测试 Provider | ✓ |
+| `pi_agent` | [README](src/pi_agent/README.md) | 最小核心 Agent 循环。事件驱动、工具调用、循环钩子 | ✓ |
+| `pi_coding_agent` | [README](src/pi_coding_agent/README.md) | CLI 编码代理。7 个编码工具、DAG 会话持久化、双层配置、扩展/技能/信任/压缩 | ✓ |
+| `pi_tui` | — | Textual TUI：主题、快捷键、选择器、剪贴板图片 | ✓ |
+| `pi_protocol` | — | protocol v2：Command/Result/Snapshot/Progress/Error + JSONL framing | ✓ |
+| `pi_storage` | — | PostgreSQL SessionStore/SessionSearch（`docker compose up -d pg`） | ✓ |
+| `pi_server` | — | 常驻服务：`python -m pi_server`（stdio JSONL） | ✓ |
+| `pi_evals` | — | pytest 评测 harness + smoke/extensions eval | ✓ |
 
 ### 架构
 
@@ -29,7 +39,8 @@ pi_coding_agent (CLI + Tools + Sessions)
 
 - **pi_ai** — 底层 LLM 调用：`Models` 注册表管理多个 Provider，`complete()` / `stream()` 统一非流式/流式调用，`EventStream` 生产者-消费者异步事件流
 - **pi_agent** — 中间层 Agent 循环：纯函数引擎 `run_agent_loop()` + 有状态 `Agent` 包装类，事件驱动、工具调用、取消机制、循环钩子
-- **pi_coding_agent** — 顶层 CLI：`pi -p "..."` 单次编码查询，7 个编码工具（read/write/edit/bash/grep/find/ls），JSONL 会话持久化，双层 settings.json 配置
+- **pi_coding_agent** — 顶层 CLI：`pi -p "..."` 单次编码查询，7 个编码工具（read/write/edit/bash/grep/find/ls），JSONL 会话持久化，双层 settings.json 配置，26 个 Slash 命令，项目信任，系统提示构建器（AGENTS.md/CLAUDE.md），turn timings / cache stats
+- **pi_tui / pi_protocol / pi_storage / pi_server / pi_evals** — TUI 组件层、protocol v2、PostgreSQL 存储、常驻服务与评测 harness（见下表）
 
 ---
 
@@ -65,7 +76,7 @@ from pi_ai import create_default_models, Context
 
 async def main():
     models = create_default_models()
-    model = models.get_model("deepseek", "deepseek-chat")
+    model = models.get_model("deepseek", "deepseek-v4-flash")
 
     async for event in await models.stream(model, Context(
         messages=[{"role": "user", "content": "Hello!"}],
@@ -90,7 +101,7 @@ async def main():
     set_default_stream_fn(models.stream)
 
     agent = Agent(AgentOptions(
-        model=models.get_model("deepseek", "deepseek-chat"),
+        model=models.get_model("deepseek", "deepseek-v4-flash"),
     ))
     agent.subscribe(lambda e: print(f"[{e['type']}]"))
     await agent.prompt("What is 2+2?")
@@ -99,7 +110,7 @@ async def main():
 asyncio.run(main())
 ```
 
-详见 [src/pi_agent/readme.md](src/pi_agent/readme.md)。
+详见 [src/pi_agent/README.md](src/pi_agent/README.md)。
 
 ### pi_coding_agent — CLI 编码代理
 
@@ -122,16 +133,18 @@ uv run python -m pi_coding_agent --no-session -p "what is 2+2?"
 
 | Provider | 模型 ID | API 类型 | Thinking | Tool Calling | 图片输入 | max_tokens |
 |----------|---------|----------|:--------:|:------------:|:--------:|:---------:|
-| OpenAI | `gpt-4o` | Responses | ✗ | ✓ | ✓ | 16,384 |
-| OpenAI | `gpt-4o-mini` | Responses | ✗ | ✓ | ✓ | 16,384 |
-| OpenAI | `o4-mini` | Responses | ✓ | ✓ | ✗ | 100,000 |
-| DeepSeek | `deepseek-chat` | Completions | ✗ | ✓ | ✗ | 65,536 |
-| DeepSeek | `deepseek-reasoner` | Completions | ✓ | ✗ | ✗ | 65,536 |
+| OpenAI | `gpt-5-chat-latest` | Responses | ✗ | ✓ | ✓ | 16,384 |
+| OpenAI | `gpt-5.6-luna` / `gpt-5.6-sol` / `gpt-5.6-terra` | Responses | ✓ | ✓ | ✓ | 128,000 |
 | DeepSeek | `deepseek-v4-flash` | Completions | ✓ | ✓ | ✗ | 384,000 |
-| Qwen | `qwen-plus` | Completions | ✗ | ✓ | ✗ | 8,192 |
+| DeepSeek | `deepseek-v4-pro` | Completions | ✓ | ✓ | ✗ | 384,000 |
+| Qwen | `qwen-turbo` / `qwen-plus` / `qwen-max` | Completions | ✗ | ✓ | ✗ | 8,192 |
 | Qwen | `qwen3-235b-a22b` | Completions | ✓ | ✓ | ✗ | 131,072 |
-| Qwen | `qwen3-vl-flash` | Completions | ✗ | ✓ | ✓ | 8,192 |
+| Qwen | `qwen3-30b-a3b` | Completions | ✓ | ✓ | ✗ | 32,768 |
+| Qwen | `qwen3-vl-flash` / `qwen-vl-max` | Completions | ✗ | ✓ | ✓ | 8,192 |
 | Qwen | `qwen-vl-plus` | Completions | ✗ | ✓ | ✓ | 4,096 |
+| Ollama | `qwen3:30b` / `gpt-oss:20b` / `deepseek-r1:14b` 等 7 个静态模型 | Completions | 按模型 | ✓ | 按模型 | 本地 |
+
+> 更多模型来自 `src/pi_ai/models/generated/providers/`（OpenRouter 273、Vercel AI Gateway 196、OpenAI Codex 7 等），`--list-models` 可查看全部。
 
 ---
 
@@ -141,13 +154,19 @@ uv run python -m pi_coding_agent --no-session -p "what is 2+2?"
 # 安装依赖
 uv sync
 
-# 运行全部测试（pi_ai + pi_agent + pi_coding_agent）
+# 运行全部测试（pi_ai + pi_agent + pi_coding_agent + pi_tui + 新包）
 uv run pytest
 
 # 按包运行测试
 uv run pytest src/pi_ai/tests/ -v
 uv run pytest src/pi_agent/tests/ -v
 uv run pytest src/pi_coding_agent/tests/ -v
+uv run pytest src/pi_protocol/tests/ src/pi_server/tests/ src/pi_evals/ -v
+
+# PostgreSQL 存储测试（先启动 compose 的 pg 服务）
+docker compose -f docker/compose.yaml up -d pg
+$env:PI_PG_DSN="postgresql://pi:pi@127.0.0.1:5432/pi"
+uv run pytest src/pi_storage/tests/ -v
 
 # 运行集成测试（需要 API Key）
 $env:OPENAI_API_KEY="sk-..."; uv run pytest src/pi_ai/tests/test_stream.py -v

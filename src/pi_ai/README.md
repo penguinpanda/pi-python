@@ -12,12 +12,10 @@
 
 | Provider | 模型 ID | API 类型 | Thinking | Tool Calling | 图片输入 | max_tokens |
 |----------|---------|----------|:--------:|:------------:|:--------:|:---------:|
-| OpenAI | `gpt-4o` | Responses | ✗ | ✓ | ✓ | 16,384 |
-| OpenAI | `gpt-4o-mini` | Responses | ✗ | ✓ | ✓ | 16,384 |
-| OpenAI | `o4-mini` | Responses | ✓ | ✓ | ✗ | 100,000 |
-| DeepSeek | `deepseek-chat` | Completions | ✗ | ✓ | ✗ | 65,536 |
-| DeepSeek | `deepseek-reasoner` | Completions | ✓ | ✗ | ✗ | 65,536 |
+| OpenAI | `gpt-5-chat-latest` | Responses | ✗ | ✓ | ✓ | 16,384 |
+| OpenAI | `gpt-5.6-luna` / `gpt-5.6-sol` / `gpt-5.6-terra` | Responses | ✓ | ✓ | ✓ | 128,000 |
 | DeepSeek | `deepseek-v4-flash` | Completions | ✓ | ✓ | ✗ | 384,000 |
+| DeepSeek | `deepseek-v4-pro` | Completions | ✓ | ✓ | ✗ | 384,000 |
 | Qwen | `qwen-turbo` | Completions | ✗ | ✓ | ✗ | 8,192 |
 | Qwen | `qwen-plus` | Completions | ✗ | ✓ | ✗ | 8,192 |
 | Qwen | `qwen-max` | Completions | ✗ | ✓ | ✗ | 8,192 |
@@ -119,7 +117,7 @@ from pi_ai import create_default_models, Context
 
 async def main():
     # 创建模型管理器
-    # 预加载 OpenAI、DeepSeek、Ollama 和 Faux 四个 provider
+    # 预加载 OpenAI、DeepSeek、Qwen、Ollama 和 Faux 五个 provider
     models = create_default_models()
 
     # 获取一个模型（不会发送网络请求）
@@ -359,13 +357,13 @@ asyncio.run(main())
 
 ## 推理模式（Thinking）
 
-DeepSeek Reasoner 和 o4-mini 支持推理过程（Thinking），模型会先生成内部思维链再输出最终回复：
+DeepSeek V4 系列（`deepseek-v4-flash` / `deepseek-v4-pro`）与 OpenAI `gpt-5.6-*` 支持推理过程（Thinking），模型会先生成内部思维链再输出最终回复：
 
 ```python
 from pi_ai import create_default_models, Context
 
 models = create_default_models()
-model = models.get_model("deepseek", "deepseek-reasoner")
+model = models.get_model("deepseek", "deepseek-v4-flash")
 
 context = Context(
     messages=[
