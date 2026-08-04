@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from textual import events
 from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.message import Message
@@ -163,10 +164,11 @@ class PiChatContainer(VerticalScroll):
 
 
 class PiEditor(TextArea):
-    """多行输入编辑器：Enter 提交。"""
+    """多行输入编辑器：Enter 提交，Shift+Enter 插入换行。"""
 
     BINDINGS = [
         Binding("enter", "submit", "Send"),
+        Binding("shift+enter", "newline", "Insert newline"),
     ]
 
     class Submitted(Message):
@@ -177,12 +179,42 @@ class PiEditor(TextArea):
             self.editor = editor
             self.text = text
 
+    class ExitRequested(Message):
+        """编辑器为空时按下 ctrl+d（退出快捷键）。"""
+
+        pass
+
     def action_submit(self) -> None:
         text = self.text.strip()
         if not text:
             return
         self.clear()
         self.post_message(self.Submitted(self, text))
+
+    def action_newline(self) -> None:
+        """Shift+Enter：插入换行（TextArea 会吞掉单独的 enter）。"""
+        self._replace_via_keyboard("\n", *self.selection)
+
+    async def _on_key(self, event: events.Key) -> None:
+        # TextArea._on_key 会把 enter 直接当换行插入并 stop() 事件，
+        # 导致上面的 "enter -> submit" 绑定永远不触发，必须在这里拦截。
+        if event.key == "enter":
+            self.action_submit()
+            event.stop()
+            event.prevent_default()
+            return
+        if event.key == "ctrl+d":
+            if not self.text:
+                # 编辑器为空时 ctrl+d = 退出请求（TextArea 默认会把它当删除键吞掉，
+                # 冒泡到应用绑定不可靠，改为显式发消息）。
+                self.post_message(self.ExitRequested())
+                event.stop()
+                event.prevent_default()
+                return
+            # 非空：保留 TextArea 默认行为（删除右侧字符）。
+            await super()._on_key(event)
+            return
+        await super()._on_key(event)
 
 
 class PiStatusBar(Label):

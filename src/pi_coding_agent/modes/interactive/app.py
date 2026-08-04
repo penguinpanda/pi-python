@@ -18,6 +18,7 @@ from ...extensions import ExtensionRunner
 from ...extensions.registry import ExtensionRegistry
 from pi_tui.clipboard_image import ClipboardImage
 from pi_tui.components import (
+    MessageEntry,
     PiChatContainer,
     PiEditor,
     PiFooter,
@@ -25,7 +26,7 @@ from pi_tui.components import (
     PiStatusBar,
 )
 from pi_tui.keybindings import KeybindingsManager
-from pi_tui.selectors import ModelSelector, SessionPicker
+from pi_tui.selectors import ModelSelector, SessionPicker, TreeSelector
 from .slash_commands import (
     SlashContext,
     SlashCommandRegistry,
@@ -168,10 +169,11 @@ class PiTuiApp(App):
             model_runtime=model_runtime,
             keybindings_manager=self._keybindings,
             slash_registry=self._slash_registry,
-            notify=self._notify,
+            notify=self._slash_notify,
             exit_app=self.exit,
             new_session=self._handle_new_session,
             open_model_selector=self._open_model_selector,
+            open_tree_selector=self._open_tree_selector,
             copy_to_clipboard=_copy_text,
             reload_all=self._reload_all,
         )
@@ -264,6 +266,30 @@ class PiTuiApp(App):
     def _notify(self, message: str) -> None:
         self._set_status(message)
 
+    def _slash_notify(self, message: str) -> None:
+        """slash 命令输出：状态栏 + 聊天区。
+
+        多行输出（如 /tree）在单行状态栏会被裁剪，看起来像没反应，
+        因此同时渲染为聊天区的 System 消息。
+        """
+        self._set_status(message)
+        # 转义方括号，避免树文本里的 [label] 被 Textual 标记解析。
+        escaped = message.replace("[", r"\[")
+        self._chat.add_message_agent({"role": "system", "content": escaped})
+        # add_message_agent 会 scroll_end 到最底部，长消息只露出最后一行；
+        # 这里把整条 System 消息滚进视口（等 mount 完成后再滚）。
+        entries = self._chat.query(MessageEntry)
+        if entries:
+            entry = entries[-1]
+
+            def _scroll_to_entry() -> None:
+                try:
+                    self._chat.scroll_visible(entry, animate=False)
+                except Exception:
+                    pass
+
+            self.call_after_refresh(_scroll_to_entry)
+
     def _update_footer(self) -> None:
         model = self._session.model
         model_label = f"{model.provider}/{model.id}" if model is not None else "—"
@@ -321,6 +347,10 @@ class PiTuiApp(App):
         else:
             self._editor.clear()
 
+    def on_pi_editor_exit_requested(self, _message) -> None:
+        """编辑器为空时 ctrl+d → 退出。"""
+        self.action_exit()
+
     def action_cycle_thinking(self) -> None:
         level = self._session.cycle_thinking_level()
         if level is None:
@@ -365,6 +395,29 @@ class PiTuiApp(App):
         except Exception as exc:
             self._notify(f"Set model failed: {exc}")
         self._update_footer()
+
+    def _open_tree_selector(self) -> None:
+        manager = self._session.session_manager
+        tree = manager.get_tree()
+        if not tree:
+            self._notify("(empty session)")
+            return
+        self.push_screen(
+            TreeSelector(tree, leaf_id=manager.get_leaf_id()),
+            callback=self._on_tree_selected,
+        )
+
+    def _on_tree_selected(self, entry_id) -> None:
+        if entry_id is None:
+            return
+        self._run_task(self._navigate_tree(entry_id))
+
+    async def _navigate_tree(self, entry_id: str) -> None:
+        try:
+            await self._session.navigate_to(entry_id)
+            self._notify(f"Navigated to {entry_id[:8]}")
+        except Exception as exc:
+            self._notify(f"Navigate failed: {exc}")
 
     def action_toggle_tools(self) -> None:
         self._show_tools = not self._show_tools

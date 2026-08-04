@@ -16,7 +16,7 @@ from pi_coding_agent.auth_storage import AuthStorage
 from pi_coding_agent.model_runtime import ModelRuntime
 from pi_coding_agent.modes.interactive.app import PiTuiApp
 from pi_tui.components import MessageEntry, PiEditor
-from pi_tui.selectors import ModelSelector
+from pi_tui.selectors import ModelSelector, TreeSelector
 
 
 def _make_runtime(
@@ -211,6 +211,140 @@ async def test_model_selector(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_model_selector_with_colon_model_ids():
+    """回归：模型 id 含冒号（如 ollama/qwen3:30b）时选择器不应崩溃。"""
+    from textual.app import App
+
+    models = [
+        Model(id="faux-1", provider="faux", api="openai-completions", name="Faux 1"),
+        Model(
+            id="qwen3:30b",
+            provider="ollama",
+            api="openai-completions",
+            name="Qwen3 30B",
+        ),
+        Model(
+            id="deepseek-r1:14b",
+            provider="ollama",
+            api="openai-completions",
+            name="DeepSeek R1 14B",
+        ),
+    ]
+
+    class Host(App):
+        def on_mount(self) -> None:
+            self.push_screen(ModelSelector(models, current=models[1]))
+
+    app = Host()
+    async with app.run_test() as pilot:
+        await _wait_until(
+            lambda: isinstance(app.screen, ModelSelector),
+            pilot=pilot,
+            message="model selector screen",
+        )
+        await _wait_until(
+            lambda: len(app.screen.query_one("#model-list").children) == 3,
+            pilot=pilot,
+            message="model list populated",
+        )
+
+
+@pytest.mark.asyncio
+async def test_model_selector_keyboard_navigation():
+    """回归：搜索框持焦时 ↑↓/Enter/Esc 应操作列表，而不是被输入框吞掉。"""
+    from textual.app import App
+
+    models = [
+        Model(id=f"faux-{index}", provider="faux", api="openai-completions")
+        for index in (1, 2, 3)
+    ]
+    dismissed: list[Any] = []
+
+    class Host(App):
+        def on_mount(self) -> None:
+            self.push_screen(ModelSelector(models), callback=dismissed.append)
+
+    app = Host()
+    async with app.run_test() as pilot:
+        await _wait_until(
+            lambda: isinstance(app.screen, ModelSelector),
+            pilot=pilot,
+            message="model selector screen",
+        )
+        list_view = app.screen.query_one("#model-list")
+
+        # 焦点在搜索框时，方向键应移动列表选择
+        base = list_view.index if list_view.index is not None else 0
+        await pilot.press("down")
+        assert list_view.index == (base + 1) % len(models)
+        await pilot.press("down")
+        assert list_view.index == (base + 2) % len(models)
+        await pilot.press("up")
+        assert list_view.index == (base + 1) % len(models)
+
+        # Enter 应选中并关闭选择器
+        await pilot.press("enter")
+        assert dismissed and dismissed[-1].id == models[(base + 1) % len(models)].id
+
+
+@pytest.mark.asyncio
+async def test_editor_enter_submits_and_shift_enter_newlines():
+    """回归：Enter 应提交消息而非插入换行；Shift+Enter 插入换行。"""
+    from textual.app import App
+
+    submitted: list[str] = []
+
+    class Host(App):
+        def compose(self):
+            yield PiEditor()
+
+        def on_pi_editor_submitted(self, message: PiEditor.Submitted) -> None:
+            submitted.append(message.text)
+
+    app = Host()
+    async with app.run_test() as pilot:
+        editor = app.query_one(PiEditor)
+        editor.focus()
+        await pilot.press("h", "i")
+        await pilot.press("shift+enter")
+        await pilot.press("t")
+        assert editor.text == "hi\nt"
+        await pilot.press("enter")
+        assert editor.text == ""
+        assert submitted == ["hi\nt"]
+
+
+@pytest.mark.asyncio
+async def test_editor_ctrl_d_bubbles_when_empty():
+    """回归：编辑器为空时 ctrl+d 应冒泡到应用（退出），非空时保留删除行为。"""
+    from textual.app import App
+
+    exited: list[bool] = []
+
+    class Host(App):
+        def compose(self):
+            yield PiEditor()
+
+        def on_pi_editor_exit_requested(self, _message) -> None:
+            exited.append(True)
+
+    app = Host()
+    async with app.run_test() as pilot:
+        editor = app.query_one(PiEditor)
+        editor.focus()
+
+        # 空编辑器：ctrl+d 冒泡到应用
+        await pilot.press("ctrl+d")
+        assert exited == [True]
+
+        # 非空：保留 TextArea 默认（删除右侧字符）
+        editor.text = "ab"
+        await pilot.press("ctrl+d")
+        assert editor.text != "ab"
+        assert exited == [True]
+
+
+@pytest.mark.asyncio
 async def test_exit_with_empty_editor(tmp_path):
     runtime = _make_runtime()
     session = _make_session(runtime, tmp_path)
@@ -263,11 +397,14 @@ async def test_slash_tree_in_app(tmp_path):
     async with app.run_test() as pilot:
         app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "/tree"))
         await _wait_until(
-            lambda: "message" in str(app._status.content),
+            lambda: isinstance(app.screen, TreeSelector),
             pilot=pilot,
-            message="tree rendered in status",
+            message="tree selector opened",
         )
-        assert entry_id[:8] in str(app._status.content)
+        list_view = app.screen.query_one("#tree-list")
+        assert len(list_view.children) == 1
+        label = list_view.children[0].query_one("Label")
+        assert entry_id[:8] in str(label.content)
 
 
 @pytest.mark.asyncio

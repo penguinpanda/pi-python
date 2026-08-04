@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
@@ -14,6 +15,29 @@ from textual.widgets import Input, Label, ListItem, ListView
 
 def _model_label(model) -> str:
     return f"{model.provider}/{model.id}  [dim]{model.name}[/dim]"
+
+
+class _SearchInput(Input):
+    """搜索输入框：把 ↑↓/Enter/Esc 转发给选择器，避免按键被输入框吞掉。"""
+
+    def __init__(self, owner: "ModelSelector", **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._owner = owner
+
+    async def _on_key(self, event: events.Key) -> None:
+        if event.key in ("up", "down", "enter", "escape"):
+            event.stop()
+            event.prevent_default()
+            if event.key == "up":
+                self._owner._move(-1)
+            elif event.key == "down":
+                self._owner._move(1)
+            elif event.key == "enter":
+                self._owner.action_select()
+            else:
+                self._owner.action_cancel()
+            return
+        await super()._on_key(event)
 
 
 class ModelSelector(ModalScreen):
@@ -33,12 +57,23 @@ class ModelSelector(ModalScreen):
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Label("Select model", classes="selector-title")
-            yield Input(
+            yield _SearchInput(
+                self,
                 placeholder="Search models...",
                 value=self._query,
                 classes="selector-input",
             )
             yield ListView(id="model-list")
+
+    def _move(self, direction: int) -> None:
+        """在模型列表中移动选择（供搜索框按键转发）。"""
+        list_view = self.query_one("#model-list", ListView)
+        count = len(list_view.children)
+        if count == 0:
+            return
+        current = list_view.index
+        index = 0 if current is None else current
+        list_view.index = (index + direction) % count
 
     def on_mount(self) -> None:
         self._rebuild()
@@ -69,12 +104,9 @@ class ModelSelector(ModalScreen):
         for model in self._filtered():
             key = f"{model.provider}/{model.id}"
             marker = ">" if key == current_key else " "
-            list_view.append(
-                ListItem(
-                    Label(f"{marker} {_model_label(model)}"),
-                    id=key.replace("/", "__").replace(".", "_"),
-                )
-            )
+            # 不设置 id：模型 id 可能含冒号等 Textual 非法字符
+            # （如 ollama/qwen3:30b），选择逻辑只依赖列表索引。
+            list_view.append(ListItem(Label(f"{marker} {_model_label(model)}")))
 
     def on_input_changed(self, event: Input.Changed) -> None:
         self._query = event.value
@@ -82,10 +114,10 @@ class ModelSelector(ModalScreen):
 
     def action_select(self) -> None:
         list_view = self.query_one("#model-list", ListView)
-        if list_view.index is None:
-            return
-        filtered = self._filtered()
         index = list_view.index
+        if index is None:
+            index = 0
+        filtered = self._filtered()
         if 0 <= index < len(filtered):
             self.dismiss(filtered[index])
 
@@ -133,4 +165,61 @@ class SessionPicker(ModalScreen):
         self.dismiss(None)
 
 
-__all__ = ["ModelSelector", "SessionPicker"]
+def _flatten_tree(
+    nodes: list[Any],
+    leaf_id: str | None,
+    depth: int = 0,
+) -> list[tuple[int, str, str, str]]:
+    """把会话树展平为 [(depth, connector, label, node_id)]，供 TreeSelector 渲染。"""
+    rows: list[tuple[int, str, str, str]] = []
+    for index, node in enumerate(nodes):
+        is_last = index == len(nodes) - 1
+        connector = "" if depth == 0 else ("└─" if is_last else "├─")
+        marker = ">" if node.id == leaf_id else " "
+        entry_type = node.entry.get("type", "?") if node.entry is not None else "?"
+        label = f" [{node.label}]" if node.label else ""
+        rows.append(
+            (depth, connector, f"{marker} {node.id[:8]} {entry_type}{label}", node.id)
+        )
+        rows.extend(_flatten_tree(node.children, leaf_id, depth + 1))
+    return rows
+
+
+class TreeSelector(ModalScreen):
+    """会话树选择器（对齐 TS TreeSelectorComponent）：ASCII 树 + 键盘导航。"""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(self, tree: list[Any], leaf_id: str | None = None) -> None:
+        super().__init__()
+        self._rows = _flatten_tree(tree, leaf_id)
+        # 节点 id 可能以数字开头（Textual id 非法），选择逻辑用索引反查。
+        self._node_ids = [row[3] for row in self._rows]
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label("Session tree (Enter: navigate, Esc: close)", classes="selector-title")
+            yield ListView(id="tree-list")
+
+    def on_mount(self) -> None:
+        list_view = self.query_one("#tree-list", ListView)
+        for depth, connector, label, node_id in self._rows:
+            indent = "  " * depth
+            prefix = f"{indent}{connector} " if connector else indent
+            list_view.append(ListItem(Label(f"{prefix}{label}")))
+
+    def on_list_view_selected(self, event: Any) -> None:
+        list_view = self.query_one("#tree-list", ListView)
+        index = list_view.index
+        if index is not None and 0 <= index < len(self._node_ids):
+            self.dismiss(self._node_ids[index])
+        else:
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+__all__ = ["ModelSelector", "SessionPicker", "TreeSelector"]

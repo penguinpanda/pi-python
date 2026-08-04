@@ -40,6 +40,7 @@ class SlashContext:
         exit_app: Callable[[], None] | None = None,
         new_session: Callable[[], None] | None = None,
         open_model_selector: Callable[[], None] | None = None,
+        open_tree_selector: Callable[[], None] | None = None,
         copy_to_clipboard: Callable[[str], None] | None = None,
         rebuild_session=None,
         reload_all: Callable[[], Any] | None = None,
@@ -52,6 +53,7 @@ class SlashContext:
         self._exit_app = exit_app
         self._new_session = new_session
         self._open_model_selector = open_model_selector
+        self._open_tree_selector = open_tree_selector
         self._copy_to_clipboard = copy_to_clipboard or (lambda _text: None)
         # 会话重建：fork / clone / resume / import 用（宿主注入）。
         self.rebuild_session = rebuild_session
@@ -72,6 +74,10 @@ class SlashContext:
     def open_model_selector(self) -> None:
         if self._open_model_selector is not None:
             self._open_model_selector()
+
+    def open_tree_selector(self) -> None:
+        if self._open_tree_selector is not None:
+            self._open_tree_selector()
 
     def copy_to_clipboard(self, text: str) -> None:
         self._copy_to_clipboard(text)
@@ -262,6 +268,11 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
                 return f"Entry not found: {target}"
             await context.session.navigate_to(target)
             return f"Navigated to {target}"
+        # TUI 环境：打开树选择器弹层（对齐 TS TreeSelectorComponent）；
+        # 无回调（RPC 等）时退回文本输出。
+        if context._open_tree_selector is not None:
+            context.open_tree_selector()
+            return ""
         lines = _format_tree(manager.get_tree(), manager.get_leaf_id())
         return "\n".join(lines) if lines else "(empty session)"
 

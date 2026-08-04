@@ -95,9 +95,15 @@ async def _async_main(args: list[str] | None = None) -> int:
 
     # 解析模型（含 --models 循环列表；继续会话时优先恢复）
     is_continuing = bool(parsed.continue_session or parsed.session)
-    model, scoped_models = await _resolve_initial_model(
-        runtime, parsed, settings, session_manager, is_continuing
-    )
+    try:
+        model, scoped_models = await _resolve_initial_model(
+            runtime, parsed, settings, session_manager, is_continuing
+        )
+    except (ValueError, RuntimeError) as exc:
+        # 模型解析失败（如未知 provider / 无可用模型）应友好报错并退出，
+        # 而不是把 Python traceback 抛给用户。
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
 
     # 系统提示
     system_prompt = parsed.system_prompt or "You are a helpful coding assistant."
