@@ -26,6 +26,11 @@ from pi_coding_agent.tools import (
 class TestReadTool:
     """测试 read 工具。"""
 
+    def test_description_scoped_to_working_directory(self):
+        tool = create_read_tool(".")
+        assert "current working directory" in tool.description
+        assert "do not search the whole disk" in tool.description
+
     def test_read_existing_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             file_path = Path(tmpdir) / "test.txt"
@@ -137,6 +142,11 @@ class TestBashTool:
 class TestGrepTool:
     """测试 grep 工具。"""
 
+    def test_description_never_searches_root(self):
+        tool = create_grep_tool(".")
+        assert "working directory" in tool.description
+        assert "grep -r /" in tool.description
+
     def test_grep_find_pattern(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             file_path = Path(tmpdir) / "test.py"
@@ -159,6 +169,11 @@ class TestGrepTool:
 
 class TestFindTool:
     """测试 find 工具。"""
+
+    def test_description_never_searches_root(self):
+        tool = create_find_tool(".")
+        assert "working directory" in tool.description
+        assert "find /" in tool.description
 
     def test_find_py_files(self):
         with tempfile.TemporaryDirectory() as tmpdir:

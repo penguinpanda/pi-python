@@ -7,10 +7,9 @@
 from __future__ import annotations
 
 import asyncio
-import io
 import sys
 
-from PIL import Image, ImageOps
+from pi_agent.tools.image_pipeline import process_image_sync
 
 MAX_IMAGE_DIMENSION = 2000
 
@@ -62,17 +61,12 @@ class ClipboardImage:
     @staticmethod
     def process(data: bytes) -> bytes:
         """格式转换 + EXIF 校正 + 缩放 → PNG bytes。"""
-        with Image.open(io.BytesIO(data)) as image:
-            image = ImageOps.exif_transpose(image)
-            if max(image.size) > MAX_IMAGE_DIMENSION:
-                image.thumbnail((MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION))
-            has_alpha = image.mode in ("RGBA", "LA") or (
-                image.mode == "P" and "transparency" in image.info
-            )
-            output = image.convert("RGBA" if has_alpha else "RGB")
-            buffer = io.BytesIO()
-            output.save(buffer, format="PNG")
-            return buffer.getvalue()
+        result = process_image_sync(
+            data, auto_resize=True, max_dimension=MAX_IMAGE_DIMENSION
+        )
+        if not result["ok"]:
+            raise ValueError(result["message"])
+        return result["data"]
 
 
 async def _run_command(args: list[str]) -> bytes | None:

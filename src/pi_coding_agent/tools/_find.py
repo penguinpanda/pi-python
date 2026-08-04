@@ -99,7 +99,11 @@ def create_find_tool(cwd: str) -> AgentTool:
 
     return AgentTool(
         name="find",
-        description="Search for files matching a glob pattern. Returns relative file paths.",
+        description=(
+            "Search for files matching a glob pattern under the working directory. "
+            "Returns relative file paths. Never search from the filesystem root "
+            "(e.g. find /) or scan the whole disk."
+        ),
         input_schema=TOOL_SCHEMA,
         label="Find",
         execute=execute,

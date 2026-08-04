@@ -9,6 +9,10 @@
 - TUI trust selector and settings selector entry points
 - Structured system-prompt builder with project context files (AGENTS.md/CLAUDE.md)
 - Turn-level timings and prompt-cache waste statistics in session stats
+- Typed SettingsManager with file/in-memory storage, migration, and project-trust gating
+- Unified resource loader aggregating skills/prompts/extensions/themes/context files
+- Tool-scope constraints against whole-disk searches (read/bash/find/grep guidance)
+- Image pipeline (EXIF orientation, resize, multi-format to PNG) wired into read/clipboard
 
 ## [0.1.0]
 

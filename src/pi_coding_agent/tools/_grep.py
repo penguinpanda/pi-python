@@ -113,7 +113,11 @@ def create_grep_tool(cwd: str) -> AgentTool:
 
     return AgentTool(
         name="grep",
-        description="Search for a regex pattern in files. Returns matching lines with file paths and line numbers.",
+        description=(
+            "Search for a regex pattern in files under the working directory. "
+            "Returns matching lines with file paths and line numbers. "
+            "Never search from the filesystem root (e.g. grep -r /) or scan the whole disk."
+        ),
         input_schema=TOOL_SCHEMA,
         label="Grep",
         execute=execute,

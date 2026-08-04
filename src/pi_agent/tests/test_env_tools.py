@@ -134,6 +134,22 @@ class TestReadTool:
         # 非图片二进制按文本读取（errors=replace）
         assert result.content[0]["text"] is not None
 
+    @pytest.mark.asyncio
+    async def test_read_not_found_includes_no_disk_search_guidance(self, tmp_path):
+        """回归（P19）：read 找不到文件时提示不要全盘搜索。"""
+        env = PythonExecutionEnv(str(tmp_path))
+        tool = create_read_tool()
+        with pytest.raises(ValueError) as excinfo:
+            await tool.execute(
+                "t1", {"path": "missing.txt"}, None, None, _tool_context(env)
+            )
+        assert "do not search the whole disk" in str(excinfo.value)
+
+    def test_read_description_scoped_to_working_directory(self):
+        tool = create_read_tool()
+        assert "current working directory" in tool.description
+        assert "do not search the whole disk" in tool.description
+
 
 class TestWriteTool:
     @pytest.mark.asyncio
@@ -207,6 +223,11 @@ class TestEditTool:
 
 
 class TestBashTool:
+    def test_bash_description_scoped_to_working_directory(self):
+        tool = create_bash_tool()
+        assert "current working directory" in tool.description
+        assert "do not scan the whole disk" in tool.description
+
     @pytest.mark.asyncio
     async def test_bash_echo(self, tmp_path):
         env = PythonExecutionEnv(str(tmp_path))

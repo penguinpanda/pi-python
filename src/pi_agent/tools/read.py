@@ -16,11 +16,16 @@ from ..truncate import (
     truncate_head,
 )
 from .image import detect_supported_image_mime_type, encode_base64
+from .image_pipeline import process_image
 from .path_utils import resolve_read_tool_path
 
 
 class ReadToolOptions:
-    def __init__(self, auto_resize_images: bool = True, image_processor=None) -> None:
+    def __init__(
+        self,
+        auto_resize_images: bool = True,
+        image_processor=process_image,
+    ) -> None:
         self.auto_resize_images = auto_resize_images
         self.image_processor = image_processor
 
@@ -32,8 +37,9 @@ def create_read_tool(options: ReadToolOptions | None = None) -> AgentTool:
         env = context.env
         path = params["path"]
         absolute_path = await resolve_read_tool_path(env, path, signal)
+        bytes_result = await env.read_binary_file(absolute_path, signal)
         try:
-            bytes_result = await env.read_binary_file(absolute_path, signal)
+            data = get_or_throw(bytes_result)
         except FileError as exc:
             if exc.code == "not_found":
                 raise ValueError(
@@ -42,7 +48,6 @@ def create_read_tool(options: ReadToolOptions | None = None) -> AgentTool:
                     "(e.g. find /, grep -r /, locate)."
                 ) from exc
             raise
-        data = get_or_throw(bytes_result)
 
         mime_type = detect_supported_image_mime_type(data)
         if mime_type:
