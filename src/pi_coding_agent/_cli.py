@@ -135,20 +135,6 @@ async def _async_main(args: list[str] | None = None) -> int:
         model_runtime=runtime,
     )
 
-    # 独立摘要模型（settings.summaryModel，如 "deepseek/deepseek-chat"）。
-    summary_model = None
-    summary_ref = settings.get("summaryModel")
-    if summary_ref:
-        from .model_resolver import resolve_cli_model
-
-        resolved = resolve_cli_model(
-            cli_provider=None,
-            cli_model=str(summary_ref),
-            model_runtime=runtime,
-        )
-        if resolved.error is None and resolved.model is not None:
-            summary_model = resolved.model
-
     # 工具白名单 / 黑名单。
     tools_include = (
         [part.strip() for part in parsed.tools.split(",") if part.strip()]
@@ -195,7 +181,6 @@ async def _async_main(args: list[str] | None = None) -> int:
             template_loader=template_loader,
             extension_runner=extension_runner,
             tools_override=tools_override,
-            summary_model=summary_model,
             compaction_settings=compaction_settings_from_config(settings),
         )
 

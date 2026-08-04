@@ -174,6 +174,30 @@ class TestCompletionsStream:
         assert msg["usage"] == _empty_usage_dict()
 
     @pytest.mark.asyncio
+    async def test_usage_chunk_without_choices_is_captured(self):
+        """回归：收尾 chunk 只有 usage、没有 choices（如 DashScope）时 usage 不能被跳过。"""
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        usage = SimpleNamespace(
+            prompt_tokens=100,
+            completion_tokens=20,
+            total_tokens=120,
+            prompt_tokens_details=SimpleNamespace(cached_tokens=5),
+        )
+        chunks = [
+            _chunk(content="Hello", finish_reason="stop"),
+            SimpleNamespace(choices=[], usage=usage),
+        ]
+        client = _mock_client(chunks)
+
+        events, _ = await _collect_events(model, context, client)
+        msg = events[-1]["message"]
+        assert msg["usage"]["input"] == 100
+        assert msg["usage"]["output"] == 20
+        assert msg["usage"]["total_tokens"] == 120
+        assert msg["usage"]["cache_read"] == 5
+
+    @pytest.mark.asyncio
     async def test_result_returns_message(self):
         model = _make_model()
         context = Context(messages=[{"role": "user", "content": "Hi"}])

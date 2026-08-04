@@ -92,8 +92,6 @@ class AgentSession:
         template_loader: PromptTemplateLoader | None = None,
         # Phase 5：扩展运行器（事件分发 / input 变换 / 注册项）。
         extension_runner=None,
-        # 独立摘要模型（压缩 / 分支摘要用；None = 使用主模型）。
-        summary_model: Model | None = None,
     ):
         self._agent = agent
         self._session_manager = session_manager
@@ -104,7 +102,6 @@ class AgentSession:
         self._skill_loader = skill_loader
         self._template_loader = template_loader
         self._extension_runner = extension_runner
-        self._summary_model = summary_model
         if extension_runner is not None:
             extension_runner.bind_session(self)
         self._listeners: list[Callable[[AgentEvent], None]] = []
@@ -159,13 +156,6 @@ class AgentSession:
     @property
     def extension_runner(self):
         return self._extension_runner
-
-    @property
-    def summary_model(self) -> Model | None:
-        return self._summary_model
-
-    def _summary_model_or_main(self) -> Model | None:
-        return self._summary_model or self._model
 
     @property
     def session_id(self) -> str:
@@ -350,7 +340,7 @@ class AgentSession:
         try:
             result = await compact(
                 preparation,
-                self._summary_model_or_main(),
+                self._model,
                 stream_fn=self._agent._resolve_stream_fn(),
                 thinking_level=self._agent.state.thinking_level,
             )
@@ -398,7 +388,7 @@ class AgentSession:
             raise ValueError(f"Entry not found: {entry_id}")
 
         summary: dict | None = None
-        summary_model = self._summary_model_or_main()
+        summary_model = self._model
         if summarize and old_leaf is not None and summary_model is not None:
             from pi_agent.branch_summarization import (
                 collect_entries_for_branch_summary,
@@ -843,7 +833,7 @@ class AgentSession:
         try:
             result = await compact(
                 preparation,
-                self._summary_model_or_main(),
+                self._model,
                 stream_fn=self._agent._resolve_stream_fn(),
                 thinking_level=self._agent.state.thinking_level,
             )

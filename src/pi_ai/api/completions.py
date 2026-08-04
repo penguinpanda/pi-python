@@ -365,6 +365,23 @@ async def chat_completions_stream(
             # Usage
             # Finish Reason
             async for chunk in response:
+                # 流式收尾 chunk 可能只带 usage、没有 choices（如 DashScope
+                # 兼容模式），必须在 choices 检查之前处理，否则 usage 会丢失。
+                if chunk.usage:
+                    cached_tokens = getattr(
+                        getattr(chunk.usage, "prompt_tokens_details", None),
+                        "cached_tokens",
+                        0,
+                    ) or 0
+                    usage = Usage(
+                        input=chunk.usage.prompt_tokens or 0,
+                        output=chunk.usage.completion_tokens or 0,
+                        cache_read=cached_tokens,
+                        cache_write=0,
+                        total_tokens=chunk.usage.total_tokens or 0,
+                        cost={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0},
+                    )
+
                 if not chunk.choices:
                     continue
 
@@ -448,20 +465,6 @@ async def chat_completions_stream(
                 # Finish reason
                 if choice.finish_reason:
                     stop_reason = choice.finish_reason
-
-                # Streaming 最后一个 Chunk
-                #
-                # 包含 Token Usage。
-                if chunk.usage:
-                    cached_tokens = getattr(getattr(chunk.usage, "prompt_tokens_details", None), "cached_tokens", 0) or 0
-                    usage = Usage(
-                        input=chunk.usage.prompt_tokens or 0,
-                        output=chunk.usage.completion_tokens or 0,
-                        cache_read=cached_tokens,
-                        cache_write=0,
-                        total_tokens=chunk.usage.total_tokens or 0,
-                        cost={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0},
-                    )
 
             # 所有 Chunk 已处理完成，
             #
