@@ -17,6 +17,8 @@
 - `pi-storage` PostgreSQL session store (asyncpg) with migrations and tsvector/pg_trgm search
 - `pi-server` persistent stdio service with attach/detach and snapshot push
 - `pi-evals` harness with smoke and extensions evals (faux provider)
+- TUI tool-execution, skill-invocation, compaction/branch-summary message entries
+- TUI thinking/oauth/scoped-models selectors and extension selector (`/thinking`, `/oauth`, `/extensions`)
 
 ## [0.1.0]
 

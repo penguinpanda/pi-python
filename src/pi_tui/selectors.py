@@ -432,6 +432,221 @@ class SettingsSelector(ModalScreen):
         self.dismiss(None)
 
 
+class ThinkingSelector(ModalScreen):
+    """思考级别选择器（对齐 TS thinking-selector）。"""
+
+    BINDINGS = [
+        Binding("enter", "select", "Select"),
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(
+        self,
+        levels: list[str],
+        current: str | None = None,
+    ) -> None:
+        super().__init__()
+        self._levels = list(levels)
+        self._current = current
+        self._selected = 0
+        if current is not None and current in self._levels:
+            self._selected = self._levels.index(current)
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label("Thinking level", classes="selector-title")
+            yield ListView(id="thinking-list")
+
+    def on_mount(self) -> None:
+        list_view = self.query_one("#thinking-list", ListView)
+        for index, level in enumerate(self._levels):
+            marker = ">" if index == self._selected else " "
+            check = " ✓" if level == self._current else ""
+            list_view.append(ListItem(Label(f"{marker} {level}{check}")))
+        if len(list_view.children) > 0:
+            list_view.index = self._selected
+        list_view.focus()
+
+    def on_list_view_selected(self, event: Any) -> None:
+        self.action_select()
+
+    def action_select(self) -> None:
+        list_view = self.query_one("#thinking-list", ListView)
+        index = list_view.index
+        if index is not None and 0 <= index < len(self._levels):
+            self.dismiss(self._levels[index])
+        else:
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class OAuthSelector(ModalScreen):
+    """OAuth provider 选择器（登录/登出；对齐 TS oauth-selector）。"""
+
+    BINDINGS = [
+        Binding("enter", "select", "Select"),
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(
+        self,
+        providers: list[tuple[str, str, bool]],
+        *,
+        mode: str = "login",
+    ) -> None:
+        super().__init__()
+        self._providers = list(providers)
+        self._mode = mode
+        self._selected = 0
+
+    def compose(self) -> ComposeResult:
+        title = "Login provider" if self._mode == "login" else "Logout provider"
+        with Vertical():
+            yield Label(title, classes="selector-title")
+            yield ListView(id="oauth-list")
+
+    def on_mount(self) -> None:
+        list_view = self.query_one("#oauth-list", ListView)
+        for index, (provider_id, name, logged_in) in enumerate(self._providers):
+            marker = ">" if index == self._selected else " "
+            status = "logged in" if logged_in else "not logged in"
+            list_view.append(
+                ListItem(Label(f"{marker} {name} ({provider_id}) [{status}]"))
+            )
+        if len(list_view.children) > 0:
+            list_view.index = 0
+        list_view.focus()
+
+    def on_list_view_selected(self, event: Any) -> None:
+        self.action_select()
+
+    def action_select(self) -> None:
+        list_view = self.query_one("#oauth-list", ListView)
+        index = list_view.index
+        if index is not None and 0 <= index < len(self._providers):
+            self.dismiss(self._providers[index][0])
+        else:
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class ScopedModelsSelector(ModalScreen):
+    """模型范围选择器：Enter 切换选中，Esc 保存（对齐 TS scoped-models-selector）。"""
+
+    BINDINGS = [
+        Binding("enter", "toggle", "Toggle"),
+        Binding("escape", "cancel", "Save and close"),
+    ]
+
+    def __init__(
+        self,
+        models: list[Any],
+        selected: set[tuple[str, str]] | None = None,
+        current: Any | None = None,
+    ) -> None:
+        super().__init__()
+        self._models = list(models)
+        self._selected = set(selected or {})
+        self._current = current
+
+    def _key(self, model) -> tuple[str, str]:
+        return (model.provider, model.id)
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label(
+                "Scoped models (Enter: toggle, Esc: save)", classes="selector-title"
+            )
+            yield ListView(id="scoped-list")
+
+    def on_mount(self) -> None:
+        list_view = self.query_one("#scoped-list", ListView)
+        for model in self._models:
+            key = self._key(model)
+            check = " ✓" if key in self._selected else ""
+            marker = ">" if self._current is not None and key == self._key(self._current) else " "
+            list_view.append(
+                ListItem(Label(f"{marker} {model.provider}/{model.id}{check}"))
+            )
+        if len(list_view.children) > 0:
+            list_view.index = 0
+        list_view.focus()
+
+    def _rebuild(self) -> None:
+        list_view = self.query_one("#scoped-list", ListView)
+        list_view.clear()
+        for model in self._models:
+            key = self._key(model)
+            check = " ✓" if key in self._selected else ""
+            list_view.append(ListItem(Label(f"  {model.provider}/{model.id}{check}")))
+        if len(list_view.children) > 0:
+            list_view.index = 0
+
+    def on_list_view_selected(self, event: Any) -> None:
+        self.action_toggle()
+
+    def action_toggle(self) -> None:
+        list_view = self.query_one("#scoped-list", ListView)
+        index = list_view.index
+        if index is None or not (0 <= index < len(self._models)):
+            return
+        key = self._key(self._models[index])
+        if key in self._selected:
+            self._selected.discard(key)
+        else:
+            self._selected.add(key)
+        self._rebuild()
+
+    def action_cancel(self) -> None:
+        self.dismiss(self._selected)
+
+
+class ExtensionSelector(ModalScreen):
+    """扩展列表选择器（对齐 TS extension-selector）。"""
+
+    BINDINGS = [
+        Binding("enter", "select", "Show details"),
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(self, extensions: list[dict[str, Any]]) -> None:
+        super().__init__()
+        self._extensions = list(extensions)
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Label("Extensions", classes="selector-title")
+            yield ListView(id="extension-list")
+
+    def on_mount(self) -> None:
+        list_view = self.query_one("#extension-list", ListView)
+        for index, extension in enumerate(self._extensions):
+            marker = ">" if index == 0 else " "
+            label = extension.get("label", extension.get("path", "?"))
+            list_view.append(ListItem(Label(f"{marker} {label}")))
+        if len(list_view.children) > 0:
+            list_view.index = 0
+        list_view.focus()
+
+    def on_list_view_selected(self, event: Any) -> None:
+        self.action_select()
+
+    def action_select(self) -> None:
+        list_view = self.query_one("#extension-list", ListView)
+        index = list_view.index
+        if index is not None and 0 <= index < len(self._extensions):
+            self.dismiss(self._extensions[index])
+        else:
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class TrustSelector(ModalScreen):
     """项目信任选择器（对齐 TS TrustSelectorComponent）。"""
 
@@ -519,5 +734,9 @@ __all__ = [
     "TextInputDialog",
     "ChoiceSelector",
     "SettingsSelector",
+    "ThinkingSelector",
+    "OAuthSelector",
+    "ScopedModelsSelector",
+    "ExtensionSelector",
     "TrustSelector",
 ]

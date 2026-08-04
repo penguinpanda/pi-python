@@ -27,10 +27,14 @@ from pi_tui.components import (
 )
 from pi_tui.keybindings import KeybindingsManager
 from pi_tui.selectors import (
+    ExtensionSelector,
     ModelSelector,
+    OAuthSelector,
+    ScopedModelsSelector,
     SessionPicker,
     SettingsSelector,
     TextInputDialog,
+    ThinkingSelector,
     TreeSelector,
     TrustSelector,
 )
@@ -219,6 +223,7 @@ class PiTuiApp(App):
         self._show_tools = True
         self._show_thinking = True
         self._tasks: set[asyncio.Task] = set()
+        self._rendered_summary_ids: set[str] = set()
 
         self._slash_registry = SlashCommandRegistry()
         register_builtin_commands(self._slash_registry)
@@ -242,6 +247,10 @@ class PiTuiApp(App):
             open_fork_selector=self._open_fork_selector,
             open_trust_selector=self._open_trust_selector,
             open_settings_selector=self._open_settings_selector,
+            open_thinking_selector=self._open_thinking_selector,
+            open_oauth_selector=self._open_oauth_selector,
+            open_scoped_models_selector=self._open_scoped_models_selector,
+            open_extensions_selector=self._open_extensions_selector,
             copy_to_clipboard=self._copy_to_clipboard,
             auth_interaction=_TuiAuthInteraction(self),
             reload_all=self._reload_all,
@@ -264,6 +273,7 @@ class PiTuiApp(App):
         self._bind_session()
         for message in self._session.get_messages():
             self._chat.add_message_agent(message)
+        self._render_missed_summaries()
         self._update_footer()
         self._editor.focus()
         # 启动时对未定信任项目提示（对齐 TS 启动 trust 选择器）。
@@ -330,6 +340,12 @@ class PiTuiApp(App):
                 self._update_footer()
             elif event_type == "agent_start":
                 self._set_status("Working")
+            elif event_type == "skill_invocation":
+                skill = event.get("skill", "")
+                self._chat.add_message_agent({
+                    "role": "skillInvocation",
+                    "content": f"Invoked skill: {skill}",
+                })
         except Exception:
             pass
 
@@ -542,6 +558,7 @@ class PiTuiApp(App):
         try:
             await self._session.navigate_to(entry_id)
             self._notify(f"Navigated to {entry_id[:8]}")
+            self._render_missed_summaries()
         except Exception as exc:
             self._notify(f"Navigate failed: {exc}")
 
@@ -657,6 +674,114 @@ class PiTuiApp(App):
         if key == "autoCompaction":
             self._session.set_auto_compaction_enabled(bool(value))
         self._notify(f"Saved {key} = {value} to {path}")
+
+    def _open_thinking_selector(self) -> None:
+        levels = self._session.get_available_thinking_levels()
+        self.push_screen(
+            ThinkingSelector(list(levels), current=self._session.thinking_level),
+            callback=self._on_thinking_selected,
+        )
+
+    def _on_thinking_selected(self, level) -> None:
+        if level is None:
+            return
+        self._session.set_thinking_level(level)
+        self._update_footer()
+        self._notify(f"Thinking level: {level}")
+
+    async def _open_oauth_selector(self, mode: str = "login") -> None:
+        from pi_ai.auth.oauth import builtin_oauth_providers
+
+        store = self._model_runtime.auth_store
+        logged_in: set[str] = set()
+        if store is not None:
+            try:
+                infos = await store.list()
+                logged_in = {info["provider_id"] for info in infos}
+            except Exception:
+                pass
+        providers = [
+            (provider_id, name, provider_id in logged_in)
+            for provider_id, name, _flow in builtin_oauth_providers()
+        ]
+        self.push_screen(
+            OAuthSelector(providers, mode=mode),
+            callback=lambda provider_id: self._on_oauth_selected(provider_id, mode),
+        )
+
+    def _on_oauth_selected(self, provider_id, mode: str) -> None:
+        if provider_id is None:
+            return
+        self._run_task(
+            self._exec_slash(f"/{ 'logout' if mode == 'logout' else 'login' } {provider_id}")
+        )
+
+    async def _open_scoped_models_selector(self) -> None:
+        models = await self._model_runtime.get_available()
+        if not models:
+            self._notify("No models available")
+            return
+        selected = {
+            (scoped.model.provider, scoped.model.id)
+            for scoped in self._session.scoped_models
+        }
+        self.push_screen(
+            ScopedModelsSelector(models, selected, current=self._session.model),
+            callback=self._on_scoped_models_selected,
+        )
+
+    def _on_scoped_models_selected(self, selected) -> None:
+        if selected is None:
+            return
+        from ...model_resolver import ScopedModel
+
+        if not selected:
+            self._session.set_scoped_models([])
+            self._notify("Scoped models cleared (all available are usable)")
+            return
+        by_key = {
+            (model.provider, model.id): model
+            for model in self._model_runtime.get_available_snapshot()
+        }
+        scoped = [
+            ScopedModel(model=by_key[key])
+            for key in selected
+            if key in by_key
+        ]
+        self._session.set_scoped_models(scoped)
+        self._notify(f"Scoped {len(scoped)} models")
+
+    def _open_extensions_selector(self) -> None:
+        runner = self._session.extension_runner
+        extensions = list(runner.extensions) if runner is not None else []
+        if not extensions:
+            self._notify("No extensions loaded")
+            return
+        entries = []
+        for extension in extensions:
+            from pathlib import Path as _Path
+
+            path = extension.path
+            label = _Path(path).name if _Path(path).name else path
+            commands = getattr(extension, "commands", None) or {}
+            tools = getattr(extension, "tools", None) or {}
+            entries.append({
+                "path": path,
+                "label": f"{label} ({len(commands)} commands, {len(tools)} tools)",
+            })
+        self.push_screen(
+            ExtensionSelector(entries),
+            callback=self._on_extension_selected,
+        )
+
+    def _on_extension_selected(self, entry) -> None:
+        if entry is None:
+            return
+        self._notify(f"Extension: {entry['path']}")
+        self._chat.add_message_agent({
+            "role": "system",
+            "content": f"Extension: {entry['path']}",
+        })
 
     def _on_fork_selected(self, entry_id) -> None:
         if entry_id is None:
@@ -868,8 +993,10 @@ class PiTuiApp(App):
         self._slash_context.session = new_session
         self._bind_session()
         self._chat.clear_messages()
+        self._rendered_summary_ids = set()
         for message in new_session.get_messages():
             self._chat.add_message_agent(message)
+        self._render_missed_summaries()
         self._update_footer()
         self._set_status(f"Session {new_session.session_id}")
 
@@ -902,10 +1029,29 @@ class PiTuiApp(App):
         self._slash_context.session = new_session
         self._bind_session()
         self._chat.clear_messages()
+        self._rendered_summary_ids = set()
         for message in new_session.get_messages():
             self._chat.add_message_agent(message)
+        self._render_missed_summaries()
         self._update_footer()
         self._set_status(f"Resumed {new_session.session_id}")
+
+    def _render_missed_summaries(self) -> None:
+        """把会话树里的 branch_summary 条目渲染为聊天消息（不重复）。"""
+        try:
+            for entry in self._session.session_manager.get_entries():
+                if entry.get("type") != "branch_summary":
+                    continue
+                entry_id = entry.get("id")
+                if entry_id in self._rendered_summary_ids:
+                    continue
+                self._rendered_summary_ids.add(entry_id)
+                self._chat.add_message_agent({
+                    "role": "branchSummary",
+                    "summary": entry.get("summary", ""),
+                })
+        except Exception:
+            pass
 
     def action_copy_last_message(self) -> None:
         text = self._session.get_last_assistant_text()

@@ -683,6 +683,9 @@ class AgentSession:
                 text, _action = await self._extension_runner.emit_input(text)
             # 2. 扩展命令 /skill: 与 /template 展开
             expanded = self.expand_prompt(text)
+            if text.startswith("/skill:") and expanded != text:
+                skill_name = text[7:].split(" ", 1)[0] if len(text) > 7 else ""
+                self._emit({"type": "skill_invocation", "skill": skill_name})
             await self._agent.prompt(expanded, images)
             await self._check_compaction()
             await self._retry_failed_turn()

@@ -110,8 +110,10 @@ class FakeSession:
         self._cwd = cwd
         self._name = None
         self._model = None
+        self._thinking_level = "off"
         self._compacted = False
         self._scoped: list = []
+        self.extension_runner = None
 
     def set_session_name(self, name):
         self._name = name
@@ -122,6 +124,16 @@ class FakeSession:
 
     async def set_model(self, model):
         self._model = model
+
+    def set_thinking_level(self, level):
+        self._thinking_level = level
+
+    @property
+    def thinking_level(self):
+        return self._thinking_level
+
+    def get_available_thinking_levels(self):
+        return ["off", "low", "medium", "high"]
 
     async def compact(self, _instructions=None):
         self._compacted = True
@@ -332,6 +344,55 @@ class TestPhase7Commands:
 
         await registry.execute("/trust bogus", context)
         assert "Usage: /trust" in notifications[-1]
+
+    async def test_thinking_command(self, tmp_path):
+        session = FakeSession(cwd=str(tmp_path))
+        registry = _make_registry()
+        notifications: list[str] = []
+        context = SlashContext(session=session, notify=notifications.append)
+
+        await registry.execute("/thinking low", context)
+        assert session.thinking_level == "low"
+        assert "Thinking level: low" in notifications[-1]
+
+    async def test_thinking_opens_selector_in_tui(self, tmp_path):
+        session = FakeSession(cwd=str(tmp_path))
+        registry = _make_registry()
+        opened: list[bool] = []
+        context = SlashContext(
+            session=session,
+            notify=lambda _message: None,
+            open_thinking_selector=lambda: opened.append(True),
+        )
+        await registry.execute("/thinking", context)
+        assert opened == [True]
+
+    async def test_extensions_lists_runner(self, tmp_path):
+        from pi_coding_agent.extensions.types import Extension
+
+        session = FakeSession(cwd=str(tmp_path))
+        extension = Extension(path="/tmp/ext.py", resolved_path="/tmp/ext.py")
+        session.extension_runner = type(
+            "Runner", (), {"extensions": [extension]}
+        )()
+        registry = _make_registry()
+        notifications: list[str] = []
+        context = SlashContext(session=session, notify=notifications.append)
+
+        await registry.execute("/extensions", context)
+        assert "ext.py" in notifications[-1]
+
+    async def test_extensions_opens_selector_in_tui(self, tmp_path):
+        session = FakeSession(cwd=str(tmp_path))
+        registry = _make_registry()
+        opened: list[bool] = []
+        context = SlashContext(
+            session=session,
+            notify=lambda _message: None,
+            open_extensions_selector=lambda: opened.append(True),
+        )
+        await registry.execute("/extensions", context)
+        assert opened == [True]
 
     async def test_changelog_renders_entries(self, tmp_path):
         (tmp_path / "CHANGELOG.md").write_text(

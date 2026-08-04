@@ -44,6 +44,10 @@ class SlashContext:
         open_fork_selector: Callable[[], None] | None = None,
         open_trust_selector: Callable[[], None] | None = None,
         open_settings_selector: Callable[[], None] | None = None,
+        open_thinking_selector: Callable[[], None] | None = None,
+        open_oauth_selector: Callable[[str], None] | None = None,
+        open_scoped_models_selector: Callable[[], None] | None = None,
+        open_extensions_selector: Callable[[], None] | None = None,
         copy_to_clipboard: Callable[[str], None] | None = None,
         auth_interaction=None,
         rebuild_session=None,
@@ -62,6 +66,10 @@ class SlashContext:
         self._open_fork_selector = open_fork_selector
         self._open_trust_selector = open_trust_selector
         self._open_settings_selector = open_settings_selector
+        self._open_thinking_selector = open_thinking_selector
+        self._open_oauth_selector = open_oauth_selector
+        self._open_scoped_models_selector = open_scoped_models_selector
+        self._open_extensions_selector = open_extensions_selector
         self._copy_to_clipboard = copy_to_clipboard or (lambda _text: None)
         self.auth_interaction = auth_interaction
         # 会话重建：fork / clone / resume / import 用（宿主注入）。
@@ -103,6 +111,26 @@ class SlashContext:
     def open_settings_selector(self) -> None:
         if self._open_settings_selector is not None:
             self._open_settings_selector()
+
+    def open_thinking_selector(self) -> None:
+        if self._open_thinking_selector is not None:
+            self._open_thinking_selector()
+
+    async def open_oauth_selector(self, mode: str = "login") -> None:
+        if self._open_oauth_selector is not None:
+            result = self._open_oauth_selector(mode)
+            if inspect.isawaitable(result):
+                await result
+
+    async def open_scoped_models_selector(self) -> None:
+        if self._open_scoped_models_selector is not None:
+            result = self._open_scoped_models_selector()
+            if inspect.isawaitable(result):
+                await result
+
+    def open_extensions_selector(self) -> None:
+        if self._open_extensions_selector is not None:
+            self._open_extensions_selector()
 
     def copy_to_clipboard(self, text: str) -> None:
         self._copy_to_clipboard(text)
@@ -454,6 +482,9 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
             context.session.set_scoped_models([])
             return "Scoped models cleared (all available are usable)"
         if not args_str:
+            if context._open_scoped_models_selector is not None:
+                await context.open_scoped_models_selector()
+                return ""
             scoped = context.session.scoped_models
             if not scoped:
                 return "No scoped models (all available are usable)"
@@ -471,6 +502,36 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
         scoped = await resolve_model_scope(patterns, context.model_runtime)
         context.session.set_scoped_models(scoped)
         return f"Scoped {len(scoped)} models"
+
+    async def _thinking(context: SlashContext, args: str) -> str:
+        level = args.strip()
+        if not level:
+            if context._open_thinking_selector is not None:
+                context.open_thinking_selector()
+                return ""
+            return "Usage: /thinking <level>"
+        context.session.set_thinking_level(level)
+        return f"Thinking level: {context.session.thinking_level}"
+
+    async def _oauth(context: SlashContext, args: str) -> str:
+        mode = "logout" if args.strip() == "logout" else "login"
+        if context._open_oauth_selector is not None:
+            await context.open_oauth_selector(mode)
+            return ""
+        return "Usage: /oauth [login|logout]"
+
+    async def _extensions(context: SlashContext, args: str) -> str:
+        if not args.strip() and context._open_extensions_selector is not None:
+            context.open_extensions_selector()
+            return ""
+        runner = context.session.extension_runner
+        extensions = list(runner.extensions) if runner is not None else []
+        if not extensions:
+            return "No extensions loaded"
+        lines = [f"Extensions ({len(extensions)}):"]
+        for extension in extensions:
+            lines.append(f"  {extension.path}")
+        return "\n".join(lines)
 
     async def _login(context: SlashContext, args: str) -> str:
         from pi_ai.auth.oauth import builtin_oauth_providers
@@ -572,6 +633,9 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
 
     builtins: list[tuple[str, Callable, str, str | None]] = [
         ("model", _model, "Select model (opens selector UI)", "<provider/model>"),
+        ("thinking", _thinking, "Set thinking level (opens selector UI)", "[level]"),
+        ("oauth", _oauth, "Configure provider authentication (opens selector UI)", "[login|logout]"),
+        ("extensions", _extensions, "List installed extensions (opens selector UI)", ""),
         ("name", _name, "Set session display name", "<name>"),
         ("compact", _compact, "Manually compact the session context", "[instructions]"),
         ("new", _new, "Start a new session", ""),

@@ -50,16 +50,19 @@ def message_to_entries(
 
     if role == "toolResult":
         tool_name = message.get("tool_name", "tool")
+        label = f"Tool: {tool_name}"
+        if message.get("is_error"):
+            label += " (error)"
         if isinstance(content, str):
-            return [(f"Tool: {tool_name}", content)]
+            return [(label, content)]
         text = "\n".join(_block_text(block) for block in content or [])
-        return [(f"Tool: {tool_name}", text)]
+        return [(label, text)]
 
     if role == "assistant":
         entries: list[tuple[str, str]] = []
         thinking_parts: list[str] = []
         text_parts: list[str] = []
-        tool_parts: list[str] = []
+        tool_calls: list[str] = []
         for block in content or []:
             if not isinstance(block, dict):
                 continue
@@ -69,19 +72,25 @@ def message_to_entries(
                     thinking_parts.append(block.get("thinking", ""))
             elif block_type == "toolCall":
                 if show_tools:
-                    tool_parts.append(_block_text(block))
+                    name = block.get("name", "tool")
+                    arguments = block.get("arguments") or {}
+                    tool_calls.append(f"{name}({arguments})")
             elif block_type == "text":
                 text_parts.append(block.get("text", ""))
         if thinking_parts:
             entries.append(("Thinking", "\n".join(thinking_parts)))
         if text_parts:
             entries.append(("Assistant", "\n".join(text_parts)))
-        if tool_parts:
-            entries.append(("Tool call", "\n".join(tool_parts)))
+        for tool_call in tool_calls:
+            entries.append(("Tool call", tool_call))
         return entries
 
     if role == "compactionSummary":
-        return [("Compaction", message.get("summary", ""))]
+        return [("Compaction summary", message.get("summary", ""))]
+    if role == "branchSummary":
+        return [("Branch summary", message.get("summary", ""))]
+    if role == "skillInvocation":
+        return [("Skill", message.get("content", ""))]
     if role == "system":
         return [("System", message.get("content", ""))]
     # 其它角色（custom/branchSummary 等）降级为文本。

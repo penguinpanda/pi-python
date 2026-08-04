@@ -16,7 +16,16 @@ from pi_coding_agent.auth_storage import AuthStorage
 from pi_coding_agent.model_runtime import ModelRuntime
 from pi_coding_agent.modes.interactive.app import PiTuiApp
 from pi_tui.components import MessageEntry, PiEditor
-from pi_tui.selectors import ModelSelector, SessionPicker, SettingsSelector, TreeSelector
+from pi_tui.selectors import (
+    ExtensionSelector,
+    ModelSelector,
+    OAuthSelector,
+    ScopedModelsSelector,
+    SessionPicker,
+    SettingsSelector,
+    ThinkingSelector,
+    TreeSelector,
+)
 
 
 def _make_runtime(
@@ -539,6 +548,146 @@ async def test_slash_settings_opens_selector(tmp_path):
         assert project_path.exists()
         data = json.loads(project_path.read_text(encoding="utf-8"))
         assert data["autoCompaction"] is (not initial_auto_compact)
+
+
+@pytest.mark.asyncio
+async def test_slash_thinking_opens_selector(tmp_path):
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "/thinking"))
+        await _wait_until(
+            lambda: isinstance(app.screen, ThinkingSelector),
+            pilot=pilot,
+            message="thinking selector opened",
+        )
+        await _wait_until(
+            lambda: len(app.screen.query_one("#thinking-list").children) > 0,
+            pilot=pilot,
+            message="thinking list populated",
+        )
+        levels = app.screen._levels
+        app.screen.action_select()
+        await _wait_until(
+            lambda: session.thinking_level == levels[0],
+            pilot=pilot,
+            message="thinking level applied",
+        )
+
+
+@pytest.mark.asyncio
+async def test_slash_scoped_models_opens_selector(tmp_path):
+    runtime = _make_runtime(model_count=2)
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "/scoped-models"))
+        await _wait_until(
+            lambda: isinstance(app.screen, ScopedModelsSelector),
+            pilot=pilot,
+            message="scoped models selector opened",
+        )
+        await _wait_until(
+            lambda: len(app.screen.query_one("#scoped-list").children) == 2,
+            pilot=pilot,
+            message="scoped list populated",
+        )
+        app.screen.action_toggle()
+        app.screen.action_cancel()
+        await _wait_until(
+            lambda: len(session.scoped_models) == 1,
+            pilot=pilot,
+            message="scoped models applied",
+        )
+
+
+@pytest.mark.asyncio
+async def test_slash_oauth_opens_selector(tmp_path):
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "/oauth"))
+        await _wait_until(
+            lambda: isinstance(app.screen, OAuthSelector),
+            pilot=pilot,
+            message="oauth selector opened",
+        )
+        await _wait_until(
+            lambda: len(app.screen.query_one("#oauth-list").children) > 0,
+            pilot=pilot,
+            message="oauth list populated",
+        )
+
+
+@pytest.mark.asyncio
+async def test_slash_extensions_opens_selector(tmp_path):
+    from pi_coding_agent.extensions import ExtensionRunner
+    from pi_coding_agent.extensions.types import Extension
+
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    extension = Extension(path="/tmp/ext.py", resolved_path="/tmp/ext.py")
+    session.set_extension_runner(ExtensionRunner([extension], cwd=str(tmp_path)))
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "/extensions"))
+        await _wait_until(
+            lambda: isinstance(app.screen, ExtensionSelector),
+            pilot=pilot,
+            message="extension selector opened",
+        )
+        await _wait_until(
+            lambda: len(app.screen.query_one("#extension-list").children) == 1,
+            pilot=pilot,
+            message="extension list populated",
+        )
+
+
+@pytest.mark.asyncio
+async def test_skill_invocation_event_renders_entry(tmp_path):
+    from pi_tui.components import MessageEntry
+
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        app._on_session_event({"type": "skill_invocation", "skill": "docs"})
+        await _wait_until(
+            lambda: any(
+                entry.label == "Skill" and "docs" in entry.entry_text
+                for entry in app.query(MessageEntry)
+            ),
+            pilot=pilot,
+            message="skill invocation entry rendered",
+        )
+
+
+@pytest.mark.asyncio
+async def test_branch_summary_rendered_from_entries(tmp_path):
+    from pi_tui.components import MessageEntry
+
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    from pi_ai._types import UserMessage
+
+    await session.session_manager.append_message(
+        UserMessage(role="user", content="a")
+    )
+    await session.session_manager.append_branch_summary(
+        session.session_manager.get_leaf_id(), "summarized branch"
+    )
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        await _wait_until(
+            lambda: any(
+                entry.label == "Branch summary" and "summarized branch" in entry.entry_text
+                for entry in app.query(MessageEntry)
+            ),
+            pilot=pilot,
+            message="branch summary entry rendered",
+        )
 
 
 @pytest.mark.asyncio
