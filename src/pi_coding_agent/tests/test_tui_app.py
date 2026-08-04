@@ -734,6 +734,9 @@ async def test_slash_reload_reloads_resources(tmp_path):
             '{"description": "Hello", "handler": lambda ctx, args: "hi"})\n',
             encoding="utf-8",
         )
+        (extensions_dir / "bad.py").write_text(
+            "def create_extension(api\n", encoding="utf-8"
+        )
         theme_colors["accent"] = "#abcdef"
         (themes_dir / "custom.json").write_text(
             _json.dumps(theme_colors), encoding="utf-8"
@@ -761,6 +764,7 @@ async def test_slash_reload_reloads_resources(tmp_path):
             pilot=pilot,
             message="reload status shown",
         )
+        assert "extension error" in str(app._status.content)
 
         assert app._theme.colors["accent"] == "#abcdef"
         assert app._keybindings.get_action_key("app.model.select") == "ctrl+m"

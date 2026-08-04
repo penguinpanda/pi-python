@@ -16,6 +16,16 @@ from pi_agent import AgentEvent
 from ._session import AgentSession
 
 
+def _emit_text(text: str) -> None:
+    """写一行纯文本到 stdout（BrokenPipeError 由调用方处理）。"""
+    print(text, flush=True)
+
+
+def _emit_json(obj: dict) -> None:
+    """写一行 JSON 到 stdout（BrokenPipeError 由调用方处理）。"""
+    print(json.dumps(obj, ensure_ascii=False, default=str), flush=True)
+
+
 async def run_print_mode(
     session: AgentSession, message: str, images: list | None = None
 ) -> int:
@@ -63,7 +73,10 @@ async def run_print_mode(
         await session.dispose()
 
     if final_text:
-        print(final_text)
+        try:
+            _emit_text(final_text)
+        except BrokenPipeError:
+            return 0
     if has_error:
         return 1
     return 0
@@ -74,20 +87,34 @@ async def run_print_mode_json(
 ) -> int:
     """Print 模式 JSON Lines 输出：逐条 agent 事件 + 结束摘要。"""
     has_error = False
+    pipe_closed = False
 
     def on_event(event: AgentEvent) -> None:
-        print(json.dumps(event, ensure_ascii=False, default=str), flush=True)
+        nonlocal pipe_closed
+        if pipe_closed:
+            return
+        try:
+            _emit_json(event)
+        except BrokenPipeError:
+            # 下游提前关闭管道（如 `--json | grep -m1`）：停止输出，静默收尾。
+            pipe_closed = True
 
     unsub = session.subscribe(on_event)
     try:
         await session.prompt(message, images)
         await session.wait_for_idle()
     except Exception as exc:
-        print(json.dumps({"type": "error", "error": str(exc)}, ensure_ascii=False), flush=True)
+        try:
+            _emit_json({"type": "error", "error": str(exc)})
+        except BrokenPipeError:
+            return 1
         return 1
     finally:
         unsub()
         await session.dispose()
+
+    if pipe_closed:
+        return 0
 
     messages = session.get_messages()
     for msg in reversed(messages):
@@ -95,12 +122,8 @@ async def run_print_mode_json(
             if msg.get("stop_reason") in ("error", "aborted"):
                 has_error = True
             break
-    print(
-        json.dumps(
-            {"type": "done", "messages": messages},
-            ensure_ascii=False,
-            default=str,
-        ),
-        flush=True,
-    )
+    try:
+        _emit_json({"type": "done", "messages": messages})
+    except BrokenPipeError:
+        return 0
     return 1 if has_error else 0

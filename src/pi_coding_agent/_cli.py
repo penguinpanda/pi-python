@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import signal
 import sys
 from pathlib import Path
 
@@ -47,6 +48,13 @@ def main(args: list[str] | None = None) -> int:
     Returns:
         退出码: 0=成功, 1=错误
     """
+    # 下游提前关闭管道（如 `--json | grep -m1`）时按 Unix 惯例静默终止，
+    # 避免 Python 默认把 EPIPE 转成 BrokenPipeError traceback。
+    # Windows 无 SIGPIPE，由 _print_mode 的 BrokenPipeError 兜底。
+    try:
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    except (AttributeError, OSError, ValueError):
+        pass
     return asyncio.run(_async_main(args))
 
 
@@ -120,6 +128,12 @@ async def _async_main(args: list[str] | None = None) -> int:
         global_dir=get_agent_dir() / "prompts",
         project_dir=Path(cwd) / ".pi" / "prompts",
     )
+    # 启动时扫描一次；否则 /skill: 与 /模板名 永远找不到资源
+    # （只有 TUI /reload 会触发加载，print/RPC 模式会静默失败）。
+    skill_result = skill_loader.load()
+    for diagnostic in skill_result.diagnostics:
+        print(f"Warning: {diagnostic.message} ({diagnostic.path})", file=sys.stderr)
+    template_loader.load()
 
     # Phase 5：扩展（项目 .pi/extensions + 全局 extensions）。
     extension_loader = ExtensionLoader(
@@ -128,6 +142,9 @@ async def _async_main(args: list[str] | None = None) -> int:
         cwd=cwd,
     )
     extension_result = await extension_loader.load()
+    for error in extension_result.errors:
+        message = error.error.replace("\n", " ")
+        print(f"Warning: {message} ({error.extension_path})", file=sys.stderr)
     extension_runner = ExtensionRunner(
         extension_result.extensions,
         runtime=extension_result.runtime,

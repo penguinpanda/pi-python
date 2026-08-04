@@ -254,3 +254,45 @@ class TestPrintMode:
         assert any(
             message.get("role") == "assistant" for message in last["messages"]
         )
+
+    async def test_json_print_mode_broken_pipe_quiet(
+        self, faux_env, tmp_path, monkeypatch, capsys
+    ):
+        """下游提前关闭管道（--json | grep -m1）→ 静默退出，不抛 traceback。"""
+        from pi_coding_agent import _print_mode as print_mode_module
+
+        models, core = faux_env
+        core.set_responses([faux_assistant_message("json reply")])
+        mgr = SessionManager.in_memory(cwd=str(tmp_path))
+        session = _make_session(models, mgr, tmp_path)
+
+        def broken_pipe(*_args, **_kwargs):
+            raise BrokenPipeError(32, "Broken pipe")
+
+        monkeypatch.setattr(print_mode_module, "_emit_json", broken_pipe)
+
+        code = await run_print_mode_json(session, "hi")
+
+        capsys.readouterr()
+        assert code == 0
+
+    async def test_print_mode_broken_pipe_quiet(
+        self, faux_env, tmp_path, monkeypatch, capsys
+    ):
+        """纯文本 print 模式管道被关闭 → 静默退出。"""
+        from pi_coding_agent import _print_mode as print_mode_module
+
+        models, core = faux_env
+        core.set_responses([faux_assistant_message("Hello from print mode!")])
+        mgr = SessionManager.in_memory(cwd=str(tmp_path))
+        session = _make_session(models, mgr, tmp_path)
+
+        def broken_pipe(*_args, **_kwargs):
+            raise BrokenPipeError(32, "Broken pipe")
+
+        monkeypatch.setattr(print_mode_module, "_emit_text", broken_pipe)
+
+        code = await run_print_mode(session, "hi")
+
+        capsys.readouterr()
+        assert code == 0

@@ -674,6 +674,11 @@ class PiTuiApp(App):
                 )
                 session.set_extension_runner(new_runner)
                 details.append(f"{len(result.extensions)} extensions")
+                for error in result.errors:
+                    message = error.error.replace("\n", " ")
+                    details.append(
+                        f"extension error: {message} ({error.extension_path})"
+                    )
             except Exception as exc:
                 details.append(f"extensions failed: {exc}")
         elif session.extension_runner is not None:
