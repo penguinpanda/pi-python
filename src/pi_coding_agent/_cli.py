@@ -19,7 +19,7 @@ from pi_agent import set_default_stream_fn as set_agent_stream_fn
 from pi_ai import Model
 from pi_ai.auth.oauth import builtin_oauth_providers
 
-from ._config import get_agent_dir, get_sessions_dir, load_settings
+from ._config import get_agent_dir, get_sessions_dir
 from .extensions import ExtensionLoader, ExtensionRunner
 from ._print_mode import run_print_mode, run_print_mode_json
 from .file_processor import process_at_files
@@ -40,6 +40,7 @@ from .model_resolver import (
 from .model_runtime import ModelRuntime
 from .prompt_templates import PromptTemplateLoader
 from .skills import SkillLoader
+from .settings_manager import SettingsManager
 from .system_prompt import (
     BuildSystemPromptOptions,
     build_system_prompt,
@@ -89,8 +90,9 @@ async def _async_main(args: list[str] | None = None) -> int:
     # 确定工作目录
     cwd = str(Path.cwd())
 
-    # 加载配置
-    settings = load_settings(cwd)
+    # 加载配置（双层 + 信任感知：先全局，信任决定后加载项目）。
+    settings_manager = SettingsManager.create(cwd, project_trusted=False)
+    settings = settings_manager.as_dict()
 
     # 项目信任：启动时解析（TUI 的交互提示由应用内 TrustSelector 承担，
     # 其余模式无 UI 时按 defaultProjectTrust=ask 拒绝并提示）。
@@ -103,6 +105,8 @@ async def _async_main(args: list[str] | None = None) -> int:
     project_trusted = await resolve_project_trusted(
         cwd, trust_manager, settings, ui=None
     )
+    settings_manager.set_project_trusted(project_trusted)
+    settings = settings_manager.as_dict()
     if needs_trust_decision and not project_trusted and parsed.mode != "tui":
         print(
             "Warning: project not trusted; .pi settings and resources are ignored. "
@@ -193,12 +197,16 @@ async def _async_main(args: list[str] | None = None) -> int:
         selected_tools = [tool.name for tool in default_tools]
 
     def system_prompt_builder() -> str:
+        custom_prompt = parsed.system_prompt or settings_manager.get_system_prompt()
+        append_parts = settings_manager.get_append_system_prompt()
+        if parsed.append_system_prompt:
+            append_parts.append(parsed.append_system_prompt)
         return build_system_prompt(BuildSystemPromptOptions(
             cwd=cwd,
-            custom_prompt=parsed.system_prompt,
+            custom_prompt=custom_prompt,
             selected_tools=selected_tools,
             tool_snippets=tool_snippets,
-            append_system_prompt=parsed.append_system_prompt,
+            append_system_prompt="\n".join(append_parts) if append_parts else None,
             context_files=load_project_context_files(cwd, get_agent_dir()),
             skills=skill_loader.all(),
         ))
@@ -300,6 +308,7 @@ async def _async_main(args: list[str] | None = None) -> int:
             resume_factory=resume_factory,
             session_rebuilder=rebuilder,
             settings=settings,
+            settings_manager=settings_manager,
             extension_loader=extension_loader,
             trust_manager=trust_manager,
             project_trusted=project_trusted,

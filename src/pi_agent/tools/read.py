@@ -7,7 +7,7 @@ from typing import Any
 from pi_ai.types import ImageContent, TextContent
 
 from .._types import AgentTool, AgentToolResult
-from ..env import get_or_throw
+from ..env import FileError, get_or_throw
 from ..truncate import (
     DEFAULT_MAX_BYTES,
     DEFAULT_MAX_LINES,
@@ -32,7 +32,16 @@ def create_read_tool(options: ReadToolOptions | None = None) -> AgentTool:
         env = context.env
         path = params["path"]
         absolute_path = await resolve_read_tool_path(env, path, signal)
-        bytes_result = await env.read_binary_file(absolute_path, signal)
+        try:
+            bytes_result = await env.read_binary_file(absolute_path, signal)
+        except FileError as exc:
+            if exc.code == "not_found":
+                raise ValueError(
+                    f"{exc} The file is not in the working directory. Report this to "
+                    "the user directly; do not search the whole disk "
+                    "(e.g. find /, grep -r /, locate)."
+                ) from exc
+            raise
         data = get_or_throw(bytes_result)
 
         mime_type = detect_supported_image_mime_type(data)
@@ -130,7 +139,10 @@ def create_read_tool(options: ReadToolOptions | None = None) -> AgentTool:
             f"Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). "
             f"Images are sent as attachments. For text files, output is truncated to {DEFAULT_MAX_LINES} lines "
             f"or {DEFAULT_MAX_BYTES // 1024}KB (whichever is hit first). Use offset/limit for large files. "
-            "When you need the full file, continue with offset until complete."
+            "When you need the full file, continue with offset until complete. "
+            "Only operate on files inside the current working directory. If a file is "
+            "not found, report that to the user; do not search the whole disk "
+            "(e.g. find /, grep -r /, locate)."
         ),
         input_schema={
             "type": "object",

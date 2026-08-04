@@ -181,12 +181,14 @@ class PiTuiApp(App):
         session_rebuilder=None,
         settings: dict | None = None,
         extension_loader=None,
+        settings_manager=None,
         trust_manager=None,
         project_trusted: bool = False,
         needs_trust_decision: bool = False,
     ) -> None:
         self._keybindings = keybindings_manager or KeybindingsManager()
         self._settings = settings if settings is not None else {}
+        self._settings_manager = settings_manager
         if self._settings:
             self._keybindings.load_from_settings(self._settings)
         self._theme_loader = theme_loader or ThemeLoader()
@@ -576,6 +578,9 @@ class PiTuiApp(App):
             self._trust_manager.set_many(updates)
         self._project_trusted = bool(option.get("trusted"))
         self._needs_trust_decision = False
+        if self._settings_manager is not None:
+            self._settings_manager.set_project_trusted(self._project_trusted)
+            self._settings = self._settings_manager.as_dict()
         label = option.get("label", "Trust")
         self._notify(
             f"{label}: saved. Project resources load on /reload or restart."
@@ -619,6 +624,17 @@ class PiTuiApp(App):
 
     def _on_settings_change(self, key: str, value) -> None:
         """持久化设置到项目 .pi/settings.json 并应用会话侧效果。"""
+        if self._settings_manager is not None:
+            try:
+                self._settings_manager.set_project_setting(key, value)
+            except RuntimeError as exc:
+                self._notify(str(exc))
+                return
+            self._settings = self._settings_manager.as_dict()
+            if key == "autoCompaction":
+                self._session.set_auto_compaction_enabled(bool(value))
+            self._notify(f"Saved {key} = {value}")
+            return
         from ..._config import (
             _load_json,
             get_project_settings_path,
