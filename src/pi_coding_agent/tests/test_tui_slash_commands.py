@@ -237,6 +237,40 @@ class TestPhase7Commands:
         assert "defaultModel" in notifications[-1]
         assert "deepseek-chat" in notifications[-1]
 
+    async def test_settings_preserves_existing_keys(self, tmp_path):
+        """回归（CF-04）：/settings 顶层合并，写入新键不覆盖已有键。"""
+        import json
+
+        session = FakeSession(cwd=str(tmp_path))
+        registry = _make_registry()
+        notifications: list[str] = []
+        context = SlashContext(session=session, notify=notifications.append)
+
+        project_path = tmp_path / ".pi" / "settings.json"
+        project_path.parent.mkdir(parents=True)
+        project_path.write_text(
+            json.dumps({"keybindings": {"app.model.select": "ctrl+0"}}),
+            encoding="utf-8",
+        )
+
+        await registry.execute("/settings defaultModel=qwen-plus", context)
+
+        data = json.loads(project_path.read_text(encoding="utf-8"))
+        assert data["defaultModel"] == "qwen-plus"
+        assert data["keybindings"] == {"app.model.select": "ctrl+0"}
+
+    async def test_login_unknown_provider_friendly_error(self):
+        """回归（P13）：/login 未知 provider 返回可读错误，不抛 traceback。"""
+        registry = _make_registry()
+        notifications: list[str] = []
+        context = SlashContext(notify=notifications.append)
+
+        handled = await registry.execute("/login bogus", context)
+
+        assert handled is True
+        assert "Unknown provider: bogus" in notifications[0]
+        assert "Traceback" not in notifications[0]
+
     async def test_scoped_models(self, tmp_path):
         from pi_ai import Model, Models
         from pi_ai.providers.faux import faux_provider

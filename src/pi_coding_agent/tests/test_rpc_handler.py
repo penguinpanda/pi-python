@@ -358,6 +358,89 @@ class TestSessionCommands:
         assert response["success"] is True
         assert response["data"]["commands"] == []
 
+    async def test_get_commands_lists_extension_prompt_skill(self, tmp_path):
+        """回归（E-03）：get_commands 聚合扩展命令 / 提示模板 / 技能三类条目。"""
+        from pi_coding_agent.extensions import (
+            Extension,
+            ExtensionRunner,
+            RegisteredCommand,
+        )
+        from pi_coding_agent.prompt_templates import PromptTemplateLoader
+        from pi_coding_agent.skills import SkillLoader
+
+        runtime = _make_runtime()
+
+        extension_path = tmp_path / "ext.py"
+        extension = Extension(
+            path=str(extension_path),
+            resolved_path=str(extension_path),
+            commands={
+                "hello": RegisteredCommand(
+                    name="hello",
+                    description="Say hello from extension",
+                    handler=lambda ctx, args: "hi",
+                    source_info={"source": "local", "path": str(extension_path)},
+                )
+            },
+        )
+        runner = ExtensionRunner(
+            [extension], cwd=str(tmp_path), model_runtime=runtime
+        )
+
+        skills_dir = tmp_path / "skills"
+        (skills_dir / "alpha").mkdir(parents=True)
+        (skills_dir / "alpha" / "SKILL.md").write_text(
+            "---\ndescription: Alpha skill\n---\nBody",
+            encoding="utf-8",
+        )
+        skill_loader = SkillLoader(global_dir=skills_dir)
+        skill_loader.load()
+
+        prompts_dir = tmp_path / "prompts"
+        prompts_dir.mkdir(parents=True)
+        (prompts_dir / "shorten.md").write_text(
+            "---\ndescription: Shorten the following text to one sentence:\n---\nBody",
+            encoding="utf-8",
+        )
+        template_loader = PromptTemplateLoader(global_dir=prompts_dir)
+        template_loader.load()
+
+        model = runtime.get_model("faux", "faux-1")
+        assert model is not None
+        agent = Agent(AgentOptions(
+            system_prompt="You are a helpful coding assistant.",
+            model=model,
+            stream_fn=runtime.stream,
+        ))
+        session = AgentSession(
+            agent=agent,
+            session_manager=SessionManager.in_memory(cwd=str(tmp_path)),
+            cwd=str(tmp_path),
+            model=model,
+            model_runtime=runtime,
+            skill_loader=skill_loader,
+            template_loader=template_loader,
+            extension_runner=runner,
+        )
+        handler = RpcMessageHandler(session, runtime)
+
+        response = await handler.handle_command({"id": "1", "type": "get_commands"})
+
+        assert response["success"] is True
+        commands = response["data"]["commands"]
+        sources = {command["source"] for command in commands}
+        assert sources == {"extension", "prompt", "skill"}
+        hello = next(command for command in commands if command["name"] == "hello")
+        assert hello["sourceInfo"]["path"] == str(extension_path)
+        shorten = next(
+            command for command in commands if command["name"] == "shorten"
+        )
+        assert shorten["sourceInfo"]["path"].endswith("shorten.md")
+        alpha = next(
+            command for command in commands if command["name"] == "skill:alpha"
+        )
+        assert alpha["sourceInfo"]["path"].endswith("SKILL.md")
+
     async def test_export_html(self, tmp_path):
         runtime = _make_runtime()
         handler = _make_handler(runtime, tmp_path)
