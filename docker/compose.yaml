@@ -77,5 +77,25 @@ services:
     mem_limit: 2g
     cpus: 2.0
 
+  pg:
+    # server 子系统会话存储（PostgreSQL，路线图 P2-2）。
+    # 容器内连接用服务名 pg；宿主测试用 localhost:5432（映射端口）。
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PG_USER:-pi}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-pi}
+      POSTGRES_DB: ${PG_DB:-pi}
+    ports:
+      - "${PG_PORT:-5432}:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-pi} -d ${PG_DB:-pi}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
   pi-home:
+  pg-data:

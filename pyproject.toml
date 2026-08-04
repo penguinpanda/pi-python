@@ -28,6 +28,8 @@ dependencies = [
     "filelock>=3.12",
     "textual>=0.80",
     "pillow>=10.0",
+    "pydantic>=2.0",
+    "asyncpg>=0.29",
 ]
 
 [project.scripts]
@@ -41,17 +43,43 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/pi_ai", "src/pi_agent", "src/pi_coding_agent", "src/pi_tui"]
+packages = [
+    "src/pi_ai",
+    "src/pi_agent",
+    "src/pi_coding_agent",
+    "src/pi_tui",
+    "src/pi_protocol",
+    "src/pi_storage",
+    "src/pi_server",
+    "src/pi_evals",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["src/pi_ai/tests", "src/pi_agent/tests", "src/pi_coding_agent/tests"]
+testpaths = [
+    "src/pi_ai/tests",
+    "src/pi_agent/tests",
+    "src/pi_coding_agent/tests",
+    "src/pi_protocol/tests",
+    "src/pi_storage/tests",
+    "src/pi_server/tests",
+    "src/pi_evals/tests",
+    "src/pi_evals",
+]
 pythonpath = ["src", "."]
 addopts = "--cov=pi_ai --cov=pi_agent --cov=pi_coding_agent --cov-report=term-missing --cov-report=html"
 
 [tool.coverage.run]
 # 只统计 src 下的包代码，不统计测试自身。
-omit = ["src/pi_ai/tests/*", "src/pi_agent/tests/*", "src/pi_coding_agent/tests/*"]
+omit = [
+    "src/pi_ai/tests/*",
+    "src/pi_agent/tests/*",
+    "src/pi_coding_agent/tests/*",
+    "src/pi_protocol/tests/*",
+    "src/pi_storage/tests/*",
+    "src/pi_server/tests/*",
+    "src/pi_evals/tests/*",
+]
 
 [tool.coverage.report]
 show_missing = true

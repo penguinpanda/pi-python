@@ -13,6 +13,10 @@
 - Unified resource loader aggregating skills/prompts/extensions/themes/context files
 - Tool-scope constraints against whole-disk searches (read/bash/find/grep guidance)
 - Image pipeline (EXIF orientation, resize, multi-format to PNG) wired into read/clipboard
+- `pi-protocol` v2 package: commands/results/snapshots/events with JSONL framing
+- `pi-storage` PostgreSQL session store (asyncpg) with migrations and tsvector/pg_trgm search
+- `pi-server` persistent stdio service with attach/detach and snapshot push
+- `pi-evals` harness with smoke and extensions evals (faux provider)
 
 ## [0.1.0]
 
