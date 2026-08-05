@@ -93,7 +93,8 @@ Box/VStack/HStack/Text/Input/SelectList 的组合，渲染成文本行后由
 `set_overlay_component(key, widget, options)`，组件模式复用根节点、焦点落到子树。
 
 **剩余建议**：
-1. 渲染回调 API（`set_overlay_renderer(key, fn(width, height) -> list[str])`）可选。
+1. ✅ 渲染回调 API 已实现：`ctx.ui.set_overlay_renderer(key, fn(width, height) -> list[str])`
+   （TUI 返回 handle，RPC 发送意图请求，Print no-op），resize 时自动重渲染。
 2. `handle_event` 已保留钩子，等通用组件（SelectList 等）落地后自然生效。
 3. 补 Tab 循环、set_component 换子树的集成测试。
 
@@ -156,8 +157,16 @@ Tree/OAuth/Scoped/Extension/Trust）都已改为 `OverlayDialog`（Widget）并�
 但没有硬件光标、OSC 查询和图像协议）。
 
 **建议**：不追求对齐。若未来需要：先做 `PI_HARDWARE_CURSOR`（Textual 无 API，
-需在渲染层拦截），图像协议等 Textual 生态支持后再评估。已在
-`examples/extensions/STATUS.md` 标注 N/A。
+需在渲染层拦截），图像协议等 Textual 生态支持后再评估。
+
+**已完成的可选项**：
+- ✅ OSC 11 背景色查询（`src/pi_tui/terminal.py`）：`query_terminal_background()` 启动时
+  查询终端背景色并喂给 `ThemeLoader.detect_terminal_background`（先 OSC 11，再
+  COLORFGBG，最后默认 dark）；支持 #RRGGBB / #RRRRGGGGBBBB / rgb:r/g/b 响应格式。
+- ✅ kitty/iTerm2 图像序列生成（`src/pi_tui/terminal_image.py`）：`encode_kitty_image` /
+  `encode_iterm2_image` / `TerminalImage`（无能力时回退占位文本）；独立可单测，
+  暂未接入聊天渲染管线。
+- ⏸ 硬件光标后处理：维持跳过（Textual 已管光标）。
 
 ### F. 输入 / 按键系统（自动补全 provider 栈已完成）
 

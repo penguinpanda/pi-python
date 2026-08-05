@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .terminal import query_terminal_background
+
 
 class ThemeError(Exception):
     """主题加载/校验错误。"""
@@ -239,6 +241,11 @@ class ThemeLoader:
 
     def detect_terminal_background(self) -> str:
         """检测终端背景（尽力而为）：dark 或 light。"""
+        rgb = query_terminal_background()
+        if rgb is not None:
+            red, green, blue = rgb
+            luminance = 0.299 * red + 0.587 * green + 0.114 * blue
+            return "light" if luminance >= 128 else "dark"
         colorfgbg = os.environ.get("COLORFGBG")
         if colorfgbg:
             parts = colorfgbg.split(";")

@@ -242,6 +242,7 @@ class PiTuiApp(App):
         self._widget_above: dict[str, str] = {}
         self._widget_below: dict[str, str] = {}
         self._overlay_dialog_callbacks: dict[str, Callable[[Any], None] | None] = {}
+        self._overlay_renderers: dict[str, Callable[[int, int], list[str]]] = {}
         self._overlay_manager = OverlayManager(
             OverlayHooks(
                 make_widget=lambda key, lines, options: OverlayWidget(key, lines, options),
@@ -550,8 +551,10 @@ class PiTuiApp(App):
     ) -> OverlayHandle | None:
         """显示 / 更新浮层（OverlayManager + overlay 层）；空列表移除。"""
         if not lines:
+            self._overlay_renderers.pop(key, None)
             self._overlay_manager.remove(key)
             return None
+        self._overlay_renderers.pop(key, None)
         handle = self._overlay_manager.show(key, list(lines), options or {})
         self.call_after_refresh(lambda: self._overlay_manager.reposition(key))
         return handle
@@ -564,12 +567,45 @@ class PiTuiApp(App):
     ) -> OverlayHandle | None:
         """用任意 Textual 组件作为 overlay（组件树 API）；None 移除。"""
         if component is None:
+            self._overlay_renderers.pop(key, None)
             self._overlay_manager.remove(key)
             return None
+        self._overlay_renderers.pop(key, None)
         handle = self._overlay_manager.show_component(key, component, options or {})
         self.call_after_refresh(lambda: self._overlay_manager.reposition(key))
         self.call_after_refresh(lambda: self._overlay_manager.ensure_focus(key))
         return handle
+
+    def _set_overlay_renderer(
+        self,
+        key: str,
+        renderer,
+        options: dict | None = None,
+    ) -> OverlayHandle | None:
+        """用渲染回调生成 overlay 内容：fn(width, height) -> list[str]。"""
+        if renderer is None:
+            self._overlay_renderers.pop(key, None)
+            self._overlay_manager.remove(key)
+            return None
+        self._overlay_renderers[key] = renderer
+        handle = self._overlay_manager.show(key, [], options or {})
+        self.call_after_refresh(lambda: self._render_overlay_renderer(key))
+        return handle
+
+    def _render_overlay_renderer(self, key: str) -> None:
+        renderer = self._overlay_renderers.get(key)
+        entry = self._overlay_manager.get(key)
+        if renderer is None or entry is None:
+            return
+        width, height = self._overlay_manager.term_size
+        try:
+            lines = renderer(width, height)
+        except Exception:
+            lines = ["(renderer error)"]
+        if not isinstance(lines, list):
+            lines = ["(renderer error)"]
+        entry.widget.update_content([str(line) for line in lines])
+        self._overlay_manager.reposition(key)
 
     def _update_overlay_widget(
         self,
@@ -631,6 +667,8 @@ class PiTuiApp(App):
         """终端尺寸变化 → overlay 重排 + 可见性 / 焦点重定向。"""
         size = event.size
         self._overlay_manager.on_resize((size.width, size.height))
+        for key in list(self._overlay_renderers):
+            self.call_after_refresh(lambda k=key: self._render_overlay_renderer(k))
 
     def on_key(self, event) -> None:
         """输入前焦点恢复（blocked/active 状态下回到 overlay）。"""

@@ -48,6 +48,11 @@ class OverlayManager:
     def entries(self) -> dict[str, OverlayEntry]:
         return self._entries
 
+    @property
+    def term_size(self) -> tuple[int, int]:
+        """当前终端尺寸（overlay 布局/渲染回调使用）。"""
+        return self._term_size
+
     def get(self, key: str) -> OverlayEntry | None:
         return self._entries.get(key)
 

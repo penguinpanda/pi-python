@@ -264,6 +264,21 @@ class RpcUiContext:
             }
         )
 
+    def set_overlay_renderer(self, key: str, renderer, options: dict | None = None) -> None:
+        """渲染回调无法跨 RPC 传输，只发送意图请求。"""
+        options = options or {}
+        self._emit(
+            {
+                "type": "extension_ui_request",
+                "id": self._new_id(),
+                "method": "setOverlayRenderer",
+                "key": key,
+                "componentType": "renderer",
+                "anchor": options.get("anchor", "top-left"),
+                "margin": options.get("margin", 1),
+            }
+        )
+
     def set_hidden_thinking_label(self, label: str | None = None) -> None:
         self._emit(
             {

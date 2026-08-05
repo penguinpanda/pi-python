@@ -97,6 +97,10 @@ normal/insert，normal 模式支持 h/j/k/l、0/$、i/a/o、dd、x、u），可�
 provider 栈（多 provider 并发收集、按 value 去重、保持注册顺序、支持同步/异步、
 单 provider 异常跳过）；Tab 触发后异步收集并弹 overlay 选择器插入选中值。
 
+终端能力：`src/pi_tui/terminal.py` 的 OSC 11 背景色查询在启动时探测终端背景色，
+用于 `auto` 主题的深/浅选择（Textual 自身不提供该查询）；`src/pi_tui/terminal_image.py`
+提供 kitty/iTerm2 图像序列生成（独立模块，暂未接入聊天渲染管线）。
+
 流式渲染：`message_start` 挂一个 Assistant 占位条目，`message_update` 用 partial
 快照增量更新（text / thinking / toolCall 统一文本），`message_end` 移除占位并追加
 最终消息；每次增量自动滚动到底；`agent_settled` 兜底清理。`MessageEntry.set_text()`
@@ -111,8 +115,8 @@ provider 栈（多 provider 并发收集、按 value 去重、保持注册顺序
 
 ## 未移植（TS TUI 独有）
 
-- 渲染回调 API（`set_overlay_renderer`，可选）尚未实现；`SelectList` / `SettingsList` /
-  `PiEditorVim` / Markdown 渲染均已实现
+- 渲染回调 API（`ctx.ui.set_overlay_renderer(key, fn(width, height) -> list[str])`）已实现；
+  `SelectList` / `SettingsList` / `PiEditorVim` / Markdown 渲染均已实现
 - ModalScreen 与 overlay 焦点协议的统一（一期共存）
 - 全屏 alt-screen 滚动、OSC 8 链接点击、鼠标拖选
 - 树过滤模式与 label 时间戳已实现：TreeSelector 按 `f` 循环 default / no-tools /

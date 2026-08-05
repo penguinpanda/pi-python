@@ -39,6 +39,13 @@ from .overlay import (
     resolve_layout,
 )
 from .selectors import ModelSelector, SessionPicker
+from .terminal import parse_osc11_background, query_terminal_background
+from .terminal_image import (
+    TerminalImage,
+    detect_capabilities,
+    encode_iterm2_image,
+    encode_kitty_image,
+)
 from .theme import (
     BUILTIN_THEMES,
     COLOR_KEYS,
@@ -88,6 +95,12 @@ __all__ = [
     "resolve_layout",
     "ModelSelector",
     "SessionPicker",
+    "parse_osc11_background",
+    "query_terminal_background",
+    "TerminalImage",
+    "detect_capabilities",
+    "encode_iterm2_image",
+    "encode_kitty_image",
     "BUILTIN_THEMES",
     "COLOR_KEYS",
     "DARK_THEME",
