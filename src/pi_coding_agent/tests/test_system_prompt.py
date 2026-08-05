@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 
 from pi_coding_agent.system_prompt import (
     BuildSystemPromptOptions,
@@ -38,6 +39,53 @@ class TestBuildSystemPrompt:
         assert str(tmp_path).replace("\\", "/") in prompt
         assert "- read: Read a file" in prompt
         assert "Be concise in your responses" in prompt
+
+    def test_default_prompt_points_to_package_docs(self, tmp_path, monkeypatch):
+        (tmp_path / "README.md").write_text("# pi", encoding="utf-8")
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "examples").mkdir()
+        monkeypatch.setenv("PI_PACKAGE_DIR", str(tmp_path))
+        prompt = build_system_prompt(
+            BuildSystemPromptOptions(
+                cwd=str(tmp_path / "work"),
+                tool_snippets=_snippets(),
+            )
+        )
+        assert "Pi documentation" in prompt
+        assert f"Main documentation: {tmp_path / 'README.md'}" in prompt
+        assert f"Additional docs: {tmp_path / 'docs'}" in prompt
+        assert f"Examples: {tmp_path / 'examples'} (extensions, custom tools, SDK)" in prompt
+        assert "extensions (docs/extensions.md, examples/extensions/)" in prompt
+        assert "Always read pi .md files completely" in prompt
+
+    def test_docs_section_ignores_cwd_readme(self, tmp_path, monkeypatch):
+        pkg_dir = tmp_path / "pkg"
+        cwd = tmp_path / "project"
+        pkg_dir.mkdir()
+        cwd.mkdir()
+        (pkg_dir / "README.md").write_text("# pi", encoding="utf-8")
+        (pkg_dir / "docs").mkdir()
+        (pkg_dir / "examples").mkdir()
+        (cwd / "README.md").write_text("# unrelated project", encoding="utf-8")
+        monkeypatch.setenv("PI_PACKAGE_DIR", str(pkg_dir))
+        prompt = build_system_prompt(
+            BuildSystemPromptOptions(
+                cwd=str(cwd),
+                tool_snippets=_snippets(),
+            )
+        )
+        assert f"Main documentation: {pkg_dir / 'README.md'}" in prompt
+        assert "# unrelated project" not in prompt
+
+    def test_custom_prompt_omits_docs_section(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PI_PACKAGE_DIR", str(tmp_path))
+        prompt = build_system_prompt(
+            BuildSystemPromptOptions(
+                cwd=str(tmp_path),
+                custom_prompt="You are custom.",
+            )
+        )
+        assert "Pi documentation" not in prompt
 
     def test_no_tools_lists_none(self, tmp_path):
         prompt = build_system_prompt(
@@ -138,6 +186,97 @@ class TestContextFiles:
         (agent_dir / "AGENTS.md").write_text("rules", encoding="utf-8")
         files = load_project_context_files(agent_dir, agent_dir)
         assert len(files) == 1
+
+
+class TestResourceLoaders:
+    def _skill(self, path, name: str) -> None:
+        path.mkdir(parents=True)
+        (path / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: {name} skill\n---\nBody",
+            encoding="utf-8",
+        )
+
+    def test_skill_loader_only_explicit(self, tmp_path):
+        from pi_coding_agent.skills import SkillLoader
+
+        global_dir = tmp_path / "global"
+        explicit = tmp_path / "explicit"
+        self._skill(global_dir / "g", "global-skill")
+        self._skill(explicit, "explicit-skill")
+
+        loader = SkillLoader(global_dir=global_dir)
+        only = loader.load(explicit_paths=[str(explicit)], only_explicit=True)
+        assert [s.name for s in only.skills] == ["explicit-skill"]
+
+        both = loader.load(explicit_paths=[str(explicit)], only_explicit=False)
+        names = {s.name for s in both.skills}
+        assert names == {"global-skill", "explicit-skill"}
+
+    def test_template_loader_only_explicit(self, tmp_path):
+        from pi_coding_agent.prompt_templates import PromptTemplateLoader
+
+        global_dir = tmp_path / "global"
+        global_dir.mkdir()
+        (global_dir / "review.md").write_text(
+            "---\ndescription: Review code\n---\nReview the diff.",
+            encoding="utf-8",
+        )
+        explicit = tmp_path / "explicit.md"
+        explicit.write_text("---\ndescription: Custom\n---\nCustom template.", encoding="utf-8")
+
+        loader = PromptTemplateLoader(global_dir=global_dir)
+        only = loader.load(explicit_paths=[str(explicit)], only_explicit=True)
+        assert [t.name for t in only] == ["explicit"]
+
+        both = loader.load(explicit_paths=[str(explicit)], only_explicit=False)
+        names = {t.name for t in both}
+        assert names == {"review", "explicit"}
+
+
+class TestConfigPaths:
+    def test_agent_dir_env_overrides(self, tmp_path, monkeypatch):
+        from pi_coding_agent._config import get_agent_dir, get_sessions_dir
+
+        agent_dir = tmp_path / "agent"
+        session_dir = tmp_path / "sessions"
+        monkeypatch.setenv("PI_CODING_AGENT_DIR", str(agent_dir))
+        monkeypatch.setenv("PI_CODING_AGENT_SESSION_DIR", str(session_dir))
+        assert get_agent_dir() == agent_dir.resolve()
+        assert get_sessions_dir() == session_dir.resolve()
+
+    def test_cli_sets_pi_coding_agent_marker(self, monkeypatch):
+        import os
+
+        import pytest
+        from pi_coding_agent._cli import main
+
+        monkeypatch.delenv("PI_CODING_AGENT", raising=False)
+        with pytest.raises(SystemExit):
+            main(["--version"])
+        assert os.environ.get("PI_CODING_AGENT") == "true"
+
+    def test_resolve_preset(self):
+        from pi_coding_agent._cli import _create_parser, _resolve_preset
+
+        parser = _create_parser()
+        settings = {"presets": {"work": {"model": "m1", "tools": ["read"]}}}
+        assert _resolve_preset(parser.parse_args(["--preset", "work"]), settings) == {
+            "model": "m1",
+            "tools": ["read"],
+        }
+        assert _resolve_preset(parser.parse_args([]), settings) is None
+        with pytest.raises(ValueError):
+            _resolve_preset(parser.parse_args(["--preset", "nope"]), settings)
+
+    def test_allow_model_network_offline_env(self, monkeypatch):
+        from pi_coding_agent._cli import _allow_model_network
+
+        assert _allow_model_network() is True
+        for value in ("1", "true", "yes", "TRUE"):
+            monkeypatch.setenv("PI_OFFLINE", value)
+            assert _allow_model_network() is False
+        monkeypatch.setenv("PI_OFFLINE", "0")
+        assert _allow_model_network() is True
 
     def test_no_context_files(self, tmp_path):
         files = load_project_context_files(tmp_path / "empty" / "x", tmp_path / "agent")

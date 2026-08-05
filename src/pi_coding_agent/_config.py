@@ -29,11 +29,17 @@ def _get_home_dir() -> Path:
 
 def get_agent_dir() -> Path:
     """全局 agent 目录: ~/.pi/agent/"""
+    override = os.environ.get("PI_CODING_AGENT_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
     return _get_home_dir() / CONFIG_DIR_NAME / "agent"
 
 
 def get_sessions_dir(agent_dir: Path | None = None) -> Path:
     """会话存储目录: ~/.pi/agent/sessions/"""
+    override = os.environ.get("PI_CODING_AGENT_SESSION_DIR")
+    if agent_dir is None and override:
+        return Path(override).expanduser().resolve()
     return (agent_dir or get_agent_dir()) / "sessions"
 
 
@@ -55,6 +61,41 @@ def get_settings_path() -> Path:
 def get_project_settings_path(cwd: str | Path) -> Path:
     """项目设置文件: <cwd>/.pi/settings.json"""
     return Path(cwd) / CONFIG_DIR_NAME / "settings.json"
+
+
+def get_package_dir() -> Path:
+    """pi-python 包根目录（对齐 TS getPackageDir）。
+
+    - PI_PACKAGE_DIR 环境变量可覆盖（用于 Nix/Guix 等 store 路径）。
+    - 源码布局下向上找 pyproject.toml 所在目录。
+    - 找不到标记时回退到 pi_coding_agent 包目录。
+    """
+    env_dir = os.environ.get("PI_PACKAGE_DIR")
+    if env_dir:
+        return Path(env_dir).resolve()
+    current = Path(__file__).resolve().parent
+    while True:
+        if (current / "pyproject.toml").is_file():
+            return current
+        if current.parent == current:
+            break
+        current = current.parent
+    return Path(__file__).resolve().parent
+
+
+def get_readme_path() -> Path:
+    """pi 包自带 README.md 路径（对齐 TS getReadmePath）。"""
+    return get_package_dir() / "README.md"
+
+
+def get_docs_path() -> Path:
+    """pi 包自带 docs 目录路径（对齐 TS getDocsPath）。"""
+    return get_package_dir() / "docs"
+
+
+def get_examples_path() -> Path:
+    """pi 包自带 examples 目录路径（对齐 TS getExamplesPath）。"""
+    return get_package_dir() / "examples"
 
 
 # ---------------------------------------------------------------------------

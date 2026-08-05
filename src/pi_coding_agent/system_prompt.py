@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ._config import get_agent_dir
+from ._config import get_agent_dir, get_docs_path, get_examples_path, get_readme_path
 from .skills import format_skills_for_prompt
 
 _CONTEXT_FILE_NAMES = ("AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD")
@@ -90,24 +90,6 @@ def load_project_context_files(cwd: str | Path, agent_dir: str | Path | None = N
     return context_files
 
 
-def _find_project_docs(cwd: str) -> tuple[str | None, str | None, str | None]:
-    """在 cwd 祖先链上查找 README.md / docs / examples（供 pi 文档段落）。"""
-    current = Path(cwd).expanduser().resolve()
-    while True:
-        readme = current / "README.md"
-        if readme.is_file():
-            docs = current / "docs"
-            examples = current / "examples"
-            return (
-                str(readme),
-                str(docs) if docs.is_dir() else None,
-                str(examples) if examples.is_dir() else None,
-            )
-        if current.parent == current:
-            return (None, None, None)
-        current = current.parent
-
-
 def build_system_prompt(options: BuildSystemPromptOptions) -> str:
     """构建系统提示：自定义提示 / 工具说明 + 指南 + 上下文文件 + 技能。"""
     custom_prompt = options.custom_prompt
@@ -137,7 +119,6 @@ def build_system_prompt(options: BuildSystemPromptOptions) -> str:
         prompt += f"\nCurrent working directory: {prompt_cwd}"
         return prompt
 
-    readme_path, docs_path, examples_path = _find_project_docs(options.cwd)
     tools = (
         options.selected_tools
         if options.selected_tools is not None
@@ -186,19 +167,25 @@ def build_system_prompt(options: BuildSystemPromptOptions) -> str:
         f"Guidelines:\n{guidelines}\n"
     )
 
-    if readme_path is not None:
-        prompt += "\nPi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):"
-        prompt += f"\n- Main documentation: {readme_path}"
-        if docs_path:
-            prompt += f"\n- Additional docs: {docs_path}"
-        if examples_path:
-            prompt += f"\n- Examples: {examples_path}"
-        prompt += (
-            "\n- When asked about: extensions, themes, skills, prompt templates, "
-            "TUI components, keybindings, SDK integrations, custom providers, "
-            "adding models, pi packages, or environment variables, read the docs "
-            "and examples before implementing"
-        )
+    # Pi 文档段：固定指向 pi 包自身 README/docs/examples（对齐 TS buildSystemPrompt），
+    # 与 cwd 是哪个项目无关；PI_PACKAGE_DIR 可覆盖包目录。
+    prompt += (
+        "\nPi documentation (read only when the user asks about pi itself, its SDK, "
+        "extensions, themes, skills, or TUI):"
+        f"\n- Main documentation: {get_readme_path()}"
+        f"\n- Additional docs: {get_docs_path()}"
+        f"\n- Examples: {get_examples_path()} (extensions, custom tools, SDK)"
+        "\n- When asked about: extensions (docs/extensions.md, examples/extensions/), "
+        "themes (docs/themes.md), skills (docs/skills.md), prompt templates "
+        "(docs/prompt-templates.md), TUI components (docs/tui.md), keybindings "
+        "(docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers "
+        "(docs/custom-provider.md), adding models (docs/models.md), pi packages "
+        "(docs/packages.md), environment variables (docs/environment-variables.md)"
+        "\n- When working on pi topics, read the docs and examples, and follow .md "
+        "cross-references before implementing"
+        "\n- Always read pi .md files completely and follow links to related docs "
+        "(e.g., tui.md for TUI API details)"
+    )
 
     if append_section:
         prompt += append_section

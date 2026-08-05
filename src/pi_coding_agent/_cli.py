@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import signal
 import sys
 from pathlib import Path
@@ -60,6 +61,8 @@ def main(args: list[str] | None = None) -> int:
     Returns:
         退出码: 0=成功, 1=错误
     """
+    # 进程标记：子进程据此识别自己在 pi 内（对齐 TS PI_CODING_AGENT）。
+    os.environ.setdefault("PI_CODING_AGENT", "true")
     # 下游提前关闭管道（如 `--json | grep -m1`）时按 Unix 惯例静默终止，
     # 避免 Python 默认把 EPIPE 转成 BrokenPipeError traceback。
     # Windows 无 SIGPIPE，由 _print_mode 的 BrokenPipeError 兜底。
@@ -118,6 +121,18 @@ async def _async_main(args: list[str] | None = None) -> int:
             file=sys.stderr,
         )
 
+    # --preset：从 settings["presets"] 解析命名预设。
+    try:
+        preset = _resolve_preset(parsed, settings)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    if preset is not None:
+        if not parsed.model and isinstance(preset.get("model"), str):
+            parsed.model = preset["model"]
+        if not parsed.provider and isinstance(preset.get("provider"), str):
+            parsed.provider = preset["provider"]
+
     # 创建 ModelRuntime（组合 provider + models.json + auth.json）
     runtime = await _create_runtime()
     set_agent_stream_fn(runtime.stream)
@@ -165,10 +180,16 @@ async def _async_main(args: list[str] | None = None) -> int:
     )
     # 启动时扫描一次；否则 /skill: 与 /模板名 永远找不到资源
     # （只有 TUI /reload 会触发加载，print/RPC 模式会静默失败）。
-    skill_result = skill_loader.load()
+    skill_result = skill_loader.load(
+        explicit_paths=parsed.skill,
+        only_explicit=parsed.no_skills,
+    )
     for diagnostic in skill_result.diagnostics:
         print(f"Warning: {diagnostic.message} ({diagnostic.path})", file=sys.stderr)
-    template_loader.load()
+    template_loader.load(
+        explicit_paths=parsed.prompt_templates,
+        only_explicit=parsed.no_prompt_templates,
+    )
 
     # 系统提示构建器：默认结构化提示（工具说明 + 指南 + 上下文文件 + 技能），
     # /reload 时重新调用（上下文文件与技能会变化）。
@@ -177,6 +198,8 @@ async def _async_main(args: list[str] | None = None) -> int:
     tools_include = (
         [part.strip() for part in parsed.tools.split(",") if part.strip()] if parsed.tools else None
     )
+    if preset is not None and parsed.tools is None and isinstance(preset.get("tools"), list):
+        tools_include = [str(item) for item in preset["tools"]]
     tools_exclude = (
         [part.strip() for part in parsed.exclude_tools.split(",") if part.strip()]
         if parsed.exclude_tools
@@ -196,11 +219,19 @@ async def _async_main(args: list[str] | None = None) -> int:
     else:
         selected_tools = [tool.name for tool in default_tools]
 
+    extension_state: dict = {"runner": None}
+
     def system_prompt_builder() -> str:
         custom_prompt = parsed.system_prompt or settings_manager.get_system_prompt()
         append_parts = settings_manager.get_append_system_prompt()
         if parsed.append_system_prompt:
             append_parts.append(parsed.append_system_prompt)
+        if preset is not None and isinstance(preset.get("instructions"), str):
+            append_parts.append(preset["instructions"])
+        skills = list(skill_loader.all())
+        runner = extension_state["runner"]
+        if runner is not None:
+            skills.extend(runner.get_discovered_skills())
         return build_system_prompt(
             BuildSystemPromptOptions(
                 cwd=cwd,
@@ -209,11 +240,9 @@ async def _async_main(args: list[str] | None = None) -> int:
                 tool_snippets=tool_snippets,
                 append_system_prompt="\n".join(append_parts) if append_parts else None,
                 context_files=load_project_context_files(cwd, get_agent_dir()),
-                skills=skill_loader.all(),
+                skills=skills,
             )
         )
-
-    system_prompt = system_prompt_builder()
 
     # Phase 5：扩展（项目 .pi/extensions + 全局 extensions）。
     extension_loader = ExtensionLoader(
@@ -221,7 +250,7 @@ async def _async_main(args: list[str] | None = None) -> int:
         project_dir=project_extensions_dir,
         cwd=cwd,
     )
-    extension_result = await extension_loader.load()
+    extension_result = await extension_loader.load(explicit_paths=parsed.extensions)
     for error in extension_result.errors:
         message = error.error.replace("\n", " ")
         print(f"Warning: {message} ({error.extension_path})", file=sys.stderr)
@@ -231,6 +260,9 @@ async def _async_main(args: list[str] | None = None) -> int:
         cwd=cwd,
         model_runtime=runtime,
     )
+    extension_state["runner"] = extension_runner
+    await extension_runner.discover_resources()
+    system_prompt = system_prompt_builder()
 
     # 创建 Agent
     def build_session(
@@ -257,7 +289,7 @@ async def _async_main(args: list[str] | None = None) -> int:
                 session_id=sm.session_id,
             )
         )
-        return AgentSession(
+        session = AgentSession(
             agent=agent,
             session_manager=sm,
             cwd=cwd,
@@ -271,8 +303,13 @@ async def _async_main(args: list[str] | None = None) -> int:
             compaction_settings=compaction_settings_from_config(settings),
             system_prompt_builder=system_prompt_builder,
         )
+        session.extension_state = extension_state
+        session.project_trusted = project_trusted
+        return session
 
     session = build_session(session_manager, model, scoped_models)
+    if preset is not None and isinstance(preset.get("thinking"), str):
+        session.set_thinking_level(preset["thinking"])
 
     async def session_factory() -> AgentSession:
         fresh_manager = SessionManager.create(cwd)
@@ -522,6 +559,37 @@ def _create_parser() -> argparse.ArgumentParser:
     p.add_argument("--exclude-tools", type=str, help="Comma-separated tool blacklist")
     p.add_argument("--no-tools", action="store_true", help="Disable all tools")
 
+    # 资源加载（对齐 TS：--extension / --skill / --prompt-template 可重复）
+    p.add_argument(
+        "-e",
+        "--extension",
+        dest="extensions",
+        action="append",
+        help="Load extension file or directory (repeatable)",
+    )
+    p.add_argument(
+        "--skill",
+        action="append",
+        help="Load skill file or directory (repeatable; additive even with --no-skills)",
+    )
+    p.add_argument(
+        "--prompt-template",
+        dest="prompt_templates",
+        action="append",
+        help="Load prompt template file or directory (repeatable)",
+    )
+    p.add_argument("--no-skills", action="store_true", help="Disable skill discovery")
+    p.add_argument(
+        "--no-prompt-templates",
+        action="store_true",
+        help="Disable prompt template discovery",
+    )
+    p.add_argument(
+        "--preset",
+        type=str,
+        help="Apply a named preset from settings 'presets' (model/provider/tools/instructions/thinking)",
+    )
+
     # 版本
     p.add_argument("--version", action="version", version="pi 0.1.0 (minimal core)")
 
@@ -529,6 +597,25 @@ def _create_parser() -> argparse.ArgumentParser:
     p.add_argument("message", nargs="?", type=str, help="User message (optional, can use stdin)")
 
     return p
+
+
+def _resolve_preset(parsed, settings: dict) -> dict | None:
+    """从 settings['presets'][name] 解析命名预设（对齐 TS preset 机制）。"""
+    name = getattr(parsed, "preset", None)
+    if not name:
+        return None
+    presets = settings.get("presets")
+    if not isinstance(presets, dict):
+        raise ValueError(f'Preset "{name}" not found (settings has no "presets")')
+    preset = presets.get(name)
+    if not isinstance(preset, dict):
+        raise ValueError(f'Preset "{name}" not found')
+    return preset
+
+
+def _allow_model_network() -> bool:
+    """PI_OFFLINE=1/true/yes 时禁止模型目录网络刷新。"""
+    return os.environ.get("PI_OFFLINE", "").lower() not in ("1", "true", "yes")
 
 
 def _print_models(runtime: ModelRuntime, provider_id: str | None = None) -> int:
@@ -575,7 +662,7 @@ async def _create_runtime() -> ModelRuntime:
         providers=providers,
         auth_path=str(get_agent_dir() / "auth.json"),
         models_path=str(get_agent_dir() / "models.json"),
-        allow_model_network=True,
+        allow_model_network=_allow_model_network(),
         model_refresh_timeout_ms=15000,
     )
     return runtime

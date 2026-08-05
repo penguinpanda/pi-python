@@ -291,7 +291,12 @@ class SkillLoader:
         self._skills: dict[str, Skill] = {}
         self._diagnostics: list[ResourceDiagnostic] = []
 
-    def load(self, *, explicit_paths: list[str] | None = None) -> LoadSkillsResult:
+    def load(
+        self,
+        *,
+        explicit_paths: list[str] | None = None,
+        only_explicit: bool = False,
+    ) -> LoadSkillsResult:
         """重新扫描并返回结果（结果也缓存在实例上）。"""
         skill_map: dict[str, Skill] = {}
         real_paths: set[str] = set()
@@ -317,15 +322,16 @@ class SkillLoader:
                 skill_map[skill.name] = skill
                 real_paths.add(real)
 
-        global_skills, global_diagnostics = _load_skills_from_dir(
-            self._global_dir, "user", True, _IgnoreMatcher(), self._global_dir
-        )
-        add(LoadSkillsResult(skills=global_skills, diagnostics=global_diagnostics))
-        if self._project_dir is not None:
-            project_skills, project_diagnostics = _load_skills_from_dir(
-                self._project_dir, "project", True, _IgnoreMatcher(), self._project_dir
+        if not only_explicit:
+            global_skills, global_diagnostics = _load_skills_from_dir(
+                self._global_dir, "user", True, _IgnoreMatcher(), self._global_dir
             )
-            add(LoadSkillsResult(skills=project_skills, diagnostics=project_diagnostics))
+            add(LoadSkillsResult(skills=global_skills, diagnostics=global_diagnostics))
+            if self._project_dir is not None:
+                project_skills, project_diagnostics = _load_skills_from_dir(
+                    self._project_dir, "project", True, _IgnoreMatcher(), self._project_dir
+                )
+                add(LoadSkillsResult(skills=project_skills, diagnostics=project_diagnostics))
 
         for raw_path in explicit_paths or []:
             resolved = Path(raw_path).expanduser().resolve()

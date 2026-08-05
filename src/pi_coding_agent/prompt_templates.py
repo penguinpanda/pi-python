@@ -107,7 +107,12 @@ class PromptTemplateLoader:
         self._project_dir = Path(project_dir) if project_dir else None
         self._templates: dict[str, PromptTemplate] = {}
 
-    def load(self, *, explicit_paths: list[str] | None = None) -> list[PromptTemplate]:
+    def load(
+        self,
+        *,
+        explicit_paths: list[str] | None = None,
+        only_explicit: bool = False,
+    ) -> list[PromptTemplate]:
         """重新扫描并返回模板列表（结果也缓存在实例上）。"""
         templates: dict[str, PromptTemplate] = {}
 
@@ -115,9 +120,10 @@ class PromptTemplateLoader:
             for template in loaded:
                 templates.setdefault(template.name, template)
 
-        add(_load_templates_from_dir(self._global_dir, "user"))
-        if self._project_dir is not None:
-            add(_load_templates_from_dir(self._project_dir, "project"))
+        if not only_explicit:
+            add(_load_templates_from_dir(self._global_dir, "user"))
+            if self._project_dir is not None:
+                add(_load_templates_from_dir(self._project_dir, "project"))
 
         for raw_path in explicit_paths or []:
             resolved = Path(raw_path).expanduser().resolve()
