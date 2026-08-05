@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from pathlib import Path
 from typing import Any, Callable
 
 from .types import (
@@ -17,6 +18,23 @@ from .types import (
     RegisteredCommand,
     ToolDefinition,
 )
+
+
+class _ModelRegistryAdapter:
+    """ctx.modelRegistry：find(provider, id) / complete(model, context, options)。"""
+
+    def __init__(self, runtime) -> None:
+        self._runtime = runtime
+
+    def find(self, provider: str, model_id: str):
+        if self._runtime is None:
+            return None
+        return self._runtime.get_model(provider, model_id)
+
+    async def complete(self, model, context, options=None):
+        if self._runtime is None:
+            raise RuntimeError("No model runtime available")
+        return await self._runtime.complete(model, context, options)
 
 
 # ---------------------------------------------------------------------------
@@ -47,6 +65,18 @@ class ExtensionContext:
         return self._runner.session
 
     @property
+    def session_manager(self):
+        """会话树管理器（对齐 TS ctx.sessionManager）。"""
+        session = self._runner.session
+        return session.session_manager if session is not None else None
+
+    @property
+    def signal(self):
+        """当前 turn 的中止信号（无运行 turn 时为 None）。"""
+        session = self._runner.session
+        return getattr(session, "_abort", None) if session is not None else None
+
+    @property
     def model(self):
         return self._runner.session.model if self._runner.session is not None else None
 
@@ -56,8 +86,29 @@ class ExtensionContext:
             return None
         return self._runner.session.thinking_level
 
+    @property
+    def scoped_models(self):
+        """--models 循环列表（对齐 TS ctx.scopedModels）。"""
+        session = self._runner.session
+        return list(session.scoped_models) if session is not None else []
+
+    def is_project_trusted(self) -> bool:
+        """当前项目是否被信任（未解析时返回 False）。"""
+        session = self._runner.session
+        return bool(session.project_trusted) if session is not None else False
+
     def is_idle(self) -> bool:
         return not (self._runner.session is not None and self._runner.session.is_streaming)
+
+    @property
+    def has_ui(self) -> bool:
+        """是否运行在有 UI 的上下文（TUI / RPC）；print 模式为 False。"""
+        return self._runner.mode != "print"
+
+    @property
+    def model_registry(self) -> _ModelRegistryAdapter:
+        """模型注册表（find / complete），供扩展自选摘要模型等使用。"""
+        return _ModelRegistryAdapter(self._runner.model_runtime)
 
     def has_pending_messages(self) -> bool:
         return bool(self._runner.session is not None and self._runner.session.pending_message_count)
@@ -78,8 +129,33 @@ class ExtensionContext:
             return ""
         return session._agent.state.system_prompt
 
+    def get_system_prompt_options(self) -> dict:
+        """当前系统提示构建相关选项（对齐 TS getSystemPromptOptions 的最小集）。"""
+        session = self._runner.session
+        if session is None:
+            return {}
+        return {
+            "systemPrompt": session._agent.state.system_prompt,
+            "cwd": self._runner.cwd,
+            "model": session.model,
+            "thinkingLevel": session.thinking_level,
+        }
+
     def get_context_usage(self):
-        return None
+        """估算当前上下文 token 用量（对齐 TS getContextUsage）。
+
+        以最后一条带 usage 的 assistant 消息为基准，加上其后的消息估算；
+        完全没有 usage 数据时返回 None。
+        """
+        session = self._runner.session
+        if session is None:
+            return None
+        from pi_agent.compaction_utils import estimate_context_tokens
+
+        estimate = estimate_context_tokens(session._agent.state.messages)
+        if estimate.last_usage_index is None:
+            return None
+        return {"tokens": estimate.tokens}
 
 
 class ExtensionCommandContext(ExtensionContext):
@@ -89,16 +165,42 @@ class ExtensionCommandContext(ExtensionContext):
         if self._runner.session is not None:
             await self._runner.session.wait_for_idle()
 
+    async def _cancel_requested(self, event_type: str, data: dict) -> bool:
+        """派发会话替换前置事件；任一 handler 返回 cancel 则阻止。"""
+        runner = self._runner
+        if runner is None or not runner.has_handlers(event_type):
+            return False
+        results = await runner.emit_event(event_type, {"type": event_type, **data})
+        for result in reversed(results):
+            if isinstance(result, dict) and result.get("cancel"):
+                return True
+        return False
+
     async def new_session(self, options: dict | None = None):
+        if await self._cancel_requested(
+            "session_before_switch",
+            {"position": "before", "targetSessionFile": None},
+        ):
+            return None
         return await self._runner._command_action("new_session", options or {})
 
     async def fork(self, entry_id: str, options: dict | None = None):
+        if await self._cancel_requested(
+            "session_before_fork",
+            {"position": "before", "entryId": entry_id},
+        ):
+            return None
         return await self._runner._command_action("fork", entry_id, options or {})
 
     async def navigate_tree(self, target_id: str, options: dict | None = None):
         return await self._runner._command_action("navigate_tree", target_id, options or {})
 
     async def switch_session(self, session_path: str, options: dict | None = None):
+        if await self._cancel_requested(
+            "session_before_switch",
+            {"position": "at", "targetSessionFile": session_path},
+        ):
+            return None
         return await self._runner._command_action("switch_session", session_path, options or {})
 
     async def reload(self) -> None:
@@ -132,9 +234,19 @@ class ExtensionRunner:
         self.event_bus = EventBus()
 
         self._error_listeners: list[Callable[[ExtensionError], None]] = []
+        self._background_tasks: set[asyncio.Task] = set()
+        self._discovered_skills: list = []
+        self._discovered_prompts: list = []
+        self._discovered_themes: list = []
         self._shutdown_handler: Callable[[], None] | None = None
         self._abort_fn: Callable[[], None] | None = None
         self._command_handlers: dict[str, Callable] = {}
+
+    def _schedule(self, coro) -> None:
+        """调度后台任务并持有引用（防止被 GC 且便于测试等待）。"""
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
     # ------------------------------------------------------------------
     # 绑定
@@ -187,7 +299,40 @@ class ExtensionRunner:
         )
         self.runtime.set_action("get_all_tools", lambda: self._get_all_tools(session))
         self.runtime.set_action("get_commands", self.get_registered_commands)
+        self.runtime.set_action(
+            "send_message",
+            lambda content, options: self._action_send_message(session, content, options),
+        )
+        self.runtime.set_action(
+            "append_entry",
+            lambda custom_type, data: self._action_append_entry(session, custom_type, data),
+        )
+        self.runtime.set_action(
+            "set_label", lambda entry_id, label: self._action_set_label(session, entry_id, label)
+        )
         self.apply_providers()
+
+    # ------------------------------------------------------------------
+    # 后台动作（send_message / append_entry / set_label）
+    # ------------------------------------------------------------------
+
+    def _action_send_message(self, session, content, options: dict | None = None) -> None:
+        self._schedule(self._run_send_message(session, content, options or {}))
+
+    async def _run_send_message(self, session, content, options: dict) -> None:
+        custom_type = options.get("customType") or "extension"
+        await session._session_manager.append_custom_message_entry(
+            custom_type,
+            content,
+            display=bool(options.get("display", True)),
+            details=options.get("details"),
+        )
+
+    def _action_append_entry(self, session, custom_type: str, data) -> None:
+        self._schedule(session._session_manager.append_custom_entry(custom_type, data))
+
+    def _action_set_label(self, session, entry_id: str, label: str | None) -> None:
+        session._session_manager.set_label(entry_id, label)
 
     # ------------------------------------------------------------------
     # 错误
@@ -246,6 +391,7 @@ class ExtensionRunner:
         *,
         images=None,
         source: str = "interactive",
+        streaming_behavior: str | None = None,
     ) -> tuple[str, str | None]:
         """input 事件链：transform 更新文本；handled 短路。返回 (text, action)。"""
         context = self.create_context()
@@ -258,6 +404,7 @@ class ExtensionRunner:
                         "text": current_text,
                         "images": images,
                         "source": source,
+                        "streamingBehavior": streaming_behavior,
                     }
                     result = handler(event, context)
                     if inspect.isawaitable(result):
@@ -305,6 +452,60 @@ class ExtensionRunner:
                         )
                     )
         return None
+
+    # ------------------------------------------------------------------
+    # 动态资源（resources_discover）
+    # ------------------------------------------------------------------
+
+    async def discover_resources(self) -> None:
+        """resources_discover 事件：收集扩展动态提供的 skills / prompts / themes。"""
+        self._discovered_skills = []
+        self._discovered_prompts = []
+        self._discovered_themes = []
+        if not self.has_handlers("resources_discover"):
+            return
+        results = await self.emit_event("resources_discover", {"type": "resources_discover"})
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+            for key, target in (
+                ("skills", self._discovered_skills),
+                ("prompts", self._discovered_prompts),
+                ("themes", self._discovered_themes),
+            ):
+                items = result.get(key)
+                if isinstance(items, list):
+                    target.extend(items)
+            # TS 兼容：路径形式（skillPaths / promptPaths / themePaths）。
+            from ..prompt_templates import _load_template_from_file
+            from ..skills import _load_skill_from_file
+
+            for raw in result.get("skillPaths") or []:
+                skill, _diagnostics = _load_skill_from_file(Path(raw), "extension")
+                if skill is not None:
+                    self._discovered_skills.append(skill)
+            for raw in result.get("promptPaths") or []:
+                template = _load_template_from_file(Path(raw), "extension")
+                if template is not None:
+                    self._discovered_prompts.append(template)
+            for raw in result.get("themePaths") or []:
+                from pi_tui.theme import ThemeLoader
+
+                path = Path(raw)
+                try:
+                    theme = ThemeLoader(path.parent).load(path.stem)
+                except Exception:
+                    continue
+                self._discovered_themes.append(theme)
+
+    def get_discovered_skills(self) -> list:
+        return list(self._discovered_skills)
+
+    def get_discovered_prompts(self) -> list:
+        return list(self._discovered_prompts)
+
+    def get_discovered_themes(self) -> list:
+        return list(self._discovered_themes)
 
     # ------------------------------------------------------------------
     # 上下文
@@ -390,6 +591,13 @@ class ExtensionRunner:
                 return renderer
         return None
 
+    def get_tool_renderer(self, tool_name: str):
+        for extension in self.extensions:
+            renderer = extension.tool_renderers.get(tool_name)
+            if renderer is not None:
+                return renderer
+        return None
+
     def get_entry_renderer(self, custom_type: str):
         for extension in self.extensions:
             renderer = extension.entry_renderers.get(custom_type)
@@ -402,6 +610,12 @@ class ExtensionRunner:
         for extension in self.extensions:
             transformers.extend(extension.markdown_transformers)
         return transformers
+
+    def get_autocomplete(self) -> list[Callable]:
+        providers: list[Callable] = []
+        for extension in self.extensions:
+            providers.extend(extension.autocomplete)
+        return providers
 
     # ------------------------------------------------------------------
     # Provider / 工具应用
@@ -462,11 +676,26 @@ class ExtensionRunner:
             return
         text = content if isinstance(content, str) else ""
         if options.get("deliverAs") == "followUp":
-            session.follow_up(text)
+            self._schedule(self._deliver_with_input(session, text, "followUp"))
         elif options.get("deliverAs") == "steer":
-            session.steer(text)
+            self._schedule(self._deliver_with_input(session, text, "steer"))
         else:
-            asyncio.create_task(self._send_prompt_text(session, text))
+            self._schedule(self._send_prompt_text(session, text))
+
+    async def _deliver_with_input(self, session, text: str, behavior: str) -> None:
+        """按 deliverAs 投递，并把 input 事件的 streamingBehavior 透传给扩展。"""
+        if session._extension_runner is not None and session._extension_runner.has_handlers(
+            "input"
+        ):
+            text, _action = await session._extension_runner.emit_input(
+                text,
+                source="extension",
+                streaming_behavior=behavior,
+            )
+        if behavior == "followUp":
+            session.follow_up(text)
+        else:
+            session.steer(text)
 
     async def _send_prompt_text(self, session, text: str) -> None:
         await session.prompt(text)

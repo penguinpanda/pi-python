@@ -16,9 +16,18 @@ _BASH_UPDATE_THROTTLE_MS = 100
 
 
 class BashToolOptions:
-    def __init__(self, command_prefix: str | None = None, prepare=None) -> None:
+    def __init__(
+        self,
+        command_prefix: str | None = None,
+        prepare=None,
+        *,
+        session_env_provider=None,
+        expose_session_environment: bool = True,
+    ) -> None:
         self.command_prefix = command_prefix
         self.prepare = prepare
+        self.session_env_provider = session_env_provider
+        self.expose_session_environment = expose_session_environment
 
 
 def _validate_timeout(timeout: float | None) -> None:
@@ -50,6 +59,10 @@ def create_bash_tool(options: BashToolOptions | None = None) -> AgentTool:
             "env": {},
             "inheritEnv": True,
         }
+        if options.expose_session_environment and options.session_env_provider is not None:
+            session_env = options.session_env_provider()
+            if isinstance(session_env, dict):
+                execution["env"].update(session_env)
         if options.prepare is not None:
             await options.prepare(execution, context, signal)
 

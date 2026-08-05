@@ -40,6 +40,7 @@ class ExtensionLoader:
         self._global_dir = Path(global_dir) if global_dir else get_agent_dir() / "extensions"
         self._project_dir = Path(project_dir) if project_dir else None
         self._cwd = cwd
+        self._added_paths: set[str] = set()
 
     def set_project_dir(self, project_dir: str | Path | None) -> None:
         """更新项目扩展目录（/reload 在信任状态变化后调用）。"""
@@ -123,6 +124,12 @@ class ExtensionLoader:
             module = importlib.util.module_from_spec(spec)
             sys.modules[module_name] = module
             try:
+                # with-deps 支持：把扩展所在目录加入 sys.path，
+                # 让扩展可以 import 同目录 helper / 依赖（对齐 TS jiti 解析）。
+                base_dir = str(resolved.parent)
+                if base_dir not in self._added_paths:
+                    sys.path.insert(0, base_dir)
+                    self._added_paths.add(base_dir)
                 spec.loader.exec_module(module)
             finally:
                 sys.modules.pop(module_name, None)

@@ -12,7 +12,10 @@ create_readonly_tools, filter_tools_by_names
 
 from __future__ import annotations
 
+import inspect
+
 from pi_agent import AgentTool
+from pi_agent.tools import BashToolOptions
 from pi_agent.env import PythonExecutionEnv
 from pi_agent.tools import (
     create_bash_tool as _create_pi_bash_tool,
@@ -72,29 +75,79 @@ def create_edit_tool(cwd: str) -> AgentTool:
     return _bind_env(_create_pi_edit_tool(), PythonExecutionEnv(cwd))
 
 
-def create_bash_tool(cwd: str) -> AgentTool:
-    """创建 bash 工具（复用 pi_agent 实现，绑定本地执行环境）。"""
-    return _bind_env(_create_pi_bash_tool(), PythonExecutionEnv(cwd))
+def create_bash_tool(
+    cwd: str,
+    *,
+    session_env_provider=None,
+    expose_session_environment: bool = True,
+    spawn_hook=None,
+) -> AgentTool:
+    """创建 bash 工具（复用 pi_agent 实现，绑定本地执行环境）。
+
+    session_env_provider 返回注入子进程的会话环境变量（PI_SESSION_ID 等）；
+    spawn_hook(ctx) 返回额外环境变量（对齐 TS createBashTool 的 spawnHook）。
+    """
+
+    async def _prepare(execution, context, signal) -> None:
+        if spawn_hook is not None:
+            extra = spawn_hook(context)
+            if inspect.isawaitable(extra):
+                extra = await extra
+            if isinstance(extra, dict):
+                execution["env"].update(extra)
+
+    return _bind_env(
+        _create_pi_bash_tool(
+            BashToolOptions(
+                prepare=_prepare,
+                session_env_provider=session_env_provider,
+                expose_session_environment=expose_session_environment,
+            )
+        ),
+        PythonExecutionEnv(cwd),
+    )
 
 
-def create_all_tools(cwd: str) -> list:
+def create_all_tools(
+    cwd: str,
+    *,
+    bash_session_env_provider=None,
+    bash_expose_session_environment: bool = True,
+    bash_spawn_hook=None,
+) -> list:
     """全部 7 个工具。"""
     return [
         create_read_tool(cwd),
         create_write_tool(cwd),
         create_edit_tool(cwd),
-        create_bash_tool(cwd),
+        create_bash_tool(
+            cwd,
+            session_env_provider=bash_session_env_provider,
+            expose_session_environment=bash_expose_session_environment,
+            spawn_hook=bash_spawn_hook,
+        ),
         create_grep_tool(cwd),
         create_find_tool(cwd),
         create_ls_tool(cwd),
     ]
 
 
-def create_coding_tools(cwd: str) -> list:
+def create_coding_tools(
+    cwd: str,
+    *,
+    bash_session_env_provider=None,
+    bash_expose_session_environment: bool = True,
+    bash_spawn_hook=None,
+) -> list:
     """编码模式: read + bash + edit + write。"""
     return [
         create_read_tool(cwd),
-        create_bash_tool(cwd),
+        create_bash_tool(
+            cwd,
+            session_env_provider=bash_session_env_provider,
+            expose_session_environment=bash_expose_session_environment,
+            spawn_hook=bash_spawn_hook,
+        ),
         create_edit_tool(cwd),
         create_write_tool(cwd),
     ]

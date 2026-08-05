@@ -257,6 +257,23 @@ class SessionManager:
                     )
                 )
                 break
+            if entry["type"] == "custom_message":
+                # 自定义消息：以 role=custom 进入上下文（display-only 字段保留给渲染器）。
+                reversed_messages.append(
+                    cast(
+                        AgentMessage,
+                        {
+                            "role": "custom",
+                            "content": entry.get("content"),
+                            "customType": entry.get("customType", "custom"),
+                            "display": entry.get("display", True),
+                            "timestamp": entry.get("timestamp"),
+                            "details": entry.get("details"),
+                        },
+                    )
+                )
+                current_id = entry["parentId"]
+                continue
             message = entry.get("message")
             if message is not None:
                 reversed_messages.append(cast(AgentMessage, message))

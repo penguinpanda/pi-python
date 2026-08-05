@@ -14,15 +14,28 @@ AgentSession — coding-agent 中枢编排类
 from __future__ import annotations
 
 import asyncio
+import copy
+import inspect
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
-from pi_agent import Agent, AgentEvent, AgentMessage, AgentTool, PythonExecutionEnv
+from pi_agent import (
+    AfterToolCallContext,
+    AfterToolCallResult,
+    Agent,
+    AgentEvent,
+    AgentMessage,
+    AgentTool,
+    BeforeToolCallContext,
+    BeforeToolCallResult,
+    PythonExecutionEnv,
+)
 from pi_agent.shell_output import execute_shell_with_capture
 from pi_ai import AssistantMessage, Model, Usage, UserMessage, now_ms
+from pi_ai.api._shared import empty_usage
 from pi_ai.types.common import ModelThinkingLevel, ThinkingLevel
 from pi_ai.utils.estimate import calculate_context_tokens
 from pi_ai.utils.overflow import is_context_overflow
@@ -36,7 +49,9 @@ from ._session_manager import SessionManager
 from .frontmatter import strip_frontmatter
 from .model_resolver import ScopedModel
 from .model_runtime import ModelRuntime
-from .prompt_templates import PromptTemplateLoader
+from pi_agent.prompt_templates import substitute_args
+
+from .prompt_templates import PromptTemplateLoader, parse_command_args
 from .skills import SkillLoader
 from .model_utils import (
     DEFAULT_THINKING_LEVEL,
@@ -119,10 +134,16 @@ class AgentSession:
         self._skill_loader = skill_loader
         self._template_loader = template_loader
         self._extension_runner = extension_runner
+        self._extension_tool_names: set[str] = set()
         self._system_prompt_builder = system_prompt_builder
         if extension_runner is not None:
             extension_runner.bind_session(self)
         self._listeners: list[Callable[[dict[Any, Any]], None]] = []
+        # CLI/TUI 共享的扩展状态（system_prompt_builder 用它读当前 runner）。
+        self.extension_state: dict | None = None
+        # 项目信任状态（CLI/TUI 在启动解析后设置；None=未知）。
+        self.project_trusted: bool | None = None
+        self._after_response_tasks: set[asyncio.Task] = set()
         self._pending_writes: set[asyncio.Task[object]] = set()
         self._turn_retry_policy = turn_retry_policy
         self._compaction_settings = compaction_settings or DEFAULT_COMPACTION_SETTINGS
@@ -139,8 +160,15 @@ class AgentSession:
         self._pending_bash_messages: list[dict[str, Any]] = []
 
         # 注入编码工具
-        tools = tools_override if tools_override is not None else create_all_tools(cwd)
+        if tools_override is not None:
+            tools = tools_override
+        else:
+            tools = create_all_tools(
+                cwd,
+                bash_session_env_provider=self._session_env_vars,
+            )
         self._agent.state.tools = tools
+        self._apply_extension_tools()
 
         # 恢复已有会话消息历史（打开已有会话时）
         existing_messages = self._session_manager.build_context()
@@ -151,6 +179,243 @@ class AgentSession:
         self._unsub_agent: Callable[[], None] | None = self._agent.subscribe(
             self._handle_agent_event
         )
+
+        # before_provider_request / after_provider_response：包装 stream fn。
+        try:
+            base_stream_fn = self._agent._resolve_stream_fn()
+        except RuntimeError:
+            base_stream_fn = None
+        if base_stream_fn is not None:
+            self._agent.stream_function = self._wrap_stream_fn(base_stream_fn)
+
+        # 扩展 tool_call / tool_result 事件：包装 agent 钩子（保留用户原有钩子）。
+        self._agent.before_tool_call = self._wrap_before_tool_call(self._agent.before_tool_call)
+        self._agent.after_tool_call = self._wrap_after_tool_call(self._agent.after_tool_call)
+
+        # session_start（对齐 TS：会话开始事件）。
+        self._emit_extension_event(
+            "session_start",
+            {
+                "type": "session_start",
+                "session_id": self.session_id,
+                "cwd": self._cwd,
+                "is_continuing": bool(existing_messages),
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # 扩展事件辅助
+    # ------------------------------------------------------------------
+
+    def _emit_extension_event(self, event_type: str, data: dict) -> None:
+        """把会话级事件异步转发给扩展（无 handler 或无线程时不派发）。"""
+        runner = self._extension_runner
+        if runner is None or not runner.has_handlers(event_type):
+            return
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        runner._schedule(runner.emit_event(event_type, data))
+
+    def _wrap_before_tool_call(self, base):
+        """包装 before_tool_call：先派发扩展 tool_call 事件（可 block / 改参数）。"""
+
+        async def _before(ctx: BeforeToolCallContext):
+            runner = self._extension_runner
+            if runner is not None and runner.has_handlers("tool_call"):
+                results = await runner.emit_event(
+                    "tool_call",
+                    {
+                        "type": "tool_call",
+                        "toolCallId": ctx.tool_call["id"],
+                        "toolName": ctx.tool_call["name"],
+                        "input": ctx.args,
+                    },
+                )
+                for result in reversed(results):
+                    if not isinstance(result, dict):
+                        continue
+                    if result.get("block"):
+                        return BeforeToolCallResult(
+                            block=True, reason=result.get("reason") or "Blocked by extension"
+                        )
+                    if "input" in result:
+                        ctx.args = result["input"]
+                        break
+            if base is not None:
+                return base(ctx)
+            return None
+
+        return _before
+
+    def _wrap_after_tool_call(self, base):
+        """包装 after_tool_call：先派发扩展 tool_result 事件（可覆盖结果）。"""
+
+        async def _after(ctx: AfterToolCallContext):
+            runner = self._extension_runner
+            if runner is not None and runner.has_handlers("tool_result"):
+                results = await runner.emit_event(
+                    "tool_result",
+                    {
+                        "type": "tool_result",
+                        "toolCallId": ctx.tool_call["id"],
+                        "toolName": ctx.tool_call["name"],
+                        "input": ctx.args,
+                        "result": ctx.result,
+                        "isError": ctx.is_error,
+                    },
+                )
+                for result in reversed(results):
+                    if not isinstance(result, dict):
+                        continue
+                    if any(
+                        key in result
+                        for key in ("content", "details", "is_error", "usage", "terminate")
+                    ):
+                        return AfterToolCallResult(
+                            content=result.get("content"),
+                            details=result.get("details"),
+                            is_error=result.get("is_error"),
+                            usage=result.get("usage"),
+                            terminate=result.get("terminate"),
+                        )
+            if base is not None:
+                return base(ctx)
+            return None
+
+        return _after
+
+    def _wrap_stream_fn(self, base):
+        """包装 stream_fn：派发 before_provider_request / after_provider_response。"""
+
+        async def _wrapped(model, context, options=None):
+            runner = self._extension_runner
+            stream_options = dict(options or {})
+            if runner is not None and runner.has_handlers("context"):
+                results = await runner.emit_event(
+                    "context",
+                    {
+                        "type": "context",
+                        "messages": copy.deepcopy(context.messages or []),
+                    },
+                )
+                for result in reversed(results):
+                    if isinstance(result, dict) and isinstance(result.get("messages"), list):
+                        context.messages = result["messages"]
+            if runner is not None and runner.has_handlers("before_provider_headers"):
+                results = await runner.emit_event(
+                    "before_provider_headers",
+                    {
+                        "type": "before_provider_headers",
+                        "model": model,
+                        "session_id": self.session_id,
+                        "headers": stream_options.get("headers") or {},
+                    },
+                )
+                for result in reversed(results):
+                    if isinstance(result, dict) and isinstance(result.get("headers"), dict):
+                        merged = dict(stream_options.get("headers") or {})
+                        merged.update(result["headers"])
+                        stream_options["headers"] = merged
+            if runner is not None and runner.has_handlers("before_provider_request"):
+                results = await runner.emit_event(
+                    "before_provider_request",
+                    {
+                        "type": "before_provider_request",
+                        "model": model,
+                        "session_id": self.session_id,
+                        "stream_options": stream_options,
+                    },
+                )
+                for result in reversed(results):
+                    if isinstance(result, dict) and isinstance(result.get("stream_options"), dict):
+                        stream_options.update(result["stream_options"])
+
+            result = base(model, context, stream_options)
+            if inspect.isawaitable(result):
+                result = await result
+            stream = result
+
+            if runner is not None and runner.has_handlers("after_provider_response"):
+                emitted = {"done": False}
+
+                async def _wait_and_emit() -> None:
+                    try:
+                        message = await stream.result()
+                    except Exception:
+                        return
+                    if emitted["done"]:
+                        return
+                    emitted["done"] = True
+                    await runner.emit_event(
+                        "after_provider_response",
+                        {
+                            "type": "after_provider_response",
+                            "model": model,
+                            "session_id": self.session_id,
+                            "response": message,
+                        },
+                    )
+
+                task = asyncio.create_task(_wait_and_emit())
+                self._after_response_tasks.add(task)
+                task.add_done_callback(self._after_response_tasks.discard)
+            return stream
+
+        return _wrapped
+
+    async def _run_compaction_hooks(
+        self,
+        preparation: CompactionPreparation,
+        reason: str,
+        will_retry: bool,
+        custom_instructions: str | None,
+    ) -> tuple[bool, CompactionResult | None, bool]:
+        """session_before_compact 事件：取消 / 扩展提供自定义压缩结果。
+
+        返回 (cancelled, result, from_extension)。
+        """
+        runner = self._extension_runner
+        if runner is None or not runner.has_handlers("session_before_compact"):
+            return False, None, False
+        results = await runner.emit_event(
+            "session_before_compact",
+            {
+                "type": "session_before_compact",
+                "preparation": preparation,
+                "branchEntries": self._session_manager.get_branch(),
+                "customInstructions": custom_instructions,
+                "reason": reason,
+                "willRetry": will_retry,
+            },
+        )
+        for result in reversed(results):
+            if not isinstance(result, dict):
+                continue
+            if result.get("cancel"):
+                return True, None, False
+            compaction = result.get("compaction")
+            if not isinstance(compaction, dict):
+                continue
+            return (
+                False,
+                CompactionResult(
+                    summary=compaction.get("summary", ""),
+                    first_kept_entry_id=(
+                        compaction.get("firstKeptEntryId") or preparation.first_kept_entry_id
+                    ),
+                    tokens_before=(
+                        int(compaction["tokensBefore"])
+                        if compaction.get("tokensBefore") is not None
+                        else preparation.tokens_before
+                    ),
+                    usage=compaction.get("usage") or empty_usage(),
+                    details=compaction.get("details") or {},
+                ),
+                True,
+            )
+        return False, None, False
 
     # ------------------------------------------------------------------
     # 公共 API
@@ -197,7 +462,29 @@ class AgentSession:
         return self._session_manager.session_name
 
     def set_session_name(self, name: str) -> None:
+        previous = self._session_manager.session_name
         self._session_manager.set_session_name(name)
+        self._emit_extension_event(
+            "session_info_changed",
+            {
+                "type": "session_info_changed",
+                "name": name,
+                "previousName": previous,
+            },
+        )
+
+    def _session_env_vars(self) -> dict[str, str]:
+        """bash 工具子进程的会话环境变量（对齐 TS bash 会话注入）。"""
+        env: dict[str, str] = {
+            "PI_SESSION_ID": self.session_id,
+        }
+        if self.session_file is not None:
+            env["PI_SESSION_FILE"] = self.session_file
+        if self._model is not None:
+            env["PI_PROVIDER"] = self._model.provider
+            env["PI_MODEL"] = self._model.id
+        env["PI_REASONING_LEVEL"] = str(self.thinking_level)
+        return env
 
     @property
     def thinking_level(self) -> ThinkingLevel:
@@ -285,6 +572,62 @@ class AgentSession:
         self._extension_runner = runner
         if runner is not None:
             runner.bind_session(self)
+        self._apply_extension_tools()
+
+    def _apply_extension_tools(self) -> None:
+        """把扩展注册的工具合并进 agent 工具集（同名覆盖内置，结果归一化为 AgentToolResult）。"""
+        runner = self._extension_runner
+        if runner is None:
+            return
+        definitions = runner.get_registered_tools()
+        current = list(self._agent.state.tools or [])
+        # 移除上一轮已应用的扩展工具（同名由新 runner 覆盖）。
+        current = [tool for tool in current if tool.name not in self._extension_tool_names]
+        if not definitions:
+            self._agent.state.tools = current
+            self._extension_tool_names = set()
+            return
+
+        from pi_agent import AgentToolResult
+
+        extension_tools: dict[str, Any] = {}
+        for definition in definitions:
+            original = definition.execute
+
+            async def execute(
+                tool_call_id,
+                params,
+                signal=None,
+                on_update=None,
+                context=None,
+                _original=original,
+            ):
+                raw = _original(tool_call_id, params, signal, on_update, context)
+                if inspect.isawaitable(raw):
+                    raw = await raw
+                if isinstance(raw, AgentToolResult):
+                    return raw
+                if isinstance(raw, dict):
+                    return AgentToolResult(
+                        content=raw.get("content") or [],
+                        details=raw.get("details"),
+                        terminate=raw.get("terminate"),
+                        usage=raw.get("usage"),
+                    )
+                return raw
+
+            extension_tools[definition.name] = AgentTool(
+                name=definition.name,
+                label=definition.label or definition.name,
+                description=definition.description,
+                input_schema=definition.parameters or {"type": "object", "properties": {}},
+                execute=execute,
+            )
+
+        merged = [tool for tool in current if tool.name not in extension_tools]
+        merged.extend(extension_tools.values())
+        self._agent.state.tools = merged
+        self._extension_tool_names = set(extension_tools)
 
     def rebuild_system_prompt(self) -> str | None:
         """重建系统提示（上下文文件 / 技能变化后调用，/reload 用）。"""
@@ -386,23 +729,56 @@ class AgentSession:
         self._emit({"type": "compaction_start", "reason": "manual"})
         self._is_compacting = True
         try:
-            summarization_auth = await self._get_summarization_request_auth(self._model)
-            result = await compact(
-                preparation,
-                summarization_auth["model"],
-                api_key=summarization_auth.get("apiKey"),
-                headers=summarization_auth.get("headers"),
-                env=summarization_auth.get("env"),
-                stream_fn=self._agent._resolve_stream_fn(),
-                thinking_level=self._agent.state.thinking_level,
+            cancelled, ext_result, from_extension = await self._run_compaction_hooks(
+                preparation, "manual", False, custom_instructions
             )
-            await self._session_manager.append_compaction(
+            if cancelled:
+                self._emit(
+                    {
+                        "type": "compaction_end",
+                        "reason": "manual",
+                        "result": None,
+                        "aborted": True,
+                        "willRetry": False,
+                    }
+                )
+                return None
+            if ext_result is None:
+                summarization_auth = await self._get_summarization_request_auth(self._model)
+                result = await compact(
+                    preparation,
+                    summarization_auth["model"],
+                    api_key=summarization_auth.get("apiKey"),
+                    headers=summarization_auth.get("headers"),
+                    env=summarization_auth.get("env"),
+                    stream_fn=self._agent._resolve_stream_fn(),
+                    thinking_level=self._agent.state.thinking_level,
+                )
+            else:
+                result = ext_result
+            entry_id = await self._session_manager.append_compaction(
                 result.summary,
                 result.first_kept_entry_id,
                 result.tokens_before,
                 result.details,
             )
             self._agent.state.messages = self._session_manager.build_context()
+            self._emit_extension_event(
+                "session_compact",
+                {
+                    "type": "session_compact",
+                    "compactionEntry": {
+                        "id": entry_id,
+                        "type": "compaction",
+                        "summary": result.summary,
+                        "firstKeptEntryId": result.first_kept_entry_id,
+                        "tokensBefore": result.tokens_before,
+                    },
+                    "fromExtension": from_extension,
+                    "reason": "manual",
+                    "willRetry": False,
+                },
+            )
             self._emit(
                 {
                     "type": "compaction_end",
@@ -472,8 +848,29 @@ class AgentSession:
             raise ValueError(f"Entry not found: {entry_id}")
 
         summary: dict | None = None
+        from_extension = False
+        runner = self._extension_runner
+        if runner is not None and runner.has_handlers("session_before_tree"):
+            results = await runner.emit_event(
+                "session_before_tree",
+                {
+                    "type": "session_before_tree",
+                    "targetId": entry_id,
+                    "oldLeafId": old_leaf,
+                },
+            )
+            for result in reversed(results):
+                if not isinstance(result, dict):
+                    continue
+                if result.get("cancel"):
+                    return False
+                if isinstance(result.get("summary"), dict):
+                    summary = result["summary"]
+                    from_extension = True
+                    break
+
         summary_model = self._model
-        if summarize and old_leaf is not None and summary_model is not None:
+        if summary is None and summarize and old_leaf is not None and summary_model is not None:
             from pi_agent.branch_summarization import (
                 collect_entries_for_branch_summary,
                 generate_branch_summary,
@@ -512,6 +909,16 @@ class AgentSession:
 
         await manager.move_to(entry_id, summary)
         self._agent.state.messages = manager.build_context()
+        self._emit_extension_event(
+            "session_tree",
+            {
+                "type": "session_tree",
+                "newLeafId": entry_id,
+                "oldLeafId": old_leaf,
+                "summaryEntry": summary,
+                "fromExtension": from_extension,
+            },
+        )
         self._emit(
             {
                 "type": "navigated",
@@ -542,6 +949,16 @@ class AgentSession:
                     "model": model,
                     "previousModel": previous_model,
                 }
+            )
+            self._emit_extension_event(
+                "model_select",
+                {
+                    "type": "model_select",
+                    "model": model,
+                    "previousModel": previous_model,
+                    "provider": model.provider,
+                    "modelId": model.id,
+                },
             )
 
     async def cycle_model(self, direction: int = 1) -> ModelCycleResult | None:
@@ -598,6 +1015,16 @@ class AgentSession:
                     "previousModel": previous_model,
                 }
             )
+            self._emit_extension_event(
+                "model_select",
+                {
+                    "type": "model_select",
+                    "model": next_scoped.model,
+                    "previousModel": previous_model,
+                    "provider": next_scoped.model.provider,
+                    "modelId": next_scoped.model.id,
+                },
+            )
         return ModelCycleResult(next_scoped.model, self.thinking_level, True)
 
     async def _cycle_available_model(self, direction: int) -> ModelCycleResult | None:
@@ -639,6 +1066,16 @@ class AgentSession:
                     "previousModel": previous_model,
                 }
             )
+            self._emit_extension_event(
+                "model_select",
+                {
+                    "type": "model_select",
+                    "model": next_model,
+                    "previousModel": previous_model,
+                    "provider": next_model.provider,
+                    "modelId": next_model.id,
+                },
+            )
         return ModelCycleResult(next_model, self.thinking_level, False)
 
     # ------------------------------------------------------------------
@@ -668,6 +1105,14 @@ class AgentSession:
                 "level": effective,
                 "previousLevel": previous,
             }
+        )
+        self._emit_extension_event(
+            "thinking_level_select",
+            {
+                "type": "thinking_level_select",
+                "level": effective,
+                "previousLevel": previous,
+            },
         )
 
     def cycle_thinking_level(self) -> ModelThinkingLevel | None:
@@ -732,7 +1177,34 @@ class AgentSession:
             if text.startswith("/skill:") and expanded != text:
                 skill_name = text[7:].split(" ", 1)[0] if len(text) > 7 else ""
                 self._emit({"type": "skill_invocation", "skill": skill_name})
-            await self._agent.prompt(expanded, images)
+            # 1.6 before_agent_start（扩展可覆盖系统提示 / 本轮 prompt）
+            if self._extension_runner is not None and self._extension_runner.has_handlers(
+                "before_agent_start"
+            ):
+                results = await self._extension_runner.emit_event(
+                    "before_agent_start",
+                    {
+                        "type": "before_agent_start",
+                        "prompt": expanded,
+                        "system_prompt": self._agent.state.system_prompt,
+                    },
+                )
+                original_system_prompt = self._agent.state.system_prompt
+                try:
+                    for result in reversed(results):
+                        if not isinstance(result, dict):
+                            continue
+                        if isinstance(result.get("system_prompt"), str):
+                            self._agent.state.system_prompt = result["system_prompt"]
+                        if isinstance(result.get("prompt"), str):
+                            expanded = result["prompt"]
+                        if result:
+                            break
+                    await self._agent.prompt(expanded, images)
+                finally:
+                    self._agent.state.system_prompt = original_system_prompt
+            else:
+                await self._agent.prompt(expanded, images)
             await self._check_compaction()
             await self._retry_failed_turn()
         finally:
@@ -755,6 +1227,19 @@ class AgentSession:
             expanded = self._template_loader.expand(text)
             if expanded != text:
                 return expanded
+        # 扩展动态提供的提示模板（resources_discover）。
+        if self._extension_runner is not None:
+            for template in self._extension_runner.get_discovered_prompts():
+                prefix = f"/{template.name}"
+                if text == prefix:
+                    if self._template_loader is not None:
+                        return self._template_loader.expand_template(template, "")
+                    return template.content
+                if text.startswith(prefix + " "):
+                    args_string = text[len(prefix) :].strip()
+                    if self._template_loader is not None:
+                        return self._template_loader.expand_template(template, args_string)
+                    return substitute_args(template.content, parse_command_args(args_string))
         return text
 
     def _expand_skill_command(self, text: str) -> str:
@@ -765,8 +1250,18 @@ class AgentSession:
         skill_name = text[7:] if space_index == -1 else text[7:space_index]
         args = "" if space_index == -1 else text[space_index + 1 :].strip()
         if self._skill_loader is None:
-            return text
-        skill = self._skill_loader.get(skill_name)
+            skill = None
+        else:
+            skill = self._skill_loader.get(skill_name)
+        if skill is None and self._extension_runner is not None:
+            skill = next(
+                (
+                    candidate
+                    for candidate in self._extension_runner.get_discovered_skills()
+                    if candidate.name == skill_name
+                ),
+                None,
+            )
         if skill is None:
             return text
         try:
@@ -925,16 +1420,33 @@ class AgentSession:
         self._emit({"type": "compaction_start", "reason": reason})
         self._is_compacting = True
         try:
-            summarization_auth = await self._get_summarization_request_auth(self._model)
-            result = await compact(
-                preparation,
-                summarization_auth["model"],
-                api_key=summarization_auth.get("apiKey"),
-                headers=summarization_auth.get("headers"),
-                env=summarization_auth.get("env"),
-                stream_fn=self._agent._resolve_stream_fn(),
-                thinking_level=self._agent.state.thinking_level,
+            cancelled, ext_result, from_extension = await self._run_compaction_hooks(
+                preparation, reason, will_retry, None
             )
+            if cancelled:
+                self._emit(
+                    {
+                        "type": "compaction_end",
+                        "reason": reason,
+                        "result": None,
+                        "aborted": True,
+                        "willRetry": False,
+                    }
+                )
+                return False
+            if ext_result is None:
+                summarization_auth = await self._get_summarization_request_auth(self._model)
+                result = await compact(
+                    preparation,
+                    summarization_auth["model"],
+                    api_key=summarization_auth.get("apiKey"),
+                    headers=summarization_auth.get("headers"),
+                    env=summarization_auth.get("env"),
+                    stream_fn=self._agent._resolve_stream_fn(),
+                    thinking_level=self._agent.state.thinking_level,
+                )
+            else:
+                result = ext_result
         except Exception as exc:
             self._emit(
                 {
@@ -950,7 +1462,7 @@ class AgentSession:
         finally:
             self._is_compacting = False
 
-        await self._session_manager.append_compaction(
+        entry_id = await self._session_manager.append_compaction(
             result.summary,
             result.first_kept_entry_id,
             result.tokens_before,
@@ -958,6 +1470,22 @@ class AgentSession:
         )
         # 重建 agent 上下文（compactionSummary + 保留的近期消息）。
         self._agent.state.messages = self._session_manager.build_context()
+        self._emit_extension_event(
+            "session_compact",
+            {
+                "type": "session_compact",
+                "compactionEntry": {
+                    "id": entry_id,
+                    "type": "compaction",
+                    "summary": result.summary,
+                    "firstKeptEntryId": result.first_kept_entry_id,
+                    "tokensBefore": result.tokens_before,
+                },
+                "fromExtension": from_extension,
+                "reason": reason,
+                "willRetry": will_retry,
+            },
+        )
 
         self._emit(
             {
@@ -1030,6 +1558,49 @@ class AgentSession:
         `!!cmd`（exclude_from_context=True）结果仅展示，不进入上下文。
         运行期间可用 abort_bash() 中止；同时只允许一条 bash。
         """
+        runner = self._extension_runner
+        if runner is not None and runner.has_handlers("user_bash"):
+            results = await runner.emit_event(
+                "user_bash",
+                {
+                    "type": "user_bash",
+                    "command": command,
+                    "excludeFromContext": exclude_from_context,
+                    "cwd": self._cwd,
+                },
+            )
+            for result in reversed(results):
+                if not isinstance(result, dict):
+                    continue
+                if isinstance(result.get("result"), dict):
+                    data = result["result"]
+                    self.record_bash_result(
+                        command, data, exclude_from_context=exclude_from_context
+                    )
+                    return BashResult(
+                        output=data.get("output", ""),
+                        exit_code=data.get("exitCode", 0),
+                        cancelled=bool(data.get("cancelled", False)),
+                        truncated=bool(data.get("truncated", False)),
+                        full_output_path=data.get("fullOutputPath"),
+                    )
+                operations = result.get("operations")
+                if isinstance(operations, dict) and callable(operations.get("exec")):
+                    op_result = operations["exec"](command, self._cwd, {"timeout": timeout})
+                    if inspect.isawaitable(op_result):
+                        op_result = await op_result
+                    if not isinstance(op_result, dict):
+                        break
+                    self.record_bash_result(
+                        command, op_result, exclude_from_context=exclude_from_context
+                    )
+                    return BashResult(
+                        output=op_result.get("output", ""),
+                        exit_code=op_result.get("exitCode", 0),
+                        cancelled=bool(op_result.get("cancelled", False)),
+                        truncated=bool(op_result.get("truncated", False)),
+                        full_output_path=op_result.get("fullOutputPath"),
+                    )
         if self.is_bash_running:
             raise RuntimeError("A bash command is already running")
         abort_signal = asyncio.Event()
@@ -1072,14 +1643,26 @@ class AgentSession:
         exclude_from_context: bool = False,
     ) -> None:
         """把 bashExecution 消息写入会话历史/上下文（对齐 TS recordBashResult）。"""
+        if isinstance(result, dict):
+            output = result.get("output", "")
+            exit_code = result.get("exitCode", 0)
+            cancelled = bool(result.get("cancelled", False))
+            truncated = bool(result.get("truncated", False))
+            full_output_path = result.get("fullOutputPath")
+        else:
+            output = result.output
+            exit_code = result.exit_code
+            cancelled = result.cancelled
+            truncated = result.truncation.truncated
+            full_output_path = result.full_output_path
         message: dict[str, Any] = {
             "role": "bashExecution",
             "command": command,
-            "output": result.output,
-            "exitCode": result.exit_code,
-            "cancelled": result.cancelled,
-            "truncated": result.truncation.truncated,
-            "fullOutputPath": result.full_output_path,
+            "output": output,
+            "exitCode": exit_code,
+            "cancelled": cancelled,
+            "truncated": truncated,
+            "fullOutputPath": full_output_path,
             "timestamp": now_ms(),
             "excludeFromContext": exclude_from_context,
         }

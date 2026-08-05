@@ -653,6 +653,14 @@ def _default_convert_to_llm(
                     "timestamp": m.get("timestamp"),
                 }
             )
+        elif role == "custom":
+            result.append(
+                {
+                    "role": "user",
+                    "content": m.get("content"),
+                    "timestamp": m.get("timestamp"),
+                }
+            )
     return result
 
 

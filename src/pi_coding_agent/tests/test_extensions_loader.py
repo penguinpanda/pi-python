@@ -55,6 +55,26 @@ class TestLoadExtension:
         assert error is None
         assert "agent_start" in extension.handlers
 
+    async def test_imports_sibling_package(self, tmp_path):
+        ext_dir = tmp_path / "ext"
+        (ext_dir / "ext_lib").mkdir(parents=True)
+        (ext_dir / "ext_lib" / "__init__.py").write_text("", encoding="utf-8")
+        (ext_dir / "ext_lib" / "helper.py").write_text(
+            "def value():\n    return 42\n",
+            encoding="utf-8",
+        )
+        path = _write_extension(
+            ext_dir / "main.py",
+            "from ext_lib.helper import value\n"
+            "def create_extension(pi):\n"
+            '    pi.register_tool({"name": "with-deps", "description": f"value={value()}", "parameters": {"type": "object"}})\n',
+        )
+        loader = ExtensionLoader(global_dir=tmp_path / "empty", cwd=str(tmp_path))
+        extension, error = await loader.load_extension(path, ExtensionRuntime())
+        assert error is None
+        assert extension is not None
+        assert extension.tools["with-deps"].description == "value=42"
+
     async def test_missing_factory_error(self, tmp_path):
         path = _write_extension(tmp_path / "bad.py", "VALUE = 42\n")
         loader = ExtensionLoader(global_dir=tmp_path / "empty", cwd=str(tmp_path))

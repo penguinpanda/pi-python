@@ -63,6 +63,22 @@ class UIContext(Protocol):
 
     def set_editor_text(self, text: str) -> None: ...
 
+    def set_footer(self, text: str | None) -> None: ...
+
+    def set_header(self, text: str | None) -> None: ...
+
+    def set_editor_component(self, component) -> None: ...
+
+    def set_widget(self, key: str, lines: list[str], options: dict | None = None) -> None: ...
+
+    def set_overlay(self, key: str, lines: list[str], options: dict | None = None) -> None: ...
+
+    def set_hidden_thinking_label(self, label: str | None = None) -> None: ...
+
+    def set_working_message(self, text: str | None = None) -> None: ...
+
+    def set_theme(self, theme: str | None = None) -> None: ...
+
 
 class NoopUIContext:
     """Print 模式降级 UI（所有操作 no-op）。"""
@@ -86,6 +102,30 @@ class NoopUIContext:
         pass
 
     def set_editor_text(self, text):
+        pass
+
+    def set_footer(self, text):
+        pass
+
+    def set_header(self, text):
+        pass
+
+    def set_editor_component(self, component):
+        pass
+
+    def set_widget(self, key, lines, options=None):
+        pass
+
+    def set_overlay(self, key, lines, options=None):
+        pass
+
+    def set_hidden_thinking_label(self, label=None):
+        pass
+
+    def set_working_message(self, text=None):
+        pass
+
+    def set_theme(self, theme=None):
         pass
 
 
@@ -167,6 +207,7 @@ class Extension:
     shortcuts: dict[str, ExtensionShortcut] = field(default_factory=dict)
     flags: dict[str, ExtensionFlag] = field(default_factory=dict)
     message_renderers: dict[str, Callable] = field(default_factory=dict)
+    tool_renderers: dict[str, Callable] = field(default_factory=dict)
     entry_renderers: dict[str, Callable] = field(default_factory=dict)
     markdown_transformers: list[Callable] = field(default_factory=list)
     providers: list[tuple[str, dict]] = field(default_factory=list)
@@ -263,6 +304,10 @@ class ExtensionAPI:
     def register_message_renderer(self, custom_type: str, renderer: Callable) -> None:
         self._extension.message_renderers[custom_type] = renderer
 
+    def register_tool_renderer(self, tool_name: str, renderer: Callable) -> None:
+        """注册内置/自定义工具结果的 TUI 渲染器（返回字符串）。"""
+        self._extension.tool_renderers[tool_name] = renderer
+
     def register_entry_renderer(self, custom_type: str, renderer: Callable) -> None:
         self._extension.entry_renderers[custom_type] = renderer
 
@@ -315,6 +360,21 @@ class ExtensionAPI:
             "send_user_message"
         )
         action(content, options or {})
+
+    def send_message(self, content: Any, options: dict | None = None) -> None:
+        """发送自定义消息（role=custom，写入会话树并进入上下文）。"""
+        action = self._runtime.get_action("send_message") or _not_initialized("send_message")
+        action(content, options or {})
+
+    def append_entry(self, custom_type: str, data: Any = None) -> None:
+        """追加自定义会话条目（custom 类型）。"""
+        action = self._runtime.get_action("append_entry") or _not_initialized("append_entry")
+        action(custom_type, data)
+
+    def set_label(self, entry_id: str, label: str | None) -> None:
+        """给会话条目设置 label（/tree 导航用）。"""
+        action = self._runtime.get_action("set_label") or _not_initialized("set_label")
+        action(entry_id, label)
 
     def get_active_tools(self):
         action = self._runtime.get_action("get_active_tools")

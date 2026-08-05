@@ -1173,12 +1173,35 @@ async def _execute_tool_call(
     )
 
     try:
+        pending_updates: list[asyncio.Task] = []
 
         def _on_update(partial: AgentToolResult) -> None:
-            # 注意：这是同步回调，不能 await emit
-            pass  # 简化：最小核心不做流式 tool update
+            # 同步回调：调度 tool_execution_update 事件，执行后统一等待，
+            # 保证 update 事件先于 tool_execution_end 发出。
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                return
+
+            async def _emit_update() -> None:
+                await emit(
+                    cast(
+                        AgentEvent,
+                        {
+                            "type": "tool_execution_update",
+                            "tool_call_id": tc_id,
+                            "tool_name": tc_name,
+                            "args": args,
+                            "result": partial,
+                        },
+                    )
+                )
+
+            pending_updates.append(asyncio.create_task(_emit_update()))
 
         result = await tool_def.execute(tc_id, args, signal, _on_update)
+        if pending_updates:
+            await asyncio.gather(*pending_updates)
 
         # Tool 生命周期：after_execute（可选，可替换结果）
         if tool_def.after_execute is not None:
