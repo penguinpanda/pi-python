@@ -44,6 +44,17 @@ def test_assistant_tool_calls_rendered_individually():
     assert entries[1][1] == "bash({'command': 'ls'})"
 
 
+def test_assistant_error_label():
+    entries = message_to_entries(
+        {
+            "role": "assistant",
+            "error_message": "boom",
+            "content": [{"type": "text", "text": "failed"}],
+        }
+    )
+    assert entries == [("Assistant (error)", "failed")]
+
+
 def test_assistant_tool_calls_hidden_when_show_tools_false():
     entries = message_to_entries(
         {

@@ -11,6 +11,7 @@ from textual.message import Message
 from textual.widgets import Input, Label, Static, TextArea
 
 from .keybindings import KeybindingsManager
+from .markdown import render_labeled_markdown
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +92,7 @@ def message_to_entries(
 
     if role == "assistant":
         entries: list[tuple[str, str]] = []
+        label = "Assistant (error)" if message.get("error_message") else "Assistant"
         thinking_parts: list[str] = []
         text_parts: list[str] = []
         tool_calls: list[str] = []
@@ -120,7 +122,7 @@ def message_to_entries(
         if text_parts:
             entries.append(
                 (
-                    "Assistant",
+                    label,
                     _apply_markdown_transformers(
                         "\n".join(text_parts), markdown_transformers, "assistant"
                     ),
@@ -184,7 +186,13 @@ class MessageEntry(Static):
         self.entry_text = text
 
     def on_mount(self) -> None:
-        self.update(f"[b]{self.label}[/b] {self.entry_text}")
+        self.update(render_labeled_markdown(self.label, self.entry_text))
+
+    def set_text(self, text: str) -> None:
+        """流式更新正文（未挂载时只记录，挂载后重渲染）。"""
+        self.entry_text = text
+        if self.is_mounted:
+            self.update(render_labeled_markdown(self.label, text))
 
 
 class BashExecutionEntry(Static):
@@ -419,6 +427,133 @@ class PiEditor(TextArea):
         await super()._on_key(event)
 
 
+class PiEditorVim(PiEditor):
+    """vim 风格编辑器：Esc 切换 normal/insert，normal 模式支持移动与编辑。
+
+    normal 模式快捷键：h/j/k/l 移动、0/$ 行首/行尾、i/a/o 进入插入、
+    dd 删行、x 删字符、u 撤销；Enter 提交（与 PiEditor 一致）。
+    """
+
+    class ModeChanged(Message):
+        """normal / insert 模式切换。"""
+
+        def __init__(self, editor: "PiEditorVim", mode: str) -> None:
+            super().__init__()
+            self.editor = editor
+            self.mode = mode
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.vim_mode = "insert"
+        self._pending: str = ""
+
+    def toggle_mode(self) -> None:
+        self.vim_mode = "normal" if self.vim_mode == "insert" else "insert"
+        self._pending = ""
+        self.post_message(self.ModeChanged(self, self.vim_mode))
+
+    async def _on_key(self, event: events.Key) -> None:
+        if self.vim_mode == "insert":
+            await self._on_insert_key(event)
+            return
+        await self._on_normal_key(event)
+
+    async def _on_insert_key(self, event: events.Key) -> None:
+        if event.key == "escape":
+            event.stop()
+            event.prevent_default()
+            self.toggle_mode()
+            return
+        await super()._on_key(event)
+
+    async def _on_normal_key(self, event: events.Key) -> None:
+        key = event.key
+        if key == "escape":
+            event.stop()
+            event.prevent_default()
+            self.toggle_mode()
+            return
+        if key == "enter":
+            self.action_submit()
+            event.stop()
+            event.prevent_default()
+            return
+        if key == "i":
+            self.toggle_mode()
+            event.stop()
+            event.prevent_default()
+            return
+        if key == "a":
+            self.move_cursor_relative(columns=1)
+            self.toggle_mode()
+            event.stop()
+            event.prevent_default()
+            return
+        if key == "o":
+            self._open_line_below()
+            event.stop()
+            event.prevent_default()
+            return
+        if key == "h":
+            self.move_cursor_relative(columns=-1)
+        elif key == "l":
+            self.move_cursor_relative(columns=1)
+        elif key == "j":
+            self.move_cursor_relative(rows=1)
+        elif key == "k":
+            self.move_cursor_relative(rows=-1)
+        elif key == "0":
+            self.move_cursor((self.cursor_location[0], 0))
+        elif key == "$":
+            row = self.cursor_location[0]
+            self.move_cursor((row, len(self.document.lines[row])))
+        elif key == "x":
+            self._delete_char()
+        elif key == "u":
+            self.undo()
+        elif key == "d":
+            if self._pending == "d":
+                self._pending = ""
+                self._delete_line()
+            else:
+                self._pending = "d"
+            event.stop()
+            event.prevent_default()
+            return
+        else:
+            self._pending = ""
+            return
+        self._pending = ""
+        event.stop()
+        event.prevent_default()
+
+    def _open_line_below(self) -> None:
+        row = self.cursor_location[0]
+        lines = self.document.lines
+        if row >= len(lines):
+            row = max(0, len(lines) - 1)
+        self.insert("\n", (row, len(lines[row])))
+        self.move_cursor((row + 1, 0))
+        self.toggle_mode()
+
+    def _delete_line(self) -> None:
+        row = self.cursor_location[0]
+        lines = self.document.lines
+        if row >= len(lines):
+            return
+        if row == len(lines) - 1:
+            self.delete((row, 0), (row, len(lines[row])))
+        else:
+            self.delete((row, 0), (row + 1, 0))
+
+    def _delete_char(self) -> None:
+        row, col = self.cursor_location
+        lines = self.document.lines
+        if row >= len(lines) or col >= len(lines[row]):
+            return
+        self.delete((row, col), (row, col + 1))
+
+
 class PiStatusBar(Label):
     """状态栏：Working/Compaction/Retry/Idle。"""
 
@@ -448,6 +583,7 @@ __all__ = [
     "PiHeader",
     "PiChatContainer",
     "PiEditor",
+    "PiEditorVim",
     "PiStatusBar",
     "PiFooter",
     "message_to_entries",
