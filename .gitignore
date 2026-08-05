@@ -24,7 +24,7 @@ Thumbs.db
 .env
 bak/
 work/
-docs/
+docs/nd_upload/
 .pi/
 src/hello_world.py
 .qodo/
