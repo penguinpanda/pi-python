@@ -31,6 +31,10 @@ PiTuiApp (Textual App)
   （旧内容 + 空行 + 新内容）→ 会话回卷到该消息并重建 → `continue_()` 继续任务；
   旧分支保留在 JSONL 文件里，树仍可见（`SessionManager.edit_message`）
 - `!cmd`：直接执行 shell；`alt+enter`：排队 follow-up
+- 列表弹层（TreeSelector / ChoiceSelector / SessionPicker）：选中即复制——
+  Enter 选择时把完整内容直接写入剪贴板（树选择器复制完整消息文本，
+  会话选择器复制 session 路径）；文本输入框 `ctrl+c` / `ctrl+v`
+  由 Textual Input 原生支持
 - 外部编辑器：`ctrl+g`（`$VISUAL` / `$EDITOR` 回退）
 
 ## 主题与快捷键

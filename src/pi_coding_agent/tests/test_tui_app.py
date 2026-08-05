@@ -1315,6 +1315,8 @@ async def test_slash_input_merges_and_continues(tmp_path):
         return _make_session_with_manager(runtime, manager, tmp_path)
 
     app = PiTuiApp(session, runtime, session_rebuilder=rebuilder)
+    # 选中即复制：避免测试把内容写进真实剪贴板。
+    app._copy_to_clipboard = lambda text: None
     async with app.run_test() as pilot:
         app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "/input 请改用Python"))
         await _wait_until(
@@ -1354,6 +1356,44 @@ async def test_slash_input_merges_and_continues(tmp_path):
         assert messages[0]["content"] == "old instruction\n\n请改用Python"
         assert app._session.session_manager.get_leaf_id() != e1  # continue 后 leaf 前进
         assert "edited reply" in (app._session.get_last_assistant_text() or "")
+
+
+@pytest.mark.asyncio
+async def test_input_selector_copy_selected(tmp_path):
+    """对话框选中即复制：/input 选择器 Enter 后复制完整消息文本。"""
+    from pi_ai._types import UserMessage
+
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    await session.session_manager.append_message(
+        UserMessage(role="user", content="full message text")
+    )
+
+    def rebuilder(manager):
+        return _make_session_with_manager(runtime, manager, tmp_path)
+
+    app = PiTuiApp(session, runtime, session_rebuilder=rebuilder)
+    copied: list[str] = []
+    app._copy_to_clipboard = lambda text: copied.append(text)
+    async with app.run_test() as pilot:
+        app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "/input"))
+        await _wait_until(
+            lambda: app.query(TreeSelector).nodes,
+            pilot=pilot,
+            message="input selector opened",
+        )
+        await _wait_until(
+            lambda: app.screen.focused is app.query_one(TreeSelector).query_one("#tree-list"),
+            pilot=pilot,
+            message="tree list focused",
+        )
+        await pilot.press("enter")
+        await _wait_until(
+            lambda: copied,
+            pilot=pilot,
+            message="copied selected message",
+        )
+    assert copied == ["full message text"]
 
 
 @pytest.mark.asyncio

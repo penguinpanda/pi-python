@@ -11,6 +11,7 @@ from textual.widgets import Label, Static
 from pi_tui.selectors import (
     TreeSelector,
     _flatten_tree,
+    _node_copy_text,
     format_label_timestamp,
     node_passes_tree_filter,
 )
@@ -74,6 +75,39 @@ def test_flatten_tree_with_label_timestamp() -> None:
     assert "@" in rows[0][2]
     rows_off = _flatten_tree([node], None, show_label_timestamps=False)
     assert "@" not in rows_off[0][2]
+
+
+def test_node_copy_text_returns_full_message() -> None:
+    assert (
+        _node_copy_text(
+            _node(
+                {
+                    "type": "message",
+                    "role": "user",
+                    "message": {"role": "user", "content": "first\nsecond"},
+                }
+            )
+        )
+        == "first\nsecond"
+    )
+    list_content = _node_copy_text(
+        _node(
+            {
+                "type": "message",
+                "role": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "a"},
+                        {"type": "text", "text": "b"},
+                    ],
+                },
+            }
+        )
+    )
+    assert list_content == "a\nb"
+    assert _node_copy_text(_node({"type": "label"}, label="lab")) == "lab"
+    assert _node_copy_text(_node({"type": "label"})) == ""
 
 
 class _Host(App):
@@ -153,3 +187,63 @@ async def test_tree_selector_toggles_label_timestamps() -> None:
         await pilot.press("t")
         await pilot.pause()
         assert selector.show_label_timestamps is False
+
+
+class _CopyHost(App):
+    def __init__(self, tree) -> None:
+        super().__init__()
+        self._tree = tree
+        self.copied: list[str] = []
+
+    def compose(self):
+        yield Static("")
+        yield TreeSelector(self._tree)
+
+    def on_mount(self) -> None:
+        self.query_one(TreeSelector).query_one("#tree-list").focus()
+
+    def on_copy_requested(self, message) -> None:
+        self.copied.append(message.text)
+
+
+@pytest.mark.asyncio
+async def test_tree_selector_copy_selected_posts_message() -> None:
+    tree = [
+        _node(
+            {
+                "type": "message",
+                "role": "user",
+                "message": {"role": "user", "content": "first\nsecond"},
+            },
+            label="snippet",
+        )
+    ]
+    app = _CopyHost(tree)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+    assert app.copied == ["first\nsecond"]
+
+
+@pytest.mark.asyncio
+async def test_choice_selector_copy_selected_posts_message() -> None:
+    from pi_tui.selectors import ChoiceSelector
+
+    class _ChoiceHost(App):
+        def __init__(self) -> None:
+            super().__init__()
+            self.copied: list[str] = []
+
+        def compose(self):
+            yield ChoiceSelector("Pick", ["alpha", "beta"], current="alpha")
+
+        def on_copy_requested(self, message) -> None:
+            self.copied.append(message.text)
+
+    app = _ChoiceHost()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+    assert app.copied == ["alpha"]

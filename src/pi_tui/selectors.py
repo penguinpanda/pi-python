@@ -9,6 +9,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.css.query import NoMatches
+from textual.message import Message
 from textual.widgets import Input, Label, ListItem, ListView
 from textual.widget import Widget
 from datetime import datetime
@@ -34,6 +35,31 @@ class OverlayDialog(Widget):
         close = getattr(self.app, "_close_overlay_dialog", None)
         if close is not None:
             close(self, value)
+
+
+class CopyRequested(Message):
+    """列表弹层请求复制选中项文本（按 c 触发，事件冒泡到宿主）。"""
+
+    def __init__(self, text: str) -> None:
+        super().__init__()
+        self.text = text
+
+
+class CopySelectedMixin(Widget):
+    """列表弹层复制能力：选中行时直接复制完整内容到剪贴板。
+
+    Textual 不支持鼠标选择，因此“选中即复制”：子类在各自的
+    on_*_selected 中调用 copy_selected()，宿主处理 CopyRequested 消息
+    写入剪贴板。
+    """
+
+    def copy_selected(self) -> None:
+        text = self._selected_copy_text()
+        if text:
+            self.post_message(CopyRequested(text))
+
+    def _selected_copy_text(self) -> str:
+        return ""
 
 
 def _model_label(model) -> str:
@@ -149,7 +175,7 @@ class ModelSelector(OverlayDialog):
         self.dismiss(None)
 
 
-class SessionPicker(OverlayDialog):
+class SessionPicker(CopySelectedMixin, OverlayDialog):
     """会话恢复选择器（--resume）：按修改时间排序。"""
 
     BINDINGS = [
@@ -192,12 +218,20 @@ class SessionPicker(OverlayDialog):
         list_view = self.query_one("#session-list", ListView)
         index = list_view.index
         if index is not None and 0 <= index < len(self._sessions):
+            self.copy_selected()
             self.dismiss(self._sessions[index]["path"])
         else:
             self.dismiss(None)
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+    def _selected_copy_text(self) -> str:
+        list_view = self.query_one("#session-list", ListView)
+        index = list_view.index
+        if index is None or not (0 <= index < len(self._sessions)):
+            return ""
+        return str(self._sessions[index].get("path", ""))
 
 
 def _flatten_tree(
@@ -223,6 +257,23 @@ def _flatten_tree(
         )
         rows.extend(_flatten_tree(node.children, leaf_id, depth + 1, show_label_timestamps))
     return rows
+
+
+def _node_copy_text(node: Any) -> str:
+    """取树节点可复制的完整文本：message 条目返回全文，其余返回 label。"""
+    entry = node.entry or {}
+    if entry.get("type") == "message":
+        content = (entry.get("message") or {}).get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return "\n".join(
+                str(block.get("text", ""))
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
+        return ""
+    return str(node.label or "")
 
 
 TREE_FILTER_MODES = ("default", "no-tools", "user-only", "labeled-only", "all")
@@ -260,7 +311,7 @@ def node_passes_tree_filter(node: Any, mode: str) -> bool:
     return entry_type not in _SETTINGS_ENTRY_TYPES
 
 
-class TreeSelector(OverlayDialog):
+class TreeSelector(CopySelectedMixin, OverlayDialog):
     """会话树选择器（对齐 TS TreeSelectorComponent）：ASCII 树 + 键盘导航。"""
 
     BINDINGS = [
@@ -321,6 +372,14 @@ class TreeSelector(OverlayDialog):
         # 节点 id 可能以数字开头（Textual id 非法），选择逻辑用索引反查。
         self._node_ids = [row[3] for row in self._rows]
 
+    def _selected_copy_text(self) -> str:
+        list_view = self.query_one("#tree-list", ListView)
+        index = list_view.index
+        if index is None or not (0 <= index < len(self._rows)):
+            return ""
+        _depth, _connector, _label, _node_id, node = self._rows[index]
+        return _node_copy_text(node)
+
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Label(self._title(), classes="selector-title")
@@ -369,6 +428,7 @@ class TreeSelector(OverlayDialog):
         list_view = self.query_one("#tree-list", ListView)
         index = list_view.index
         if index is not None and 0 <= index < len(self._node_ids):
+            self.copy_selected()
             self.dismiss(self._node_ids[index])
         else:
             self.dismiss(None)
@@ -409,7 +469,7 @@ class TextInputDialog(OverlayDialog):
         self.dismiss(None)
 
 
-class ChoiceSelector(OverlayDialog):
+class ChoiceSelector(CopySelectedMixin, OverlayDialog):
     """通用选项列表弹层（settings 菜单子项等）。"""
 
     def __init__(
@@ -429,6 +489,7 @@ class ChoiceSelector(OverlayDialog):
             yield SelectList(self._options, current=self._current, list_id="choice-list")
 
     def on_select_list_selected(self, event: SelectList.Selected) -> None:
+        self.copy_selected()
         self.dismiss(event.item.value)
 
     def on_select_list_cancelled(self, event: SelectList.Cancelled) -> None:
@@ -442,6 +503,11 @@ class ChoiceSelector(OverlayDialog):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+    def _selected_copy_text(self) -> str:
+        select = self.query_one(SelectList)
+        item = select.selected_item
+        return str(item.value) if item is not None else ""
 
 
 class SettingsSelector(OverlayDialog):

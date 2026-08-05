@@ -920,6 +920,13 @@ class PiTuiApp(App):
         """ctrl+x → 复制最后一条 assistant 消息（对齐 TS）。"""
         self.action_copy_last_message()
 
+    def on_copy_requested(self, message) -> None:
+        """列表弹层按 c 复制选中项（TreeSelector / ChoiceSelector / SessionPicker）。"""
+        text = getattr(message, "text", "")
+        if text:
+            self._copy_to_clipboard(text)
+            self._notify("Copied selected")
+
     def on_pi_editor_cycle_thinking_requested(self, _message) -> None:
         """shift+tab → 循环 thinking 级别（对齐 TS）。"""
         self.action_cycle_thinking()
