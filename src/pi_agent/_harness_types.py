@@ -8,9 +8,9 @@ hook 结果与 AgentHarnessOptions。
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, TypedDict
+from typing import Any, Awaitable, Callable, Literal, TypedDict
 
-from pi_ai.types import ImageContent, Model, Usage
+from pi_ai.types import CacheRetention, ImageContent, Model, Usage
 
 from ._types import AgentEvent, AgentMessage, AgentTool, QueueMode, StreamFn, ThinkingLevel
 
@@ -102,7 +102,7 @@ class AgentHarnessStreamOptions:
     max_retry_delay_ms: int | None = None
     headers: dict[str, str] | None = None
     metadata: dict[str, Any] | None = None
-    cache_retention: str | None = None
+    cache_retention: CacheRetention | None = None
 
     def clone(self) -> "AgentHarnessStreamOptions":
         return AgentHarnessStreamOptions(
@@ -410,7 +410,7 @@ class NavigateTreeResult:
 # AgentHarnessOptions
 # ---------------------------------------------------------------------------
 
-AgentHarnessSystemPrompt = str | Callable[[dict], str]
+AgentHarnessSystemPrompt = str | Callable[[dict], str | Awaitable[str]]
 
 
 @dataclass(slots=True)

@@ -208,6 +208,12 @@ class AgentEndEvent(TypedDict):
     messages: list[AgentMessage]
 
 
+class AgentSettledEvent(TypedDict):
+    """agent 状态机进入 settled（一次 run/continue 完全结束）。"""
+
+    type: Literal["agent_settled"]
+
+
 class TurnStartEvent(TypedDict):
     type: Literal["turn_start"]
 
@@ -279,6 +285,7 @@ class AutoRetryEndEvent(TypedDict):
 AgentEvent = (
     AgentStartEvent
     | AgentEndEvent
+    | AgentSettledEvent
     | TurnStartEvent
     | TurnEndEvent
     | MessageStartEvent

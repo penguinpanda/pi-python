@@ -63,6 +63,7 @@ class TraceSpanHandle:
             "metadata": self.metadata,
         }
         self.status = status
+        assert self.tracer.trace is not None
         self.tracer.trace.add_span(span)
         self._last_span = span
         return span
@@ -70,9 +71,8 @@ class TraceSpanHandle:
     def __enter__(self) -> "TraceSpanHandle":
         return self
 
-    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
         self.end(status="error" if exc_type is not None else self.status)
-        return False
 
 
 @dataclass(slots=True)
@@ -123,12 +123,11 @@ class TraceTracer:
         self._token = _current_trace.set(self.trace)
         return self
 
-    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> bool:
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
         self.finish()
         if self._token is not None:
             _current_trace.reset(self._token)
             self._token = None
-        return False
 
 
 # ---------------------------------------------------------------------------

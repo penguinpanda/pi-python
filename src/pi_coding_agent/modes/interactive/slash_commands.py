@@ -8,7 +8,7 @@ import os
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 
 # ---------------------------------------------------------------------------
@@ -38,16 +38,16 @@ class SlashContext:
         slash_registry=None,
         notify: Callable[[str], None] | None = None,
         exit_app: Callable[[], None] | None = None,
-        new_session: Callable[[], None] | None = None,
-        open_model_selector: Callable[[], None] | None = None,
-        open_tree_selector: Callable[[], None] | None = None,
-        open_fork_selector: Callable[[], None] | None = None,
-        open_trust_selector: Callable[[], None] | None = None,
-        open_settings_selector: Callable[[], None] | None = None,
-        open_thinking_selector: Callable[[], None] | None = None,
-        open_oauth_selector: Callable[[str], None] | None = None,
-        open_scoped_models_selector: Callable[[], None] | None = None,
-        open_extensions_selector: Callable[[], None] | None = None,
+        new_session: Callable[[], None | Awaitable[None]] | None = None,
+        open_model_selector: Callable[[], None | Awaitable[None]] | None = None,
+        open_tree_selector: Callable[[], None | Awaitable[None]] | None = None,
+        open_fork_selector: Callable[[], None | Awaitable[None]] | None = None,
+        open_trust_selector: Callable[[], None | Awaitable[None]] | None = None,
+        open_settings_selector: Callable[[], None | Awaitable[None]] | None = None,
+        open_thinking_selector: Callable[[], None | Awaitable[None]] | None = None,
+        open_oauth_selector: Callable[[str], None | Awaitable[None]] | None = None,
+        open_scoped_models_selector: Callable[[], None | Awaitable[None]] | None = None,
+        open_extensions_selector: Callable[[], None | Awaitable[None]] | None = None,
         copy_to_clipboard: Callable[[str], None] | None = None,
         auth_interaction=None,
         rebuild_session=None,

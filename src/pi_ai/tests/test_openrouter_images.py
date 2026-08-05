@@ -77,6 +77,7 @@ async def test_generate_images_success(monkeypatch):
     assert result["output"][0]["type"] == "text"
     assert result["output"][1] == {
         "type": "image",
+        "url": None,
         "mime_type": "image/png",
         "data": "aGVsbG8=",
     }

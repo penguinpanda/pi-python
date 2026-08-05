@@ -6,6 +6,7 @@
 """
 
 import sys
+from types import FrameType
 
 from typing import TYPE_CHECKING
 
@@ -13,8 +14,9 @@ from typing import TYPE_CHECKING
 def _warn_external_deprecation() -> None:
     """仅对包外直接导入发出 DeprecationWarning（包内迁移期不打扰）。"""
     try:
-        frame = sys._getframe(2)
+        frame: FrameType | None = sys._getframe(2)
         for _ in range(8):
+            assert frame is not None
             name = frame.f_globals.get("__name__") or ""
             if name == "pi_ai" or name.startswith("pi_ai."):
                 return

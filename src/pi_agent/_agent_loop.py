@@ -228,6 +228,7 @@ from pi_ai.types import (
     DoneEvent,
     ErrorEvent,
     StartEvent,
+    StopReason,
     StreamOptions,
     TextContent,
     ToolCall,
@@ -758,7 +759,7 @@ async def _stream_assistant_response(
         #
         # 12 事件协议下，每个增量事件都携带 partial 快照，
         # 因此不需要在此自行拼接内容块。
-        final_stop_reason = "stop"
+        final_stop_reason: StopReason = "stop"
         final_error_message: str | None = None
         _final_msg: AssistantMessage | None = None  # DoneEvent/ErrorEvent 的完整消息
 
@@ -769,6 +770,7 @@ async def _stream_assistant_response(
             "api": config.model.api,
             "provider": config.model.provider,
             "model": config.model.id,
+            "timestamp": now_ms(),
         }
         await emit({"type": "message_start", "message": temp_msg})
 
@@ -808,7 +810,7 @@ async def _stream_assistant_response(
                     "toolcall_delta",
                     "toolcall_end",
                 ):
-                    partial = event["partial"]
+                    partial = cast(AssistantMessage, event.get("partial"))
                     temp_msg = partial
                     await emit(
                         {

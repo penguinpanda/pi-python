@@ -27,10 +27,11 @@ def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
         key = key.strip()
         value = value.strip().strip('"').strip("'")
         if value.lower() == "true":
-            value = True
+            frontmatter[key] = True
         elif value.lower() == "false":
-            value = False
-        frontmatter[key] = value
+            frontmatter[key] = False
+        else:
+            frontmatter[key] = value
     return frontmatter, body
 
 

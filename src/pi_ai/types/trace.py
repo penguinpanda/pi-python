@@ -12,18 +12,20 @@
 
 from dataclasses import dataclass, field
 
-from typing import Any, NotRequired, TypedDict
+from typing import Any, TypedDict
+
+from typing_extensions import NotRequired
 
 
 class TraceSpan(TypedDict, total=False):
     """单个 span 记录（一段可观测的操作）。"""
 
     name: str  # span 名称（如 "llm.call" / "tool.execute"）
-    parent_id: NotRequired[str]  # 父 span 标识（构成树状结构）
+    parent_id: NotRequired[str | None]  # 父 span 标识（构成树状结构）
     start_time: int  # 开始时间（Unix 毫秒）
     end_time: NotRequired[int]  # 结束时间（Unix 毫秒）
     status: NotRequired[str]  # 状态（ok / error / cancelled）
-    metadata: NotRequired[dict[str, Any]]  # 附加信息
+    metadata: NotRequired[dict[str, Any] | None]  # 附加信息
 
 
 @dataclass(slots=True)

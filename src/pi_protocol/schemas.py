@@ -11,7 +11,7 @@ from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, model_validator
 
-PROTOCOL_VERSION = 2
+PROTOCOL_VERSION: Literal[2] = 2
 
 Id = Annotated[str, Field(min_length=1)]
 Timestamp = Annotated[int, Field(ge=0)]

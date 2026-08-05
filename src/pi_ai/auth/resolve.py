@@ -14,6 +14,7 @@ from .types import (
     Credential,
     CredentialStore,
     OAuthAuth,
+    OAuthCredential,
     credential_type,
 )
 
@@ -80,17 +81,18 @@ async def _resolve_api_key_legacy(
 
 
 def _expires_soon(
-    credential: dict[str, Any],
+    credential: OAuthCredential,
     minimum_validity_ms: int,
 ) -> bool:
-    return now_ms() + minimum_validity_ms >= credential.get("expires", 0)
+    expires = credential.get("expires", 0)
+    return isinstance(expires, int) and now_ms() + minimum_validity_ms >= expires
 
 
 async def resolve_stored_oauth(
     credentials: CredentialStore,
     provider_id: str,
     oauth: OAuthAuth,
-    stored: dict[str, Any],
+    stored: OAuthCredential,
     min_oauth_validity_ms: int | None = None,
 ) -> AuthResult | None:
     """OAuth 解析：双重检查锁定 + 刷新 + 持久化（对齐 TS resolveStoredOAuth）。"""

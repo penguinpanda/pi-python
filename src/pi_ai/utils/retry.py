@@ -167,11 +167,11 @@ class RetryCallbacks:
     """重试过程回调（对应 TS RetryCallbacks，全部可选）。"""
 
     # 退避 sleep 前：计划重试（attempt 从 1 起，max_attempts 为策略上限）。
-    on_retry_scheduled: Callable[[int, int, float, str], None] | None = None
+    on_retry_scheduled: Callable[[int, int, float, str], None | Awaitable[None]] | None = None
     # sleep 结束后、重试调用开始前。
-    on_retry_attempt_start: Callable[[], None] | None = None
+    on_retry_attempt_start: Callable[[], None | Awaitable[None]] | None = None
     # 重试循环结束（成功 / 放弃）各调用一次。
-    on_retry_finished: Callable[[bool, int, str | None], None] | None = None
+    on_retry_finished: Callable[[bool, int, str | None], None | Awaitable[None]] | None = None
 
 
 def _notify_scheduled(

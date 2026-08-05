@@ -8,13 +8,14 @@ pi 自有线协议（Radius 网关等后端实现）：单次 POST
 import asyncio
 import json
 
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Literal, cast
 
 import httpx
 
 from ..types import (
     AssistantMessage,
     AssistantMessageEvent,
+    ContentBlock,
     Context,
     Model,
     SimpleStreamOptions,
@@ -56,7 +57,9 @@ def _empty_usage() -> Usage:
 
 
 def _map_done_reason(reason: str | None) -> StopReason:
-    return "tool_call" if reason == "toolUse" else (reason or "stop")
+    if reason == "toolUse":
+        return "tool_call"
+    return cast(StopReason, reason or "stop")
 
 
 def _context_payload(context: Context) -> dict[str, Any]:
@@ -96,9 +99,10 @@ def _set_content_block(
 ) -> dict[str, Any]:
     """写入 content[content_index]；JS 数组可越界赋值，Python 需先扩展。"""
     content = partial["content"]
+    block_c = cast(ContentBlock, block)
     while len(content) <= content_index:
-        content.append(None)
-    content[content_index] = block
+        content.append(block_c)
+    content[content_index] = block_c
     return block
 
 
@@ -119,15 +123,22 @@ def _create_event_converter(model: Model):
     def convert(event: dict[str, Any]) -> AssistantMessageEvent:
         etype = event.get("type")
         if etype == "done":
-            partial["stop_reason"] = _map_done_reason(event.get("reason"))
+            done_reason = _map_done_reason(event.get("reason"))
+            partial["stop_reason"] = done_reason
             if isinstance(event.get("usage"), dict):
                 partial["usage"] = event["usage"]
             if event.get("responseId"):
                 partial["response_id"] = event["responseId"]
             _append_rewrite_diagnostic(partial, event.get("rewrite"))
-            return {"type": "done", "reason": partial["stop_reason"], "message": partial}
+            return {
+                "type": "done",
+                "reason": cast(Literal["stop", "length", "tool_call"], done_reason),
+                "message": partial,
+            }
         if etype == "error":
-            reason = "aborted" if event.get("reason") == "aborted" else "error"
+            reason: Literal["aborted", "error"] = (
+                "aborted" if event.get("reason") == "aborted" else "error"
+            )
             partial["stop_reason"] = reason
             if isinstance(event.get("usage"), dict):
                 partial["usage"] = event["usage"]
@@ -310,7 +321,7 @@ def _create_error_message(
     error: BaseException,
     aborted: bool,
 ) -> AssistantMessage:
-    reason = "aborted" if aborted else "error"
+    reason: StopReason = "aborted" if aborted else "error"
     message: AssistantMessage = {
         "role": "assistant",
         "content": [],
@@ -449,11 +460,14 @@ def streamSimple(
 ) -> AssistantMessageEventStream:
     """stream 的简化入口：透传 reasoning / toolChoice / debug。"""
     extra = options or {}
-    merged: StreamOptions = dict(extra)
-    merged["reasoning"] = extra.get("reasoning")
-    merged["tool_choice"] = extra.get("tool_choice")
-    merged["debug"] = extra.get("debug")
-    return stream(model, context, merged)
+    merged: dict[str, Any] = dict(extra)
+    if extra.get("reasoning") is not None:
+        merged["reasoning"] = extra.get("reasoning")
+    if extra.get("tool_choice") is not None:
+        merged["tool_choice"] = extra.get("tool_choice")
+    if extra.get("debug") is not None:
+        merged["debug"] = extra.get("debug")
+    return stream(model, context, cast(StreamOptions, merged))
 
 
 __all__ = [

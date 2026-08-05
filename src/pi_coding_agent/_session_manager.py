@@ -18,7 +18,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from filelock import FileLock
 from pi_agent import AgentMessage
@@ -79,12 +79,12 @@ class SessionManager:
         cwd: str,
         session_id: str,
         session_path: Path | None = None,
-        entries: list[SessionMessageEntry] | None = None,
+        entries: list[SessionEntry] | None = None,
     ):
         self._cwd = cwd
         self._session_id = session_id
         self._session_path = session_path  # None = 内存模式
-        self._entries: list[SessionMessageEntry] = entries or []
+        self._entries: list[SessionEntry] = entries or []
         self._session_name: str | None = None
         # 跟踪最新的 parentId（单链尾）
         self._leaf_parent_id: str | None = self._entries[-1]["id"] if self._entries else None
@@ -159,15 +159,15 @@ class SessionManager:
         for entry in reversed(entries):
             if entry.get("type") == "leaf":
                 target = entry.get("targetId")
-                self._leaf_parent_id = target if target else None
+                self._leaf_parent_id = cast(str | None, target) if target else None
                 return
         if entries:
-            self._leaf_parent_id = entries[-1].get("id")
+            self._leaf_parent_id = cast(str | None, entries[-1].get("id"))
 
     def _restore_session_name(self, entries: list[SessionEntry]) -> None:
         for entry in reversed(entries):
             if entry.get("type") == "session_info" and entry.get("name"):
-                self._session_name = entry.get("name")
+                self._session_name = cast(str, entry.get("name"))
                 return
 
     @staticmethod
@@ -259,7 +259,7 @@ class SessionManager:
                 break
             message = entry.get("message")
             if message is not None:
-                reversed_messages.append(message)
+                reversed_messages.append(cast(AgentMessage, message))
             current_id = entry["parentId"]
 
         # 反转得到时间顺序
@@ -339,7 +339,7 @@ class SessionManager:
         for entry in reversed(self._entries):
             if entry.get("type") == "model_change":
                 model_id = entry.get("modelId") or entry.get("model_id")
-                return entry.get("provider", ""), model_id or ""
+                return str(entry.get("provider", "")), str(model_id or "")
         return None
 
     def get_leaf_id(self) -> str | None:
@@ -377,8 +377,9 @@ class SessionManager:
             if entry.get("type") == "leaf":
                 # leaf 是指针条目，不参与树结构。
                 continue
-            nodes[entry.get("id")] = SessionTreeNode(
-                id=entry.get("id"),
+            entry_id = cast(str, entry.get("id"))
+            nodes[entry_id] = SessionTreeNode(
+                id=entry_id,
                 parent_id=entry.get("parentId"),
                 entry=entry,
             )
@@ -386,14 +387,14 @@ class SessionManager:
         for entry in self._entries:
             if entry.get("type") == "label":
                 target = entry.get("targetId")
-                node = nodes.get(target)
+                node = nodes.get(cast(str, target))
                 if node is not None:
-                    node.label = entry.get("label")
+                    node.label = cast(str | None, entry.get("label"))
         roots: list[SessionTreeNode] = []
         for entry in self._entries:
             if entry.get("type") == "leaf":
                 continue
-            node = nodes[entry.get("id")]
+            node = nodes[cast(str, entry.get("id"))]
             parent_id = entry.get("parentId")
             if parent_id is None or parent_id == entry.get("id"):
                 roots.append(node)
@@ -672,15 +673,15 @@ def _schedule_task(coroutine) -> None:
 
 
 def _entry_ts(entry: SessionEntry | None) -> float:
+    if entry is None:
+        return 0.0
     try:
         return datetime.fromisoformat(entry["timestamp"]).timestamp()
     except (ValueError, TypeError, KeyError):
         return 0.0
 
 
-def _write_jsonl_sync(
-    filepath: Path, header: dict[str, Any], entries: list[dict[str, Any]]
-) -> None:
+def _write_jsonl_sync(filepath: Path, header: Any, entries: list[Any]) -> None:
     """重写会话文件（header + entries）。"""
     filepath.parent.mkdir(parents=True, exist_ok=True)
     with open(filepath, "w", encoding="utf-8") as f:
@@ -689,7 +690,7 @@ def _write_jsonl_sync(
             f.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
 
 
-def _write_jsonl_line_sync(filepath: Path, entry: dict[str, Any]) -> None:
+def _write_jsonl_line_sync(filepath: Path, entry: Any) -> None:
     """同步写入单行 JSON（用于创建文件时写 header）。"""
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
@@ -713,6 +714,7 @@ def _migrate_v1_to_v2(header: dict[str, Any], entries: list[SessionEntry]) -> No
         entry["parentId"] = prev_id
         prev_id = entry.get("id")
         if entry.get("type") == "compaction":
+            compaction = cast(CompactionEntry, entry)
             first_kept_index = entry.get("firstKeptEntryIndex")
             if isinstance(first_kept_index, int):
                 # TS 的索引包含文件头（下标 0）；本列表不含头，减 1 对齐。
@@ -720,8 +722,8 @@ def _migrate_v1_to_v2(header: dict[str, Any], entries: list[SessionEntry]) -> No
                 if 0 <= target_index < len(entries):
                     target = entries[target_index]
                     if target.get("type") != "session":
-                        entry["firstKeptEntryId"] = target.get("id")
-                entry.pop("firstKeptEntryIndex", None)
+                        compaction["firstKeptEntryId"] = cast(str, target.get("id"))
+                cast(dict[str, Any], compaction).pop("firstKeptEntryIndex", None)
 
 
 def _migrate_v2_to_v3(header: dict[str, Any], entries: list[SessionEntry]) -> None:
@@ -735,7 +737,7 @@ def _migrate_v2_to_v3(header: dict[str, Any], entries: list[SessionEntry]) -> No
             message["role"] = "custom"
 
 
-def migrate_session_entries(header: dict[str, Any], entries: list[SessionEntry]) -> bool:
+def migrate_session_entries(header: Any, entries: list[SessionEntry]) -> bool:
     """按版本迁移条目到 CURRENT_SESSION_VERSION；返回是否发生迁移。"""
     version = header.get("version", 1)
     if version >= CURRENT_SESSION_VERSION:
@@ -802,15 +804,18 @@ def _compaction_summary_message(
         ts = int(datetime.fromisoformat(timestamp_iso).timestamp() * 1000)
     except (ValueError, TypeError):
         ts = now_ms()
-    return {
-        "role": "compactionSummary",
-        "summary": summary,
-        "tokens_before": tokens_before,
-        "timestamp": ts,
-    }
+    return cast(
+        AgentMessage,
+        {
+            "role": "compactionSummary",
+            "summary": summary,
+            "tokens_before": tokens_before,
+            "timestamp": ts,
+        },
+    )
 
 
-def _append_jsonl_line_sync_append(filepath: Path, entry: dict[str, Any]) -> None:
+def _append_jsonl_line_sync_append(filepath: Path, entry: Any) -> None:
     """同步追加单行 JSON（用于追加消息）。"""
     filepath.parent.mkdir(parents=True, exist_ok=True)
     with open(filepath, "a", encoding="utf-8") as f:

@@ -47,8 +47,8 @@ def resize_image(data: bytes, max_dimension: int = MAX_IMAGE_DIMENSION) -> bytes
 
 def convert_image(data: bytes, target_format: str = "PNG") -> tuple[bytes, str]:
     """转换为目标格式；返回 (bytes, mime_type)。"""
-    with Image.open(io.BytesIO(data)) as image:
-        image = ImageOps.exif_transpose(image)
+    with Image.open(io.BytesIO(data)) as opened:
+        image = ImageOps.exif_transpose(opened)
         has_alpha = image.mode in ("RGBA", "LA") or (
             image.mode == "P" and "transparency" in image.info
         )
@@ -75,8 +75,8 @@ def process_image_sync(
     try:
         if mime_type is None:
             mime_type = detect_supported_image_mime_type(data) or "image/png"
-        with Image.open(io.BytesIO(data)) as image:
-            image = ImageOps.exif_transpose(image)
+        with Image.open(io.BytesIO(data)) as opened:
+            image = ImageOps.exif_transpose(opened)
             hints: list[str] = []
             if auto_resize and max(image.size) > max_dimension:
                 image.thumbnail((max_dimension, max_dimension))

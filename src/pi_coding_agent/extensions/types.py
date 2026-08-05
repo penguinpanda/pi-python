@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import shlex
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Protocol, cast
 
 
 # ---------------------------------------------------------------------------
@@ -346,8 +346,8 @@ class ExtensionAPI:
         if not ok:
             raise result
         return {
-            "output": (result.stdout or "") + (result.stderr or ""),
-            "exit_code": result.exit_code,
+            "output": (cast(Any, result).stdout or "") + (cast(Any, result).stderr or ""),
+            "exit_code": cast(Any, result).exit_code,
             "canceled": False,
         }
 

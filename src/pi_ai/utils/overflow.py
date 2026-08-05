@@ -12,8 +12,9 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
-from ..types import AssistantMessage
+from ..types import AssistantMessage, Usage
 
 # ------------------------------------------------------------------
 # 各 provider 的上下文溢出错误模式。
@@ -116,7 +117,7 @@ def is_context_overflow(message: AssistantMessage, context_window: int | None = 
             ):
                 return True
 
-    usage = message.get("usage") or {}
+    usage: Usage | dict[str, Any] = message.get("usage") or {}
     stop_reason = message.get("stop_reason")
 
     # Case 2: 静默溢出（z.ai 风格）——成功但 usage 超出上下文窗口。

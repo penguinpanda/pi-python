@@ -16,7 +16,9 @@ OAuth 引擎见 pi_ai.auth.oauth（builtin_oauth_providers）。
 import asyncio
 import sys
 
-from typing import Any, Sequence
+from typing import Sequence
+
+from .auth.types import AuthEvent, AuthPrompt
 
 from .auth import FileCredentialStore
 from .auth.oauth import builtin_oauth_providers
@@ -30,9 +32,9 @@ class _CliAuthInteraction:
 
     signal: asyncio.Event | None = None
 
-    async def prompt(self, prompt: dict[str, Any]) -> str:
-        if prompt["type"] == "select":
-            print(f"\n{prompt['message']}")
+    async def prompt(self, prompt: AuthPrompt) -> str:
+        if prompt.get("type") == "select":
+            print(f"\n{prompt.get('message', '')}")
             options = prompt.get("options") or []
             for index, option in enumerate(options, 1):
                 print(f"  {index}. {option['label']}")
@@ -44,18 +46,18 @@ class _CliAuthInteraction:
                     print("Invalid selection.")
         placeholder = prompt.get("placeholder")
         suffix = f" ({placeholder})" if placeholder else ""
-        return input(f"{prompt['message']}{suffix}: ")
+        return input(f"{prompt.get('message', '')}{suffix}: ")
 
-    def notify(self, event: dict[str, Any]) -> None:
-        if event["type"] == "auth_url":
-            print(f"\nOpen this URL in your browser:\n{event['url']}")
+    def notify(self, event: AuthEvent) -> None:
+        if event.get("type") == "auth_url":
+            print(f"\nOpen this URL in your browser:\n{event.get('url', '')}")
             instructions = event.get("instructions")
             if instructions:
                 print(instructions)
-        elif event["type"] == "device_code":
-            print(f"\nOpen this URL in your browser:\n{event['verificationUri']}")
-            print(f"Enter code: {event['userCode']}")
-        elif event["type"] in ("info", "progress"):
+        elif event.get("type") == "device_code":
+            print(f"\nOpen this URL in your browser:\n{event.get('verification_uri', '')}")
+            print(f"Enter code: {event.get('user_code', '')}")
+        elif event.get("type") in ("info", "progress"):
             message = event.get("message")
             if message:
                 print(message)

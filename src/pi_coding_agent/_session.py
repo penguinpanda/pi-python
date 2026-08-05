@@ -18,9 +18,10 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 
 from pi_agent import Agent, AgentEvent, AgentMessage, AgentTool
-from pi_ai import Model, UserMessage
+from pi_ai import AssistantMessage, Model, Usage, UserMessage, now_ms
 from pi_ai.types.common import ModelThinkingLevel, ThinkingLevel
 from pi_ai.utils.estimate import calculate_context_tokens
 from pi_ai.utils.overflow import is_context_overflow
@@ -109,7 +110,7 @@ class AgentSession:
         self._system_prompt_builder = system_prompt_builder
         if extension_runner is not None:
             extension_runner.bind_session(self)
-        self._listeners: list[Callable[[AgentEvent], None]] = []
+        self._listeners: list[Callable[[dict[Any, Any]], None]] = []
         self._pending_writes: set[asyncio.Task[object]] = set()
         self._turn_retry_policy = turn_retry_policy
         self._compaction_settings = compaction_settings or DEFAULT_COMPACTION_SETTINGS
@@ -185,7 +186,7 @@ class AgentSession:
 
     @property
     def thinking_level(self) -> ThinkingLevel:
-        return self._agent.state.thinking_level
+        return cast(ThinkingLevel, self._agent.state.thinking_level)
 
     @property
     def is_streaming(self) -> bool:
@@ -280,11 +281,11 @@ class AgentSession:
 
     def steer(self, text: str) -> None:
         """入队一条 steering 消息（Agent 运行中注入）。"""
-        self._agent.steer(UserMessage(role="user", content=text))
+        self._agent.steer(UserMessage(role="user", content=text, timestamp=now_ms()))
 
     def follow_up(self, text: str) -> None:
         """入队一条 follow-up 消息（Agent 即将停止时继续）。"""
-        self._agent.follow_up(UserMessage(role="user", content=text))
+        self._agent.follow_up(UserMessage(role="user", content=text, timestamp=now_ms()))
 
     def get_last_assistant_text(self) -> str | None:
         """返回最后一条 assistant 消息的纯文本。"""
@@ -292,7 +293,7 @@ class AgentSession:
             if message.get("role") != "assistant":
                 continue
             parts = [
-                block.get("text", "")
+                str(block.get("text", ""))
                 for block in message.get("content", [])
                 if isinstance(block, dict) and block.get("type") == "text"
             ]
@@ -319,7 +320,7 @@ class AgentSession:
                     if isinstance(block, dict) and block.get("type") == "toolCall":
                         tool_calls += 1
                 usage = message.get("usage")
-                if usage:
+                if isinstance(usage, dict):
                     for key in ("input", "output", "cache_read", "cache_write", "total_tokens"):
                         tokens[key.replace("total_tokens", "total")] += usage.get(key, 0) or 0
                     cost += (usage.get("cost") or {}).get("total", 0) or 0
@@ -328,7 +329,10 @@ class AgentSession:
 
         turn_count = len(self._turn_timings)
         total_turn_ms = sum(timing.get("durationMs", 0) for timing in self._turn_timings)
-        cache_stats = compute_cache_waste(messages, self._model_runtime)
+        cache_stats = compute_cache_waste(
+            [cast(dict[Any, Any], message) for message in messages],
+            self._model_runtime,
+        )
         return {
             "sessionFile": self.session_file,
             "sessionId": self.session_id,
@@ -633,7 +637,7 @@ class AgentSession:
         self, explicit_level: ModelThinkingLevel | None = None
     ) -> ThinkingLevel:
         if explicit_level is not None:
-            return explicit_level
+            return cast(ThinkingLevel, explicit_level)
         if not self.supports_thinking():
             return DEFAULT_THINKING_LEVEL
         return self.thinking_level
@@ -643,7 +647,7 @@ class AgentSession:
     ) -> ThinkingLevel:
         if self._model is None:
             return "off"
-        return clamp_thinking_level(self._model, level)
+        return cast(ThinkingLevel, clamp_thinking_level(self._model, level))
 
     def _persist_thinking_level_change(self, level: ModelThinkingLevel) -> None:
         """后台持久化思考级别变更（仅在运行中的事件循环内执行）。"""
@@ -746,7 +750,7 @@ class AgentSession:
             if last is None or last.get("stop_reason") != "error":
                 return
             error_message = last.get("error_message")
-            if not is_retryable_error(error_message):
+            if not is_retryable_error(cast(str | None, error_message)):
                 return
 
             # 移除错误消息，使末条消息非 assistant，满足 continue_() 约束
@@ -806,7 +810,9 @@ class AgentSession:
         )
 
         # Case 1: 溢出。
-        if same_model and is_context_overflow(assistant_message, context_window):
+        if same_model and is_context_overflow(
+            cast(AssistantMessage, assistant_message), context_window
+        ):
             will_retry = assistant_message.get("stop_reason") != "stop"
 
             if not will_retry:
@@ -838,7 +844,9 @@ class AgentSession:
         # Case 2: 阈值。
         # 对错误消息或全零 usage 消息，从最后一条有效响应估算上下文。
         usage = assistant_message.get("usage")
-        direct_context_tokens = calculate_context_tokens(usage) if usage else 0
+        direct_context_tokens = (
+            calculate_context_tokens(cast(Usage, usage)) if isinstance(usage, dict) else 0
+        )
         if assistant_message.get("stop_reason") == "error" or direct_context_tokens == 0:
             estimate = estimate_context_tokens(self._agent.state.messages)
             if estimate.last_usage_index is None:
@@ -917,7 +925,7 @@ class AgentSession:
             await self._check_compaction()
         return True
 
-    def _emit(self, event: dict) -> None:
+    def _emit(self, event: dict[Any, Any]) -> None:
         """把会话级事件转发给所有外部监听器。"""
         for listener in self._listeners:
             try:
@@ -951,11 +959,11 @@ class AgentSession:
 
     def subscribe(self, listener: Callable[[AgentEvent], None]) -> Callable[[], None]:
         """订阅 Agent 生命周期事件。返回取消订阅函数。"""
-        self._listeners.append(listener)
+        self._listeners.append(cast(Callable[[dict[Any, Any]], None], listener))
 
         def _unsubscribe() -> None:
             try:
-                self._listeners.remove(listener)
+                self._listeners.remove(cast(Callable[[dict[Any, Any]], None], listener))
             except ValueError:
                 pass
 
@@ -1017,13 +1025,15 @@ class AgentSession:
             msg = event.get("message")
             if msg is not None:
                 # 后台写入 JSONL，跟踪 task 以便 dispose 时等待
-                task = asyncio.create_task(self._session_manager.append_message(msg))
+                task = asyncio.create_task(
+                    self._session_manager.append_message(cast(AgentMessage, msg))
+                )
                 self._pending_writes.add(task)
                 task.add_done_callback(self._pending_writes.discard)
 
         # 转发给所有外部监听器
         for listener in self._listeners:
             try:
-                listener(event)
+                listener(cast(dict[Any, Any], event))
             except Exception:
                 pass  # 监听器异常不应影响主流程

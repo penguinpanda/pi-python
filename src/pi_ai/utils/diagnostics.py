@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..types.message import AssistantMessageDiagnostic, DiagnosticErrorInfo
+from ..types.message import AssistantMessage, AssistantMessageDiagnostic, DiagnosticErrorInfo
 from ..types.common import now_ms
 
 
@@ -80,7 +80,7 @@ def create_assistant_message_diagnostic(
 
 
 def append_assistant_message_diagnostic(
-    message: dict[str, Any],
+    message: AssistantMessage,
     diagnostic: AssistantMessageDiagnostic,
 ) -> None:
     """不可变追加一条诊断到 AssistantMessage（对齐 TS appendAssistantMessageDiagnostic）。

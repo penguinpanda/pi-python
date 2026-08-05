@@ -13,21 +13,25 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 
 from pi_ai import (
     AssistantMessage,
     AssistantMessageEventStream,
     Context,
     Model,
+    ModelCompat,
     Models,
     Provider,
+    ModelCost,
+    ModelInput,
     StreamOptions,
 )
+from pi_ai.types.common import ModelThinkingLevel
 from pi_ai.api.api_provider_registry import get_api_provider, invoke_api_stream
 from pi_ai.auth import ApiKeyCredential, EnvApiKeyAuth, ResolvedAuth
 from pi_ai.auth.resolve import ModelsError
-from pi_ai.auth.types import AuthResult, credential_type
+from pi_ai.auth.types import AuthResult, ModelAuth, credential_type
 from pi_ai.models.models_store import InMemoryModelsStore, ModelsStore
 from pi_ai.models import ModelsRefreshOptions, ModelsRefreshResult
 from pi_ai.provider import _API_KIND_IDS
@@ -178,7 +182,9 @@ def _apply_model_override(model: Model, override: ModelOverride) -> Model:
         provider=model.provider,
         api=model.api,
         name=override.name if override.name is not None else model.name,
-        input=list(override.input) if override.input is not None else model.input,
+        input=cast(list[ModelInput], list(override.input))
+        if override.input is not None
+        else model.input,
         output=list(model.output),
         cost=_merge_cost(model, override.cost),
         max_tokens=override.max_tokens if override.max_tokens is not None else model.max_tokens,
@@ -187,9 +193,18 @@ def _apply_model_override(model: Model, override: ModelOverride) -> Model:
             override.context_window if override.context_window is not None else model.context_window
         ),
         headers=override.headers if override.headers is not None else model.headers,
-        compat=_merge_compat(model.compat, override.compat),
+        compat=cast(
+            ModelCompat,
+            _merge_compat(
+                cast(dict[str, Any] | None, model.compat),
+                override.compat,
+            ),
+        ),
         thinking_level_map=(
-            {**(model.thinking_level_map or {}), **(override.thinking_level_map or {})}
+            {
+                **(model.thinking_level_map or {}),
+                **cast(dict[ModelThinkingLevel, str | None], override.thinking_level_map or {}),
+            }
             if override.thinking_level_map is not None
             else model.thinking_level_map
         ),
@@ -228,22 +243,33 @@ def _model_from_json(
         provider=provider_id,
         api=api,
         name=definition.name or definition.id,
-        input=list(definition.input) if definition.input is not None else ["text"],
+        input=cast(list[ModelInput], list(definition.input))
+        if definition.input is not None
+        else ["text"],
         output=["text"],
-        cost=_cost_config_to_model_cost(cost)
-        if cost is not None
-        else (defaults.cost if defaults else None),
+        cost=cast(
+            ModelCost,
+            _cost_config_to_model_cost(cost)
+            if cost is not None
+            else (defaults.cost if defaults else None),
+        ),
         max_tokens=definition.max_tokens if definition.max_tokens is not None else 16384,
         base_url=base_url,
         context_window=definition.context_window
         if definition.context_window is not None
         else 128000,
         headers=definition.headers,
-        compat=_merge_compat(
-            provider_config.compat if provider_config else None,
-            definition.compat,
+        compat=cast(
+            ModelCompat,
+            _merge_compat(
+                cast(dict[str, Any] | None, provider_config.compat if provider_config else None),
+                definition.compat,
+            ),
         ),
-        thinking_level_map=definition.thinking_level_map,
+        thinking_level_map=cast(
+            dict[ModelThinkingLevel, str | None] | None,
+            definition.thinking_level_map,
+        ),
         reasoning=bool(definition.reasoning),
     )
 
@@ -307,7 +333,13 @@ def _apply_models_json(
             base_url=config.base_url or model.base_url,
             context_window=model.context_window,
             headers=model.headers,
-            compat=_merge_compat(model.compat, config.compat),
+            compat=cast(
+                ModelCompat,
+                _merge_compat(
+                    cast(dict[str, Any] | None, model.compat),
+                    config.compat,
+                ),
+            ),
             thinking_level_map=model.thinking_level_map,
             reasoning=model.reasoning,
         )
@@ -392,10 +424,11 @@ def _apply_extension(
                 name=definition.get("name") or definition.get("id"),
                 input=list(definition.get("input") or ["text"]),
                 output=["text"],
-                cost=(
+                cost=cast(
+                    ModelCost,
                     definition.get("cost")
                     if isinstance(definition.get("cost"), dict)
-                    else (defaults.cost if defaults else None)
+                    else (defaults.cost if defaults else None),
                 ),
                 max_tokens=definition.get("max_tokens", 16384),
                 base_url=base_url,
@@ -501,7 +534,7 @@ class ModelRuntime:
         self._credentials = RuntimeCredentials(auth_store)
         self._models._credentials = self._credentials
         for provider in self._models.get_providers():
-            provider._credential_store = self._credentials
+            provider._credential_store = cast(Any, self._credentials)
 
         self._builtins: dict[str, Provider] = {
             provider.id: provider for provider in self._models.get_providers()
@@ -636,7 +669,7 @@ class ModelRuntime:
         return Provider(
             id=provider_id,
             name=name,
-            auth=auth,
+            auth=cast(Any, auth),
             models=models,
             _api_kind=base._api_kind if base is not None else "completions",
             base_url=base_url,
@@ -661,14 +694,20 @@ class ModelRuntime:
             opts = dict(options or {})
             resolution = await self.get_auth(
                 model,
-                {"api_key": opts.get("api_key"), "env": opts.get("env")},
+                cast(
+                    ModelRuntimeAuthOverrides,
+                    {"api_key": opts.get("api_key"), "env": opts.get("env")},
+                ),
             )
             if resolution is None:
                 raise ModelsError("auth", f"Provider is not configured: {model.provider}")
             auth = resolution.auth
             if opts.get("api_key") is None and auth.get("api_key"):
                 opts["api_key"] = auth["api_key"]
-            headers = {**(auth.get("headers") or {}), **(opts.get("headers") or {})}
+            headers = {
+                **(auth.get("headers") or {}),
+                **(cast(dict[str, str | None], opts.get("headers") or {})),
+            }
             if headers:
                 opts["headers"] = headers
             opts["base_url"] = opts.get("base_url") or composed_base_url or ""
@@ -676,7 +715,7 @@ class ModelRuntime:
             if extension is not None and extension.get("stream_simple") is not None:
                 return await extension["stream_simple"](model, context, opts)
             if base is not None and base._stream_fn is not None:
-                return await base._stream_fn(model, context, opts)
+                return await base._stream_fn(model, context, cast(StreamOptions, opts))
             api_id = model.api or (
                 _API_KIND_IDS.get(base._api_kind, base._api_kind)
                 if base is not None
@@ -687,7 +726,7 @@ class ModelRuntime:
                 raise ValueError(
                     f"No API provider registered for api: {api_id} (provider api kind: {api_id})"
                 )
-            return await invoke_api_stream(entry.stream, model, context, opts)
+            return await invoke_api_stream(entry.stream, model, context, cast(StreamOptions, opts))
 
         return _stream
 
@@ -727,11 +766,13 @@ class ModelRuntime:
         for key, value in config.items():
             if value is not None:
                 effective[key] = value
-        self._extension_providers[provider_id] = effective
+        self._extension_providers[provider_id] = cast(ProviderConfigInput, effective)
         self._recompose_provider(provider_id)
         self._update_model_snapshot()
         # 已配置时先给一个临时可用性条目，异步 refresh 会修正。
-        check = self._provisional_auth_check(provider_id, effective)
+        check = self._provisional_auth_check(
+            provider_id, cast(ProviderConfigInput | None, effective)
+        )
         if check is not None:
             self._auth_checks[provider_id] = check
             self._configured_providers.add(provider_id)
@@ -850,7 +891,7 @@ class ModelRuntime:
         raw_headers: dict[str, str] | None,
         auth_header: bool,
         api_key: str | None,
-    ) -> dict[str, str] | None:
+    ) -> dict[str, str | None] | None:
         merged: dict[str, str] = {}
         if raw_headers:
             resolved = resolve_headers_or_throw(
@@ -868,7 +909,7 @@ class ModelRuntime:
             if api_key is None:
                 raise ModelsError("auth", "authHeader requires a resolved API key")
             merged["Authorization"] = f"Bearer {api_key}"
-        return merged or None
+        return cast(dict[str, str | None] | None, merged or None)
 
     async def get_auth(
         self,
@@ -920,7 +961,7 @@ class ModelRuntime:
                 model, env, raw_headers, auth_header, explicit_key
             )
             return AuthResult(
-                auth={"api_key": explicit_key, "headers": headers},
+                auth=cast(ModelAuth, {"api_key": explicit_key, "headers": headers}),
                 env=env or None,
                 source="runtime API key",
             )
@@ -948,7 +989,7 @@ class ModelRuntime:
                     model, env, raw_headers, auth_header, key
                 )
                 return AuthResult(
-                    auth={"api_key": key, "headers": headers},
+                    auth=cast(ModelAuth, {"api_key": key, "headers": headers}),
                     env=env or None,
                     source="stored credential",
                 )
@@ -963,7 +1004,7 @@ class ModelRuntime:
                 return None
             headers = self._resolve_configured_headers(model, env, raw_headers, auth_header, key)
             return AuthResult(
-                auth={"api_key": key, "headers": headers},
+                auth=cast(ModelAuth, {"api_key": key, "headers": headers}),
                 env=env or None,
                 source="configured API key",
             )
@@ -975,7 +1016,7 @@ class ModelRuntime:
                     model, env, raw_headers, auth_header, resolved.api_key
                 )
                 return AuthResult(
-                    auth={"api_key": resolved.api_key, "headers": headers},
+                    auth=cast(ModelAuth, {"api_key": resolved.api_key, "headers": headers}),
                     env=env or None,
                     source=resolved.source,
                 )
@@ -983,7 +1024,10 @@ class ModelRuntime:
 
         if auth is None:
             headers = self._resolve_configured_headers(model, env, raw_headers, auth_header, None)
-            return AuthResult(auth={"headers": headers}, source="no auth required")
+            return AuthResult(
+                auth=cast(ModelAuth, {"headers": headers}),
+                source="no auth required",
+            )
         return None
 
     # ------------------------------------------------------------------
@@ -1121,7 +1165,7 @@ class ModelRuntime:
         if model.headers:
             merged.update(model.headers)
         return {
-            "headers": merged or None,
+            "headers": cast(dict[str, str], merged or None),
             "auth_header": bool(
                 extension.get("auth_header")
                 if extension is not None and extension.get("auth_header") is not None

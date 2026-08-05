@@ -395,7 +395,7 @@ class SettingsSelector(ModalScreen):
         if item_type == "choice":
             current = self._value(key)
             current_text = str(current) if current is not None else None
-            self.push_screen(
+            self.app.push_screen(
                 ChoiceSelector(
                     item.get("label", key),
                     list(item.get("choices", [])),
@@ -405,7 +405,7 @@ class SettingsSelector(ModalScreen):
             )
             return
         current = self._value(key)
-        self.push_screen(
+        self.app.push_screen(
             TextInputDialog(
                 f"{item.get('label', key)}:",
                 value=str(current) if current is not None else "",
@@ -528,7 +528,7 @@ class ScopedModelsSelector(ModalScreen):
     """模型范围选择器：Enter 切换选中，Esc 保存（对齐 TS scoped-models-selector）。"""
 
     BINDINGS = [
-        Binding("enter", "toggle", "Toggle"),
+        Binding("enter", "toggle_scoped", "Toggle"),
         Binding("escape", "cancel", "Save and close"),
     ]
 
@@ -573,9 +573,9 @@ class ScopedModelsSelector(ModalScreen):
             list_view.index = 0
 
     def on_list_view_selected(self, event: Any) -> None:
-        self.action_toggle()
+        self.action_toggle_scoped()
 
-    def action_toggle(self) -> None:
+    def action_toggle_scoped(self) -> None:
         list_view = self.query_one("#scoped-list", ListView)
         index = list_view.index
         if index is None or not (0 <= index < len(self._models)):
@@ -689,10 +689,15 @@ class TrustSelector(ModalScreen):
         list_view = self.query_one("#trust-list", ListView)
         for index, option in enumerate(self._options):
             marker = ">" if index == self._selected else " "
+            saved_decision = self._saved_decision
             check = (
                 " ✓"
                 if option.get("savedPath") == self._saved_decision
-                and (option.get("trusted") == self._saved_decision.get("decision"))
+                and (
+                    option.get("trusted") == saved_decision.get("decision")
+                    if saved_decision is not None
+                    else False
+                )
                 else ""
             )
             list_view.append(ListItem(Label(f"{marker} {option['label']}{check}")))

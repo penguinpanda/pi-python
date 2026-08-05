@@ -87,7 +87,9 @@ Provider 只负责：
 
 import os
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
+
+from .types import Credential
 
 # 凭证类型
 
@@ -141,46 +143,9 @@ class CredentialStore(Protocol):
         KeyringCredentialStore
     """
 
-    async def read(self, provider_id: str) -> ApiKeyCredential | None: ...
+    async def read(self, provider_id: str) -> Credential | None: ...
     async def write(self, provider_id: str, credential: ApiKeyCredential) -> None: ...
     async def delete(self, provider_id: str) -> None: ...
-
-
-class InMemoryCredentialStore:
-    """
-    内存中的凭证存储.
-
-    生命周期仅限当前 Python 进程.
-
-    特点：
-
-    ✓ 实现简单
-    ✓ 不需要文件
-    ✓ 不需要数据库
-
-    缺点：
-
-    Python 退出以后,
-    所有 API Key 都会丢失.
-
-    因此主要用于：
-
-    - CLI
-    - Demo
-    - 单元测试
-    """
-
-    def __init__(self) -> None:
-        self._store: dict[str, ApiKeyCredential] = {}
-
-    async def read(self, provider_id: str) -> ApiKeyCredential | None:
-        return self._store.get(provider_id)
-
-    async def write(self, provider_id: str, credential: ApiKeyCredential) -> None:
-        self._store[provider_id] = credential
-
-    async def delete(self, provider_id: str) -> None:
-        self._store.pop(provider_id, None)
 
 
 # 凭证解析验证
@@ -257,7 +222,7 @@ class EnvApiKeyAuth:
 
     def resolve(
         self,
-        credential: ApiKeyCredential | dict | None = None,
+        credential: Any = None,
     ) -> ResolvedAuth | None:
         """
         解析 API Key.
@@ -303,7 +268,7 @@ class EnvApiKeyAuth:
 
 async def resolve_api_key(
     auth: EnvApiKeyAuth,
-    store: InMemoryCredentialStore,
+    store: CredentialStore,
     provider_id: str,
 ) -> str:
     """

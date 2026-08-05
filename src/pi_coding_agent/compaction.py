@@ -19,7 +19,7 @@ import json
 import math
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from pi_agent import AgentMessage
 from pi_agent.compaction import CompactionSettings, DEFAULT_COMPACTION_SETTINGS
@@ -29,9 +29,11 @@ from pi_agent.compaction_utils import (
     get_assistant_usage,
     should_compact,
 )
-from pi_ai import Context, Model, Usage
+from pi_ai import Context, Message, Model, Usage
 from pi_ai.api._shared import empty_usage
 from pi_ai.utils.retry import RetryPolicy, retry_assistant_call
+
+from ._types import SessionEntry
 
 
 def compaction_settings_from_config(settings: dict) -> CompactionSettings:
@@ -315,15 +317,16 @@ def serialize_conversation(messages: list[AgentMessage]) -> str:
             for block in msg.get("content") or []:
                 if not isinstance(block, dict):
                     continue
-                btype = block.get("type")
+                block_dict = cast(dict[str, Any], block)
+                btype = block_dict.get("type")
                 if btype == "thinking":
-                    thinking_parts.append(block.get("thinking", ""))
+                    thinking_parts.append(block_dict.get("thinking", ""))
                 elif btype == "toolCall":
-                    args = block.get("arguments") or {}
+                    args = block_dict.get("arguments") or {}
                     args_str = ", ".join(
                         f"{k}={json.dumps(v, ensure_ascii=False)}" for k, v in args.items()
                     )
-                    tool_calls.append(f"{block.get('name', '')}({args_str})")
+                    tool_calls.append(f"{block_dict.get('name', '')}({args_str})")
 
             if thinking_parts:
                 parts.append(f"[Assistant thinking]: {chr(10).join(thinking_parts)}")
@@ -469,7 +472,7 @@ class CompactionResult:
 
 
 def prepare_compaction(
-    entries: list[dict[str, Any]],
+    entries: list[SessionEntry],
     context_messages: list[AgentMessage],
     settings: CompactionSettings,
 ) -> CompactionPreparation | None:
@@ -492,7 +495,7 @@ def prepare_compaction(
     boundary_start = 0
     if prev_compaction_index >= 0:
         prev = entries[prev_compaction_index]
-        previous_summary = prev.get("summary")
+        previous_summary = cast(str | None, prev.get("summary"))
         first_kept_index = next(
             (i for i, e in enumerate(entries) if e.get("id") == prev.get("firstKeptEntryId")),
             -1,
@@ -502,7 +505,12 @@ def prepare_compaction(
     boundary_end = len(entries)
     tokens_before = estimate_context_tokens(context_messages).tokens
 
-    cut = find_cut_point(entries, boundary_start, boundary_end, settings.keep_recent_tokens)
+    cut = find_cut_point(
+        [cast(dict[str, Any], e) for e in entries],
+        boundary_start,
+        boundary_end,
+        settings.keep_recent_tokens,
+    )
     if cut.first_kept_entry_index >= len(entries):
         return None
     first_kept_entry = entries[cut.first_kept_entry_index]
@@ -512,12 +520,14 @@ def prepare_compaction(
 
     history_end = cut.turn_start_index if cut.is_split_turn else cut.first_kept_entry_index
     messages_to_summarize = [
-        e["message"] for e in entries[boundary_start:history_end] if e.get("type") == "message"
+        cast(AgentMessage, e.get("message"))
+        for e in entries[boundary_start:history_end]
+        if e.get("type") == "message"
     ]
     turn_prefix_messages: list[AgentMessage] = []
     if cut.is_split_turn:
         turn_prefix_messages = [
-            e["message"]
+            cast(AgentMessage, e.get("message"))
             for e in entries[cut.turn_start_index : cut.first_kept_entry_index]
             if e.get("type") == "message"
         ]
@@ -540,7 +550,7 @@ def _combine_usage(first: Usage, second: Usage) -> Usage:
     """合并两次摘要调用的 usage。"""
 
     def _g(u: Usage, key: str) -> int:
-        return u.get(key, 0) or 0
+        return int(cast(Any, u).get(key, 0) or 0)
 
     def _cost(u: Usage) -> dict[str, float]:
         c = u.get("cost") or {}
@@ -593,13 +603,18 @@ async def complete_summarization(
         return await stream.result()
 
     if retry is not None:
-        return await retry_assistant_call(_produce, retry, request_options.get("signal"), callbacks)
+        return await retry_assistant_call(
+            _produce,
+            policy=retry,
+            signal=request_options.get("signal"),
+            callbacks=callbacks,
+        )
     return await _produce()
 
 
 def _create_summarization_options(
     model: Model,
-    max_tokens: int,
+    max_tokens: int | float,
     api_key: str | None,
     thinking_level: str | None,
 ) -> dict[str, Any]:
@@ -640,7 +655,7 @@ async def generate_summary_with_usage(
         prompt_text += f"<previous-summary>\n{previous_summary}\n</previous-summary>\n\n"
     prompt_text += base_prompt
 
-    summarization_messages = [
+    summarization_messages: list[Message] = [
         {
             "role": "user",
             "content": [{"type": "text", "text": prompt_text}],
@@ -688,7 +703,7 @@ async def _generate_turn_prefix_summary(
     )
     conversation_text = serialize_conversation(messages)
     prompt_text = f"<conversation>\n{conversation_text}\n</conversation>\n\n{TURN_PREFIX_SUMMARIZATION_PROMPT}"
-    summarization_messages = [
+    summarization_messages: list[Message] = [
         {
             "role": "user",
             "content": [{"type": "text", "text": prompt_text}],

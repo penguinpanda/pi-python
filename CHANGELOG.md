@@ -24,6 +24,8 @@
 
 ### Changed
 
+- mypy 全仓清零（原 664 个错误）：TypedDict 判别字段基类重构（NotRequired/Literal 收窄）、`NotRequired` 改用 `typing_extensions`、运行时凭证/事件/配置对象的类型收窄；CI 中 mypy 由非阻塞报告改为阻塞检查
+- 修复一批运行时隐患：`skills.py`/`prompt_templates.py` 访问不存在的 `.message` 属性（改为 `str(error)`）、TUI `scroll_visible(entry)` 应为 `scroll_to_widget(entry)`、`_CliAuthInteraction` 读取 camelCase 事件键、`openrouter_images` 输出补齐 `url` 键等
 - `!command` 配置值改为 `shlex.split` 参数数组执行（不再经 shell，消除命令注入边界）
 - 提交 `uv.lock` 锁定依赖；`docs/` 保持不入库；运行时 `.pi/` 目录忽略
 - 修复 `app.py` 中 `/reload` 未导入 `Path` 的运行时错误、`env.py` 回调异常被静默吞掉的问题

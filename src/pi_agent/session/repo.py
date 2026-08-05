@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import Any, Generic, TypeVar
+from typing import Generic, TypeVar, cast
 
 from pi_ai.utils.uuid import uuidv7
 
@@ -27,6 +27,7 @@ from .types import (
     SessionMetadata,
     SessionSearch,
     SessionSearchHit,
+    SessionSearchOptions,
     SessionStats,
     SessionStorage,
     SessionStore,
@@ -88,7 +89,7 @@ async def get_entries_to_fork(
         raise SessionError("invalid_fork_target", f"Entry {options['entryId']} not found")
     position = options.get("position", "before")
     if position == "at":
-        effective_leaf_id = target["id"]
+        effective_leaf_id: str | None = target["id"]
     else:
         if target["type"] != "message" or target["message"].get("role") != "user":
             raise SessionError(
@@ -177,9 +178,6 @@ class SessionRepo(Generic[TMetadata, TCreateOptions, TListOptions]):
         snapshot = await self._store.load(metadata)
         return to_store_session(self._store, snapshot["metadata"])
 
-    async def list(self, options: TListOptions | None = None) -> list[TMetadata]:
-        return await self._store.list()
-
     async def delete(self, metadata: TMetadata) -> None:
         await self._store.delete(metadata)
 
@@ -187,10 +185,13 @@ class SessionRepo(Generic[TMetadata, TCreateOptions, TListOptions]):
         metadata = await self._store.fork(source, options)
         return to_store_session(self._store, metadata)
 
-    async def search(self, options: dict[str, Any]) -> list[SessionSearchHit]:
+    async def search(self, options: SessionSearchOptions) -> list[SessionSearchHit]:
         if self._search_backend is None:
             return []
         return await self._search_backend.search(options)
+
+    async def list(self, options: TListOptions | None = None) -> list[TMetadata]:
+        return cast(list[TMetadata], await self._store.list())
 
 
 def create_session_repo(

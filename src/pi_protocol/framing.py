@@ -9,8 +9,8 @@ from pydantic import TypeAdapter
 
 from .schemas import ClientMessage, ServerMessage
 
-_CLIENT_MESSAGE_ADAPTER = TypeAdapter(ClientMessage)
-_SERVER_MESSAGE_ADAPTER = TypeAdapter(ServerMessage)
+_CLIENT_MESSAGE_ADAPTER: TypeAdapter[ClientMessage] = TypeAdapter(ClientMessage)
+_SERVER_MESSAGE_ADAPTER: TypeAdapter[ServerMessage] = TypeAdapter(ServerMessage)
 
 
 def encode_frame(message) -> str:
@@ -24,7 +24,7 @@ def encode_frame(message) -> str:
     return json.dumps(data, ensure_ascii=False, separators=(",", ":")) + "\n"
 
 
-def decode_frame(line: str) -> dict:
+def decode_frame(line: str) -> dict | None:
     """JSON 行 → dict；空行返回 None。"""
     stripped = line.strip()
     if not stripped:

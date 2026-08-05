@@ -10,7 +10,9 @@ import html
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+
+from ._types import SessionEntry
 
 from pygments import highlight
 from pygments.formatters import HtmlFormatter
@@ -85,10 +87,11 @@ def _content_to_text(content: Any) -> str:
     return "\n".join(parts)
 
 
-def _render_entries(entries: list[dict[str, Any]]) -> str:
+def _render_entries(entries: list[SessionEntry]) -> str:
     """把分支条目渲染为 HTML。"""
     blocks: list[str] = []
-    for entry in entries:
+    for raw_entry in entries:
+        entry = cast(dict[str, Any], raw_entry)
         entry_type = entry.get("type")
         if entry_type == "message":
             message = entry.get("message") or {}

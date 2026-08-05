@@ -45,9 +45,21 @@
 """
 
 import re
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
-from ..types import AssistantMessage, Message, Model, ToolCall, now_ms
+from ..types import (
+    AssistantMessage,
+    CodeContent,
+    ContentBlock,
+    Message,
+    Model,
+    TextContent,
+    ThinkingContent,
+    ToolCall,
+    ToolResultMessage,
+    UserMessage,
+    now_ms,
+)
 
 # ------------------------------------------------------
 # 图片降级占位文本
@@ -319,7 +331,8 @@ def transform_messages(
     # 可能违反类型契约；统一归一化，下游可依赖 content 是列表。
     # --------------------------------------------------
     normalized_messages = [
-        {**msg, "content": []} if msg.get("content") is None else msg for msg in messages
+        cast(Message, {**msg, "content": []}) if msg.get("content") is None else msg
+        for msg in messages
     ]
 
     image_aware_messages = downgrade_unsupported_images(normalized_messages, model)
@@ -351,29 +364,30 @@ def transform_messages(
 
         # User 消息原样透传。
         if role == "user":
-            transformed.append(msg)
+            transformed.append(cast(UserMessage, msg))
             continue
 
         # toolResult：按映射规范化 tool_call_id。
         if role == "toolResult":
-            original_id = msg.get("tool_call_id")
+            tool_result = cast(ToolResultMessage, msg)
+            original_id = tool_result.get("tool_call_id")
             normalized_id = tool_call_id_map.get(original_id or "")
             if normalized_id and normalized_id != original_id:
-                new_msg = dict(msg)
+                new_msg = dict(tool_result)
                 new_msg["tool_call_id"] = normalized_id
                 transformed.append(new_msg)  # type: ignore[arg-type]
             else:
-                transformed.append(msg)
+                transformed.append(tool_result)
             continue
 
         # Assistant 消息：需要检查 content 块。
         if role == "assistant":
-            asst = msg  # type: ignore[assignment]
+            asst = cast(AssistantMessage, msg)
             same_model = _is_same_model(asst)
 
-            transformed_content: list[dict[str, Any]] = []
-            for block in asst["content"]:
-                block_type = block["type"]
+            transformed_content: list[ContentBlock] = []
+            for content_block in asst["content"]:
+                block_type = content_block["type"]
 
                 # Thinking 块：
                 #
@@ -383,23 +397,26 @@ def transform_messages(
                 # - 空 thinking 丢弃
                 # - 其余：同模型保留，跨模型转为纯文本
                 if block_type == "thinking":
-                    if block.get("redacted"):
+                    thinking_block = cast(ThinkingContent, content_block)
+                    if thinking_block.get("redacted"):
                         if same_model:
-                            transformed_content.append(block)
+                            transformed_content.append(thinking_block)
                         continue
 
-                    if same_model and block.get("thinking_signature"):
-                        transformed_content.append(block)
+                    if same_model and thinking_block.get("thinking_signature"):
+                        transformed_content.append(thinking_block)
                         continue
 
-                    thinking = block.get("thinking") or ""
-                    if not thinking.strip():
+                    thinking = thinking_block.get("thinking") or ""
+                    if not isinstance(thinking, str) or not thinking.strip():
                         continue
 
                     if same_model:
-                        transformed_content.append(block)
+                        transformed_content.append(thinking_block)
                     else:
-                        transformed_content.append({"type": "text", "text": thinking})
+                        transformed_content.append(
+                            cast(TextContent, {"type": "text", "text": thinking})
+                        )
                     continue
 
                 # Text 块：
@@ -407,10 +424,16 @@ def transform_messages(
                 # 同模型原样保留；
                 # 跨模型重建 {type:text, text}（剥掉 text_signature）。
                 if block_type == "text":
+                    text_block = cast(TextContent, content_block)
                     if same_model:
-                        transformed_content.append(block)
+                        transformed_content.append(text_block)
                     else:
-                        transformed_content.append({"type": "text", "text": block.get("text", "")})
+                        transformed_content.append(
+                            cast(
+                                TextContent,
+                                {"type": "text", "text": text_block.get("text", "")},
+                            )
+                        )
                     continue
 
                 # Tool Call 块：
@@ -418,8 +441,8 @@ def transform_messages(
                 # - 跨模型删除 thought_signature（Google 专用签名）
                 # - 跨模型 + normalize_tool_call_id_fn：规范化 ID 并记入映射
                 if block_type == "toolCall":
-                    tool_call = block  # type: ignore[assignment]
-                    normalized_tool_call: dict[str, Any] = tool_call
+                    tool_call = cast(ToolCall, content_block)
+                    normalized_tool_call: dict[str, Any] = cast(dict[str, Any], tool_call)
 
                     if not same_model and tool_call.get("thought_signature"):
                         normalized_tool_call = dict(tool_call)
@@ -433,19 +456,19 @@ def transform_messages(
                                 normalized_tool_call = dict(tool_call)
                             normalized_tool_call["id"] = normalized_id
 
-                    transformed_content.append(normalized_tool_call)
+                    transformed_content.append(cast(ToolCall, normalized_tool_call))
                     continue
 
                 # 未知块类型（code 等）原样透传。
-                transformed_content.append(block)
+                transformed_content.append(cast(CodeContent, content_block))
 
             new_msg = dict(asst)
             new_msg["content"] = transformed_content
-            transformed.append(new_msg)  # type: ignore[arg-type]
+            transformed.append(cast(Message, new_msg))
             continue
 
         # 其余 role（system / AgentMessage 等）原样透传。
-        transformed.append(msg)
+        transformed.append(cast(Message, msg))
 
     # --------------------------------------------------
     # 第二遍：孤立 Tool Call 合成空 Tool Result
@@ -491,24 +514,22 @@ def transform_messages(
             # - 可能只有部分内容（有推理没有正文、工具调用不完整）
             # - 重放可能触发 API 报错（如 OpenAI "reasoning without following item"）
             # - 模型应从最后一个有效状态重试
-            if msg.get("stop_reason") in ("error", "aborted"):
+            asst_msg = cast(AssistantMessage, msg)
+            if asst_msg.get("stop_reason") in ("error", "aborted"):
                 continue
 
             # 记录本轮的 tool call，供后续匹配 toolResult。
-            tool_calls = [
-                b
-                for b in msg["content"]
-                if b["type"] == "toolCall"  # type: ignore[typeddict-item]
-            ]
+            tool_calls = [b for b in asst_msg["content"] if b["type"] == "toolCall"]
             if tool_calls:
-                pending_tool_calls = tool_calls  # type: ignore[assignment]
+                pending_tool_calls = tool_calls
                 existing_tool_result_ids = set()
 
-            result.append(msg)
+            result.append(asst_msg)
 
         elif role == "toolResult":
-            existing_tool_result_ids.add(msg["tool_call_id"])
-            result.append(msg)
+            tool_result_msg = cast(ToolResultMessage, msg)
+            existing_tool_result_ids.add(tool_result_msg["tool_call_id"])
+            result.append(tool_result_msg)
 
         elif role == "user":
             # User 消息打断工具流：补合成孤立 tool call 的结果。

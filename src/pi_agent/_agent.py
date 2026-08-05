@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, cast
 
 from pi_ai.types import (
     CacheRetention,
@@ -46,6 +46,8 @@ from ._types import (
     ThinkingLevel,
     ToolExecutionMode,
 )
+
+from pi_ai.types import AssistantMessage
 
 # 监听器签名：async (event, signal) → None；同步监听器返回 None 也支持
 AgentListener = Callable[[AgentEvent, asyncio.Event | None], Awaitable[None] | None]
@@ -529,24 +531,24 @@ class Agent:
         event_type = event["type"]
 
         if event_type == "message_start":
-            self._state.streaming_message = event["message"]
+            self._state.streaming_message = cast(AgentMessage, event.get("message"))
 
         elif event_type == "message_update":
-            self._state.streaming_message = event["message"]
+            self._state.streaming_message = cast(AgentMessage, event.get("message"))
 
         elif event_type == "message_end":
             self._state.streaming_message = None
-            self._state._append_message(event["message"])
+            self._state._append_message(cast(AgentMessage, event.get("message")))
 
         elif event_type == "tool_execution_start":
-            self._state.pending_tool_calls.add(event["tool_call_id"])
+            self._state.pending_tool_calls.add(cast(str, event.get("tool_call_id")))
 
         elif event_type == "tool_execution_end":
-            tc_id = event["tool_call_id"]
+            tc_id = cast(str, event.get("tool_call_id"))
             self._state.pending_tool_calls.discard(tc_id)
 
         elif event_type == "turn_end":
-            msg = event["message"]
+            msg = cast(AssistantMessage, event.get("message"))
             if msg.get("stop_reason") == "error":
                 self._state.error_message = msg.get("error_message", "Unknown error")
 

@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 
 from ..types import AuthInteraction, ModelAuth, OAuthAuth, OAuthCredential
-from .device_code import poll_oauth_device_code_flow
+from .device_code import DEFAULT_POLL_INTERVAL_SECONDS, poll_oauth_device_code_flow
 
 _AsyncClient = httpx.AsyncClient
 
@@ -198,8 +198,8 @@ async def _login(interaction: AuthInteraction) -> OAuthCredential:
             "type": "device_code",
             "user_code": device["user_code"],
             "verification_uri": device["verification_uri"],
-            "interval_seconds": device.get("interval"),
-            "expires_in_seconds": device.get("expires_in"),
+            "interval_seconds": int(device.get("interval") or DEFAULT_POLL_INTERVAL_SECONDS),
+            "expires_in_seconds": int(device.get("expires_in") or 0),
         }
     )
     github_access_token = await _poll_for_github_access_token(domain, device, interaction.signal)

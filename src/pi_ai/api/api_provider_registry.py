@@ -28,7 +28,7 @@ complete_simple 自动按 model.api 分发。
 import inspect
 
 from dataclasses import dataclass
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, cast
 
 from ..types import (
     AssistantMessage,
@@ -225,7 +225,7 @@ def _with_env_api_key(
         return options
     opts = dict(options or {})
     opts["api_key"] = api_key
-    return opts
+    return cast(StreamOptions | None, opts)
 
 
 def _resolve_api_provider(api: str) -> ApiProvider:

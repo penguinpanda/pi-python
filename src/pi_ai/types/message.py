@@ -16,17 +16,20 @@
 Agent 层可通过 AgentMessage 携带任意 Agent role（planner/observation/memory...）。
 """
 
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Any, Literal, TypedDict
+
+from typing_extensions import NotRequired
 
 from .common import StopReason
 from .content import ContentBlock, ImageContent, TextContent
 
 
 class BaseMessage(TypedDict):
-    """消息基础协议：所有 Message 共享 role 判别字段。"""
+    """消息基础协议（标记基类）。
 
-    role: str
-    timestamp: NotRequired[int]  # Unix 毫秒时间戳（部分消息必填，见具体类型）
+    判别字段 ``role`` 由各具体子类声明为唯一 Literal，
+    以构成 Message 可辨识联合（mypy 不支持基类收窄字段类型）。
+    """
 
 
 class SystemMessage(BaseMessage):
@@ -34,6 +37,7 @@ class SystemMessage(BaseMessage):
 
     role: Literal["system"]
     content: str
+    timestamp: NotRequired[int]  # Unix 毫秒时间戳（可选）
 
 
 class UserMessage(BaseMessage):

@@ -80,10 +80,11 @@ def _parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
         key = key.strip()
         value = value.strip().strip('"').strip("'")
         if value.lower() == "true":
-            value = True
+            frontmatter[key] = True
         elif value.lower() == "false":
-            value = False
-        frontmatter[key] = value
+            frontmatter[key] = False
+        else:
+            frontmatter[key] = value
     return frontmatter, body
 
 
@@ -192,15 +193,13 @@ async def _add_ignore_rules(
         info = await env.file_info(ignore_path)
         if not info[0]:
             if info[1].code != "not_found":
-                diagnostics.append(
-                    SkillDiagnostic("file_info_failed", info[1].message, ignore_path)
-                )
+                diagnostics.append(SkillDiagnostic("file_info_failed", str(info[1]), ignore_path))
             continue
         if info[1].kind != "file":
             continue
         content = await env.read_text_file(ignore_path)
         if not content[0]:
-            diagnostics.append(SkillDiagnostic("read_failed", content[1].message, ignore_path))
+            diagnostics.append(SkillDiagnostic("read_failed", str(content[1]), ignore_path))
             continue
         patterns = [
             prefixed
@@ -218,12 +217,12 @@ async def _load_skill_from_file(
     diagnostics: list[SkillDiagnostic] = []
     raw = await env.read_text_file(file_path)
     if not raw[0]:
-        diagnostics.append(SkillDiagnostic("read_failed", raw[1].message, file_path))
+        diagnostics.append(SkillDiagnostic("read_failed", str(raw[1]), file_path))
         return None, diagnostics
     try:
         frontmatter, body = _parse_frontmatter(raw[1])
-    except Exception as error:
-        diagnostics.append(SkillDiagnostic("parse_failed", str(error), file_path))
+    except Exception as exc:
+        diagnostics.append(SkillDiagnostic("parse_failed", str(exc), file_path))
         return None, diagnostics
 
     skill_dir = _dirname(file_path)
@@ -261,7 +260,7 @@ async def _load_skills_from_dir(
     dir_info = await env.file_info(directory)
     if not dir_info[0]:
         if dir_info[1].code != "not_found":
-            diagnostics.append(SkillDiagnostic("file_info_failed", dir_info[1].message, directory))
+            diagnostics.append(SkillDiagnostic("file_info_failed", str(dir_info[1]), directory))
         return skills, diagnostics
     if dir_info[1].kind != "directory":
         return skills, diagnostics
@@ -269,7 +268,7 @@ async def _load_skills_from_dir(
     await _add_ignore_rules(env, ignore_matcher, directory, root_dir, diagnostics)
     list_result = await env.list_dir(directory)
     if not list_result[0]:
-        diagnostics.append(SkillDiagnostic("list_failed", list_result[1].message, directory))
+        diagnostics.append(SkillDiagnostic("list_failed", str(list_result[1]), directory))
         return skills, diagnostics
     entries = list_result[1]
 
@@ -322,7 +321,7 @@ async def load_skills(
         info = await env.file_info(directory)
         if not info[0]:
             if info[1].code != "not_found":
-                diagnostics.append(SkillDiagnostic("file_info_failed", info[1].message, directory))
+                diagnostics.append(SkillDiagnostic("file_info_failed", str(info[1]), directory))
             continue
         if info[1].kind != "directory":
             continue

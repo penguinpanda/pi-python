@@ -12,13 +12,17 @@ ContentBlock 是消息内容的统一抽象：
 新增类型只需继承 BaseContent 并把 Literal 收窄为唯一 type。
 """
 
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Any, Literal, TypedDict
+
+from typing_extensions import NotRequired
 
 
 class BaseContent(TypedDict):
-    """内容块基础协议：所有 ContentBlock 共享 type 判别字段。"""
+    """内容块基础协议（标记基类）。
 
-    type: str
+    判别字段 ``type`` 由各具体子类声明为唯一 Literal，
+    以构成 ContentBlock 可辨识联合（mypy 不支持基类收窄字段类型）。
+    """
 
 
 class TextContent(BaseContent):

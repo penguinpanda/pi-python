@@ -66,7 +66,7 @@ Provider 本身不负责：
 import asyncio
 
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Literal
+from typing import Any, Awaitable, Callable, Literal, cast
 
 from .utils._event_stream import AssistantMessageEventStream
 from .types import (
@@ -351,7 +351,12 @@ class Provider:
         request_options = dict(options or {})
         request_options["api_key"] = api_key
         request_options["base_url"] = base_url
-        return await invoke_api_stream(entry.stream, model, context, request_options)
+        return await invoke_api_stream(
+            entry.stream,
+            model,
+            context,
+            cast(StreamOptions, request_options),
+        )
 
     async def complete(
         self,

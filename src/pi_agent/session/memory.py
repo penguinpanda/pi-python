@@ -85,7 +85,7 @@ class InMemorySessionStorage:
         }
 
     async def get_metadata(self) -> SessionMetadata:
-        return dict(self._metadata)
+        return cast(SessionMetadata, dict(self._metadata))
 
     async def get_leaf_id(self) -> str | None:
         if self._leaf_id is not None and self._leaf_id not in self._by_id:
@@ -173,9 +173,6 @@ class InMemorySessionStore:
             "entries": await storage.get_entries(),
         }
 
-    async def list(self) -> list[SessionMetadata]:
-        return [await storage.get_metadata() for storage in self._sessions.values()]
-
     async def get_entries(
         self, metadata: SessionMetadata, options: SessionEntryCursorOptions | None = None
     ) -> list[SessionTreeEntry]:
@@ -183,6 +180,9 @@ class InMemorySessionStore:
 
     async def create_entry_id(self, metadata: SessionMetadata) -> str:
         return await (await self.open(metadata)).create_entry_id()
+
+    async def list(self) -> list[SessionMetadata]:
+        return [await storage.get_metadata() for storage in self._sessions.values()]
 
     async def append_entry(self, metadata: SessionMetadata, entry: SessionTreeEntry) -> None:
         await (await self.open(metadata)).append_entry(entry)

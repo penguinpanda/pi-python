@@ -62,7 +62,7 @@ async def forward_stream(
     async for event in source:
         target.push(event)
     if has_result:
-        result = await source.result()  # type: ignore[union-attr]
+        result = await source.result()  # type: ignore[attr-defined]
     target.end(result)
 
 

@@ -21,7 +21,7 @@ from .repo import (
     get_entries_to_fork,
     get_path_to_root_or_compaction,
 )
-from .search import ScanningSessionSearch
+from .search import ScanningSessionSearch, SessionSearchSource
 from .session import _get_session_name, _get_session_stats
 from .types import (
     JsonlSessionMetadata,
@@ -30,6 +30,7 @@ from .types import (
     SessionError,
     SessionForkOptions,
     SessionSnapshot,
+    SessionStore,
     SessionTreeEntry,
 )
 
@@ -214,7 +215,7 @@ class JsonlSessionStorage:
         return JsonlSessionStorage(file_path, header, [], None)
 
     async def get_metadata(self) -> JsonlSessionMetadata:
-        return dict(self._metadata)
+        return cast(JsonlSessionMetadata, dict(self._metadata))
 
     async def get_leaf_id(self) -> str | None:
         if self._leaf_id is not None and self._leaf_id not in self._by_id:
@@ -327,29 +328,6 @@ class JsonlSessionStore:
             "entries": await storage.get_entries(),
         }
 
-    async def list(self, options: dict[str, Any] | None = None) -> list[JsonlSessionMetadata]:
-        options = options or {}
-        if options.get("cwd") is not None:
-            dirs = [self._session_dir(options["cwd"])]
-        else:
-            if not self._sessions_root.exists():
-                return []
-            dirs = [entry for entry in self._sessions_root.iterdir() if entry.is_dir()]
-        sessions: list[JsonlSessionMetadata] = []
-        for directory in dirs:
-            if not directory.exists():
-                continue
-            for file_path in directory.iterdir():
-                if file_path.is_dir() or not file_path.name.endswith(".jsonl"):
-                    continue
-                try:
-                    sessions.append(_load_metadata(file_path))
-                except SessionError as error:
-                    if error.code != "invalid_session":
-                        raise
-        sessions.sort(key=lambda s: s["createdAt"], reverse=True)
-        return sessions
-
     async def get_entries(
         self, metadata: JsonlSessionMetadata, options: SessionEntryCursorOptions | None = None
     ) -> list[SessionTreeEntry]:
@@ -387,6 +365,29 @@ class JsonlSessionStore:
             await storage.append_entry(entry)
         return await storage.get_metadata()
 
+    async def list(self, options: dict[str, Any] | None = None) -> list[JsonlSessionMetadata]:
+        options = options or {}
+        if options.get("cwd") is not None:
+            dirs = [self._session_dir(options["cwd"])]
+        else:
+            if not self._sessions_root.exists():
+                return []
+            dirs = [entry for entry in self._sessions_root.iterdir() if entry.is_dir()]
+        sessions: list[JsonlSessionMetadata] = []
+        for directory in dirs:
+            if not directory.exists():
+                continue
+            for file_path in directory.iterdir():
+                if file_path.is_dir() or not file_path.name.endswith(".jsonl"):
+                    continue
+                try:
+                    sessions.append(_load_metadata(file_path))
+                except SessionError as error:
+                    if error.code != "invalid_session":
+                        raise
+        sessions.sort(key=lambda s: s["createdAt"], reverse=True)
+        return sessions
+
 
 def create_jsonl_session_store(sessions_root: str) -> JsonlSessionStore:
     return JsonlSessionStore(sessions_root)
@@ -394,4 +395,9 @@ def create_jsonl_session_store(sessions_root: str) -> JsonlSessionStore:
 
 def create_jsonl_session_repo(sessions_root: str) -> SessionRepo:
     store = create_jsonl_session_store(sessions_root)
-    return SessionRepo(store=store, search=ScanningSessionSearch(store))
+    # JsonlSessionStore 的元数据类型是 SessionMetadata 的细化（含 cwd/path），
+    # 在统一 SessionStore / SessionSearchSource 协议入口做窄化适配。
+    return SessionRepo(
+        store=cast(SessionStore, store),
+        search=ScanningSessionSearch(cast(SessionSearchSource, store)),
+    )

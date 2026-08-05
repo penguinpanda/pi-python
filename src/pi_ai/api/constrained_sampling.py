@@ -140,6 +140,8 @@ def resolve_grammar_constrained_sampling(
         return None
 
     variants = config.get("variants") or {}
+    if not isinstance(variants, dict):
+        variants = {}
     lark_definition = variants.get("openai_lark")
     regex_definition = variants.get("openai_regex")
     has_lark = isinstance(lark_definition, str) and lark_definition.strip() != ""
@@ -151,9 +153,14 @@ def resolve_grammar_constrained_sampling(
         )
 
     try:
+        if has_lark:
+            definition = lark_definition
+        else:
+            definition = regex_definition
+        assert isinstance(definition, str)
         return GrammarConstrainedSampling(
             format="lark" if has_lark else "regex",
-            definition=lark_definition if has_lark else regex_definition,
+            definition=definition,
             input_property=infer_grammar_input_property(tool),
         )
     except ValueError as exc:

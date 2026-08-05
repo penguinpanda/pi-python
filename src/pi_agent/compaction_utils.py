@@ -8,12 +8,19 @@ from __future__ import annotations
 
 import json
 import math
-from typing import Any
+from typing import Any, cast
 
-from pi_ai.types import AgentMessage, Usage
+from pi_ai.types import Usage
 from pi_ai.utils.estimate import ContextUsageEstimate
 
+from ._types import AgentMessage
 from .session.types import SessionTreeEntry
+from .session.types import (
+    BranchSummaryEntry,
+    CompactionEntry,
+    CustomMessageEntry,
+    MessageEntry,
+)
 
 TOOL_RESULT_MAX_CHARS = 2000
 ESTIMATED_IMAGE_CHARS = 4800
@@ -29,9 +36,10 @@ def extract_file_ops_from_message(message: AgentMessage, file_ops: dict[str, set
     for block in message.get("content") or []:
         if not isinstance(block, dict) or block.get("type") != "toolCall":
             continue
-        if not isinstance(block.get("arguments"), dict):
+        arguments = block.get("arguments")
+        if not isinstance(arguments, dict):
             continue
-        path = block["arguments"].get("path")
+        path = arguments.get("path")
         if not isinstance(path, str):
             continue
         name = block.get("name")
@@ -105,15 +113,16 @@ def serialize_conversation(messages: list[AgentMessage]) -> str:
             for block in message.get("content") or []:
                 if not isinstance(block, dict):
                     continue
-                block_type = block.get("type")
+                block_dict = cast(dict[str, Any], block)
+                block_type = block_dict.get("type")
                 if block_type == "thinking":
-                    thinking_parts.append(str(block.get("thinking", "")))
+                    thinking_parts.append(str(block_dict.get("thinking", "")))
                 elif block_type == "toolCall":
-                    args = block.get("arguments") or {}
+                    args = block_dict.get("arguments") or {}
                     args_str = ", ".join(
                         f"{key}={safe_json_stringify(value)}" for key, value in args.items()
                     )
-                    tool_calls.append(f"{block.get('name', '')}({args_str})")
+                    tool_calls.append(f"{block_dict.get('name', '')}({args_str})")
             if thinking_parts:
                 parts.append(f"[Assistant thinking]: {chr(10).join(thinking_parts)}")
             if any(
@@ -142,20 +151,27 @@ def get_message_from_entry(entry: SessionTreeEntry) -> AgentMessage | None:
 
     entry_type = entry["type"]
     if entry_type == "message":
-        return entry["message"]
+        return cast(MessageEntry, entry)["message"]
     if entry_type == "custom_message":
+        custom_entry = cast(CustomMessageEntry, entry)
         return _create_custom_message(
-            entry["customType"],
-            entry["content"],
-            entry["display"],
-            entry.get("details"),
-            entry["timestamp"],
+            custom_entry["customType"],
+            custom_entry["content"],
+            custom_entry["display"],
+            custom_entry.get("details"),
+            custom_entry["timestamp"],
         )
     if entry_type == "branch_summary":
-        return _create_branch_summary_message(entry["summary"], entry["fromId"], entry["timestamp"])
+        branch_entry = cast(BranchSummaryEntry, entry)
+        return _create_branch_summary_message(
+            branch_entry["summary"], branch_entry["fromId"], branch_entry["timestamp"]
+        )
     if entry_type == "compaction":
+        compaction_entry = cast(CompactionEntry, entry)
         return _create_compaction_summary_message(
-            entry["summary"], entry.get("tokensBefore", 0), entry["timestamp"]
+            compaction_entry["summary"],
+            compaction_entry.get("tokensBefore", 0),
+            compaction_entry["timestamp"],
         )
     return None
 
@@ -191,14 +207,15 @@ def estimate_tokens(message: AgentMessage) -> int:
         for block in message.get("content") or []:
             if not isinstance(block, dict):
                 continue
-            block_type = block.get("type")
+            block_dict = cast(dict[str, Any], block)
+            block_type = block_dict.get("type")
             if block_type == "text":
-                chars += len(block.get("text", ""))
+                chars += len(block_dict.get("text", ""))
             elif block_type == "thinking":
-                chars += len(block.get("thinking", ""))
+                chars += len(block_dict.get("thinking", ""))
             elif block_type == "toolCall":
-                chars += len(block.get("name", "")) + len(
-                    safe_json_stringify(block.get("arguments") or {})
+                chars += len(block_dict.get("name", "")) + len(
+                    safe_json_stringify(block_dict.get("arguments") or {})
                 )
         return math.ceil(chars / 4)
     if role in ("custom", "toolResult"):
@@ -230,13 +247,15 @@ def calculate_context_tokens(usage: Usage) -> int:
 
 
 def get_assistant_usage(message: AgentMessage) -> Usage | None:
-    if message.get("role") == "assistant":
-        if (
-            message.get("stop_reason") not in ("aborted", "error")
-            and isinstance(message.get("usage"), dict)
-            and calculate_context_tokens(message["usage"]) > 0
-        ):
-            return message["usage"]
+    if message.get("role") != "assistant":
+        return None
+    usage = message.get("usage")
+    if (
+        message.get("stop_reason") not in ("aborted", "error")
+        and isinstance(usage, dict)
+        and calculate_context_tokens(cast(Usage, usage)) > 0
+    ):
+        return cast(Usage, usage)
     return None
 
 

@@ -6,9 +6,13 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, NotRequired, Protocol, TypedDict
+from typing import Any, Literal, Protocol, TypedDict
 
-from pi_ai.types import AgentMessage, ImageContent, TextContent, Usage
+from typing_extensions import NotRequired
+
+from pi_ai.types import ImageContent, TextContent, Usage
+
+from .._types import AgentMessage
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +49,6 @@ class SessionError(Exception):
 
 
 class _SessionTreeEntryBase(TypedDict):
-    type: str
     id: str
     parentId: str | None
     timestamp: str
@@ -225,6 +228,10 @@ class SessionForkOptions(TypedDict, total=False):
     entryId: NotRequired[str]
     position: NotRequired[Literal["before", "at"]]
     id: NotRequired[str]
+    # JsonlSessionStore fork 扩展字段（会话文件布局）。
+    cwd: NotRequired[str]
+    parentSessionPath: NotRequired[str]
+    metadata: NotRequired[dict[str, Any]]
 
 
 class SessionStore(Protocol):
@@ -233,8 +240,6 @@ class SessionStore(Protocol):
     async def create(self, options: SessionCreateOptions) -> SessionMetadata: ...
 
     async def load(self, metadata: SessionMetadata) -> SessionSnapshot: ...
-
-    async def list(self) -> list[SessionMetadata]: ...
 
     async def get_entries(
         self, metadata: SessionMetadata, options: SessionEntryCursorOptions | None = None
@@ -247,6 +252,8 @@ class SessionStore(Protocol):
     async def set_leaf_id(self, metadata: SessionMetadata, leaf_id: str | None) -> LeafEntry: ...
 
     async def delete(self, metadata: SessionMetadata) -> None: ...
+
+    async def list(self) -> list[SessionMetadata]: ...
 
     async def fork(
         self, source: SessionMetadata, options: SessionForkOptions

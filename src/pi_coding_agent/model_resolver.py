@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 import sys
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 
 from pi_ai import Model
 from pi_ai.types.common import ModelThinkingLevel, ThinkingLevel
@@ -184,7 +184,7 @@ def parse_model_pattern(
         if result.model is not None:
             return ParsedModelResult(
                 result.model,
-                None if result.warning else suffix,
+                None if result.warning else cast(ModelThinkingLevel, suffix),
                 result.warning,
             )
         return result
@@ -260,7 +260,7 @@ async def resolve_model_scope_with_diagnostics(
         if colon_index != -1:
             suffix = pattern[colon_index + 1 :]
             if is_valid_thinking_level(suffix):
-                thinking_level = suffix
+                thinking_level = cast(ModelThinkingLevel, suffix)
                 glob_pattern = pattern[:colon_index]
 
         exact = find_exact_model_reference_match(glob_pattern, available_models)
@@ -424,7 +424,7 @@ def resolve_cli_model(
                 suffix = pattern[last_colon + 1 :]
                 if is_valid_thinking_level(suffix):
                     fallback_pattern = pattern[:last_colon]
-                    fallback_thinking = suffix
+                    fallback_thinking = cast(ModelThinkingLevel, suffix)
         fallback_model = _build_fallback_model(provider, fallback_pattern, available_models)
         if fallback_model is not None:
             requested = cli_thinking or fallback_thinking
@@ -526,7 +526,10 @@ async def find_initial_model(
         first = scoped_models[0]
         return InitialModelResult(
             first.model,
-            first.thinking_level or default_thinking_level or DEFAULT_THINKING_LEVEL,
+            cast(
+                ThinkingLevel,
+                first.thinking_level or default_thinking_level or DEFAULT_THINKING_LEVEL,
+            ),
             None,
         )
 

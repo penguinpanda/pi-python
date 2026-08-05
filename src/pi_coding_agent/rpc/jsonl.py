@@ -12,7 +12,7 @@ from typing import Any, AsyncIterator
 
 def _json_default(value: Any) -> Any:
     """dataclass → dict（事件中的 Model 等对象可序列化）。"""
-    if is_dataclass(value):
+    if is_dataclass(value) and not isinstance(value, type):
         return asdict(value)
     raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 

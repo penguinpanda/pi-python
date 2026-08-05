@@ -8,6 +8,8 @@
 
 from typing import Any, Literal, Protocol, TypedDict
 
+from typing_extensions import NotRequired
+
 from .context import AuthContext
 
 
@@ -18,8 +20,9 @@ class OAuthCredential(TypedDict, total=False):
     access: str
     refresh: str
     expires: int  # Unix 毫秒
-    # 扩展字段（openai-codex account_id、github-copilot enterprise_url /
-    # available_model_ids 等）直接以额外键存放。
+    # 扩展字段（openai-codex account_id、github-copilot enterprise_url 等）。
+    account_id: NotRequired[str]
+    enterprise_url: NotRequired[str | None]
 
 
 Credential = OAuthCredential | Any  # 实际为 OAuthCredential | ApiKeyCredential

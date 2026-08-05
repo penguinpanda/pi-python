@@ -90,7 +90,7 @@ def _create_client(
     base_url: str,
     timeout: float = 120.0,
     max_retries: int = 2,
-    headers: dict[str, str] | None = None,
+    headers: dict[str, str | None] | None = None,
 ) -> AsyncOpenAI:
     """
     创建 AsyncOpenAI 客户端。
@@ -124,7 +124,7 @@ def _create_client(
         max_retries=max_retries,
     )
     if headers:
-        kwargs["default_headers"] = headers
+        kwargs["default_headers"] = {k: v for k, v in headers.items() if v is not None}
     return AsyncOpenAI(**kwargs)
 
 
@@ -336,14 +336,14 @@ async def chat_completions_stream(
                         )
                     )
                 elif current_kind == "toolCall" and current_index is not None:
-                    block = cast(ToolCall, content_blocks[current_index])
-                    block["raw_arguments"] = current_raw_args
-                    block["arguments"] = parse_tool_arguments(current_raw_args)
+                    tool_block = cast(ToolCall, content_blocks[current_index])
+                    tool_block["raw_arguments"] = current_raw_args
+                    tool_block["arguments"] = parse_tool_arguments(current_raw_args)
                     stream.push(
                         ToolCallEndEvent(
                             type="toolcall_end",
                             content_index=current_index,
-                            tool_call=block,
+                            tool_call=tool_block,
                             partial=_partial(),
                         )
                     )
@@ -464,11 +464,11 @@ async def chat_completions_stream(
                                 )
                             )
 
-                        block = cast(ToolCall, content_blocks[cast(int, current_index)])
+                        tool_block = cast(ToolCall, content_blocks[cast(int, current_index)])
 
                         # 工具名称可能延迟到达。
                         if tc_name:
-                            block["name"] = tc_name
+                            tool_block["name"] = tc_name
 
                         if tc_args:
                             current_raw_args += tc_args

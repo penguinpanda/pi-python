@@ -19,7 +19,14 @@ import re
 from typing import Any, Awaitable, Callable, cast
 from uuid import uuid4
 
-from pi_ai.types import AssistantMessage, ImageContent, TextContent, UserMessage, now_ms
+from pi_ai.types import (
+    AssistantMessage,
+    ImageContent,
+    StreamOptions,
+    TextContent,
+    UserMessage,
+    now_ms,
+)
 
 from ._agent import _default_convert_to_llm
 from ._agent_loop import run_agent_loop
@@ -485,7 +492,7 @@ class AgentHarness:
         if isinstance(self._system_prompt_src, str):
             system_prompt = self._system_prompt_src
         elif callable(self._system_prompt_src):
-            system_prompt = await self._system_prompt_src(
+            prompt_result = self._system_prompt_src(
                 {
                     "session": self._session,
                     "model": self._model,
@@ -494,6 +501,10 @@ class AgentHarness:
                     "resources": resources,
                 }
             )
+            if asyncio.iscoroutine(prompt_result):
+                system_prompt = await cast(Awaitable[str], prompt_result)
+            else:
+                system_prompt = cast(str, prompt_result)
         return _TurnState(
             messages=messages,
             resources=resources,
@@ -532,7 +543,7 @@ class AgentHarness:
                 merged["cache_retention"] = request_options.cache_retention
             if turn_state.thinking_level != "off":
                 merged["reasoning"] = turn_state.thinking_level
-            return await base(model, context, merged)
+            return await base(model, context, cast(StreamOptions, merged))
 
         return _stream
 
@@ -711,7 +722,7 @@ class AgentHarness:
         event_type = event["type"]
 
         if event_type == "message_end":
-            self._session.append_message(event["message"])
+            self._session.append_message(cast(AgentMessage, event.get("message")))
             await self._emit_any(event, signal)
             return
 

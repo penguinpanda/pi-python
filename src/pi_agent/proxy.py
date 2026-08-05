@@ -24,11 +24,20 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
-from typing import Any
+from typing import Any, Literal, cast
 
 import httpx
 
-from pi_ai.types import AssistantMessage, Context, Model, now_ms
+from pi_ai.types import (
+    AssistantMessage,
+    AssistantMessageEvent,
+    ContentBlock,
+    Context,
+    Model,
+    ToolCall,
+    Usage,
+    now_ms,
+)
 from pi_ai.utils._event_stream import AssistantMessageEventStream
 from pi_ai.utils.partial_json import partial_json
 
@@ -37,7 +46,7 @@ class ProxyMessageEventStream(AssistantMessageEventStream):
     """代理消息事件流：done/error 即结束。"""
 
 
-def _empty_usage() -> dict[str, Any]:
+def _empty_usage() -> Usage:
     return {
         "input": 0,
         "output": 0,
@@ -81,15 +90,16 @@ def build_proxy_request_options(options: dict[str, Any]) -> dict[str, Any]:
 def process_proxy_event(
     proxy_event: dict[str, Any],
     partial: AssistantMessage,
-) -> dict[str, Any] | None:
+) -> AssistantMessageEvent | None:
     """根据代理事件重建 partial 消息，返回完整事件（对齐 TS processProxyEvent）。"""
     event_type = proxy_event.get("type")
     content = partial.setdefault("content", [])
 
     def _set_content(index: int, block: dict[str, Any]) -> None:
+        block_c = cast(ContentBlock, block)
         while len(content) <= index:
-            content.append(None)
-        content[index] = block
+            content.append(block_c)
+        content[index] = block_c
 
     if event_type == "start":
         return {"type": "start", "partial": partial}
@@ -195,24 +205,37 @@ def process_proxy_event(
         if not isinstance(block, dict) or block.get("type") != "toolCall":
             return None
         block.pop("partialJson", None)
-        return {
-            "type": "toolcall_end",
-            "content_index": proxy_event["contentIndex"],
-            "tool_call": block,
-            "partial": partial,
-        }
+        return cast(
+            AssistantMessageEvent,
+            {
+                "type": "toolcall_end",
+                "content_index": proxy_event["contentIndex"],
+                "tool_call": cast(ToolCall, block),
+                "partial": partial,
+            },
+        )
 
     if event_type == "done":
-        partial["stop_reason"] = proxy_event["reason"]
-        partial["usage"] = proxy_event.get("usage")
-        return {"type": "done", "reason": proxy_event["reason"], "message": partial}
+        done_reason = proxy_event["reason"]
+        partial["stop_reason"] = done_reason
+        usage = proxy_event.get("usage")
+        if isinstance(usage, dict):
+            partial["usage"] = cast(Usage, usage)
+        return cast(
+            AssistantMessageEvent, {"type": "done", "reason": done_reason, "message": partial}
+        )
 
     if event_type == "error":
-        partial["stop_reason"] = proxy_event["reason"]
+        error_reason: Literal["aborted", "error"] = (
+            "aborted" if proxy_event.get("reason") == "aborted" else "error"
+        )
+        partial["stop_reason"] = error_reason
         if proxy_event.get("errorMessage") is not None:
             partial["error_message"] = proxy_event["errorMessage"]
-        partial["usage"] = proxy_event.get("usage")
-        return {"type": "error", "reason": proxy_event["reason"], "error": partial}
+        usage = proxy_event.get("usage")
+        if isinstance(usage, dict):
+            partial["usage"] = cast(Usage, usage)
+        return {"type": "error", "reason": error_reason, "error": partial}
 
     return None
 
@@ -279,7 +302,9 @@ async def _consume_proxy_stream(
                         stream.push(event)
         stream.end()
     except BaseException as error:
-        reason = "aborted" if (signal is not None and signal.is_set()) else "error"
+        reason: Literal["aborted", "error"] = (
+            "aborted" if (signal is not None and signal.is_set()) else "error"
+        )
         partial["stop_reason"] = reason
         partial["error_message"] = str(error)
         stream.push(

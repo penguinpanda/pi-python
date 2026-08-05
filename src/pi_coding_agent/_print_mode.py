@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import json
 import sys
+from typing import Any, cast
 
-from pi_agent import AgentEvent
+from pi_agent import AgentEvent, AgentMessage
 
 from ._session import AgentSession
 
@@ -41,16 +42,18 @@ async def run_print_mode(session: AgentSession, message: str, images: list | Non
         event_type = event.get("type")
 
         if event_type == "agent_end":
-            messages = event.get("messages", [])
+            messages = cast(list[AgentMessage], event.get("messages") or [])
             # 从后往前找最后一条 assistant 消息
             for msg in reversed(messages):
                 if msg.get("role") == "assistant":
                     # 提取纯文本
                     content = msg.get("content", [])
+                    if not isinstance(content, list):
+                        content = []
                     text_parts: list[str] = []
                     for block in content:
                         if block.get("type") == "text":
-                            text_parts.append(block.get("text", ""))
+                            text_parts.append(str(block.get("text", "")))
                     final_text = "".join(text_parts)
 
                     stop_reason = msg.get("stop_reason", "stop")
@@ -92,7 +95,7 @@ async def run_print_mode_json(
         if pipe_closed:
             return
         try:
-            _emit_json(event)
+            _emit_json(cast(dict[Any, Any], event))
         except BrokenPipeError:
             # 下游提前关闭管道（如 `--json | grep -m1`）：停止输出，静默收尾。
             pipe_closed = True

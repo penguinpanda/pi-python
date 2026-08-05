@@ -4,7 +4,9 @@ import asyncio
 
 from dataclasses import dataclass, field
 
-from typing import Any, Callable, Literal, NotRequired, TypedDict
+from typing import Any, Callable, Literal, TypedDict
+
+from typing_extensions import NotRequired
 
 from .common import (
     AsyncHTTPClient,

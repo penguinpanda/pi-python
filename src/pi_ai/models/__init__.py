@@ -301,6 +301,8 @@ class Models:
         ]
 
         async def _refresh_one(provider: Provider) -> None:
+            refresh_models = provider.refresh_models
+            assert refresh_models is not None
             if opts.signal is not None and opts.signal.is_set():
                 result.aborted = True
                 return
@@ -314,7 +316,7 @@ class Models:
                 signal=opts.signal,
             )
             try:
-                await provider.refresh_models(context)
+                await refresh_models(context)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -324,7 +326,7 @@ class Models:
                 result.errors[provider.id] = exc
                 # 失败后 best-effort 缓存恢复（离线重跑）。
                 try:
-                    await provider.refresh_models(
+                    await refresh_models(
                         RefreshModelsContext(
                             credential=credential,
                             store=store,

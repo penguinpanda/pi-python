@@ -16,7 +16,9 @@ from __future__ import annotations
 import re
 from typing import Any, Callable, cast
 
-from pi_ai.types import AgentMessage, ImageContent, TextContent, Usage
+from pi_ai.types import ImageContent, TextContent, Usage
+
+from .._types import AgentMessage
 
 from .types import (
     ActiveToolsChangeEntry,
@@ -139,12 +141,15 @@ def _create_compaction_summary_message(
     tokens_before: int,
     timestamp: str,
 ) -> AgentMessage:
-    return {
-        "role": "compactionSummary",
-        "summary": summary,
-        "tokensBefore": tokens_before,
-        "timestamp": timestamp,
-    }
+    return cast(
+        AgentMessage,
+        {
+            "role": "compactionSummary",
+            "summary": summary,
+            "tokensBefore": tokens_before,
+            "timestamp": timestamp,
+        },
+    )
 
 
 def _create_branch_summary_message(
@@ -152,12 +157,15 @@ def _create_branch_summary_message(
     from_id: str,
     timestamp: str,
 ) -> AgentMessage:
-    return {
-        "role": "branchSummary",
-        "summary": summary,
-        "fromId": from_id,
-        "timestamp": timestamp,
-    }
+    return cast(
+        AgentMessage,
+        {
+            "role": "branchSummary",
+            "summary": summary,
+            "fromId": from_id,
+            "timestamp": timestamp,
+        },
+    )
 
 
 def _create_custom_message(
@@ -167,14 +175,17 @@ def _create_custom_message(
     details: Any,
     timestamp: str,
 ) -> AgentMessage:
-    return {
-        "role": "custom",
-        "customType": custom_type,
-        "content": content,
-        "display": display,
-        "details": details,
-        "timestamp": timestamp,
-    }
+    return cast(
+        AgentMessage,
+        {
+            "role": "custom",
+            "customType": custom_type,
+            "content": content,
+            "display": display,
+            "details": details,
+            "timestamp": timestamp,
+        },
+    )
 
 
 def session_entry_to_context_messages(
@@ -220,9 +231,9 @@ def session_entry_to_context_messages(
             ]
         return []
     if entry_type == "custom":
-        custom = cast(CustomEntry, entry)
-        projector = (options.entry_projectors if options else {}).get(custom["customType"])
-        return list(projector(custom, index, entries)) if projector else []
+        custom_entry = cast(CustomEntry, entry)
+        projector = (options.entry_projectors if options else {}).get(custom_entry["customType"])
+        return list(projector(custom_entry, index, entries)) if projector else []
     return []
 
 
@@ -235,10 +246,7 @@ def build_session_context(
     messages: list[AgentMessage] = []
     for index, entry in enumerate(context_entries):
         messages.extend(session_entry_to_context_messages(entry, index, context_entries, options))
-    return {
-        **state,
-        "messages": messages,
-    }
+    return cast(SessionContext, {**state, "messages": messages})
 
 
 def _entries_by_id(

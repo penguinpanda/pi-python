@@ -7,13 +7,14 @@ import inspect
 import json
 import sys
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingsMap
 
 from ..._config import get_sessions_dir
 from ..._session import AgentSession
+from pi_agent import AgentEvent
 from ...model_runtime import ModelRuntime
 from ...extensions import ExtensionRunner
 from ...extensions.registry import ExtensionRegistry
@@ -205,11 +206,11 @@ class PiTuiApp(App):
         self._needs_trust_decision = needs_trust_decision
 
         # 实例级 BINDINGS / CSS：必须在 super().__init__() 之前设置。
-        self.BINDINGS = [
+        self.BINDINGS = [  # type: ignore[misc]
             Binding(binding.key, binding.action, binding.description)
             for binding in self._keybindings.all_bindings()
         ]
-        self.CSS = _build_css(self._theme.colors)
+        self.CSS = _build_css(self._theme.colors)  # type: ignore[misc]
         super().__init__()
         # Textual 8 的运行时绑定来自 node._bindings（类级 BINDINGS 构建）；
         # 实例级 self.BINDINGS 需显式重建映射，否则快捷键不会分发。
@@ -273,7 +274,7 @@ class PiTuiApp(App):
     def on_mount(self) -> None:
         self._bind_session()
         for message in self._session.get_messages():
-            self._chat.add_message_agent(message)
+            self._chat.add_message_agent(cast(dict[str, Any], message))
         self._render_missed_summaries()
         self._update_footer()
         self._editor.focus()
@@ -292,7 +293,9 @@ class PiTuiApp(App):
         if self._unsubscribe is not None:
             self._unsubscribe()
             self._unsubscribe = None
-        self._unsubscribe = self._session.subscribe(self._on_session_event)
+        self._unsubscribe = self._session.subscribe(
+            cast(Callable[[AgentEvent], None], self._on_session_event)
+        )
 
     # ------------------------------------------------------------------
     # 组件快捷访问
@@ -383,7 +386,7 @@ class PiTuiApp(App):
 
             def _scroll_to_entry() -> None:
                 try:
-                    self._chat.scroll_visible(entry, animate=False)
+                    self._chat.scroll_to_widget(entry, animate=False)
                 except Exception:
                     pass
 
@@ -605,7 +608,7 @@ class PiTuiApp(App):
         self._notify(f"{label}: saved. Project resources load on /reload or restart.")
 
     def _open_settings_selector(self) -> None:
-        items = [
+        items: list[dict[str, Any]] = [
             {
                 "key": "autoCompaction",
                 "label": "Auto-compact",
@@ -813,7 +816,7 @@ class PiTuiApp(App):
         self._chat.set_visibility(show_tools=self._show_tools, show_thinking=self._show_thinking)
         self._chat.clear_messages()
         for message in self._session.get_messages():
-            self._chat.add_message_agent(message)
+            self._chat.add_message_agent(cast(dict[str, Any], message))
 
     def action_follow_up(self) -> None:
         text = self._editor.text.strip()
@@ -854,7 +857,11 @@ class PiTuiApp(App):
 
     async def _create_new_session(self) -> None:
         try:
-            result = self._session_factory()
+            factory = self._session_factory
+            if factory is None:
+                self._notify("New session not available")
+                return
+            result = factory()
             new_session = await result if inspect.isawaitable(result) else result
         except Exception as exc:
             self._notify(f"New session failed: {exc}")
@@ -947,7 +954,7 @@ class PiTuiApp(App):
                 ).apply()
             self._slash_registry = registry
             self._slash_context.slash_registry = registry
-            self.BINDINGS = [
+            self.BINDINGS = [  # type: ignore[misc]
                 Binding(binding.key, binding.action, binding.description)
                 for binding in self._keybindings.all_bindings()
             ]
@@ -961,7 +968,7 @@ class PiTuiApp(App):
         # 4. 主题：重新解析并刷新 CSS。
         try:
             self._theme = self._theme_loader.resolve(self._theme_name)
-            self.CSS = _build_css(self._theme.colors)
+            self.CSS = _build_css(self._theme.colors)  # type: ignore[misc]
             self.refresh_css()
             details.append(f"theme {self._theme.name}")
         except Exception as exc:
@@ -985,7 +992,7 @@ class PiTuiApp(App):
         self._chat.clear_messages()
         self._rendered_summary_ids = set()
         for message in new_session.get_messages():
-            self._chat.add_message_agent(message)
+            self._chat.add_message_agent(cast(dict[str, Any], message))
         self._render_missed_summaries()
         self._update_footer()
         self._set_status(f"Session {new_session.session_id}")
@@ -1010,7 +1017,10 @@ class PiTuiApp(App):
 
     async def _apply_resumed_session(self, path: str) -> None:
         try:
-            result = self._resume_factory(path)
+            factory = self._resume_factory
+            if factory is None:
+                return
+            result = factory(path)
             new_session = await result if inspect.isawaitable(result) else result
         except Exception as exc:
             self._notify(f"Resume failed: {exc}")
@@ -1021,7 +1031,7 @@ class PiTuiApp(App):
         self._chat.clear_messages()
         self._rendered_summary_ids = set()
         for message in new_session.get_messages():
-            self._chat.add_message_agent(message)
+            self._chat.add_message_agent(cast(dict[str, Any], message))
         self._render_missed_summaries()
         self._update_footer()
         self._set_status(f"Resumed {new_session.session_id}")
@@ -1035,12 +1045,17 @@ class PiTuiApp(App):
                 entry_id = entry.get("id")
                 if entry_id in self._rendered_summary_ids:
                     continue
+                if not entry_id:
+                    continue
                 self._rendered_summary_ids.add(entry_id)
                 self._chat.add_message_agent(
-                    {
-                        "role": "branchSummary",
-                        "summary": entry.get("summary", ""),
-                    }
+                    cast(
+                        dict[str, Any],
+                        {
+                            "role": "branchSummary",
+                            "summary": str(entry.get("summary", "")),
+                        },
+                    )
                 )
         except Exception:
             pass

@@ -21,7 +21,7 @@ from typing import Any, Callable, Literal, Protocol, Tuple, TypeAlias
 # Result / 错误
 # ---------------------------------------------------------------------------
 
-Result: TypeAlias = Tuple[Literal[True], Any] | Tuple[Literal[False], "FileError"]
+Result: TypeAlias = Tuple[Literal[True], Any] | Tuple[Literal[False], "FileError | ExecutionError"]
 
 
 def ok(value: Any) -> Tuple[Literal[True], Any]:
@@ -659,10 +659,11 @@ class PythonExecutionEnv:
                         pass
 
         abort_waiter: asyncio.Task | None = None
-        if options.abort_signal is not None:
+        abort_signal = options.abort_signal
+        if abort_signal is not None:
 
             async def _on_abort() -> None:
-                await options.abort_signal.wait()
+                await abort_signal.wait()
                 await _kill_tree()
 
             abort_waiter = asyncio.create_task(_on_abort())

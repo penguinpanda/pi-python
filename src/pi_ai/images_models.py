@@ -7,7 +7,7 @@
 
 import asyncio
 
-from typing import Any, Awaitable, Callable, Protocol
+from typing import Any, Awaitable, Callable, Protocol, cast
 
 from .types import (
     AssistantImages,
@@ -173,8 +173,9 @@ class ImagesModels:
                 if headers:
                     merged.update({k: v for k, v in headers.items() if v is not None})
                 headers = merged
-            request_options: ImagesOptions = dict(options)
-            request_options["api_key"] = api_key
+            request_options = cast(ImagesOptions, dict(options))
+            if api_key:
+                request_options["api_key"] = api_key
             if headers:
                 request_options["headers"] = headers
 

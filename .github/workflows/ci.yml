@@ -34,8 +34,7 @@ jobs:
         run: uv run ruff check .
       - name: Ruff format check
         run: uv run ruff format --check .
-      - name: Type check (baseline, non-blocking)
-        run: uv run mypy src/pi_ai src/pi_agent
-        continue-on-error: true
+      - name: Type check
+        run: uv run mypy src/pi_ai src/pi_agent src/pi_coding_agent src/pi_tui src/pi_protocol src/pi_storage src/pi_server src/pi_evals
       - name: Tests
         run: uv run pytest -q -k "not live and not oauth and not device" --cov=pi_ai --cov=pi_agent --cov=pi_coding_agent --cov-report=term-missing

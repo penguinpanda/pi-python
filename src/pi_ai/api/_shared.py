@@ -214,24 +214,26 @@ def to_openai_messages(
             tool_calls: list[dict[str, Any]] = []
             text_parts: list[str] = []
 
-            for block in asst_msg["content"]:
-                if block["type"] == "text":
-                    text_parts.append(block["text"])
-                elif block["type"] == "toolCall":
+            for asst_block in asst_msg["content"]:
+                if asst_block["type"] == "text":
+                    text_parts.append(asst_block["text"])
+                elif asst_block["type"] == "toolCall":
                     tool_calls.append(
                         {
-                            "id": block["id"],
+                            "id": asst_block["id"],
                             "type": "function",
                             "function": {
-                                "name": block["name"],
+                                "name": asst_block["name"],
                                 "arguments": json.dumps(
-                                    block["arguments"] if block["arguments"] is not None else {},
+                                    asst_block["arguments"]
+                                    if asst_block["arguments"] is not None
+                                    else {},
                                     ensure_ascii=False,
                                 ),
                             },
                         }
                     )
-                elif block["type"] == "thinking":
+                elif asst_block["type"] == "thinking":
                     # Skip assistant thinking blocks — replayed as text
                     pass
 

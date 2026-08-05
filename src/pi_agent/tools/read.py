@@ -79,7 +79,10 @@ def create_read_tool(options: ReadToolOptions | None = None) -> AgentTool:
                     content=[
                         TextContent(type="text", text=text),
                         ImageContent(
-                            type="image", data=processed["data"], mimeType=processed["mimeType"]
+                            type="image",
+                            url=None,
+                            data=processed["data"],
+                            mime_type=processed["mimeType"],
                         ),
                     ],
                     details=None,
@@ -97,7 +100,12 @@ def create_read_tool(options: ReadToolOptions | None = None) -> AgentTool:
             return AgentToolResult(
                 content=[
                     TextContent(type="text", text=f"Read image file [{mime_type}]"),
-                    ImageContent(type="image", data=encode_base64(data), mimeType=mime_type),
+                    ImageContent(
+                        type="image",
+                        url=None,
+                        data=encode_base64(data),
+                        mime_type=mime_type,
+                    ),
                 ],
                 details=None,
             )

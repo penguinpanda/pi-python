@@ -593,7 +593,7 @@ async def test_slash_scoped_models_opens_selector(tmp_path):
             pilot=pilot,
             message="scoped list populated",
         )
-        app.screen.action_toggle()
+        app.screen.action_toggle_scoped()
         app.screen.action_cancel()
         await _wait_until(
             lambda: len(session.scoped_models) == 1,

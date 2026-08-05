@@ -314,7 +314,7 @@ async def _async_main(args: list[str] | None = None) -> int:
         )
 
     # 运行 print 模式
-    message = parsed.message or _read_stdin()
+    message = parsed.message or _read_stdin() or ""
     if not message:
         print(
             "Error: No input message provided. Use -p 'message' or pipe via stdin.", file=sys.stderr

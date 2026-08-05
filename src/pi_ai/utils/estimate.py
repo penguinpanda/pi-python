@@ -117,7 +117,9 @@ def estimate_message_tokens(message: Message) -> int:
             chars += len(block["thinking"])
         else:
             # toolCall（及未知块）：工具名 + 参数 JSON。
-            chars += len(block.get("name", "")) + len(_safe_json_stringify(block.get("arguments")))
+            chars += len(str(block.get("name") or "")) + len(
+                _safe_json_stringify(block.get("arguments"))
+            )
     return math.ceil(chars / CHARS_PER_TOKEN)
 
 

@@ -18,11 +18,12 @@ from typing import (
     Awaitable,
     Callable,
     Literal,
-    NotRequired,
     Protocol,
     TYPE_CHECKING,
     TypedDict,
 )
+
+from typing_extensions import NotRequired
 
 from .common import (
     AsyncHTTPClient,
@@ -48,9 +49,12 @@ if TYPE_CHECKING:
 
 
 class BaseEvent(TypedDict):
-    """事件基础协议：所有流事件共享 type 判别字段。"""
+    """事件基础协议（标记基类）。
 
-    type: str
+    判别字段 ``type`` 由各具体子类声明为唯一 Literal，
+    以构成 AssistantMessageEvent 可辨识联合（mypy 不支持基类收窄字段类型）。
+    """
+
     timestamp: NotRequired[int]  # 可选：事件产生时的 Unix 毫秒时间戳
 
 

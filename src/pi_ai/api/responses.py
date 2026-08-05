@@ -201,7 +201,7 @@ def _create_client(
     base_url: str = "",
     timeout: float = 180.0,
     max_retries: int = 2,
-    headers: dict[str, str] | None = None,
+    headers: dict[str, str | None] | None = None,
 ) -> AsyncOpenAI:
     """
     创建 AsyncOpenAI 客户端。
@@ -226,7 +226,7 @@ def _create_client(
     if base_url:
         kwargs["base_url"] = base_url.rstrip("/")
     if headers:
-        kwargs["default_headers"] = headers
+        kwargs["default_headers"] = {k: v for k, v in headers.items() if v is not None}
 
     return AsyncOpenAI(**kwargs)
 
@@ -646,34 +646,34 @@ async def responses_stream(
                 """结束当前累积块并发射对应的 *_end 事件。"""
                 nonlocal current_kind, current_index, current_tool_id
                 if current_kind == "text" and current_index is not None:
-                    block = content_blocks[current_index]
+                    text_block = cast(TextContent, content_blocks[current_index])
                     stream.push(
                         TextEndEvent(
                             type="text_end",
                             content_index=current_index,
-                            content=block["text"],
+                            content=text_block["text"],
                             partial=_partial(),
                         )
                     )
                 elif current_kind == "thinking" and current_index is not None:
-                    block = content_blocks[current_index]
+                    thinking_block = cast(ThinkingContent, content_blocks[current_index])
                     stream.push(
                         ThinkingEndEvent(
                             type="thinking_end",
                             content_index=current_index,
-                            content=block["thinking"],
+                            content=thinking_block["thinking"],
                             partial=_partial(),
                         )
                     )
                 elif current_kind == "toolCall" and current_index is not None:
-                    block = content_blocks[current_index]
-                    block["raw_arguments"] = current_raw_args
-                    block["arguments"] = parse_tool_arguments(current_raw_args)
+                    tool_block = cast(ToolCall, content_blocks[current_index])
+                    tool_block["raw_arguments"] = current_raw_args
+                    tool_block["arguments"] = parse_tool_arguments(current_raw_args)
                     stream.push(
                         ToolCallEndEvent(
                             type="toolcall_end",
                             content_index=current_index,
-                            tool_call=cast(ToolCall, block),
+                            tool_call=tool_block,
                             partial=_partial(),
                         )
                     )
@@ -730,7 +730,7 @@ async def responses_stream(
                 if event_type == "response.output_text.delta":
                     delta = getattr(event, "delta", "")
                     idx = _begin_text()
-                    content_blocks[idx]["text"] += delta
+                    cast(TextContent, content_blocks[idx])["text"] += delta
                     stream.push(
                         TextDeltaEvent(
                             type="text_delta",
@@ -831,7 +831,7 @@ async def responses_stream(
                     if summary and getattr(summary, "type", None) == "summary_text":
                         text = getattr(summary, "text", "")
                         idx = _begin_thinking()
-                        content_blocks[idx]["thinking"] += text
+                        cast(ThinkingContent, content_blocks[idx])["thinking"] += text
                         stream.push(
                             ThinkingDeltaEvent(
                                 type="thinking_delta",
@@ -844,7 +844,7 @@ async def responses_stream(
                 elif event_type == "response.reasoning_text.delta":
                     delta = getattr(event, "delta", "")
                     idx = _begin_thinking()
-                    content_blocks[idx]["thinking"] += delta
+                    cast(ThinkingContent, content_blocks[idx])["thinking"] += delta
                     stream.push(
                         ThinkingDeltaEvent(
                             type="thinking_delta",
@@ -863,7 +863,9 @@ async def responses_stream(
                         output_text = getattr(resp, "output_text", "")
                         if output_text:
                             if current_kind == "text" and current_index is not None:
-                                content_blocks[current_index]["text"] = output_text
+                                cast(TextContent, content_blocks[current_index])["text"] = (
+                                    output_text
+                                )
                             else:
                                 _end_current_block()
                                 current_kind = "text"

@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from pi_ai.types import AgentMessage
+from pi_ai.types import Message
+
+from ._types import AgentMessage
 
 from .compaction import SUMMARIZATION_SYSTEM_PROMPT, complete_simple_with_retries
 from .compaction_utils import (
@@ -197,7 +199,7 @@ async def generate_branch_summary(
 
     from pi_ai import Context, now_ms
 
-    summarization_messages = [
+    summarization_messages: list[Message] = [
         {
             "role": "user",
             "content": [{"type": "text", "text": prompt_text}],

@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from pi_agent import Agent, AgentOptions
 from pi_ai import Models
@@ -102,7 +102,7 @@ def _transcript_events(messages: list[dict]) -> list[dict]:
 
 
 def _aggregate_usage(messages: list[dict]) -> dict:
-    totals = {
+    totals: dict[str, Any] = {
         "provider": None,
         "model": None,
         "input": 0,
@@ -217,15 +217,17 @@ class PiCodingAgentHarness:
                 stop_reason = last_message.get("stop_reason")
                 if stop_reason not in (None, "stop"):
                     errors.append(
-                        last_message.get("error_message")
-                        or f"Agent run ended with unexpected stop reason: {stop_reason}"
+                        str(
+                            last_message.get("error_message")
+                            or f"Agent run ended with unexpected stop reason: {stop_reason}"
+                        )
                     )
                 last_output = session.get_last_assistant_text() or ""
         except Exception as exc:
             errors.append(str(exc))
 
-        transcript = _transcript_events(session.get_messages())
-        usage = _aggregate_usage(session.get_messages())
+        transcript = _transcript_events(cast(list[dict], session.get_messages()))
+        usage = _aggregate_usage(cast(list[dict], session.get_messages()))
         artifacts = {
             "sessionId": session.session_id,
             "transcript": transcript,

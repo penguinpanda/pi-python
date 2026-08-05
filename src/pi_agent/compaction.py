@@ -9,11 +9,12 @@ from __future__ import annotations
 import math
 import uuid
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
-from pi_ai.types import AgentMessage, Usage
+from pi_ai.types import Message, Usage
 from pi_ai.utils.retry import RetryPolicy, retry_assistant_call
 
+from ._types import AgentMessage
 from .compaction_utils import (
     compute_file_lists,
     create_file_ops,
@@ -265,7 +266,7 @@ async def complete_simple_with_retries(
 
 def _combine_usage(first: Usage, second: Usage) -> Usage:
     def _g(usage: Usage, key: str) -> int:
-        return int(usage.get(key, 0) or 0)
+        return int(cast(Any, usage).get(key, 0) or 0)
 
     def _cost(usage: Usage) -> dict[str, float]:
         cost = usage.get("cost") or {}
@@ -337,7 +338,7 @@ async def generate_summary_with_usage(
 
     from pi_ai import Context, now_ms
 
-    summarization_messages = [
+    summarization_messages: list[Message] = [
         {
             "role": "user",
             "content": [{"type": "text", "text": prompt_text}],
@@ -520,7 +521,7 @@ async def _generate_turn_prefix_summary(
     prompt_text = f"<conversation>\n{conversation_text}\n</conversation>\n\n{TURN_PREFIX_SUMMARIZATION_PROMPT}"
     from pi_ai import Context, now_ms
 
-    summarization_messages = [
+    summarization_messages: list[Message] = [
         {
             "role": "user",
             "content": [{"type": "text", "text": prompt_text}],

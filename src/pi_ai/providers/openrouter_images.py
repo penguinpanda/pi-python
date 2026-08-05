@@ -152,6 +152,7 @@ async def generate_images(
                 output["output"].append(
                     {
                         "type": "image",
+                        "url": None,
                         "mime_type": match.group(1),
                         "data": match.group(2),
                     }

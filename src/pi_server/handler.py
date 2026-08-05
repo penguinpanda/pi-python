@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import Any, Callable
+from typing import Any, Callable, Literal, cast
 
 from pi_agent import Agent, AgentOptions
 from pi_protocol.schemas import (
@@ -26,6 +26,7 @@ from pi_protocol.schemas import (
     ModelCost,
     ModelMetadata,
     ModelRef,
+    ProtocolErrorCode,
     PromptCommand,
     PromptResult,
     ProtocolError,
@@ -37,6 +38,7 @@ from pi_protocol.schemas import (
     ServerSnapshotEvent,
     SessionSnapshot,
     SessionSummary,
+    TranscriptItem,
     SetModelCommand,
     SetModelResult,
     SetThinkingCommand,
@@ -144,21 +146,24 @@ def _transcript_item(message: dict) -> dict | None:
         return UserTranscriptItem(
             id=str(message.get("id") or _new_id()),
             role="user",
-            content=_content_to_protocol(message.get("content")),
+            content=cast(Any, _content_to_protocol(message.get("content"))),
             timestamp=timestamp,
         ).model_dump(mode="json")
     if role == "assistant":
         model = message.get("model") or ""
         provider = message.get("provider") or ""
-        stop_reason = _STOP_REASON_MAP.get(message.get("stop_reason"))
+        stop_reason = _STOP_REASON_MAP.get(cast(str, message.get("stop_reason") or ""))
         return AssistantTranscriptItem(
             id=str(message.get("id") or _new_id()),
             role="assistant",
-            content=_content_to_protocol(message.get("content")),
+            content=cast(Any, _content_to_protocol(message.get("content"))),
             status="error" if message.get("stop_reason") == "error" else "complete",
             model=ModelRef(provider=provider or "?", id=model or "?"),
             usage=_usage_to_protocol(message.get("usage")),
-            stopReason=stop_reason,
+            stopReason=cast(
+                Literal["stop", "length", "tool_use", "error", "aborted"] | None,
+                stop_reason,
+            ),
             errorMessage=message.get("error_message"),
             timestamp=timestamp,
         ).model_dump(mode="json")
@@ -169,7 +174,7 @@ def _transcript_item(message: dict) -> dict | None:
             toolCallId=str(message.get("tool_call_id") or _new_id()),
             toolName=str(message.get("tool_name") or "?"),
             input=message.get("tool_input"),
-            content=_content_to_protocol(message.get("content")),
+            content=cast(Any, _content_to_protocol(message.get("content"))),
             status="error" if message.get("is_error") else "complete",
             isError=bool(message.get("is_error")),
             usage=_usage_to_protocol(message.get("usage")),
@@ -253,7 +258,7 @@ class ServerSession:
         return SessionSnapshot(
             **self.summary().model_dump(mode="json"),
             revision=self.revision,
-            transcript=transcript,
+            transcript=cast(list[TranscriptItem], transcript),
             queuedSteer=[],
             queuedSteerCount=session.pending_message_count,
         )
@@ -360,9 +365,13 @@ class PiServer:
                 type="response",
                 id=envelope.id,
                 ok=False,
-                error=ProtocolError(code=error.code, message=error.message, details=error.details),
+                error=ProtocolError(
+                    code=cast(ProtocolErrorCode, error.code),
+                    message=error.message,
+                    details=error.details,
+                ),
             ).model_dump(mode="json")
-            events: list[dict] = []
+            events = []
         return [response, *events]
 
     # ------------------------------------------------------------------

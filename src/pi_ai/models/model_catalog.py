@@ -5,7 +5,7 @@ flattenModelCatalog 把按 api 分组的原始模型表
 支持 O(1) 按 ID 查找。
 """
 
-from typing import Any, TypeAlias
+from typing import Any, TypeAlias, cast
 
 from ..types import Model
 
@@ -25,7 +25,7 @@ def flatten_model_catalog(
     result: dict[str, Model] = {}
     for models_by_id in groups.values():
         for model_id, model in models_by_id.items():
-            result[model_id] = model
+            result[model_id] = cast(Model, model)
     return result
 
 

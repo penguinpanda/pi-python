@@ -15,9 +15,10 @@ import inspect
 import json
 import sys
 from dataclasses import asdict
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable, cast
 
 from pi_ai.models.models_store import model_to_dict
+from pi_ai.types.common import ModelThinkingLevel
 
 from .._session import AgentSession
 from ..model_runtime import ModelRuntime
@@ -189,7 +190,7 @@ class RpcUiContext:
     def resolve_response(self, response: dict[str, Any]) -> None:
         """处理客户端返回的 extension_ui_response。"""
         request_id = response.get("id")
-        future = self._pending.get(request_id)
+        future = self._pending.get(cast(str, request_id))
         if future is not None and not future.done():
             future.set_result(response)
 
@@ -211,7 +212,7 @@ class RpcMessageHandler:
         model_runtime: ModelRuntime,
         *,
         ui_context: RpcUiContext | None = None,
-        session_factory: Callable[[], AgentSession] | None = None,
+        session_factory: Callable[[], AgentSession | Awaitable[AgentSession]] | None = None,
         session_rebuilder=None,
     ) -> None:
         self.session = session
@@ -401,7 +402,7 @@ class RpcMessageHandler:
         level = cmd.get("level")
         if not isinstance(level, str):
             return error_response(command_id, "set_thinking_level", "level is required")
-        self.session.set_thinking_level(level)
+        self.session.set_thinking_level(cast(ModelThinkingLevel, level))
         return success_response(command_id, "set_thinking_level")
 
     async def _handle_cycle_thinking_level(self, _cmd: dict, command_id: str | None) -> dict:
@@ -490,8 +491,8 @@ class RpcMessageHandler:
             command_id,
             "bash",
             {
-                "output": (result.stdout or "") + (result.stderr or ""),
-                "exit_code": result.exit_code,
+                "output": (cast(Any, result).stdout or "") + (cast(Any, result).stderr or ""),
+                "exit_code": cast(Any, result).exit_code,
                 "canceled": False,
             },
         )
@@ -549,7 +550,7 @@ class RpcMessageHandler:
         return success_response(
             command_id,
             "fork",
-            {"text": _entry_text(target), "cancelled": False},
+            {"text": _entry_text(cast(dict[Any, Any], target)), "cancelled": False},
         )
 
     async def _handle_clone(self, _cmd: dict, command_id: str | None) -> dict:
@@ -593,7 +594,8 @@ class RpcMessageHandler:
 
     async def _handle_get_fork_messages(self, _cmd: dict, command_id: str | None) -> dict:
         messages = []
-        for entry in self.session.session_manager.get_branch():
+        for raw_entry in self.session.session_manager.get_branch():
+            entry = cast(dict[str, Any], raw_entry)
             if entry.get("type") != "message":
                 continue
             message = entry.get("message") or {}
@@ -695,7 +697,7 @@ async def run_rpc_mode(
     session: AgentSession,
     model_runtime: ModelRuntime,
     *,
-    session_factory: Callable[[], AgentSession] | None = None,
+    session_factory: Callable[[], AgentSession | Awaitable[AgentSession]] | None = None,
     session_rebuilder=None,
     stdin=None,
     stdout=None,
@@ -715,9 +717,9 @@ async def run_rpc_mode(
         session_factory=session_factory,
         session_rebuilder=session_rebuilder,
     )
-    write_queue: asyncio.Queue[bytes] = asyncio.Queue()
+    write_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
 
-    def output(obj: dict) -> None:
+    def output(obj: dict[Any, Any]) -> None:
         write_queue.put_nowait(serialize_json_line(obj).encode("utf-8"))
 
     async def _flush_output() -> None:
@@ -743,7 +745,7 @@ async def run_rpc_mode(
         if unsubscribe is not None:
             unsubscribe()
             unsubscribe = None
-        unsubscribe = handler.session.subscribe(lambda event: output(event))
+        unsubscribe = handler.session.subscribe(lambda event: output(cast(dict[Any, Any], event)))
 
     rebind()
 

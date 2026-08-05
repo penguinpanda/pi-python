@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, NotRequired, TypedDict
+from typing import Any, TypedDict
+
+from typing_extensions import NotRequired
 
 
 class RpcSessionState(TypedDict, total=False):

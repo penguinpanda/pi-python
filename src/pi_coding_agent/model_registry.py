@@ -80,10 +80,13 @@ class ModelRegistry:
                 "env": None,
                 "error": None,
             }
+        auth_headers = resolution.auth.get("headers")
         return {
             "ok": True,
             "api_key": resolution.auth.get("api_key"),
-            "headers": resolution.auth.get("headers"),
+            "headers": (
+                {k: v for k, v in auth_headers.items() if v is not None} if auth_headers else None
+            ),
             "env": resolution.env,
             "error": None,
         }
