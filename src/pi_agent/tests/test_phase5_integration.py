@@ -59,6 +59,12 @@ def _assistant_with_usage(text: str):
     }
 
 
+async def _context_messages(harness: AgentHarness) -> list[dict]:
+    """DAG Session 投影后的 LLM 上下文消息。"""
+    context = await harness._session.build_context()
+    return list(context["messages"])
+
+
 class TestHarnessToolsIntegration:
     @pytest.mark.asyncio
     async def test_harness_runs_read_tool(self, tmp_path):
@@ -90,11 +96,11 @@ class TestHarnessToolsIntegration:
                 for block in m["content"]
                 if isinstance(block, dict) and block.get("type") == "text"
             )
-            for m in harness._session.messages
+            for m in await _context_messages(harness)
             if isinstance(m.get("content"), list)
         )
         assert "harness tool content" in session_text
-        roles = [m.get("role") for m in harness._session.messages]
+        roles = [m.get("role") for m in await _context_messages(harness)]
         assert "toolResult" in roles
 
     @pytest.mark.asyncio
@@ -162,7 +168,7 @@ class TestHarnessToolsIntegration:
                 for block in m["content"]
                 if isinstance(block, dict) and block.get("type") == "text"
             )
-            for m in harness._session.messages
+            for m in await _context_messages(harness)
             if isinstance(m.get("content"), list)
         )
         assert "please continue" in text
@@ -231,7 +237,7 @@ class TestHarnessSkillInstructions:
                 for block in m["content"]
                 if isinstance(block, dict) and block.get("type") == "text"
             )
-            for m in harness._session.messages
+            for m in await _context_messages(harness)
             if isinstance(m.get("content"), list)
         )
         assert "Read the docs carefully." in text

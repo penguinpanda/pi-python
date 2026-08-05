@@ -1,8 +1,8 @@
-"""AgentHarness 顶层协调器（Phase 2 骨架）。
+"""AgentHarness 顶层协调器。
 
 对齐 TS `harness/agent-harness.ts` 的核心结构：
 
-- 拥有 Session（Phase 2 使用最小内存会话，Phase 3 替换为 DAG Session）
+- 拥有 DAG Session（默认内存存储；可注入 SessionStorage / Session）
 - 阶段状态机（2.2）：idle → turn / compaction / branch_summary → idle，
   通过 `_active_tasks` 跟踪运行中的操作与配置变更
 - 双事件系统（2.3）：`subscribe()` 通配符订阅 + `on()` 类型化 hook
@@ -30,6 +30,15 @@ from pi_ai.types import (
 
 from ._agent import _default_convert_to_llm
 from ._agent_loop import run_agent_loop
+from .branch_summarization import collect_entries_for_branch_summary, generate_branch_summary
+from .compaction import (
+    DEFAULT_COMPACTION_SETTINGS,
+    CompactionSettings,
+    compact as run_compaction,
+    prepare_compaction,
+)
+from .session.memory import InMemorySessionStorage
+from .session.session import Session
 from ._harness_types import (
     AbortEvent,
     AbortResult,
@@ -52,6 +61,8 @@ from ._harness_types import (
     SavePointEvent,
     SessionBeforeCompactEvent,
     SessionBeforeTreeEvent,
+    SessionCompactEvent,
+    SessionTreeEvent,
     SettledEvent,
     Skill,
     ThinkingLevelUpdateEvent,
@@ -83,9 +94,9 @@ from ._types import (
 
 
 class AgentHarnessSession:
-    """线性内存会话：消息列表 + 会话 ID。
+    """兼容占位（已废弃）：Phase 3 起 harness 使用 pi_agent.Session。
 
-    Phase 3 将用真正的 DAG Session 替换本类；harness 只依赖这里的最小接口。
+    保留导出以避免破坏已有引用；新代码请使用 pi_agent.Session。
     """
 
     def __init__(self, session_id: str | None = None) -> None:
@@ -265,7 +276,12 @@ class AgentHarness:
     """Agent 应用的顶层协调器（Phase 2 骨架）。"""
 
     def __init__(self, options: AgentHarnessOptions) -> None:
-        self._session: AgentHarnessSession = options.session or AgentHarnessSession()
+        self._session: Any = self._resolve_session(options.session)
+        self._compaction_settings: CompactionSettings = (
+            options.compaction_settings
+            if options.compaction_settings is not None
+            else DEFAULT_COMPACTION_SETTINGS
+        )
         self._model = options.model
         self._thinking_level: ThinkingLevel = options.thinking_level
         self._system_prompt_src: AgentHarnessSystemPrompt | None = options.system_prompt
@@ -321,6 +337,27 @@ class AgentHarness:
     def _assert_not_shut_down(self) -> None:
         if self._is_shutdown:
             raise AgentHarnessError("invalid_state", "AgentHarness has been shut down")
+
+    def _resolve_session(self, session: Any) -> Any:
+        if session is None:
+            return Session(InMemorySessionStorage())
+        if isinstance(session, AgentHarnessSession):
+            raise AgentHarnessError(
+                "invalid_argument",
+                "AgentHarnessSession is deprecated; pass pi_agent.Session or a SessionStorage",
+            )
+        if isinstance(session, Session):
+            return session
+        if hasattr(session, "get_metadata") and hasattr(session, "append_entry"):
+            return Session(session)
+        raise AgentHarnessError(
+            "invalid_argument",
+            "session must be pi_agent.Session or a SessionStorage",
+        )
+
+    async def _get_session_id(self) -> str:
+        metadata = await self._session.get_metadata()
+        return str(metadata["id"])
 
     # ------------------------------------------------------------------
     # 任务跟踪 / 阶段状态机（2.2）
@@ -481,7 +518,8 @@ class AgentHarness:
 
     async def _create_turn_state(self) -> _TurnState:
         self._assert_not_shut_down()
-        messages = list(self._session.messages)
+        context = await self._session.build_context()
+        messages = list(context["messages"])
         resources = self._get_resources()
         tool_context = await self._resolve_tool_context()
         tools = list(self._tools.values())
@@ -510,7 +548,7 @@ class AgentHarness:
             resources=resources,
             tool_context=tool_context,
             stream_options=self._stream_options.clone(),
-            session_id=self._session.session_id,
+            session_id=await self._get_session_id(),
             system_prompt=system_prompt,
             model=self._model,
             thinking_level=self._thinking_level,
@@ -522,27 +560,45 @@ class AgentHarness:
     # Loop 接线
     # ------------------------------------------------------------------
 
+    async def _apply_request_options(
+        self,
+        model: Any,
+        session_id: str,
+        options: Any,
+    ) -> dict[str, Any]:
+        request_options = await self._emit_before_provider_request(
+            model,
+            session_id,
+            self._stream_options.clone(),
+        )
+        merged = dict(options or {})
+        if request_options.max_retries is not None:
+            merged["max_retries"] = request_options.max_retries
+        if request_options.max_retry_delay_ms is not None:
+            merged["max_retry_delay_ms"] = request_options.max_retry_delay_ms
+        if request_options.headers is not None:
+            merged["headers"] = dict(request_options.headers)
+        if request_options.cache_retention is not None:
+            merged["cache_retention"] = request_options.cache_retention
+        if self._thinking_level != "off":
+            merged["reasoning"] = self._thinking_level
+        return merged
+
     def _create_stream_fn(self, get_turn_state: Callable[[], _TurnState]) -> StreamFn:
         base = self._stream_fn or get_default_stream_fn()
 
         async def _stream(model: Any, context: Any, options: Any = None) -> Any:
             turn_state = get_turn_state()
-            request_options = await self._emit_before_provider_request(
-                model,
-                turn_state.session_id,
-                turn_state.stream_options.clone(),
-            )
-            merged = dict(options or {})
-            if request_options.max_retries is not None:
-                merged["max_retries"] = request_options.max_retries
-            if request_options.max_retry_delay_ms is not None:
-                merged["max_retry_delay_ms"] = request_options.max_retry_delay_ms
-            if request_options.headers is not None:
-                merged["headers"] = dict(request_options.headers)
-            if request_options.cache_retention is not None:
-                merged["cache_retention"] = request_options.cache_retention
-            if turn_state.thinking_level != "off":
-                merged["reasoning"] = turn_state.thinking_level
+            merged = await self._apply_request_options(model, turn_state.session_id, options)
+            return await base(model, context, cast(StreamOptions, merged))
+
+        return _stream
+
+    def _create_summary_stream_fn(self) -> StreamFn:
+        base = self._stream_fn or get_default_stream_fn()
+
+        async def _stream(model: Any, context: Any, options: Any = None) -> Any:
+            merged = await self._apply_request_options(model, await self._get_session_id(), options)
             return await base(model, context, cast(StreamOptions, merged))
 
         return _stream
@@ -705,7 +761,7 @@ class AgentHarness:
     async def _flush_pending_writes(self) -> None:
         while self._pending_message_writes:
             message = self._pending_message_writes.pop(0)
-            self._session.append_message(message)
+            await self._session.append_message(message)
         self._pending_mutations = 0
 
     # ------------------------------------------------------------------
@@ -722,7 +778,7 @@ class AgentHarness:
         event_type = event["type"]
 
         if event_type == "message_end":
-            self._session.append_message(cast(AgentMessage, event.get("message")))
+            await self._session.append_message(cast(AgentMessage, event.get("message")))
             await self._emit_any(event, signal)
             return
 
@@ -995,26 +1051,27 @@ class AgentHarness:
 
     async def _apply_append_message(self, message: AgentMessage) -> None:
         if self._phase == "idle":
-            self._session.append_message(message)
+            await self._session.append_message(message)
         else:
             self._pending_message_writes.append(message)
 
     async def compact(self, custom_instructions: str | None = None) -> CompactResult:
-        """上下文压缩（Phase 2 骨架：hook 可取消或提供压缩结果；
-        LLM 摘要生成属 Phase 4）。
-        """
+        """上下文压缩：prepare → hook → LLM 摘要 → 写入 compaction 条目。"""
         self._assert_not_shut_down()
         if self._phase != "idle":
             raise AgentHarnessError("busy", "compact() requires idle harness")
         self._phase = "compaction"
         abort_event, finish = self._start_operation()
         try:
-            branch_entries = self._session.get_branch()
+            branch_entries = await self._session.get_branch()
+            ok_flag, preparation = prepare_compaction(branch_entries, self._compaction_settings)
+            if not ok_flag:
+                raise _normalize_harness_error(cast(BaseException, preparation), "compaction")
             hook_result = await self._emit_hook(
                 "session_before_compact",
                 SessionBeforeCompactEvent(
                     type="session_before_compact",
-                    preparation=None,
+                    preparation=preparation,
                     branch_entries=branch_entries,
                     custom_instructions=custom_instructions,
                 ),
@@ -1023,9 +1080,47 @@ class AgentHarness:
                 raise AgentHarnessError("compaction", "Compaction cancelled")
             provided = hook_result.compaction if hook_result is not None else None
             if provided is not None:
+                await self._session.append_compaction(
+                    provided.summary,
+                    provided.first_kept_entry_id,
+                    provided.tokens_before,
+                    details=provided.details,
+                    from_hook=True,
+                    usage=provided.usage,
+                    retained_tail=provided.retained_tail,
+                )
+                await self._emit_own(SessionCompactEvent(type="session_compact", from_hook=True))
                 return provided
-            # Phase 2 无 token 预估/摘要生成：与 TS 小上下文行为一致
-            raise AgentHarnessError("compaction", "Nothing to compact")
+            if preparation is None:
+                raise AgentHarnessError("compaction", "Nothing to compact")
+            ok_flag, result = await run_compaction(
+                preparation,
+                self._create_summary_stream_fn(),
+                self._model,
+                custom_instructions=custom_instructions,
+                signal=abort_event,
+                thinking_level=self._thinking_level,
+            )
+            if not ok_flag:
+                raise _normalize_harness_error(cast(BaseException, result), "compaction")
+            await self._session.append_compaction(
+                result.summary,
+                result.first_kept_entry_id,
+                result.tokens_before,
+                details=result.details,
+                from_hook=False,
+                usage=result.usage,
+                retained_tail=result.retained_tail,
+            )
+            await self._emit_own(SessionCompactEvent(type="session_compact", from_hook=False))
+            return CompactResult(
+                summary=result.summary,
+                first_kept_entry_id=result.first_kept_entry_id,
+                tokens_before=result.tokens_before,
+                usage=result.usage,
+                retained_tail=result.retained_tail,
+                details=result.details,
+            )
         except BaseException as error:
             raise _normalize_harness_error(error, "compaction") from error
         finally:
@@ -1033,19 +1128,17 @@ class AgentHarness:
             finish()
 
     async def navigate_tree(self, target_id: str, *, summarize: bool = False) -> NavigateTreeResult:
-        """分支导航（Phase 2 骨架：线性会话仅支持同 leaf 无操作；
-        DAG 分支与摘要生成属 Phase 3/4）。
-        """
+        """分支导航：hook → （可选 LLM 分支摘要）→ move leaf → 写 branch_summary 条目。"""
         self._assert_not_shut_down()
         if self._phase != "idle":
             raise AgentHarnessError("busy", "navigateTree() requires idle harness")
         self._phase = "branch_summary"
         abort_event, finish = self._start_operation()
         try:
-            old_leaf_id = self._session.get_leaf_id()
+            old_leaf_id = await self._session.get_leaf_id()
             if old_leaf_id == target_id:
                 return NavigateTreeResult(cancelled=False)
-            if self._session.get_entry(target_id) is None:
+            if await self._session.get_entry(target_id) is None:
                 raise AgentHarnessError("invalid_argument", f"Entry {target_id} not found")
             hook_result = await self._emit_hook(
                 "session_before_tree",
@@ -1060,10 +1153,65 @@ class AgentHarness:
             )
             if hook_result is not None and hook_result.cancel:
                 return NavigateTreeResult(cancelled=True)
-            raise AgentHarnessError(
-                "not_implemented",
-                "navigateTree DAG branching requires Phase 3 (Session)",
+
+            summary_data: dict[str, Any] | None = None
+            from_hook = False
+            if hook_result is not None and hook_result.summary is not None:
+                summary_data = {
+                    "summary": str(hook_result.summary),
+                    "fromHook": True,
+                }
+                from_hook = True
+            elif summarize:
+                custom_instructions = (
+                    hook_result.custom_instructions if hook_result is not None else None
+                )
+                replace_instructions = bool(
+                    hook_result.replace_instructions if hook_result is not None else False
+                )
+                collected = await collect_entries_for_branch_summary(
+                    self._session, old_leaf_id, target_id
+                )
+                ok_flag, summary = await generate_branch_summary(
+                    collected["entries"],
+                    stream_fn=self._create_summary_stream_fn(),
+                    model=self._model,
+                    signal=abort_event,
+                    custom_instructions=custom_instructions,
+                    replace_instructions=replace_instructions,
+                    reserve_tokens=self._compaction_settings.reserve_tokens,
+                )
+                if not ok_flag:
+                    raise _normalize_harness_error(cast(BaseException, summary), "branch_summary")
+                summary_data = {
+                    "summary": summary["summary"],
+                    "details": {
+                        "readFiles": summary.get("readFiles", []),
+                        "modifiedFiles": summary.get("modifiedFiles", []),
+                    },
+                    "usage": summary.get("usage"),
+                    "fromHook": False,
+                }
+
+            summary_entry_id = await self._session.move_to(target_id, summary_data)
+            label = hook_result.label if hook_result is not None else None
+            if label is not None:
+                await self._session.append_label(target_id, label)
+            summary_entry = (
+                await self._session.get_entry(summary_entry_id)
+                if summary_entry_id is not None
+                else None
             )
+            new_leaf_id = await self._session.get_leaf_id()
+            await self._emit_own(
+                SessionTreeEvent(
+                    type="session_tree",
+                    new_leaf_id=new_leaf_id or target_id,
+                    old_leaf_id=old_leaf_id,
+                    from_hook=from_hook,
+                )
+            )
+            return NavigateTreeResult(cancelled=False, summary_entry=summary_entry)
         except BaseException as error:
             raise _normalize_harness_error(error, "branch_summary") from error
         finally:
@@ -1122,6 +1270,17 @@ class AgentHarness:
 
     def get_model(self) -> Any:
         return self._model
+
+    async def get_leaf_id(self) -> str | None:
+        """当前 leaf 条目 ID（DAG 会话）。"""
+        return await self._session.get_leaf_id()
+
+    def get_compaction_settings(self) -> CompactionSettings:
+        return self._compaction_settings
+
+    async def set_compaction_settings(self, settings: CompactionSettings) -> None:
+        self._assert_not_shut_down()
+        self._compaction_settings = settings
 
     async def set_model(self, model: Any) -> None:
         self._assert_not_shut_down()

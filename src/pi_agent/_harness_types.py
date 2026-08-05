@@ -13,6 +13,7 @@ from typing import Any, Awaitable, Callable, Literal, TypedDict
 from pi_ai.types import CacheRetention, ImageContent, Model, Usage
 
 from ._types import AgentEvent, AgentMessage, AgentTool, QueueMode, StreamFn, ThinkingLevel
+from .compaction import CompactionSettings
 
 # ---------------------------------------------------------------------------
 # 错误
@@ -258,7 +259,7 @@ class SessionBeforeCompactEvent(TypedDict):
 class SessionBeforeTreeEvent(TypedDict):
     type: Literal["session_before_tree"]
     target_id: str
-    old_leaf_id: str
+    old_leaf_id: str | None
     summarize: bool
     custom_instructions: str | None
     label: str | None
@@ -272,7 +273,7 @@ class SessionCompactEvent(TypedDict):
 class SessionTreeEvent(TypedDict):
     type: Literal["session_tree"]
     new_leaf_id: str
-    old_leaf_id: str
+    old_leaf_id: str | None
     from_hook: bool
 
 
@@ -418,13 +419,14 @@ class AgentHarnessOptions:
     """AgentHarness 构造选项（Phase 2 骨架）。"""
 
     model: Model
-    session: Any | None = None  # 最小 Session；None 时自动创建内存会话
+    session: Any | None = None  # Session 或 SessionStorage；None 时自动创建内存 DAG 会话
     system_prompt: AgentHarnessSystemPrompt | None = None
     tools: list[AgentTool] | None = None
     active_tool_names: list[str] | None = None
     resources: AgentHarnessResources | None = None
     stream_fn: StreamFn | None = None
     stream_options: AgentHarnessStreamOptions | None = None
+    compaction_settings: CompactionSettings | None = None
     thinking_level: ThinkingLevel = "off"
     tool_context: Any = None
     steering_mode: QueueMode = "one-at-a-time"

@@ -19,6 +19,7 @@ from pi_agent._harness_types import (
     ContextResult,
     PromptTemplate,
     SessionBeforeCompactResult,
+    SessionBeforeTreeResult,
     Skill,
     ToolCallResult,
     ToolResultPatch,
@@ -84,10 +85,16 @@ def _make_harness_tool(
     )
 
 
-def _session_text(harness: AgentHarness) -> str:
-    """把会话消息内容拼接为纯文本（content 可能是 str 或块列表）。"""
+async def _context_messages(harness: AgentHarness) -> list[dict]:
+    """DAG Session 投影后的 LLM 上下文消息。"""
+    context = await harness._session.build_context()
+    return list(context["messages"])
+
+
+async def _session_text(harness: AgentHarness) -> str:
+    """把会话上下文消息内容拼接为纯文本（content 可能是 str 或块列表）。"""
     parts: list[str] = []
-    for message in harness._session.messages:
+    for message in await _context_messages(harness):
         content = message.get("content")
         if isinstance(content, str):
             parts.append(content)
@@ -126,7 +133,7 @@ class TestHarnessPrompt:
         result = await harness.prompt("Hi")
 
         assert result.get("role") == "assistant"
-        roles = [m.get("role") for m in harness._session.messages]
+        roles = [m.get("role") for m in await _context_messages(harness)]
         assert roles.count("user") == 1
         assert roles.count("assistant") == 1
 
@@ -197,7 +204,7 @@ class TestHarnessSkillTemplate:
 
         await harness.skill("docs")
 
-        text = _session_text(harness)
+        text = await _session_text(harness)
         assert "docs" in text and "Read docs" in text
 
     @pytest.mark.asyncio
@@ -213,7 +220,7 @@ class TestHarnessSkillTemplate:
 
         await harness.prompt_from_template("greet", ["World"])
 
-        assert "Hi World! World" in _session_text(harness)
+        assert "Hi World! World" in await _session_text(harness)
 
     @pytest.mark.asyncio
     async def test_unknown_template(self):
@@ -281,7 +288,9 @@ class TestHarnessDualEvents:
 
         assert executed == []
         # 被 block 的工具结果以错误形式回给 LLM，随后文本轮正常完成
-        tool_results = [m for m in harness._session.messages if m.get("role") == "toolResult"]
+        tool_results = [
+            m for m in await _context_messages(harness) if m.get("role") == "toolResult"
+        ]
         assert len(tool_results) == 1
         assert tool_results[0]["is_error"] is True
 
@@ -299,7 +308,9 @@ class TestHarnessDualEvents:
         harness.on("tool_result", _tool_result_hook)
         await harness.prompt("Search")
 
-        tool_results = [m for m in harness._session.messages if m.get("role") == "toolResult"]
+        tool_results = [
+            m for m in await _context_messages(harness) if m.get("role") == "toolResult"
+        ]
         assert tool_results[0]["content"][0]["text"] == "patched"
 
     @pytest.mark.asyncio
@@ -315,7 +326,7 @@ class TestHarnessDualEvents:
         harness.on("before_agent_start", _before_start)
         await harness.prompt("Hi")
 
-        assert "extra-context" in _session_text(harness)
+        assert "extra-context" in await _session_text(harness)
 
     @pytest.mark.asyncio
     async def test_on_before_provider_request_patches_options(self):
@@ -453,7 +464,7 @@ class TestHarnessSavePoint:
         tool_ready.set()
         await asyncio.wait_for(run_task, timeout=5.0)
 
-        assert "queued-append" in _session_text(harness)
+        assert "queued-append" in await _session_text(harness)
 
 
 # ============================================================================
@@ -484,7 +495,7 @@ class TestHarnessQueues:
 
         await asyncio.gather(harness.prompt("Q"), _steer_mid_run())
 
-        text = _session_text(harness)
+        text = await _session_text(harness)
         assert "nudge" in text
         assert text.count("A" * 100) == 1
 
@@ -510,9 +521,9 @@ class TestHarnessQueues:
 
         await asyncio.gather(harness.prompt("Q"), _follow_up_mid_run())
 
-        assert "one more" in _session_text(harness)
+        assert "one more" in await _session_text(harness)
         # follow-up 追加一轮 → 两条 assistant
-        assert sum(1 for m in harness._session.messages if m.get("role") == "assistant") == 2
+        assert sum(1 for m in await _context_messages(harness) if m.get("role") == "assistant") == 2
 
     @pytest.mark.asyncio
     async def test_next_turn_prepended(self):
@@ -520,7 +531,7 @@ class TestHarnessQueues:
         await harness.next_turn("prepended")
         await harness.prompt("main")
 
-        text = _session_text(harness)
+        text = await _session_text(harness)
         assert text.index("prepended") < text.index("main")
 
     @pytest.mark.asyncio
@@ -565,7 +576,10 @@ class TestHarnessCompactNavigate:
     @pytest.mark.asyncio
     async def test_navigate_tree_leaf_noop(self):
         harness = _make_harness()
-        result = await harness.navigate_tree(harness._session.session_id)
+        await harness.prompt("Hi")
+        leaf_id = await harness.get_leaf_id()
+        assert leaf_id is not None
+        result = await harness.navigate_tree(leaf_id)
         assert result.cancelled is False
 
     @pytest.mark.asyncio
@@ -573,6 +587,137 @@ class TestHarnessCompactNavigate:
         harness = _make_harness()
         with pytest.raises(AgentHarnessError, match="not found"):
             await harness.navigate_tree("missing-entry")
+
+    @pytest.mark.asyncio
+    async def test_compact_generates_summary_and_entry(self):
+        core = _make_faux(
+            [
+                _text_response("first answer"),
+                faux_assistant_message("## Goal\ncompacted"),
+            ]
+        )
+        harness = AgentHarness(AgentHarnessOptions(model=_make_model(), stream_fn=core.stream))
+        compact_events: list[dict] = []
+        harness.subscribe(
+            lambda e, signal: compact_events.append(e) if e["type"] == "session_compact" else None
+        )
+
+        await harness.prompt("question")
+        result = await harness.compact()
+
+        assert "## Goal" in result.summary
+        entries = await harness._session.get_branch()
+        assert entries[-1]["type"] == "compaction"
+        assert entries[-1].get("fromHook") is False
+        context = await harness._session.build_context()
+        assert context["messages"][0]["role"] == "compactionSummary"
+        assert compact_events and compact_events[-1]["from_hook"] is False
+
+    @pytest.mark.asyncio
+    async def test_compact_hook_provided_writes_entry(self):
+        harness = _make_harness()
+        await harness.prompt("Hi")
+        provided = CompactResult(summary="from hook", first_kept_entry_id="nope", tokens_before=3)
+        compact_events: list[dict] = []
+        harness.subscribe(
+            lambda e, signal: compact_events.append(e) if e["type"] == "session_compact" else None
+        )
+        harness.on(
+            "session_before_compact",
+            lambda e: SessionBeforeCompactResult(compaction=provided),
+        )
+
+        result = await harness.compact()
+
+        assert result.summary == "from hook"
+        entries = await harness._session.get_branch()
+        assert entries[-1]["type"] == "compaction"
+        assert entries[-1]["summary"] == "from hook"
+        assert entries[-1].get("fromHook") is True
+        assert compact_events and compact_events[-1]["from_hook"] is True
+
+    @pytest.mark.asyncio
+    async def test_navigate_tree_moves_leaf(self):
+        core = _make_faux([_text_response("a1"), _text_response("a2")])
+        harness = AgentHarness(AgentHarnessOptions(model=_make_model(), stream_fn=core.stream))
+        await harness.prompt("q1")
+        first_leaf = await harness.get_leaf_id()
+        assert first_leaf is not None
+        first_entry = (await harness._session.get_branch())[0]["id"]
+        tree_events: list[dict] = []
+        harness.subscribe(
+            lambda e, signal: tree_events.append(e) if e["type"] == "session_tree" else None
+        )
+
+        result = await harness.navigate_tree(first_entry)
+        assert result.cancelled is False
+        assert await harness.get_leaf_id() == first_entry
+
+        await harness.prompt("q2")
+        second_leaf = await harness.get_leaf_id()
+        assert second_leaf is not None and second_leaf != first_leaf
+
+        await harness.navigate_tree(first_leaf)
+        assert await harness.get_leaf_id() == first_leaf
+        assert any(e["new_leaf_id"] == first_leaf for e in tree_events)
+
+    @pytest.mark.asyncio
+    async def test_navigate_tree_summarize_generates_branch_summary(self):
+        core = _make_faux(
+            [
+                _text_response("a1"),
+                _text_response("a2"),
+                faux_assistant_message("## Goal\nbranch summary"),
+            ]
+        )
+        harness = AgentHarness(AgentHarnessOptions(model=_make_model(), stream_fn=core.stream))
+        await harness.prompt("q1")
+        first_leaf = await harness.get_leaf_id()
+        assert first_leaf is not None
+        first_entry = (await harness._session.get_branch())[0]["id"]
+        await harness.navigate_tree(first_entry)
+        await harness.prompt("q2")
+
+        result = await harness.navigate_tree(first_leaf, summarize=True)
+
+        assert result.cancelled is False
+        assert result.summary_entry is not None
+        assert result.summary_entry["type"] == "branch_summary"
+        assert result.summary_entry.get("fromHook") is False
+        context = await harness._session.build_context()
+        roles = [m.get("role") for m in context["messages"]]
+        assert "branchSummary" in roles
+
+    @pytest.mark.asyncio
+    async def test_navigate_tree_hook_cancel(self):
+        harness = _make_harness()
+        await harness.prompt("Hi")
+        target = (await harness._session.get_branch())[0]["id"]
+        harness.on("session_before_tree", lambda e: SessionBeforeTreeResult(cancel=True))
+
+        result = await harness.navigate_tree(target)
+
+        assert result.cancelled is True
+        assert await harness.get_leaf_id() != target
+
+    @pytest.mark.asyncio
+    async def test_navigate_tree_hook_provides_summary(self):
+        harness = _make_harness()
+        await harness.prompt("Hi")
+        target = (await harness._session.get_branch())[0]["id"]
+        harness.on(
+            "session_before_tree",
+            lambda e: SessionBeforeTreeResult(summary="hook summary"),
+        )
+
+        result = await harness.navigate_tree(target, summarize=True)
+
+        assert result.cancelled is False
+        assert result.summary_entry is not None
+        assert result.summary_entry["summary"] == "hook summary"
+        assert result.summary_entry.get("fromHook") is True
+        context = await harness._session.build_context()
+        assert any(m.get("role") == "branchSummary" for m in context["messages"])
 
 
 # ============================================================================

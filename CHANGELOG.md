@@ -33,6 +33,7 @@
 - 修复 `app.py` 中 `/reload` 未导入 `Path` 的运行时错误、`env.py` 回调异常被静默吞掉的问题
 - 清理 `_agent_loop.py` 游离 docstring 与各类 lint 问题（未使用变量/导入、异常链、zip strict 等）
 - 默认 pytest 不再强制开启覆盖率（CI 中显式开启）
+- `AgentHarness.compact()` / `navigate_tree()` 接入 DAG Session 与 `pi_agent.compaction` / `branch_summarization`，不再抛 `not_implemented`
 
 ## [0.1.0]
 
