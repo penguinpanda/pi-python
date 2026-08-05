@@ -363,7 +363,22 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
         if context._open_tree_selector is not None:
             context.open_tree_selector()
             return ""
-        lines = _format_tree(manager.get_tree(), manager.get_leaf_id())
+        runner = context.session.extension_runner
+
+        def _entry_renderer(custom_type: str, entry, state):
+            if runner is None:
+                return None
+            renderer = runner.get_entry_renderer(custom_type)
+            if renderer is None:
+                return None
+            result = renderer(entry, state)
+            return result if isinstance(result, str) else None
+
+        lines = _format_tree(
+            manager.get_tree(),
+            manager.get_leaf_id(),
+            entry_renderer=_entry_renderer,
+        )
         return "\n".join(lines) if lines else "(empty session)"
 
     async def _fork(context: SlashContext, args: str) -> str:
@@ -658,15 +673,27 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
         registry.register(name, handler, description=description, argument_hint=hint)
 
 
-def _format_tree(nodes, leaf_id: str | None, depth: int = 0) -> list[str]:
+def _format_tree(
+    nodes,
+    leaf_id: str | None,
+    depth: int = 0,
+    entry_renderer=None,
+) -> list[str]:
     """把会话树渲染为缩进文本（leaf 标记 >）。"""
     lines: list[str] = []
     for node in nodes:
         marker = ">" if node.id == leaf_id else " "
         label = f" [{node.label}]" if node.label else ""
         entry_type = node.entry.get("type", "?") if node.entry is not None else "?"
+        if entry_type == "custom" and entry_renderer is not None and node.entry is not None:
+            custom_type = str(node.entry.get("customType", "custom"))
+            rendered = entry_renderer(custom_type, node.entry, {"expanded": False})
+            if isinstance(rendered, str) and rendered:
+                lines.append(f"{'  ' * depth}{marker} {rendered}")
+                lines.extend(_format_tree(node.children, leaf_id, depth + 1, entry_renderer))
+                continue
         lines.append(f"{'  ' * depth}{marker} {node.id[:8]} {entry_type}{label}")
-        lines.extend(_format_tree(node.children, leaf_id, depth + 1))
+        lines.extend(_format_tree(node.children, leaf_id, depth + 1, entry_renderer))
     return lines
 
 

@@ -656,3 +656,23 @@ class TestReloadCommand:
         context = SlashContext(notify=notifications.append)
         await registry.execute("/reload", context)
         assert "not available" in notifications[-1]
+
+
+def test_format_tree_entry_renderer():
+    from pi_coding_agent._session_manager import SessionTreeNode
+    from pi_coding_agent.modes.interactive.slash_commands import _format_tree
+
+    node = SessionTreeNode(
+        id="abc123",
+        parent_id=None,
+        entry={"type": "custom", "customType": "status-card", "data": {}},
+    )
+    lines = _format_tree(
+        [node],
+        None,
+        entry_renderer=lambda custom_type, entry, state: f"CARD:{custom_type}",
+    )
+    assert "CARD:status-card" in lines[0]
+    # 无渲染器时回退默认 id/type 行。
+    default_lines = _format_tree([node], None)
+    assert "abc123" in default_lines[0]

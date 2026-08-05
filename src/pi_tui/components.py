@@ -32,11 +32,38 @@ def _block_text(block: dict[str, Any]) -> str:
     return ""
 
 
+def _apply_markdown_transformers(
+    text: str,
+    transformers,
+    message_type: str,
+    is_streaming: bool = False,
+) -> str:
+    """按扩展注册顺序应用 markdown 变换器（单个失败保留上一步结果）。"""
+    if not transformers:
+        return text
+    resolved = transformers() if callable(transformers) else list(transformers or [])
+    current = text
+    for transformer in resolved:
+        try:
+            result = transformer(
+                current, {"messageType": message_type, "isStreaming": is_streaming}
+            )
+        except Exception:
+            continue
+        if isinstance(result, str):
+            current = result
+    return current
+
+
 def message_to_entries(
     message: dict[str, Any],
     *,
     show_tools: bool = True,
     show_thinking: bool = True,
+    custom_renderer=None,
+    markdown_transformers=None,
+    hidden_thinking_label: str = "Thinking",
+    tool_renderer=None,
 ) -> list[tuple[str, str]]:
     """AgentMessage → [(label, text)]，供聊天容器渲染。"""
     role = message.get("role")
@@ -44,15 +71,19 @@ def message_to_entries(
 
     if role == "user":
         if isinstance(content, str):
-            return [("User", content)]
+            return [("User", _apply_markdown_transformers(content, markdown_transformers, "user"))]
         text = "\n".join(_block_text(block) for block in content or [])
-        return [("User", text)]
+        return [("User", _apply_markdown_transformers(text, markdown_transformers, "user"))]
 
     if role == "toolResult":
         tool_name = message.get("tool_name", "tool")
         label = f"Tool: {tool_name}"
         if message.get("is_error"):
             label += " (error)"
+        if tool_renderer is not None:
+            rendered = tool_renderer(message)
+            if isinstance(rendered, str) and rendered:
+                return [(label, rendered)]
         if isinstance(content, str):
             return [(label, content)]
         text = "\n".join(_block_text(block) for block in content or [])
@@ -78,9 +109,23 @@ def message_to_entries(
             elif block_type == "text":
                 text_parts.append(block.get("text", ""))
         if thinking_parts:
-            entries.append(("Thinking", "\n".join(thinking_parts)))
+            entries.append(
+                (
+                    hidden_thinking_label,
+                    _apply_markdown_transformers(
+                        "\n".join(thinking_parts), markdown_transformers, "assistant-thinking"
+                    ),
+                )
+            )
         if text_parts:
-            entries.append(("Assistant", "\n".join(text_parts)))
+            entries.append(
+                (
+                    "Assistant",
+                    _apply_markdown_transformers(
+                        "\n".join(text_parts), markdown_transformers, "assistant"
+                    ),
+                )
+            )
         for tool_call in tool_calls:
             entries.append(("Tool call", tool_call))
         return entries
@@ -108,6 +153,16 @@ def message_to_entries(
         return [(label, "\n".join(lines))]
     if role == "system":
         return [("System", message.get("content", ""))]
+    if role == "custom":
+        custom_type = str(message.get("customType", "custom"))
+        if custom_renderer is not None:
+            rendered = custom_renderer(message)
+            if isinstance(rendered, str) and rendered:
+                return [(custom_type, rendered)]
+        if isinstance(content, str):
+            return [(custom_type, content)]
+        text = "\n".join(_block_text(block) for block in content or [])
+        return [(custom_type, text)] if text else []
     # 其它角色（custom/branchSummary 等）降级为文本。
     if isinstance(content, str):
         return [("Agent", content)]
@@ -224,10 +279,32 @@ class PiChatContainer(VerticalScroll):
         super().__init__(**kwargs)
         self._show_tools = True
         self._show_thinking = True
+        self._custom_renderer = None
+        self._markdown_transformers = None
+        self._hidden_thinking_label = "Thinking"
+        self._tool_renderer = None
 
     def set_visibility(self, *, show_tools: bool, show_thinking: bool) -> None:
         self._show_tools = show_tools
         self._show_thinking = show_thinking
+
+    def set_renderers(
+        self,
+        *,
+        custom_renderer=None,
+        markdown_transformers=None,
+        tool_renderer=None,
+    ) -> None:
+        """设置扩展渲染器（custom 消息 / markdown 变换器 / 工具结果）。"""
+        self._custom_renderer = custom_renderer
+        self._markdown_transformers = markdown_transformers
+        self._tool_renderer = tool_renderer
+
+    def set_hidden_thinking_label(self, label: str) -> None:
+        self._hidden_thinking_label = label
+
+    def set_tool_renderer(self, tool_renderer) -> None:
+        self._tool_renderer = tool_renderer
 
     def add_message_agent(
         self,
@@ -240,6 +317,10 @@ class PiChatContainer(VerticalScroll):
             message,
             show_tools=self._show_tools if show_tools is None else show_tools,
             show_thinking=self._show_thinking if show_thinking is None else show_thinking,
+            custom_renderer=getattr(self, "_custom_renderer", None),
+            markdown_transformers=getattr(self, "_markdown_transformers", None),
+            hidden_thinking_label=getattr(self, "_hidden_thinking_label", "Thinking"),
+            tool_renderer=getattr(self, "_tool_renderer", None),
         )
         for label, text in entries:
             self.mount(MessageEntry(label, text))
@@ -257,7 +338,15 @@ class PiEditor(TextArea):
     BINDINGS = [
         Binding("enter", "submit", "Send"),
         Binding("shift+enter", "newline", "Insert newline"),
+        Binding("tab", "autocomplete", "Autocomplete"),
     ]
+
+    class AutocompleteRequested(Message):
+        """Tab 按下且需要扩展自动补全。"""
+
+        def __init__(self, editor: "PiEditor") -> None:
+            super().__init__()
+            self.editor = editor
 
     class Submitted(Message):
         """编辑器提交事件。"""
@@ -292,6 +381,9 @@ class PiEditor(TextArea):
     def action_newline(self) -> None:
         """Shift+Enter：插入换行（TextArea 会吞掉单独的 enter）。"""
         self._replace_via_keyboard("\n", *self.selection)
+
+    def action_autocomplete(self) -> None:
+        self.post_message(self.AutocompleteRequested(self))
 
     async def _on_key(self, event: events.Key) -> None:
         # TextArea._on_key 会把 enter 直接当换行插入并 stop() 事件，

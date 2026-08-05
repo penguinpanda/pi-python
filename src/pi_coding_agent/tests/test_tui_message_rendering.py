@@ -135,3 +135,76 @@ def test_bash_execution_cancelled_rendering():
         }
     )
     assert entries == [("Bash", "$ sleep 10\n(no output)\n(cancelled)")]
+
+
+def test_custom_message_custom_renderer():
+    message = {
+        "role": "custom",
+        "customType": "note",
+        "content": [{"type": "text", "text": "payload"}],
+    }
+    entries = message_to_entries(
+        message,
+        custom_renderer=lambda m: f"RENDERED:{m.get('customType')}",
+    )
+    assert entries == [("note", "RENDERED:note")]
+    # 无渲染器时回退到文本。
+    fallback = message_to_entries(message)
+    assert fallback == [("note", "payload")]
+
+
+def test_markdown_transformers_chain():
+    def upper(text, ctx):
+        assert ctx["messageType"] == "user"
+        return text.upper()
+
+    def broken(text, ctx):
+        raise RuntimeError("boom")
+
+    def decorate(text, ctx):
+        return f"*{text}*"
+
+    entries = message_to_entries(
+        {"role": "user", "content": "hi"},
+        markdown_transformers=[upper, broken, decorate],
+    )
+    # 失败的变换器被跳过，保留上一步结果。
+    assert entries == [("User", "*HI*")]
+
+
+def test_hidden_thinking_label():
+    message = {
+        "role": "assistant",
+        "content": [{"type": "thinking", "thinking": "reasoning"}],
+    }
+    default_entries = message_to_entries(message)
+    assert default_entries == [("Thinking", "reasoning")]
+    custom_entries = message_to_entries(message, hidden_thinking_label="Pondering...")
+    assert custom_entries == [("Pondering...", "reasoning")]
+
+
+def test_tool_renderer():
+    message = {
+        "role": "toolResult",
+        "tool_name": "read",
+        "content": [{"type": "text", "text": "line1\nline2"}],
+    }
+    default_entries = message_to_entries(message)
+    assert default_entries[0][1] == "line1\nline2"
+    custom_entries = message_to_entries(
+        message,
+        tool_renderer=lambda m: (
+            "read: "
+            + str(
+                len(
+                    "".join(
+                        block.get("text", "")
+                        for block in m.get("content") or []
+                        if isinstance(block, dict)
+                    ).splitlines()
+                )
+            )
+            + " lines"
+        ),
+    )
+    assert custom_entries == [("Tool: read", "read: 2 lines")]

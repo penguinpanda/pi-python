@@ -11,6 +11,8 @@ from typing import Any, Callable, cast
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingsMap
+from textual.geometry import Offset
+from textual.widgets import Static
 
 from ..._config import get_sessions_dir
 from ..._session import AgentSession
@@ -30,6 +32,7 @@ from pi_tui.components import (
 )
 from pi_tui.keybindings import KeybindingsManager
 from pi_tui.selectors import (
+    ChoiceSelector,
     ExtensionSelector,
     ModelSelector,
     OAuthSelector,
@@ -227,16 +230,26 @@ class PiTuiApp(App):
         self._show_thinking = True
         self._tasks: set[asyncio.Task] = set()
         self._rendered_summary_ids: set[str] = set()
+        self._custom_editor: PiEditor | None = None
+        self._widget_above: dict[str, str] = {}
+        self._widget_below: dict[str, str] = {}
+        self._overlays: dict[str, dict] = {}
+        self._hidden_thinking_label = "Thinking"
+        self._working_message = "Working"
 
         self._slash_registry = SlashCommandRegistry()
         register_builtin_commands(self._slash_registry)
         # 扩展命令 / 快捷键注入 slash 注册表与键位表。
         if session.extension_runner is not None:
-            ExtensionRegistry(
+            extension_registry = ExtensionRegistry(
                 session.extension_runner,
                 slash_registry=self._slash_registry,
                 keybindings_manager=self._keybindings,
-            ).apply()
+            )
+            extension_registry.apply()
+            from .ui_context import TuiUIContext
+
+            session.extension_runner.bind(ui_context=TuiUIContext(self))
         self._slash_context = SlashContext(
             session=session,
             model_runtime=model_runtime,
@@ -268,8 +281,10 @@ class PiTuiApp(App):
     def compose(self) -> ComposeResult:
         yield PiHeader(self._keybindings, id="pi-header")
         yield PiChatContainer(id="pi-chat")
+        yield Static("", id="pi-widgets-above")
         yield PiStatusBar("Idle", id="pi-status")
         yield PiEditor(id="pi-editor")
+        yield Static("", id="pi-widgets-below")
         yield PiFooter("", id="pi-footer")
 
     def on_mount(self) -> None:
@@ -294,6 +309,11 @@ class PiTuiApp(App):
         if self._unsubscribe is not None:
             self._unsubscribe()
             self._unsubscribe = None
+        self._chat.set_renderers(
+            custom_renderer=self._extension_custom_message_renderer,
+            markdown_transformers=self._extension_markdown_transformers,
+            tool_renderer=self._extension_tool_renderer,
+        )
         self._unsubscribe = self._session.subscribe(
             cast(Callable[[AgentEvent], None], self._on_session_event)
         )
@@ -308,6 +328,8 @@ class PiTuiApp(App):
 
     @property
     def _editor(self) -> PiEditor:
+        if self._custom_editor is not None:
+            return self._custom_editor
         return self.query_one("#pi-editor", PiEditor)
 
     @property
@@ -344,7 +366,7 @@ class PiTuiApp(App):
             elif event_type in ("model_changed", "thinking_level_changed"):
                 self._update_footer()
             elif event_type == "agent_start":
-                self._set_status("Working")
+                self._set_status(self._working_message)
             elif event_type == "skill_invocation":
                 skill = event.get("skill", "")
                 self._chat.add_message_agent(
@@ -356,8 +378,167 @@ class PiTuiApp(App):
         except Exception:
             pass
 
+    def _extension_custom_message_renderer(self, message):
+        """custom 角色消息 → 扩展注册的消息渲染器（返回文本或 None）。"""
+        runner = self._session.extension_runner
+        if runner is None:
+            return None
+        renderer = runner.get_message_renderer(str(message.get("customType", "")))
+        if renderer is None:
+            return None
+        result = renderer(message)
+        if asyncio.iscoroutine(result):
+            # 渲染是同步路径；异步渲染器暂不等待。
+            return None
+        return result
+
+    def _extension_markdown_transformers(self):
+        """扩展注册的 markdown 变换器链。"""
+        runner = self._session.extension_runner
+        if runner is None:
+            return []
+        return runner.get_markdown_transformers()
+
+    def _extension_tool_renderer(self, message):
+        """内置工具结果 → 扩展注册的工具渲染器（返回字符串或 None）。"""
+        runner = self._session.extension_runner
+        if runner is None:
+            return None
+        renderer = runner.get_tool_renderer(str(message.get("tool_name", "")))
+        if renderer is None:
+            return None
+        result = renderer(message)
+        if asyncio.iscoroutine(result):
+            return None
+        return result
+
+    def _replace_editor(self, component) -> None:
+        """用扩展提供的编辑器组件替换 PiEditor（对齐 TS setEditorComponent）。
+
+        组件必须是 PiEditor 子类（继承提交/快捷键语义），替换后聚焦新编辑器。
+        """
+        from pi_tui import PiEditor as PiEditorType
+
+        if not isinstance(component, PiEditorType):
+            raise TypeError("set_editor_component requires a PiEditor subclass")
+        old = self.query_one("#pi-editor", PiEditorType)
+        old.display = False
+        component.id = f"pi-editor-{id(component):x}"
+        footer = self.query_one("#pi-footer")
+        self.screen.mount(component, before=footer)
+        self._custom_editor = component
+        component.focus()
+
     def _set_status(self, text: str) -> None:
         self._status.update(text)
+
+    def _set_widget(self, key: str, lines: list[str], options: dict | None = None) -> None:
+        """编辑器上方（默认）或下方显示多行组件（对齐 TS setWidget）。"""
+        below = (options or {}).get("placement") == "belowEditor"
+        target = self._widget_below if below else self._widget_above
+        if lines:
+            target[key] = "\n".join(lines)
+        else:
+            target.pop(key, None)
+        widget = self.query_one(
+            "#pi-widgets-below" if below else "#pi-widgets-above",
+            Static,
+        )
+        widget.update("\n".join(target.values()))
+
+    def _set_hidden_thinking_label(self, label: str | None = None) -> None:
+        """设置折叠 thinking 块的标签（None 恢复默认 "Thinking"）。"""
+        self._hidden_thinking_label = label or "Thinking"
+        self._chat.set_hidden_thinking_label(self._hidden_thinking_label)
+
+    def _set_working_message(self, text: str | None = None) -> None:
+        """设置流式工作提示文案（None 恢复默认 "Working"）。"""
+        self._working_message = text or "Working"
+
+    def _set_theme(self, theme: str | None = None) -> None:
+        """切换主题（None 恢复当前配置主题）。"""
+        try:
+            self._theme = self._theme_loader.resolve(theme or self._theme_name)
+            self.CSS = _build_css(self._theme.colors)  # type: ignore[misc]
+            self.refresh_css()
+        except Exception:
+            pass
+
+    def _set_overlay(self, key: str, lines: list[str], options: dict | None = None) -> None:
+        """显示浮层（对齐 TS overlay 的最小子集：锚点 + margin + 分层堆叠）。
+
+        浮层作为 Static 追加到屏幕末尾（DOM 顺序靠后 → 渲染在上层），
+        用 offset 视觉移动到锚点；空列表移除。
+        """
+        options = options or {}
+        anchor = str(options.get("anchor", "top-left"))
+        margin = int(options.get("margin", 1))
+        animate = bool(options.get("animate", False))
+        duration = float(options.get("duration", 0.5))
+        border = options.get("border")
+        border_color = options.get("border_color")
+        title = options.get("title")
+        entry = self._overlays.get(key)
+        widget = entry["widget"] if entry is not None else None
+        if not lines:
+            if widget is not None:
+                widget.remove()
+            self._overlays.pop(key, None)
+            return
+        text = "\n".join(lines)
+        if widget is None:
+            widget = Static(text, id=f"pi-overlay-{key}")
+            widget.styles.layer = "overlay"
+            widget.styles.position = "absolute"
+            self.screen.mount(widget)
+        else:
+            widget.update(text)
+        if border:
+            widget.styles.border = (str(border), str(border_color or "white"))
+            widget.border_title = str(title or "")
+        self._overlays[key] = {
+            "widget": widget,
+            "anchor": anchor,
+            "margin": margin,
+            "animate": animate,
+            "duration": duration,
+        }
+        self.call_after_refresh(lambda: self._apply_overlay_position(key))
+
+    def _apply_overlay_position(self, key: str) -> None:
+        entry = self._overlays.get(key)
+        if entry is None:
+            return
+        widget = entry["widget"]
+        anchor = entry["anchor"]
+        margin = entry["margin"]
+        size = self.screen.size
+        width = widget.content_size.width
+        height = widget.content_size.height
+        x = margin
+        y = margin
+        if "right" in anchor:
+            x = max(margin, size.width - width - margin)
+        if "bottom" in anchor:
+            y = max(margin, size.height - height - margin)
+        if anchor == "center":
+            x = max(0, (size.width - width) // 2)
+            y = max(0, (size.height - height) // 2)
+        # 流式布局基准：浮层在页面流末尾，用 offset 视觉移动到锚点。
+        # absolute 定位时 offset 即屏幕坐标；回退路径按流式布局基准换算。
+        if widget.styles.position == "absolute":
+            target = (x, y)
+        else:
+            target = (x - widget.region.x, y - widget.region.y)
+        if entry.get("animate"):
+            widget.animate(
+                "offset",
+                Offset(x, y),
+                duration=float(entry.get("duration", 0.5)),
+                easing="out_cubic",
+            )
+        else:
+            widget.styles.offset = target
 
     def _notify(self, message: str) -> None:
         self._set_status(message)
@@ -416,8 +597,50 @@ class PiTuiApp(App):
         else:
             self._run_task(self._send_prompt(text))
 
+    def on_pi_editor_autocomplete_requested(self, message: PiEditor.AutocompleteRequested) -> None:
+        """Tab：查询扩展自动补全 provider，弹选择器并插入选中值。"""
+        runner = self._session.extension_runner
+        if runner is None:
+            return
+        providers = runner.get_autocomplete()
+        if not providers:
+            return
+        completions: list[dict] = []
+        for provider in providers:
+            try:
+                result = provider(message.editor.text)
+            except Exception:
+                continue
+            if isinstance(result, list):
+                completions.extend(result)
+        if not completions:
+            return
+
+        def _label(item: dict) -> str:
+            return str(item.get("label", item.get("value", "")))
+
+        def _callback(selected) -> None:
+            if selected is None:
+                return
+            match = next(
+                (item for item in completions if _label(item) == selected),
+                None,
+            )
+            if match is None:
+                return
+            value = str(match.get("value", match.get("label", "")))
+            try:
+                self._editor.insert(value)
+            except Exception:
+                self._editor.text += value
+
+        self.push_screen(
+            ChoiceSelector("Autocomplete", [_label(item) for item in completions]),
+            callback=_callback,
+        )
+
     async def _send_prompt(self, text: str) -> None:
-        self._set_status("Working")
+        self._set_status(self._working_message)
         try:
             await self._session.prompt(text)
         except Exception as exc:
@@ -982,6 +1205,17 @@ class PiTuiApp(App):
                     model_runtime=self._model_runtime,
                 )
                 session.set_extension_runner(new_runner)
+                from .ui_context import TuiUIContext
+
+                new_runner.bind(ui_context=TuiUIContext(self))
+                if session.extension_state is not None:
+                    session.extension_state["runner"] = new_runner
+                await new_runner.discover_resources()
+                self._chat.set_renderers(
+                    custom_renderer=self._extension_custom_message_renderer,
+                    markdown_transformers=self._extension_markdown_transformers,
+                    tool_renderer=self._extension_tool_renderer,
+                )
                 details.append(f"{len(result.extensions)} extensions")
                 for error in result.errors:
                     message = error.error.replace("\n", " ")

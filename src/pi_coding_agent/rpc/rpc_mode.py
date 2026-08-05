@@ -187,6 +187,98 @@ class RpcUiContext:
             }
         )
 
+    def set_footer(self, text: str | None) -> None:
+        self._emit(
+            {
+                "type": "extension_ui_request",
+                "id": self._new_id(),
+                "method": "setFooter",
+                "text": text,
+            }
+        )
+
+    def set_header(self, text: str | None) -> None:
+        self._emit(
+            {
+                "type": "extension_ui_request",
+                "id": self._new_id(),
+                "method": "setHeader",
+                "text": text,
+            }
+        )
+
+    def set_editor_component(self, component) -> None:
+        self._emit(
+            {
+                "type": "extension_ui_request",
+                "id": self._new_id(),
+                "method": "setEditorComponent",
+                "componentType": type(component).__name__,
+            }
+        )
+
+    def set_widget(self, key: str, lines: list[str], options: dict | None = None) -> None:
+        options = options or {}
+        self._emit(
+            {
+                "type": "extension_ui_request",
+                "id": self._new_id(),
+                "method": "setWidget",
+                "key": key,
+                "lines": list(lines),
+                "placement": options.get("placement", "aboveEditor"),
+            }
+        )
+
+    def set_overlay(self, key: str, lines: list[str], options: dict | None = None) -> None:
+        options = options or {}
+        self._emit(
+            {
+                "type": "extension_ui_request",
+                "id": self._new_id(),
+                "method": "setOverlay",
+                "key": key,
+                "lines": list(lines),
+                "anchor": options.get("anchor", "top-left"),
+                "margin": options.get("margin", 1),
+                "animate": bool(options.get("animate", False)),
+                "duration": float(options.get("duration", 0.5)),
+                "border": options.get("border"),
+                "borderColor": options.get("border_color"),
+                "title": options.get("title"),
+            }
+        )
+
+    def set_hidden_thinking_label(self, label: str | None = None) -> None:
+        self._emit(
+            {
+                "type": "extension_ui_request",
+                "id": self._new_id(),
+                "method": "setHiddenThinkingLabel",
+                "label": label,
+            }
+        )
+
+    def set_working_message(self, text: str | None = None) -> None:
+        self._emit(
+            {
+                "type": "extension_ui_request",
+                "id": self._new_id(),
+                "method": "setWorkingMessage",
+                "text": text,
+            }
+        )
+
+    def set_theme(self, theme: str | None = None) -> None:
+        self._emit(
+            {
+                "type": "extension_ui_request",
+                "id": self._new_id(),
+                "method": "setTheme",
+                "theme": theme,
+            }
+        )
+
     def resolve_response(self, response: dict[str, Any]) -> None:
         """处理客户端返回的 extension_ui_response。"""
         request_id = response.get("id")

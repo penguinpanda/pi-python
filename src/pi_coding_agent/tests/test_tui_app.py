@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from textual.widgets import Static
 from pi_agent import Agent, AgentOptions
 from pi_ai import Model, Models
 from pi_ai.providers.faux import faux_assistant_message, faux_provider
@@ -117,6 +118,163 @@ async def test_app_mounts_and_footer(tmp_path):
         footer_text = app._footer.content
         assert "faux/faux-1" in str(footer_text)
         assert "messages: 0" in str(footer_text)
+
+
+@pytest.mark.asyncio
+async def test_set_editor_component_replaces_editor(tmp_path):
+    from pi_tui import PiEditor
+
+    class CustomEditor(PiEditor):
+        pass
+
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        custom = CustomEditor()
+        app._replace_editor(custom)
+        await pilot.pause()
+        assert app._editor is custom
+        assert app._editor.has_focus
+        await pilot.press("h", "i")
+        await pilot.pause()
+        assert app._editor.text == "hi"
+
+
+@pytest.mark.asyncio
+async def test_set_widget_above_and_below_editor(tmp_path):
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        app._set_widget("w1", ["line1", "line2"])
+        await pilot.pause()
+        above = app.query_one("#pi-widgets-above", Static)
+        assert "line1" in str(above.content)
+        assert "line2" in str(above.content)
+
+        app._set_widget("w2", ["below line"], {"placement": "belowEditor"})
+        await pilot.pause()
+        below = app.query_one("#pi-widgets-below", Static)
+        assert "below line" in str(below.content)
+        assert "line1" not in str(below.content)
+
+        # 清空（空列表）后移除该 key。
+        app._set_widget("w1", [])
+        await pilot.pause()
+        assert "line1" not in str(app.query_one("#pi-widgets-above", Static).content)
+
+
+@pytest.mark.asyncio
+async def test_set_overlay_anchor_and_clear(tmp_path):
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        app._set_overlay("ov1", ["overlay text"], {"anchor": "top-right", "margin": 2})
+        await pilot.pause()
+        widget = app.query_one("#pi-overlay-ov1", Static)
+        assert "overlay text" in str(widget.content)
+        assert widget.styles.layer == "overlay"
+        assert widget.styles.position == "absolute"
+        assert widget.styles.offset is not None
+
+        app._set_overlay(
+            "ov1",
+            ["bordered overlay"],
+            {"anchor": "center", "border": "round", "border_color": "blue", "title": "demo"},
+        )
+        await pilot.pause()
+        assert widget.styles.border is not None
+        assert widget.border_title == "demo"
+
+        app._set_overlay("ov1", [])
+        await pilot.pause()
+        assert app.query("#pi-overlay-ov1").nodes == []
+
+
+@pytest.mark.asyncio
+async def test_set_overlay_animation(tmp_path):
+    import time
+
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        app._set_overlay(
+            "ov2",
+            ["animated overlay"],
+            {"anchor": "center", "animate": True, "duration": 0.2},
+        )
+        await pilot.pause()
+        widget = app.query_one("#pi-overlay-ov2", Static)
+        deadline = time.monotonic() + 3
+        last = widget.styles.offset
+        while time.monotonic() < deadline:
+            await pilot.pause()
+            current = widget.styles.offset
+            if current == last:
+                break
+            last = current
+        assert widget.styles.offset is not None
+
+
+@pytest.mark.asyncio
+async def test_hidden_thinking_label_in_chat(tmp_path):
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        app._set_hidden_thinking_label("Pondering...")
+        app._chat.add_message_agent(
+            {
+                "role": "assistant",
+                "content": [{"type": "thinking", "thinking": "reasoning"}],
+            }
+        )
+        await pilot.pause()
+        labels = [entry.label for entry in app.query(MessageEntry)]
+        assert "Pondering..." in labels
+
+
+@pytest.mark.asyncio
+async def test_working_message_and_theme(tmp_path):
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        app._set_working_message("Working... (custom)")
+        assert app._working_message == "Working... (custom)"
+        app._set_theme("light")
+        await pilot.pause()
+        assert app._theme.name == "light"
+
+
+@pytest.mark.asyncio
+async def test_autocomplete_inserts_value(tmp_path):
+    from pi_coding_agent.extensions.runner import ExtensionRunner
+    from pi_coding_agent.extensions.types import Extension
+    from pi_tui.selectors import ChoiceSelector
+
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    extension = Extension(path="<inline>", resolved_path="<inline>")
+
+    def provider(text):
+        return [{"value": "#123", "label": "#123 Fix bug"}] if "#" in text else None
+
+    extension.autocomplete.append(provider)
+    session.set_extension_runner(ExtensionRunner([extension], cwd=str(tmp_path)))
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        app._editor.text = "fix #"
+        app._editor.focus()
+        await pilot.press("tab")
+        await pilot.pause()
+        assert isinstance(app.screen, ChoiceSelector)
+        app.screen.action_select()
+        await pilot.pause()
+        assert "#123" in app._editor.text
 
 
 @pytest.mark.asyncio
