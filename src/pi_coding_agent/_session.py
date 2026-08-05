@@ -20,7 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from pi_agent import Agent, AgentEvent, AgentMessage, AgentTool
+from pi_agent import Agent, AgentEvent, AgentMessage, AgentTool, PythonExecutionEnv
+from pi_agent.shell_output import execute_shell_with_capture
 from pi_ai import AssistantMessage, Model, Usage, UserMessage, now_ms
 from pi_ai.types.common import ModelThinkingLevel, ThinkingLevel
 from pi_ai.utils.estimate import calculate_context_tokens
@@ -65,6 +66,17 @@ class ModelCycleResult:
     model: Model
     thinking_level: ThinkingLevel
     is_scoped: bool
+
+
+@dataclass(slots=True)
+class BashResult:
+    """交互 bash 执行结果（对齐 TS BashResult）。"""
+
+    output: str
+    exit_code: int | None
+    cancelled: bool
+    truncated: bool
+    full_output_path: str | None = None
 
 
 class AgentSession:
@@ -122,6 +134,9 @@ class AgentSession:
         self._abort: asyncio.Event | None = None
         # turn 级耗时记录（get_session_stats 用）。
         self._turn_timings: list[dict] = []
+        # 交互 bash（!/!!）运行中/待刷入上下文的状态。
+        self._bash_abort_signals: set[asyncio.Event] = set()
+        self._pending_bash_messages: list[dict[str, Any]] = []
 
         # 注入编码工具
         tools = tools_override if tools_override is not None else create_all_tools(cwd)
@@ -953,6 +968,109 @@ class AgentSession:
             self._abort.set()
         self._agent.abort()
 
+    @property
+    def is_bash_running(self) -> bool:
+        """是否有交互 bash 命令正在运行（一次仅允许一条）。"""
+        return bool(self._bash_abort_signals)
+
+    def abort_bash(self) -> None:
+        """中止正在运行的交互 bash 命令。"""
+        for signal in list(self._bash_abort_signals):
+            signal.set()
+
+    async def execute_bash(
+        self,
+        command: str,
+        on_chunk: Callable[[str, Any], None] | None = None,
+        *,
+        exclude_from_context: bool = False,
+        shell_path: str | None = None,
+        command_prefix: str | None = None,
+        timeout: float | None = None,
+    ) -> BashResult:
+        """执行交互 shell 命令（对齐 TS AgentSession.executeBash）。
+
+        `!cmd` 的结果会作为 bashExecution 消息进入 LLM 上下文；
+        `!!cmd`（exclude_from_context=True）结果仅展示，不进入上下文。
+        运行期间可用 abort_bash() 中止；同时只允许一条 bash。
+        """
+        if self.is_bash_running:
+            raise RuntimeError("A bash command is already running")
+        abort_signal = asyncio.Event()
+        self._bash_abort_signals.add(abort_signal)
+        env = PythonExecutionEnv(self._cwd, shell_path=shell_path)
+        resolved_command = f"{command_prefix}\n{command}" if command_prefix else command
+        try:
+            ok, result = await execute_shell_with_capture(
+                env,
+                resolved_command,
+                {
+                    "cwd": self._cwd,
+                    "inheritEnv": True,
+                    "timeout": timeout,
+                    "abortSignal": abort_signal,
+                    "onChunk": on_chunk,
+                    "returnExecutionErrors": True,
+                },
+            )
+            if not ok:
+                raise result
+            if result.execution_error is not None:
+                raise result.execution_error
+            self.record_bash_result(command, result, exclude_from_context=exclude_from_context)
+            return BashResult(
+                output=result.output,
+                exit_code=result.exit_code,
+                cancelled=result.cancelled,
+                truncated=result.truncation.truncated,
+                full_output_path=result.full_output_path,
+            )
+        finally:
+            self._bash_abort_signals.discard(abort_signal)
+
+    def record_bash_result(
+        self,
+        command: str,
+        result: Any,
+        *,
+        exclude_from_context: bool = False,
+    ) -> None:
+        """把 bashExecution 消息写入会话历史/上下文（对齐 TS recordBashResult）。"""
+        message: dict[str, Any] = {
+            "role": "bashExecution",
+            "command": command,
+            "output": result.output,
+            "exitCode": result.exit_code,
+            "cancelled": result.cancelled,
+            "truncated": result.truncation.truncated,
+            "fullOutputPath": result.full_output_path,
+            "timestamp": now_ms(),
+            "excludeFromContext": exclude_from_context,
+        }
+        if self.is_streaming:
+            # Agent 运行中延迟写入，避免打断 tool_use/tool_result 顺序。
+            self._pending_bash_messages.append(message)
+            return
+        self._agent.state._append_message(cast(AgentMessage, message))
+        self._persist_message(cast(AgentMessage, message))
+
+    def _flush_pending_bash_messages(self) -> None:
+        """Agent 一轮结束后把延迟的 bashExecution 消息写入上下文。"""
+        if not self._pending_bash_messages:
+            return
+        pending = self._pending_bash_messages
+        self._pending_bash_messages = []
+        for message in pending:
+            bash_message = cast(AgentMessage, message)
+            self._agent.state._append_message(bash_message)
+            self._persist_message(bash_message)
+
+    def _persist_message(self, message: AgentMessage) -> None:
+        """后台把消息写入 JSONL，dispose 时等待写入完成。"""
+        task = asyncio.create_task(self._session_manager.append_message(message))
+        self._pending_writes.add(task)
+        task.add_done_callback(self._pending_writes.discard)
+
     async def wait_for_idle(self) -> None:
         """等待当前运行结束（含所有事件监听器完成）。"""
         await self._agent.wait_for_idle()
@@ -1024,12 +1142,11 @@ class AgentSession:
         if event_type == "message_end":
             msg = event.get("message")
             if msg is not None:
-                # 后台写入 JSONL，跟踪 task 以便 dispose 时等待
-                task = asyncio.create_task(
-                    self._session_manager.append_message(cast(AgentMessage, msg))
-                )
-                self._pending_writes.add(task)
-                task.add_done_callback(self._pending_writes.discard)
+                self._persist_message(cast(AgentMessage, msg))
+
+        # agent_end / agent_settled → 刷入延迟的 bashExecution 消息。
+        if event_type in ("agent_end", "agent_settled"):
+            self._flush_pending_bash_messages()
 
         # 转发给所有外部监听器
         for listener in self._listeners:

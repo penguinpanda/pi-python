@@ -421,6 +421,32 @@ class TestSerializeConversation:
         assert "more characters truncated" in text
         assert len(text) < 5000
 
+    def test_serialize_bash_execution(self):
+        text = serialize_conversation(
+            [
+                {
+                    "role": "bashExecution",
+                    "command": "npm run lint",
+                    "output": "All checks passed",
+                    "exitCode": 0,
+                    "cancelled": False,
+                    "truncated": False,
+                    "timestamp": 1,
+                },
+                {
+                    "role": "bashExecution",
+                    "command": "exit 2",
+                    "output": "boom",
+                    "exitCode": 2,
+                    "cancelled": False,
+                    "truncated": False,
+                    "timestamp": 2,
+                },
+            ]
+        )
+        assert "[Bash]: npm run lint\nAll checks passed" in text
+        assert "[Bash]: exit 2 (exit 2)\nboom" in text
+
 
 # ============================================================================
 # prepare_compaction

@@ -342,6 +342,18 @@ def serialize_conversation(messages: list[AgentMessage]) -> str:
                 parts.append(
                     f"[Tool result]: {truncate_for_summary(content, TOOL_RESULT_MAX_CHARS)}"
                 )
+        elif role == "bashExecution":
+            command = str(msg.get("command", ""))
+            output = str(msg.get("output", ""))
+            status = ""
+            if msg.get("cancelled"):
+                status = " (cancelled)"
+            elif msg.get("exitCode") not in (None, 0):
+                status = f" (exit {msg.get('exitCode')})"
+            if output:
+                parts.append(
+                    f"[Bash]: {command}{status}\n{truncate_for_summary(output, TOOL_RESULT_MAX_CHARS)}"
+                )
 
     return "\n\n".join(parts)
 

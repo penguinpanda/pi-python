@@ -86,3 +86,52 @@ def test_skill_invocation_label():
         }
     )
     assert entries == [("Skill", "Invoked skill: docs")]
+
+
+def test_bash_execution_rendering():
+    entries = message_to_entries(
+        {
+            "role": "bashExecution",
+            "command": "npm run lint",
+            "output": "All checks passed",
+            "exitCode": 0,
+            "cancelled": False,
+            "truncated": False,
+        }
+    )
+    assert entries == [("Bash", "$ npm run lint\nAll checks passed")]
+
+
+def test_bash_execution_excluded_label_and_status():
+    entries = message_to_entries(
+        {
+            "role": "bashExecution",
+            "command": "ls",
+            "output": "a.txt",
+            "exitCode": 2,
+            "cancelled": False,
+            "truncated": True,
+            "fullOutputPath": "/tmp/pi-bash.log",
+            "excludeFromContext": True,
+        }
+    )
+    assert entries == [
+        (
+            "Bash (excluded)",
+            "$ ls\na.txt\n(exit 2) Output truncated. Full output: /tmp/pi-bash.log",
+        )
+    ]
+
+
+def test_bash_execution_cancelled_rendering():
+    entries = message_to_entries(
+        {
+            "role": "bashExecution",
+            "command": "sleep 10",
+            "output": "",
+            "exitCode": None,
+            "cancelled": True,
+            "truncated": False,
+        }
+    )
+    assert entries == [("Bash", "$ sleep 10\n(no output)\n(cancelled)")]

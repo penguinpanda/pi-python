@@ -762,3 +762,37 @@ class TestAsyncListeners:
         await task
 
         assert listener_done.is_set()
+
+
+def test_default_convert_to_llm_bash_execution():
+    """bashExecution 包装为 user 消息；!!（excludeFromContext）跳过。"""
+    from pi_agent._agent import _default_convert_to_llm
+
+    messages = [
+        {
+            "role": "bashExecution",
+            "command": "npm run lint",
+            "output": "All checks passed",
+            "exitCode": 0,
+            "cancelled": False,
+            "truncated": False,
+            "timestamp": 1,
+        },
+        {
+            "role": "bashExecution",
+            "command": "secret-command",
+            "output": "hidden",
+            "exitCode": 1,
+            "cancelled": False,
+            "truncated": False,
+            "excludeFromContext": True,
+            "timestamp": 2,
+        },
+    ]
+    llm_messages = _default_convert_to_llm(messages)
+    assert len(llm_messages) == 1
+    assert llm_messages[0]["role"] == "user"
+    content = str(llm_messages[0]["content"])
+    assert "Ran `npm run lint`" in content
+    assert "All checks passed" in content
+    assert "secret-command" not in content

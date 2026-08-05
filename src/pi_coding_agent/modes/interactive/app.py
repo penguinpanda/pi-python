@@ -20,6 +20,7 @@ from ...extensions import ExtensionRunner
 from ...extensions.registry import ExtensionRegistry
 from pi_tui.clipboard_image import ClipboardImage
 from pi_tui.components import (
+    BashExecutionEntry,
     MessageEntry,
     PiChatContainer,
     PiEditor,
@@ -410,6 +411,8 @@ class PiTuiApp(App):
         text = message.text
         if text.startswith("/"):
             self._run_task(self._exec_slash(text))
+        elif text.startswith("!"):
+            self._run_task(self._exec_bash(text))
         else:
             self._run_task(self._send_prompt(text))
 
@@ -432,11 +435,60 @@ class PiTuiApp(App):
             self._notify(f"Command failed: {exc}")
         self._update_footer()
 
+    async def _exec_bash(self, text: str) -> None:
+        """交互 shell 命令：`!cmd` 执行并进入上下文，`!!cmd` 执行但不进上下文。"""
+        is_excluded = text.startswith("!!")
+        command = text[2:].strip() if is_excluded else text[1:].strip()
+        if not command:
+            return
+        if self._session.is_bash_running:
+            self._notify("A bash command is already running. Press Esc to cancel it first.")
+            self._editor.text = text
+            return
+        entry = BashExecutionEntry(command, exclude_from_context=is_excluded)
+        self._chat.mount(entry)
+        self._chat.scroll_end(animate=False)
+        self._set_status("Running bash")
+        try:
+            result = await self._session.execute_bash(
+                command,
+                on_chunk=lambda chunk, _progress: entry.append_output(chunk),
+                exclude_from_context=is_excluded,
+                shell_path=self._shell_path(),
+                command_prefix=self._shell_command_prefix(),
+            )
+            entry.set_complete(
+                result.exit_code,
+                cancelled=result.cancelled,
+                truncated=result.truncated,
+                full_output_path=result.full_output_path,
+            )
+            self._set_status("Idle")
+        except Exception as exc:
+            entry.set_error(str(exc))
+            self._notify(f"Bash command failed: {exc}")
+        self._update_footer()
+
+    def _shell_path(self) -> str | None:
+        manager = self._settings_manager
+        return manager.get_shell_path() if manager is not None else None
+
+    def _shell_command_prefix(self) -> str | None:
+        manager = self._settings_manager
+        return manager.get_shell_command_prefix() if manager is not None else None
+
     # ------------------------------------------------------------------
     # 快捷键 actions
     # ------------------------------------------------------------------
 
     def action_interrupt(self) -> None:
+        if self._session.is_bash_running:
+            self._session.abort_bash()
+            self._set_status("Aborting bash")
+            return
+        if self._editor.text.lstrip().startswith("!"):
+            self._editor.clear()
+            return
         self._set_status("Aborting")
         self._run_task(self._session.abort())
 

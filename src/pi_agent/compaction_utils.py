@@ -138,6 +138,18 @@ def serialize_conversation(messages: list[AgentMessage]) -> str:
                 parts.append(
                     f"[Tool result]: {truncate_for_summary(content, TOOL_RESULT_MAX_CHARS)}"
                 )
+        elif role == "bashExecution":
+            command = str(message.get("command", ""))
+            output = str(message.get("output", ""))
+            status = ""
+            if message.get("cancelled"):
+                status = " (cancelled)"
+            elif message.get("exitCode") not in (None, 0):
+                status = f" (exit {message.get('exitCode')})"
+            if output:
+                parts.append(
+                    f"[Bash]: {command}{status}\n{truncate_for_summary(output, TOOL_RESULT_MAX_CHARS)}"
+                )
     return "\n\n".join(parts)
 
 
@@ -222,6 +234,10 @@ def estimate_tokens(message: AgentMessage) -> int:
         return math.ceil(estimate_text_and_image_content_chars(message.get("content") or "") / 4)
     if role in ("branchSummary", "compactionSummary"):
         return math.ceil(len(message.get("summary", "")) / 4)
+    if role == "bashExecution":
+        return math.ceil(
+            (len(str(message.get("command", ""))) + len(str(message.get("output", "")))) / 4
+        )
     # 其余角色（system / agent 扩展角色）：优先按 content，其次按 summary 字段。
     content = message.get("content")
     if isinstance(content, str):

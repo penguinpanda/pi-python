@@ -595,6 +595,24 @@ BRANCH_SUMMARY_PREFIX = (
 BRANCH_SUMMARY_SUFFIX = "</summary>"
 
 
+def bash_execution_to_text(msg: dict[str, Any]) -> str:
+    """把 bashExecution 消息转为 LLM user 消息文本（对齐 TS bashExecutionToText）。"""
+    command = str(msg.get("command", ""))
+    output = str(msg.get("output", ""))
+    text = f"Ran `{command}`\n"
+    if output:
+        text += f"```\n{output}\n```"
+    else:
+        text += "(no output)"
+    if msg.get("cancelled"):
+        text += "\n\n(command cancelled)"
+    elif msg.get("exitCode") not in (None, 0):
+        text += f"\n\nCommand exited with code {msg.get('exitCode')}"
+    if msg.get("truncated") and msg.get("fullOutputPath"):
+        text += f"\n\n[Output truncated. Full output: {msg.get('fullOutputPath')}]"
+    return text
+
+
 def _default_convert_to_llm(
     messages: list[AgentMessage],
 ) -> list[Message]:
@@ -602,6 +620,7 @@ def _default_convert_to_llm(
 
     - system/user/assistant/toolResult 直接透传
     - compactionSummary / branchSummary 包装为 user 消息（对齐 TS convertToLlm）
+    - bashExecution 包装为 user 消息；excludeFromContext 时跳过（!! 前缀）
     - 其余不支持 role 的消息被过滤
     """
     result: list[Message] = []
@@ -609,6 +628,16 @@ def _default_convert_to_llm(
         role = m.get("role", "")
         if role in ("system", "user", "assistant", "toolResult"):
             result.append(m)
+        elif role == "bashExecution":
+            if cast(dict[str, Any], m).get("excludeFromContext"):
+                continue
+            result.append(
+                {
+                    "role": "user",
+                    "content": bash_execution_to_text(cast(dict[str, Any], m)),
+                    "timestamp": m.get("timestamp"),
+                }
+            )
         elif role in ("compactionSummary", "branchSummary"):
             summary = m.get("summary", "")
             prefix = (

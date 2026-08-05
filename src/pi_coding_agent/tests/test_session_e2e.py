@@ -76,6 +76,25 @@ def _make_session(
     )
 
 
+@pytest.mark.asyncio
+async def test_execute_bash_defers_while_streaming(faux_env, tmp_path):
+    """Agent 运行中执行 `!cmd`：bashExecution 延迟到 agent_end 后才进入上下文。"""
+    models, _core = faux_env
+    manager = SessionManager.in_memory(cwd=str(tmp_path))
+    session = _make_session(models, manager, tmp_path)
+    try:
+        session._agent.state.is_streaming = True
+        result = await session.execute_bash("echo deferred-bash")
+        assert result.exit_code == 0
+        assert session.get_messages() == []
+        session._flush_pending_bash_messages()
+        assert session.get_messages()[-1]["role"] == "bashExecution"
+        assert session.get_messages()[-1]["command"] == "echo deferred-bash"
+    finally:
+        session._agent.state.is_streaming = False
+        await session.dispose()
+
+
 def _final_assistant_text(messages) -> str:
     """提取最后一条 assistant 消息的纯文本。"""
     for msg in reversed(messages):

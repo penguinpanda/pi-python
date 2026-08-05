@@ -4,6 +4,7 @@
 
 ### Added
 
+- 交互模式支持 `!cmd` / `!!cmd` 本地 shell 命令（对齐 TS）：`!` 执行并进入 LLM 上下文，`!!` 执行但不进上下文，输出流式渲染
 - 引入 ruff（lint + format）与 mypy 配置及依赖
 - GitHub Actions CI：uv sync → ruff lint/format → pytest（含 PostgreSQL 存储测试）
 - `/trust` slash command and CLI startup project-trust resolution (`trust.json` persistence)

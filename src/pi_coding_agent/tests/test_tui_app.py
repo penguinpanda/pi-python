@@ -16,7 +16,7 @@ from pi_coding_agent._session_manager import SessionManager
 from pi_coding_agent.auth_storage import AuthStorage
 from pi_coding_agent.model_runtime import ModelRuntime
 from pi_coding_agent.modes.interactive.app import PiTuiApp
-from pi_tui.components import MessageEntry, PiEditor
+from pi_tui.components import BashExecutionEntry, MessageEntry, PiEditor
 from pi_tui.selectors import (
     ExtensionSelector,
     ModelSelector,
@@ -937,3 +937,79 @@ async def test_slash_reload_reloads_resources(tmp_path):
             pilot=pilot,
             message="reloaded keybinding dispatches",
         )
+
+
+@pytest.mark.asyncio
+async def test_bang_command_runs_and_records_bash_execution(tmp_path):
+    """`!cmd` 本地执行、流式展示并写入 bashExecution 消息。"""
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test():
+        app._editor.text = "!echo hello-bash"
+        app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "!echo hello-bash"))
+        await _wait_until(
+            lambda: any(
+                entry.label == "Bash" and "hello-bash" in entry.output
+                for entry in app._chat.query(BashExecutionEntry)
+            ),
+            message="bash entry shows output",
+        )
+        await _wait_until(
+            lambda: (
+                not session.is_bash_running
+                and session.get_messages()
+                and session.get_messages()[-1].get("role") == "bashExecution"
+            ),
+            message="bash result recorded",
+        )
+        bash = session.get_messages()[-1]
+        assert bash["command"] == "echo hello-bash"
+        assert "hello-bash" in str(bash["output"])
+        assert bash["exitCode"] == 0
+        assert bash.get("excludeFromContext") is False
+
+
+@pytest.mark.asyncio
+async def test_double_bang_command_excludes_from_context(tmp_path):
+    """`!!cmd` 本地执行，但 bashExecution 不进入 LLM 上下文。"""
+    from pi_agent._agent import _default_convert_to_llm
+
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test():
+        app._editor.text = "!!echo hidden-bash"
+        app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "!!echo hidden-bash"))
+        await _wait_until(
+            lambda: (
+                not session.is_bash_running
+                and session.get_messages()
+                and session.get_messages()[-1].get("role") == "bashExecution"
+            ),
+            message="double-bang bash result recorded",
+        )
+        bash = session.get_messages()[-1]
+        assert bash.get("excludeFromContext") is True
+        llm_messages = _default_convert_to_llm(session.get_messages())
+        assert all("hidden-bash" not in str(message.get("content", "")) for message in llm_messages)
+
+
+@pytest.mark.asyncio
+async def test_bang_command_failure_renders_error(tmp_path):
+    """命令失败时条目显示 exit code，会话仍可继续。"""
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test():
+        app._editor.text = "!exit 7"
+        app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "!exit 7"))
+        await _wait_until(
+            lambda: any(
+                entry.label == "Bash" and entry.status == "(exit 7)"
+                for entry in app._chat.query(BashExecutionEntry)
+            ),
+            message="bash failure status shown",
+        )
+        bash = session.get_messages()[-1]
+        assert bash["exitCode"] == 7

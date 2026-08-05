@@ -91,6 +91,21 @@ def message_to_entries(
         return [("Branch summary", message.get("summary", ""))]
     if role == "skillInvocation":
         return [("Skill", message.get("content", ""))]
+    if role == "bashExecution":
+        command = str(message.get("command", ""))
+        output = str(message.get("output", ""))
+        status_parts: list[str] = []
+        if message.get("cancelled"):
+            status_parts.append("(cancelled)")
+        elif message.get("exitCode") not in (None, 0):
+            status_parts.append(f"(exit {message.get('exitCode')})")
+        if message.get("truncated") and message.get("fullOutputPath"):
+            status_parts.append(f"Output truncated. Full output: {message.get('fullOutputPath')}")
+        lines = [f"$ {command}", output or "(no output)"]
+        if status_parts:
+            lines.append(" ".join(status_parts))
+        label = "Bash (excluded)" if message.get("excludeFromContext") else "Bash"
+        return [(label, "\n".join(lines))]
     if role == "system":
         return [("System", message.get("content", ""))]
     # 其它角色（custom/branchSummary 等）降级为文本。
@@ -115,6 +130,69 @@ class MessageEntry(Static):
 
     def on_mount(self) -> None:
         self.update(f"[b]{self.label}[/b] {self.entry_text}")
+
+
+class BashExecutionEntry(Static):
+    """交互 bash 命令条目：流式输出 + 完成状态。"""
+
+    def __init__(
+        self,
+        command: str,
+        *,
+        exclude_from_context: bool = False,
+        **kwargs,
+    ) -> None:
+        super().__init__("", **kwargs)
+        self.command = command
+        self.exclude_from_context = exclude_from_context
+        self.output = ""
+        self.status: str | None = None
+
+    @property
+    def label(self) -> str:
+        return "Bash (excluded)" if self.exclude_from_context else "Bash"
+
+    def on_mount(self) -> None:
+        self._update_display()
+
+    def append_output(self, chunk: str) -> None:
+        self.output += chunk
+        self._schedule_update()
+
+    def set_complete(
+        self,
+        exit_code: int | None,
+        cancelled: bool = False,
+        truncated: bool = False,
+        full_output_path: str | None = None,
+    ) -> None:
+        if cancelled:
+            self.status = "(cancelled)"
+        elif exit_code not in (None, 0):
+            self.status = f"(exit {exit_code})"
+        else:
+            self.status = None
+        if truncated and full_output_path:
+            prefix = f"{self.status} " if self.status else ""
+            self.status = f"{prefix}Output truncated. Full output: {full_output_path}"
+        self._schedule_update()
+
+    def set_error(self, message: str) -> None:
+        self.status = f"(failed: {message})"
+        self._schedule_update()
+
+    def _schedule_update(self) -> None:
+        if self.is_mounted:
+            self.call_after_refresh(self._update_display)
+
+    def _update_display(self) -> None:
+        escaped = self.output.replace("[", r"\[")
+        text = f"$ {self.command}"
+        if escaped:
+            text += f"\n{escaped}"
+        if self.status:
+            text += f"\n{self.status}"
+        self.update(f"[b]{self.label}[/b] {text}")
 
 
 class PiHeader(Static):
@@ -168,7 +246,8 @@ class PiChatContainer(VerticalScroll):
         self.scroll_end(animate=False)
 
     def clear_messages(self) -> None:
-        for entry in self.query(MessageEntry):
+        entries = list(self.query(MessageEntry)) + list(self.query(BashExecutionEntry))
+        for entry in entries:
             entry.remove()
 
 
@@ -272,6 +351,7 @@ class PiToolbar(Input):
 
 
 __all__ = [
+    "BashExecutionEntry",
     "MessageEntry",
     "PiHeader",
     "PiChatContainer",
