@@ -19,7 +19,7 @@ TS pi-tui 是**自研终端渲染器 + 组件树 + overlay 焦点协议**；Pyth
 | --- | --- | --- |
 | 渲染引擎 | 自研：`Component.render(width)` 生成文本行，差分写入终端，支持主屏/alt-screen | Textual compositor（CSS 布局、鼠标、resize 全由 Textual 负责） |
 | 组件模型 | `Component` / `Container` 树，每个组件可渲染、可聚焦（`Focusable`） | Textual `Widget` 树 |
-| Overlay | `showOverlay(component, options)` + `OverlayStackEntry` + `OverlayHandle` | `OverlayManager` + `OverlayLayer` + `OverlayHandle` |
+| Overlay | `showOverlay(component, options)` + `OverlayStackEntry` + `OverlayHandle` | `OverlayManager` + overlay 层（widget 直接挂 Screen）+ `OverlayHandle` |
 | Overlay 布局 | `resolveOverlayLayout`：anchor / margin / 百分比 / 绝对 row/col / offset / maxHeight | `resolve_layout()` 纯函数，语义一致 |
 | 焦点 | `TuiBase.setFocus` + eligible/blocked/inactive + preFocus 链 + `isOverlayFocusAncestor` + `CURSOR_MARKER` | `OverlayFocusController` 三态（active/blocked/inactive）+ `DescendantFocus` 同步，无 eligible 专有状态 |
 | 输入 | 自解析终端 stdin（kitty 协议、key release/repeat、input listener） | Textual 键盘事件分发 |
@@ -39,7 +39,7 @@ TS pi-tui 是**自研终端渲染器 + 组件树 + overlay 焦点协议**；Pyth
   offset、maxHeight、minWidth、边界 clamp；含随机不变量测试。
 - `OverlayHandle`：hide / setHidden / focus / unfocus(target) / isFocused / isHidden。
 - z-order：`focusOrder` 单调递增，focus()/setHidden(false) 会置顶（Textual 无 `z` 样式，
-  通过异步重挂载到 `OverlayLayer` 末尾实现）。
+  通过异步重挂载到 Screen 末尾实现）。
 - `visible(w,h)` 回调 + resize 重排 + 焦点重定向。
 - `nonCapturing`：不抢焦点、不参与事件路由。
 - 事件路由：`manager.handle_event` 从最上层可见 capturing overlay 向下冒泡到基座。
@@ -118,7 +118,7 @@ Box/VStack/HStack/Text/Input/SelectList 的组合，渲染成文本行后由
 
 **Python 现状**：全部选择器（Choice/TextInput/Thinking/Settings/Model/Session/
 Tree/OAuth/Scoped/Extension/Trust）都已改为 `OverlayDialog`（Widget）并通过
-`push_screen` 桥接挂进 `OverlayLayer`——选择器即 overlay，焦点 / z-order /
+`push_screen` 桥接挂进 overlay 层——选择器即 overlay，焦点 / z-order /
 关闭恢复全部走同一套管理器；不再有 ModalScreen。
 
 **建议**：无（已全部迁移）。
@@ -203,7 +203,7 @@ TS `utils.ts` 有 `visibleWidth` / `sliceByColumn` / `wrapTextWithAnsi` /
 ### Phase 3：通用组件移植 + 选择器迁移（已完成）
 
 - ✅ `SelectList`（fuzzy + 键盘导航）→ `SettingsList`（循环取值）。
-- ✅ 轻量选择器（Choice/TextInput/Thinking/Settings）迁移到 `OverlayLayer`
+- ✅ 轻量选择器（Choice/TextInput/Thinking/Settings）迁移到 overlay 层
   （`OverlayDialog` + `push_screen` 桥接），关闭后焦点回到打开前位置。
 - 可选：`Markdown` 渲染对齐、`PiEditorVim`。
 

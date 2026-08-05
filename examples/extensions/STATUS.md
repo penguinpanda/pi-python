@@ -89,10 +89,10 @@
 
 ## 依赖的未实现能力（按示例分类）
 
-- UI：`set_overlay_component`（组件实例）已实现；`SelectList` / `SettingsList` 已提供；全部选择器（Choice/TextInput/Thinking/Settings/Model/Session/Tree/OAuth/Scoped/Extension/Trust）已迁移到 OverlayLayer
+- UI：`set_overlay_component`（组件实例）已实现；`SelectList` / `SettingsList` 已提供；全部选择器（Choice/TextInput/Thinking/Settings/Model/Session/Tree/OAuth/Scoped/Extension/Trust）已迁移到 overlay 层
 
 ## 已知限制（非 pi-python 扩展 API 缺口）
 
 - `doom-overlay/`、`gondolin/`、`sandbox/`：依赖外部运行时（WASM 游戏、微 VM、OS 沙箱），需要引入对应外部子系统后才能移植。
 - `PI_SKIP_VERSION_CHECK` / `PI_TELEMETRY` / `PI_SHARE_VIEWER_URL` / `PI_HARDWARE_CURSOR`：pi-python 没有版本检查 / 遥测 / share 上传 / 硬件光标对应的功能消费者；当前 Textual 版本也无硬件光标 API，标注 N/A。
-- overlay 运行时：`src/pi_tui/overlay/` 已实现 `OverlayLayer` + `OverlayManager` + `OverlayFocusController` + `resolve_layout` + `OverlayHandle`（hide / setHidden / focus / unfocus），支持锚点 / margin / 百分比 / maxHeight / nonCapturing / visible / 动画 / z-order / 事件路由；`OverlayWidget` 双模支持行文本与组件子树（`set_overlay_component`）；ModalScreen 选择器与 overlay 焦点恢复已统一（渲染路径仍分离）。
+- overlay 运行时：`src/pi_tui/overlay/` 已实现 `OverlayManager` + `OverlayFocusController` + `resolve_layout` + `OverlayHandle`（hide / setHidden / focus / unfocus），支持锚点 / margin / 百分比 / maxHeight / nonCapturing / visible / 动画 / z-order / 事件路由；`OverlayWidget` 双模支持行文本与组件子树（`set_overlay_component`），overlay 直接挂 Screen overlay 层；全部选择器已 overlay 化。

@@ -331,6 +331,23 @@ async def test_set_overlay_component_replaces_lines_overlay(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_overlay_mounts_on_screen_without_covering_base(tmp_path):
+    """回归：overlay 直接挂 Screen overlay 层，不遮挡聊天/编辑器/底栏。"""
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.query("#pi-overlay-layer").nodes == []
+        assert app._editor.display is True
+        app._set_overlay("ov1", ["overlay text"], {"anchor": "top-left"})
+        await pilot.pause()
+        widget = app.query_one("#pi-overlay-ov1", Widget)
+        assert widget.parent is app.screen
+        assert app._editor.display is True
+
+
+@pytest.mark.asyncio
 async def test_overlay_dialog_focus_restores_overlay(tmp_path):
     runtime = _make_runtime()
     session = _make_session(runtime, tmp_path)
@@ -1266,6 +1283,11 @@ async def test_slash_fork_no_args_opens_selector(tmp_path):
             lambda: app.query(TreeSelector).nodes,
             pilot=pilot,
             message="fork selector opened",
+        )
+        await _wait_until(
+            lambda: app.screen.focused is app.query_one(TreeSelector).query_one("#tree-list"),
+            pilot=pilot,
+            message="tree list focused",
         )
         # 初始选中第一项，Enter 直接 fork
         await pilot.press("enter")

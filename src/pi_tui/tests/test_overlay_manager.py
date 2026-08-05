@@ -191,3 +191,10 @@ def test_route_input_keeps_component_focus() -> None:
     before = list(env.focused)
     env.manager.route_input()
     assert env.focused == before
+
+
+def test_overlay_layer_renders_empty() -> None:
+    """OverlayLayer 容器本身不渲染任何内容（防止默认描述文本遮挡 UI）。"""
+    from pi_tui.overlay import OverlayLayer
+
+    assert OverlayLayer().render() == ""

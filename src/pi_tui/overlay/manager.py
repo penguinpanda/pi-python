@@ -220,10 +220,15 @@ class OverlayManager:
         """overlay 仍持有焦点权时重新聚焦（不改变 z-order）。
 
         用于组件 overlay 的子组件完成挂载后，把焦点真正落到子树。
+        blocked 且焦点被临时挪走（如重挂载中间态）时同样恢复。
         """
         entry = self._entries.get(key)
-        if entry is None or self.controller.focused is not entry:
+        if entry is None:
             return
+        if self.controller.focused is not entry:
+            if self.controller.state.overlay is not entry:
+                return
+            self.controller.focus(entry)
         self._hooks.focus(entry.widget)
 
     def unfocus(self, key: str, target: Any | None = None) -> None:

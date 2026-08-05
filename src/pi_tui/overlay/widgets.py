@@ -14,6 +14,8 @@ from .model import OverlayOptions
 class OverlayLayer(Widget):
     """所有 overlay 的绝对定位容器，叠加在 base 内容之上。"""
 
+    can_focus = False
+
     DEFAULT_CSS = """
     OverlayLayer {
         position: absolute;
@@ -22,6 +24,10 @@ class OverlayLayer(Widget):
         layer: overlay;
     }
     """
+
+    def render(self) -> str:
+        """空渲染：容器本身不画任何内容，避免默认描述文本遮挡 base UI。"""
+        return ""
 
 
 class OverlayWidget(Static):
@@ -87,6 +93,13 @@ class OverlayWidget(Static):
                 else:
                     # 子组件尚未完成挂载：下个刷新周期再聚焦。
                     self.call_after_refresh(lambda: self.focus(scroll_visible))
+                return self
+            # 子树尚未 compose（无 children）也重试，直到挂载完成。
+            if self._component is not None and (
+                not getattr(self._component, "is_mounted", False)
+                or not getattr(self._component, "children", ())
+            ):
+                self.call_after_refresh(lambda: self.focus(scroll_visible))
                 return self
         return super().focus(scroll_visible)
 

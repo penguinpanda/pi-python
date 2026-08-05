@@ -63,7 +63,7 @@ Print 模式降级为 `NoopUIContext`；RPC 模式有 `RpcUiContext`。自定义
 - `layout.py`：`resolve_layout()` 纯函数——锚点、margin、百分比/绝对 row/col、offset、maxHeight、minWidth、边界 clamp。
 - `focus.py`：`OverlayFocusController` 三态状态机（inactive / active / blocked），只管理“哪个 overlay 拥有焦点权”与 preFocus / blocked / resume 恢复关系，不直接操作 Textual widget。
 - `manager.py`：`OverlayManager` 管理 show / update / remove / setHidden / focusOrder 置顶、可见性回调、resize 重排、事件路由（topmost capturing overlay 优先，未处理则冒泡到基座）。
-- `widgets.py`：`OverlayLayer`（绝对定位容器，挂在 `#pi-overlay-layer`）与 `OverlayWidget`（Static 子类，can_focus）。
+- `widgets.py`：`OverlayLayer`（保留类，空渲染，不挂载）与 `OverlayWidget`（Static 子类，can_focus）；overlay 直接以 `layer: overlay` 挂到 Screen。
 
 `ctx.ui.set_overlay(key, lines, options)` 支持：锚点 / margin / offset / 百分比 / maxHeight / 边框标题 / `nonCapturing` / `visible(w,h)` 回调 / 动画；capturing overlay 会接管键盘焦点，关闭或 unfocus 后恢复到 preFocus（编辑器或上层 overlay）。ModalScreen 选择器暂不接入这套焦点协议。
 
@@ -75,7 +75,7 @@ Print 模式降级为 `NoopUIContext`；RPC 模式有 `RpcUiContext`。自定义
 `ThinkingSelector` / `SettingsSelector` / `ModelSelector` / `SessionPicker` /
 `TreeSelector` / `OAuthSelector` / `ScopedModelsSelector` / `ExtensionSelector` /
 `TrustSelector` 都继承 `OverlayDialog`（Widget），`push_screen` 自动桥接到
-`OverlayLayer`（居中、80% 宽、maxHeight 60%），dismiss 时移除 overlay 并把焦点
+overlay 层（居中、80% 宽、maxHeight 60%），dismiss 时移除 overlay 并把焦点
 恢复到打开前位置（编辑器或上层 overlay）。pi 自身不再使用 ModalScreen。
 
 ## 通用列表组件

@@ -184,15 +184,25 @@ class MessageEntry(Static):
         super().__init__("", **kwargs)
         self.label = label
         self.entry_text = text
+        self.speaking = False
 
     def on_mount(self) -> None:
-        self.update(render_labeled_markdown(self.label, self.entry_text))
+        self._refresh_display()
 
     def set_text(self, text: str) -> None:
         """流式更新正文（未挂载时只记录，挂载后重渲染）。"""
         self.entry_text = text
         if self.is_mounted:
-            self.update(render_labeled_markdown(self.label, text))
+            self._refresh_display()
+
+    def set_speaking(self, speaking: bool) -> None:
+        """标记当前是否正在说话（流式回复中显示 Speaking…）。"""
+        self.speaking = speaking
+        if self.is_mounted:
+            self._refresh_display()
+
+    def _refresh_display(self) -> None:
+        self.update(render_labeled_markdown(self.label, self.entry_text, speaking=self.speaking))
 
 
 class BashExecutionEntry(Static):

@@ -4,14 +4,29 @@ from __future__ import annotations
 
 import pytest
 from rich.console import Console
+from rich.markdown import Markdown
 
-from pi_tui.markdown import render_labeled_markdown
+from pi_tui.markdown import label_icon, render_labeled_markdown
 
 
 def _render(renderable) -> str:
     console = Console(record=True, width=80, force_terminal=False)
     console.print(renderable)
     return console.export_text()
+
+
+def _find_markdown(renderable):
+    if isinstance(renderable, Markdown):
+        return renderable
+    nested = getattr(renderable, "renderables", None) or getattr(renderable, "renderable", None)
+    if isinstance(nested, (list, tuple)):
+        for item in nested:
+            found = _find_markdown(item)
+            if found is not None:
+                return found
+    elif nested is not None:
+        return _find_markdown(nested)
+    return None
 
 
 def test_heading_and_bold() -> None:
@@ -56,12 +71,34 @@ def test_brackets_are_escaped() -> None:
     assert "a [b] c" in out
 
 
+def test_label_icons() -> None:
+    user_out = _render(render_labeled_markdown("User", "hi"))
+    assistant_out = _render(render_labeled_markdown("Assistant", "hi"))
+    tool_out = _render(render_labeled_markdown("Tool: bash", "out"))
+    assert "👤 User" in user_out
+    assert "🤖 Assistant" in assistant_out
+    assert "🛠 Tool: bash" in tool_out
+    assert label_icon("Compaction summary") == "📦"
+    assert label_icon("Unknown") == "▸"
+
+
+def test_speaking_indicator() -> None:
+    out = _render(render_labeled_markdown("Assistant", "hi", speaking=True))
+    assert "Speaking" in out
+    assert "🤖 Assistant" in out
+
+
+def test_first_line_indent() -> None:
+    out = _render(render_labeled_markdown("Assistant", "first line\n\nsecond line"))
+    assert "\n  first line" in out
+    assert "\n  second line" in out
+
+
 @pytest.mark.asyncio
 async def test_message_entry_renders_markdown() -> None:
     from textual.app import App
 
     from rich.console import Group
-    from rich.markdown import Markdown
 
     from pi_tui.components import MessageEntry
 
@@ -77,7 +114,7 @@ async def test_message_entry_renders_markdown() -> None:
         assert entry.entry_text == "# Hi\n\n- item"
         content = entry.content
         assert isinstance(content, Group)
-        assert any(isinstance(renderable, Markdown) for renderable in content.renderables)
+        assert _find_markdown(content) is not None
 
 
 @pytest.mark.asyncio
@@ -97,3 +134,25 @@ async def test_message_entry_set_text_updates() -> None:
         entry.set_text("second")
         assert entry.entry_text == "second"
         assert entry.content is not None
+
+
+@pytest.mark.asyncio
+async def test_message_entry_set_speaking_updates() -> None:
+    from textual.app import App
+
+    from pi_tui.components import MessageEntry
+
+    class Host(App):
+        def compose(self):
+            yield MessageEntry("Assistant", "hi")
+
+    app = Host()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        entry = app.query_one(MessageEntry)
+        entry.set_speaking(True)
+        label_text = entry.content.renderables[0]
+        assert "Speaking" in label_text.plain
+        entry.set_speaking(False)
+        label_text = entry.content.renderables[0]
+        assert "Speaking" not in label_text.plain

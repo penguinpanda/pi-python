@@ -35,7 +35,6 @@ from pi_tui.keybindings import KeybindingsManager
 from pi_tui.overlay import (
     OverlayHandle,
     OverlayHooks,
-    OverlayLayer,
     OverlayManager,
     OverlayRect,
     OverlayWidget,
@@ -242,7 +241,6 @@ class PiTuiApp(App):
         self._custom_editor: PiEditor | None = None
         self._widget_above: dict[str, str] = {}
         self._widget_below: dict[str, str] = {}
-        self._overlay_layer: OverlayLayer | None = None
         self._overlay_dialog_callbacks: dict[str, Callable[[Any], None] | None] = {}
         self._overlay_manager = OverlayManager(
             OverlayHooks(
@@ -318,8 +316,6 @@ class PiTuiApp(App):
         yield PiEditor(id="pi-editor")
         yield Static("", id="pi-widgets-below")
         yield PiFooter("", id="pi-footer")
-        self._overlay_layer = OverlayLayer(id="pi-overlay-layer")
-        yield self._overlay_layer
 
     def on_mount(self) -> None:
         self._bind_session()
@@ -423,6 +419,7 @@ class PiTuiApp(App):
         if self._stream_entry is not None:
             return
         entry = MessageEntry("Assistant", "")
+        entry.set_speaking(True)
         self._stream_entry = entry
         self._chat.mount(entry)
         self._chat.scroll_end(animate=False)
@@ -551,7 +548,7 @@ class PiTuiApp(App):
         lines: list[str],
         options: dict | None = None,
     ) -> OverlayHandle | None:
-        """显示 / 更新浮层（OverlayManager + OverlayLayer）；空列表移除。"""
+        """显示 / 更新浮层（OverlayManager + overlay 层）；空列表移除。"""
         if not lines:
             self._overlay_manager.remove(key)
             return None
@@ -588,8 +585,7 @@ class PiTuiApp(App):
         widget.set_component(component)
 
     def _mount_overlay(self, widget: OverlayWidget) -> None:
-        if self._overlay_layer is not None:
-            self._overlay_layer.mount(widget)
+        self.screen.mount(widget)
 
     def _apply_overlay_rect(
         self,
@@ -610,18 +606,20 @@ class PiTuiApp(App):
             widget.styles.offset = target
 
     def _bring_overlay_to_front(self, widget: OverlayWidget) -> None:
-        """重新挂载到 layer 末尾，确保 focusOrder 置顶（DOM 顺序决定同层堆叠）。"""
-        layer = self._overlay_layer
-        if layer is None:
-            return
+        """重新挂载到屏幕末尾，确保 focusOrder 置顶（DOM 顺序决定同层堆叠）。"""
 
         async def _reorder() -> None:
             try:
                 if widget.is_attached:
                     await widget.remove()
-                await layer.mount(widget)
+                await self.screen.mount(widget)
             except Exception:
                 pass
+            finally:
+                # 重挂载会重建组件子树，焦点可能被 Textual 挪走；完成后重新落位。
+                entry = self._overlay_manager.entry_for_widget(widget)
+                if entry is not None:
+                    self._overlay_manager.ensure_focus(entry.key)
 
         self._run_task(_reorder())
 
@@ -639,7 +637,7 @@ class PiTuiApp(App):
         self._overlay_manager.route_input()
 
     def push_screen(self, screen, callback=None, wait_for_dismiss=False, *, mode=None) -> Any:
-        """轻量选择器改走 OverlayLayer；其余（Model/Tree 等）仍走屏幕栈。"""
+        """选择器改走 overlay 层；其余（内置帮助等）仍走屏幕栈。"""
         if isinstance(
             screen,
             (
@@ -666,7 +664,7 @@ class PiTuiApp(App):
         )
 
     def _open_overlay_selector(self, component, callback=None) -> None:
-        """把对话框组件挂进 OverlayLayer（选择器即 overlay）。"""
+        """把对话框组件挂进 overlay 层（选择器即 overlay）。"""
         key = f"dialog-{id(component):x}"
         self._overlay_dialog_callbacks[key] = callback
         self._overlay_manager.show_component(
