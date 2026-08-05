@@ -56,6 +56,7 @@ def _bind_env(tool: AgentTool, env: PythonExecutionEnv) -> AgentTool:
         description=tool.description,
         input_schema=tool.input_schema,
         label=tool.label,
+        prompt_snippet=tool.prompt_snippet,
         execute=execute,
     )
 

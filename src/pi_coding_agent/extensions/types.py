@@ -150,6 +150,7 @@ class ToolDefinition:
 
     name: str
     description: str = ""
+    prompt_snippet: str = ""
     parameters: dict | None = None
     label: str = ""
     execute: Callable | None = None

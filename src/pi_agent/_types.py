@@ -123,6 +123,9 @@ class AgentTool:
     # 单工具执行模式（对齐 TS executionMode，省略时按默认并行）。
     # 批次内任一工具声明 "sequential" → 整批回退为顺序执行。
     execution_mode: ToolExecutionMode = "parallel"
+    # 工具在 "Available tools" 段的单行说明（对齐 TS promptSnippet）；
+    # 缺省时由 tool_snippets_for 回退到 description 第一行 / 工具名。
+    prompt_snippet: str | None = None
 
     # ---- 生命周期钩子（可选，默认 None 不改变现有行为）----
 

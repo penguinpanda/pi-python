@@ -101,6 +101,7 @@ def create_find_tool(cwd: str) -> AgentTool:
 
     return AgentTool(
         name="find",
+        prompt_snippet="Find files by glob pattern (respects .gitignore)",
         description=(
             "Search for files matching a glob pattern under the working directory. "
             "Returns relative file paths. Never search from the filesystem root "

@@ -131,6 +131,7 @@ def create_bash_tool(options: BashToolOptions | None = None) -> AgentTool:
     return AgentTool(
         name="bash",
         label="bash",
+        prompt_snippet="Execute bash commands (ls, grep, find, etc.)",
         description=(
             f"Execute a bash command in the current working directory. Returns stdout and stderr. "
             f"Output is truncated to last {DEFAULT_MAX_LINES} lines or {DEFAULT_MAX_BYTES // 1024}KB "

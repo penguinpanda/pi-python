@@ -309,6 +309,7 @@ async def _async_main(args: list[str] | None = None) -> int:
             tools_override=tools_override,
             compaction_settings=compaction_settings_from_config(settings),
             system_prompt_builder=system_prompt_builder,
+            restrict_untrusted_tools=bool(settings.get("restrictUntrustedTools")),
         )
         session.extension_state = extension_state
         session.project_trusted = project_trusted

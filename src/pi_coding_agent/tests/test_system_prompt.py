@@ -17,9 +17,10 @@ from pi_coding_agent.system_prompt import (
 
 
 class _FakeTool:
-    def __init__(self, name: str, description: str) -> None:
+    def __init__(self, name: str, description: str = "", prompt_snippet: str | None = None) -> None:
         self.name = name
         self.description = description
+        self.prompt_snippet = prompt_snippet
 
 
 def _snippets():
@@ -32,6 +33,20 @@ def _snippets():
 
 
 class TestBuildSystemPrompt:
+    def test_tool_snippets_priority(self):
+        snippets = tool_snippets_for(
+            [
+                _FakeTool("a", description="first line\nsecond", prompt_snippet="explicit"),
+                _FakeTool("b", description="desc line\nmore"),
+                _FakeTool("c"),
+            ]
+        )
+        assert snippets == {"a": "explicit", "b": "desc line", "c": "c"}
+
+    def test_tool_snippet_multiline_normalized(self):
+        snippets = tool_snippets_for([_FakeTool("a", prompt_snippet="multi\nline   text")])
+        assert snippets == {"a": "multi line text"}
+
     def test_default_prompt_contains_cwd_and_tools(self, tmp_path):
         prompt = build_system_prompt(
             BuildSystemPromptOptions(
@@ -102,19 +117,31 @@ class TestBuildSystemPrompt:
         assert "Available tools:\n(none)" in prompt
 
     def test_custom_prompt_keeps_context_and_skills(self, tmp_path):
+        from pi_coding_agent.skills import Skill
+
+        skill = Skill(
+            name="alpha",
+            description="Alpha skill",
+            file_path=str(tmp_path / "SKILL.md"),
+            base_dir=str(tmp_path),
+            source="user",
+        )
         prompt = build_system_prompt(
             BuildSystemPromptOptions(
                 cwd=str(tmp_path),
                 custom_prompt="You are custom.",
+                append_system_prompt="Extra instruction.",
                 context_files=[
                     {"path": str(tmp_path / "AGENTS.md"), "content": "Follow repo rules"}
                 ],
-                skills=[],
+                skills=[skill],
             )
         )
         assert "You are custom." in prompt
+        assert "Extra instruction." in prompt
         assert "<project_context>" in prompt
         assert "Follow repo rules" in prompt
+        assert "<available_skills>" in prompt
         assert "Current working directory:" in prompt
 
     def test_append_system_prompt(self, tmp_path):
@@ -294,7 +321,8 @@ class TestToolSnippets:
             _FakeTool("bash", ""),
         ]
         snippets = tool_snippets_for(tools)
-        assert snippets == {"read": "Read a file"}
+        # 优先级：prompt_snippet → description 第一行 → 工具名。
+        assert snippets == {"read": "Read a file", "bash": "bash"}
 
 
 class TestSessionRebuild:

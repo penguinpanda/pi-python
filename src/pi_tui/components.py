@@ -465,6 +465,15 @@ class PiEditor(TextArea):
             event.prevent_default()
             return
         await super()._on_key(event)
+        # 自动触发 slash 命令补全：输入 `/cmd` 且尚未出现空格时。
+        character = getattr(event, "character", None)
+        if (
+            character
+            and character.isprintable()
+            and self.text.startswith("/")
+            and " " not in self.text
+        ):
+            self.post_message(self.AutocompleteRequested(self))
 
 
 class PiEditorVim(PiEditor):

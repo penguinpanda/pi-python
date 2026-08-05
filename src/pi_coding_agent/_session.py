@@ -124,6 +124,8 @@ class AgentSession:
         extension_runner=None,
         # 系统提示构建器（/reload 重建用）。
         system_prompt_builder: Callable[[], str] | None = None,
+        # 未信任项目时拦截高风险工具（bash/write/edit；默认关闭，对齐 TS 不限制工具）。
+        restrict_untrusted_tools: bool = False,
     ):
         self._agent = agent
         self._session_manager = session_manager
@@ -136,6 +138,7 @@ class AgentSession:
         self._extension_runner = extension_runner
         self._extension_tool_names: set[str] = set()
         self._system_prompt_builder = system_prompt_builder
+        self._restrict_untrusted_tools = restrict_untrusted_tools
         if extension_runner is not None:
             extension_runner.bind_session(self)
         self._listeners: list[Callable[[dict[Any, Any]], None]] = []
@@ -222,6 +225,13 @@ class AgentSession:
         """包装 before_tool_call：先派发扩展 tool_call 事件（可 block / 改参数）。"""
 
         async def _before(ctx: BeforeToolCallContext):
+            if self._restrict_untrusted_tools and self.project_trusted is not True:
+                tool_name = ctx.tool_call.get("name", "")
+                if tool_name in ("bash", "write", "edit"):
+                    return BeforeToolCallResult(
+                        block=True,
+                        reason="Project is not trusted; high-risk tools are disabled",
+                    )
             runner = self._extension_runner
             if runner is not None and runner.has_handlers("tool_call"):
                 results = await runner.emit_event(

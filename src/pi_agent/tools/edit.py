@@ -109,6 +109,10 @@ def create_edit_tool() -> AgentTool:
     return AgentTool(
         name="edit",
         label="edit",
+        prompt_snippet=(
+            "Make precise file edits with exact text replacement, "
+            "including multiple disjoint edits in one call"
+        ),
         description=(
             "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, "
             "non-overlapping region of the original file. If two changes affect the same block or nearby lines, "

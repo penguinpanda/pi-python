@@ -6,6 +6,7 @@ import sys
 
 from pi_tui.terminal import (
     _parse_osc_hex_channel,
+    drain_pending_osc_response,
     parse_osc11_background,
     query_terminal_background,
 )
@@ -51,3 +52,9 @@ def test_query_dumb_term_returns_none(monkeypatch) -> None:
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     monkeypatch.setenv("TERM", "dumb")
     assert query_terminal_background() is None
+
+
+def test_drain_pending_noop_without_tty(monkeypatch) -> None:
+    """退出 drain：非 TTY 时静默返回，不抛异常。"""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    drain_pending_osc_response()

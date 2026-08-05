@@ -229,7 +229,8 @@ SessionManager.open("~/.pi/agent/sessions/abc.jsonl", cwd_override=".")
 | 7 | ls | `ls` | `path` | 目录优先排序，显示大小 |
 
 组合器：`create_all_tools(cwd)`（7 个）、`create_coding_tools(cwd)`（read/bash/edit/write）、
-`create_readonly_tools(cwd)`（read/grep/find/ls）。
+`create_readonly_tools(cwd)`（read/grep/find/ls）。工具在系统提示
+“Available tools”段的单行说明优先级：`prompt_snippet` → description 第一行 → 工具名。
 
 ---
 
@@ -294,6 +295,7 @@ AgentSession(
     "appendSystemPrompt": ["只回答中文"],
     "keybindings": {"app.model.select": "ctrl+m"},
     "compaction": {"enabled": true, "reserveTokens": 16384, "keepRecentTokens": 20000},
+    "restrictUntrustedTools": false,
     "retry": {"enabled": true, "maxRetries": 3, "baseDelayMs": 2000},
     "httpIdleTimeoutMs": 300000,
     "enableSkillCommands": true

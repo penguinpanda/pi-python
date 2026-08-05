@@ -115,6 +115,7 @@ def create_grep_tool(cwd: str) -> AgentTool:
 
     return AgentTool(
         name="grep",
+        prompt_snippet="Search file contents for patterns (respects .gitignore)",
         description=(
             "Search for a regex pattern in files under the working directory. "
             "Returns matching lines with file paths and line numbers. "

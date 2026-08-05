@@ -474,6 +474,32 @@ async def test_autocomplete_async_provider(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_slash_autocomplete_opens_and_inserts(tmp_path):
+    """输入 `/` 自动弹出命令补全，Enter 插入 `/name ` 并保留后续参数。"""
+    from pi_tui.selectors import ChoiceSelector
+
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        editor = app.query_one(PiEditor)
+        editor.focus()
+        await pilot.press("/")
+        await _wait_until(
+            lambda: app.query(ChoiceSelector).nodes,
+            pilot=pilot,
+            message="slash autocomplete opened",
+        )
+        app.query_one(ChoiceSelector).action_select()
+        await pilot.pause()
+        await _wait_until(
+            lambda: editor.text == "/model ",
+            pilot=pilot,
+            message="command inserted",
+        )
+
+
+@pytest.mark.asyncio
 async def test_session_streaming_updates_partial_entry(tmp_path):
     runtime = _make_runtime()
     session = _make_session(runtime, tmp_path)

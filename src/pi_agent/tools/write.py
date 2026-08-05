@@ -39,6 +39,7 @@ def create_write_tool() -> AgentTool:
     return AgentTool(
         name="write",
         label="write",
+        prompt_snippet="Create or overwrite files",
         description=(
             "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. "
             "Automatically creates parent directories."

@@ -23,6 +23,7 @@ from pi_agent import AgentEvent
 from ...model_runtime import ModelRuntime
 from ...extensions import ExtensionRunner
 from ...extensions.registry import ExtensionRegistry
+from .autocomplete import create_slash_command_provider
 from pi_tui.clipboard_image import ClipboardImage
 from pi_tui.autocomplete import CombinedAutocompleteProvider
 from pi_tui.components import (
@@ -848,19 +849,34 @@ class PiTuiApp(App):
         self,
         message: PiEditor.AutocompleteRequested,
     ) -> None:
-        """Tab：查询扩展自动补全 provider，弹选择器并插入选中值。"""
+        """Tab / 自动触发：slash 命令 + 扩展 provider 补全，弹选择器并插入。"""
         runner = self._session.extension_runner
-        if runner is None:
-            return
-        providers = runner.get_autocomplete()
-        if not providers:
-            return
+        providers: list = [
+            create_slash_command_provider(
+                self._slash_registry,
+                self._session.template_loader,
+            )
+        ]
+        if runner is not None:
+            providers.extend(runner.get_autocomplete())
         completions = await CombinedAutocompleteProvider(providers).collect(message.editor.text)
         if not completions:
             return
 
         def _label(item: dict) -> str:
             return str(item.get("label", item.get("value", "")))
+
+        def _insert(value: str) -> None:
+            if value.startswith("/"):
+                # slash 补全：替换当前命令 token，保留已输入参数。
+                parts = self._editor.text.split(" ", 1)
+                rest = parts[1] if len(parts) > 1 else ""
+                self._editor.text = value + (f" {rest}" if rest else "")
+                return
+            try:
+                self._editor.insert(value)
+            except Exception:
+                self._editor.text += value
 
         def _callback(selected) -> None:
             if selected is None:
@@ -872,10 +888,7 @@ class PiTuiApp(App):
             if match is None:
                 return
             value = str(match.get("value", match.get("label", "")))
-            try:
-                self._editor.insert(value)
-            except Exception:
-                self._editor.text += value
+            _insert(value)
 
         self.push_screen(
             ChoiceSelector("Autocomplete", [_label(item) for item in completions]),
@@ -1742,7 +1755,13 @@ async def run_tui_mode(
 ) -> int:
     """运行 TUI（供 CLI --mode tui 使用）。"""
     app = PiTuiApp(session, model_runtime, **kwargs)
-    await app.run_async()
+    try:
+        await app.run_async()
+    finally:
+        # 兜底消费 OSC 11 查询的晚到响应，防止退出后漏到 shell。
+        from pi_tui.terminal import drain_pending_osc_response
+
+        drain_pending_osc_response()
     return 0
 
 

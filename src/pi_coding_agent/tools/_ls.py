@@ -83,6 +83,7 @@ def create_ls_tool(cwd: str) -> AgentTool:
 
     return AgentTool(
         name="ls",
+        prompt_snippet="List directory contents",
         description="List the contents of a directory. Shows files and subdirectories.",
         input_schema=TOOL_SCHEMA,
         label="Ls",

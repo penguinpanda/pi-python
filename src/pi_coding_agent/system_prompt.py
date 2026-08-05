@@ -27,15 +27,23 @@ class BuildSystemPromptOptions:
 
 
 def _tool_snippet(tool) -> str | None:
-    """工具的单行说明（描述第一行）。"""
+    """工具的单行说明：prompt_snippet → description 第一行 → 工具名。"""
+    snippet = getattr(tool, "prompt_snippet", None)
+    if isinstance(snippet, str) and snippet.strip():
+        return " ".join(snippet.split())
     description = getattr(tool, "description", None)
     if not description:
-        return None
+        return _tool_name_snippet(tool)
     first_line = next(
         (line.strip() for line in str(description).split("\n") if line.strip()),
         "",
     )
-    return first_line or None
+    return first_line or _tool_name_snippet(tool)
+
+
+def _tool_name_snippet(tool) -> str | None:
+    name = getattr(tool, "name", None)
+    return str(name) if name else None
 
 
 def tool_snippets_for(tools: list) -> dict[str, str]:

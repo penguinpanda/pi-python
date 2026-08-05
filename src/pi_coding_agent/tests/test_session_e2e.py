@@ -312,3 +312,43 @@ class TestPrintMode:
 
         capsys.readouterr()
         assert code == 0
+
+
+@pytest.mark.asyncio
+async def test_restrict_untrusted_tools_blocks_high_risk(tmp_path):
+    """restrictUntrustedTools：未信任项目拦截 bash/write/edit，只读工具放行。"""
+    from types import SimpleNamespace
+
+    from pi_agent import Agent, AgentOptions
+    from pi_ai import Model
+
+    def _make(restrict: bool) -> AgentSession:
+        agent = Agent(AgentOptions(system_prompt="x", model=None))
+        return AgentSession(
+            agent=agent,
+            session_manager=SessionManager.in_memory(cwd=str(tmp_path)),
+            cwd=str(tmp_path),
+            model=Model(id="m", provider="faux", api="openai-completions"),
+            restrict_untrusted_tools=restrict,
+        )
+
+    def _ctx(name: str):
+        return SimpleNamespace(
+            tool_call={"id": "1", "name": name, "arguments": {}},
+            args={},
+        )
+
+    session = _make(restrict=True)
+    session.project_trusted = False
+    for name in ("bash", "write", "edit"):
+        result = await session._agent.before_tool_call(_ctx(name))
+        assert result is not None and result.block is True
+    for name in ("read", "grep", "find", "ls"):
+        assert await session._agent.before_tool_call(_ctx(name)) is None
+
+    session.project_trusted = True
+    assert await session._agent.before_tool_call(_ctx("bash")) is None
+
+    session2 = _make(restrict=False)
+    session2.project_trusted = False
+    assert await session2._agent.before_tool_call(_ctx("bash")) is None
