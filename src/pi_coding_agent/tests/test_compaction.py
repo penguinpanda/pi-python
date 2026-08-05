@@ -568,6 +568,90 @@ class TestGenerateSummary:
             )
 
     @pytest.mark.asyncio
+    async def test_summarization_auth_options_forwarded(self, faux_env):
+        """摘要请求级认证覆盖：api_key/headers/env/base_url 透传到 stream_fn 选项。"""
+        models, _core = faux_env
+        model = models.get_model("faux", "faux-1")
+        assert model is not None
+        captured: dict = {}
+
+        class _FakeStream:
+            async def result(self):
+                return {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "## Goal\nok"}],
+                    "stop_reason": "stop",
+                    "usage": None,
+                }
+
+        async def fake_stream(_model, _context, options):
+            captured["options"] = dict(options)
+            return _FakeStream()
+
+        text, _usage = await generate_summary_with_usage(
+            [_user("hello")],
+            model,
+            16384,
+            api_key="sk-ovr",
+            headers={"X-Override": "1"},
+            env={"PI_TEST": "1"},
+            base_url="https://override.example.com/v1",
+            stream_fn=fake_stream,
+        )
+        assert text == "## Goal\nok"
+        opts = captured["options"]
+        assert opts["api_key"] == "sk-ovr"
+        assert opts["headers"] == {"X-Override": "1"}
+        assert opts["env"] == {"PI_TEST": "1"}
+        assert opts["base_url"] == "https://override.example.com/v1"
+        assert opts["cache_retention"] == "none"
+        assert opts["session_id"]
+
+    @pytest.mark.asyncio
+    async def test_compact_forwards_auth_options(self, faux_env):
+        """compact 把认证覆盖传给全部摘要调用（含 split-turn 两条路径）。"""
+        models, _core = faux_env
+        model = models.get_model("faux", "faux-1")
+        assert model is not None
+        captured: list[dict] = []
+
+        class _FakeStream:
+            async def result(self):
+                return {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "## Goal\ns"}],
+                    "stop_reason": "stop",
+                    "usage": None,
+                }
+
+        async def fake_stream(_model, _context, options):
+            captured.append(dict(options))
+            return _FakeStream()
+
+        entries = [_entry(_user("a"), "e0"), _entry(_user("b"), "e1")]
+        preparation = prepare_compaction(
+            entries,
+            [_user("a"), _user("b")],
+            CompactionSettings(keep_recent_tokens=1),
+        )
+        assert preparation is not None
+        await compact(
+            preparation,
+            model,
+            api_key="sk-ovr",
+            headers={"X-A": "1"},
+            env={"E": "1"},
+            base_url="https://override.example.com/v1",
+            stream_fn=fake_stream,
+        )
+        assert captured
+        for opts in captured:
+            assert opts["api_key"] == "sk-ovr"
+            assert opts["headers"] == {"X-A": "1"}
+            assert opts["env"] == {"E": "1"}
+            assert opts["base_url"] == "https://override.example.com/v1"
+
+    @pytest.mark.asyncio
     async def test_compact_split_turn(self, faux_env):
         """split turn：历史摘要 + 轮次前缀摘要两次 LLM 调用，usage 合并。"""
         models, core = faux_env

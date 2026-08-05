@@ -629,10 +629,21 @@ def _create_summarization_options(
     max_tokens: int | float,
     api_key: str | None,
     thinking_level: str | None,
+    *,
+    headers: dict[str, str | None] | None = None,
+    env: dict[str, str] | None = None,
+    base_url: str | None = None,
 ) -> dict[str, Any]:
+    """构建摘要请求选项（可显式覆盖认证：api_key / headers / env / base_url）。"""
     options: dict[str, Any] = {"max_tokens": int(max_tokens)}
     if api_key:
         options["api_key"] = api_key
+    if headers:
+        options["headers"] = dict(headers)
+    if env:
+        options["env"] = dict(env)
+    if base_url:
+        options["base_url"] = base_url
     if thinking_level and thinking_level != "off":
         options["reasoning"] = thinking_level
     return options
@@ -644,6 +655,9 @@ async def generate_summary_with_usage(
     reserve_tokens: int,
     *,
     api_key: str | None = None,
+    headers: dict[str, str | None] | None = None,
+    env: dict[str, str] | None = None,
+    base_url: str | None = None,
     previous_summary: str | None = None,
     thinking_level: str | None = None,
     stream_fn,
@@ -675,7 +689,15 @@ async def generate_summary_with_usage(
         }
     ]
 
-    completion_options = _create_summarization_options(model, max_tokens, api_key, thinking_level)
+    completion_options = _create_summarization_options(
+        model,
+        max_tokens,
+        api_key,
+        thinking_level,
+        headers=headers,
+        env=env,
+        base_url=base_url,
+    )
     response = await complete_summarization(
         model,
         Context(system_prompt=SUMMARIZATION_SYSTEM_PROMPT, messages=summarization_messages),
@@ -701,6 +723,9 @@ async def _generate_turn_prefix_summary(
     reserve_tokens: int,
     *,
     api_key: str | None = None,
+    headers: dict[str, str | None] | None = None,
+    env: dict[str, str] | None = None,
+    base_url: str | None = None,
     thinking_level: str | None = None,
     stream_fn,
     retry: RetryPolicy | None = None,
@@ -726,7 +751,15 @@ async def _generate_turn_prefix_summary(
     response = await complete_summarization(
         model,
         Context(system_prompt=SUMMARIZATION_SYSTEM_PROMPT, messages=summarization_messages),
-        _create_summarization_options(model, max_tokens, api_key, thinking_level),
+        _create_summarization_options(
+            model,
+            max_tokens,
+            api_key,
+            thinking_level,
+            headers=headers,
+            env=env,
+            base_url=base_url,
+        ),
         stream_fn,
         retry,
         callbacks,
@@ -745,6 +778,9 @@ async def compact(
     model: Model,
     *,
     api_key: str | None = None,
+    headers: dict[str, str | None] | None = None,
+    env: dict[str, str] | None = None,
+    base_url: str | None = None,
     thinking_level: str | None = None,
     stream_fn,
     retry: RetryPolicy | None = None,
@@ -775,6 +811,9 @@ async def compact(
                 model,
                 settings.reserve_tokens,
                 api_key=api_key,
+                headers=headers,
+                env=env,
+                base_url=base_url,
                 previous_summary=previous_summary,
                 thinking_level=thinking_level,
                 stream_fn=stream_fn,
@@ -786,6 +825,9 @@ async def compact(
             model,
             settings.reserve_tokens,
             api_key=api_key,
+            headers=headers,
+            env=env,
+            base_url=base_url,
             thinking_level=thinking_level,
             stream_fn=stream_fn,
             retry=retry,
@@ -801,6 +843,9 @@ async def compact(
             model,
             settings.reserve_tokens,
             api_key=api_key,
+            headers=headers,
+            env=env,
+            base_url=base_url,
             previous_summary=previous_summary,
             thinking_level=thinking_level,
             stream_fn=stream_fn,

@@ -120,6 +120,107 @@ async def _preload_history(mgr: SessionManager, count: int = 6) -> None:
         await mgr.append_message(_asst(f"a{i} " + "y" * 100))
 
 
+class TestSummarizationAuthOverride:
+    @pytest.mark.asyncio
+    async def test_resolver_returns_auth(self, faux_env, tmp_path):
+        """_get_summarization_request_auth 返回 apiKey/headers/env/baseUrl 覆盖。"""
+        from pi_ai.auth.types import AuthResult
+
+        models, _core = faux_env
+        model = _realistic_model()
+
+        class _FakeRuntime:
+            async def get_auth(self, m):
+                return AuthResult(
+                    auth={
+                        "api_key": "sk-ovr",
+                        "headers": {"X-A": "1", "X-Dropped": None},
+                        "base_url": "https://override.example.com/v1",
+                    },
+                    env={"PI_TEST": "1"},
+                )
+
+        session = AgentSession(
+            agent=Agent(
+                AgentOptions(
+                    system_prompt="x",
+                    model=model,
+                    retry_policy=RetryPolicy(enabled=False),
+                )
+            ),
+            session_manager=SessionManager.in_memory(cwd=str(tmp_path)),
+            cwd=str(tmp_path),
+            model=model,
+            model_runtime=_FakeRuntime(),
+        )
+        try:
+            auth = await session._get_summarization_request_auth(model)
+        finally:
+            await session.dispose()
+        assert auth["apiKey"] == "sk-ovr"
+        assert auth["headers"] == {"X-A": "1"}  # None 值被过滤
+        assert auth["env"] == {"PI_TEST": "1"}
+        assert auth["model"] is not model
+        assert auth["model"].base_url == "https://override.example.com/v1"
+
+    @pytest.mark.asyncio
+    async def test_manual_compact_forwards_auth(self, faux_env, tmp_path):
+        """手动 /compact 把摘要级认证覆盖传进 stream_fn 选项。"""
+        from pi_ai.auth.types import AuthResult
+
+        models, core = faux_env
+        core.set_responses([faux_assistant_message("## Goal\ncompacted")])
+        model = _realistic_model()
+
+        class _FakeRuntime:
+            async def get_auth(self, m):
+                return AuthResult(
+                    auth={
+                        "api_key": "sk-ovr",
+                        "headers": {"X-A": "1"},
+                        "base_url": "https://override.example.com/v1",
+                    },
+                    env={"PI_TEST": "1"},
+                )
+
+        mgr = SessionManager.create(cwd=str(tmp_path), sessions_dir=str(tmp_path / "sessions"))
+        await _preload_history(mgr)
+        session = AgentSession(
+            agent=Agent(
+                AgentOptions(
+                    system_prompt="x",
+                    model=model,
+                    retry_policy=RetryPolicy(enabled=False),
+                )
+            ),
+            session_manager=mgr,
+            cwd=str(tmp_path),
+            model=model,
+            model_runtime=_FakeRuntime(),
+            compaction_settings=CompactionSettings(keep_recent_tokens=40),
+        )
+        captured: list[tuple] = []
+        original = models.stream
+
+        async def capturing_stream(model, context, options=None):
+            captured.append((model, dict(options or {})))
+            return await original(model, context, options)
+
+        session._agent.stream_function = capturing_stream
+        try:
+            result = await session.compact()
+        finally:
+            await session.dispose()
+        assert result is not None
+        assert captured
+        for request_model, opts in captured:
+            # baseUrl 通过替换后的 requestModel 生效（对齐 TS requestModel）。
+            assert request_model.base_url == "https://override.example.com/v1"
+            assert opts.get("api_key") == "sk-ovr"
+            assert opts.get("headers") == {"X-A": "1"}
+            assert opts.get("env") == {"PI_TEST": "1"}
+
+
 # ============================================================================
 # 溢出 → 压缩 + 自动重试
 # ============================================================================

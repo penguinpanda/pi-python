@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -386,9 +386,13 @@ class AgentSession:
         self._emit({"type": "compaction_start", "reason": "manual"})
         self._is_compacting = True
         try:
+            summarization_auth = await self._get_summarization_request_auth(self._model)
             result = await compact(
                 preparation,
-                self._model,
+                summarization_auth["model"],
+                api_key=summarization_auth.get("apiKey"),
+                headers=summarization_auth.get("headers"),
+                env=summarization_auth.get("env"),
                 stream_fn=self._agent._resolve_stream_fn(),
                 thinking_level=self._agent.state.thinking_level,
             )
@@ -423,6 +427,34 @@ class AgentSession:
             return None
         finally:
             self._is_compacting = False
+
+    async def _get_summarization_request_auth(self, model: Model) -> dict:
+        """解析摘要请求级认证（对齐 TS _getSummarizationRequestAuth）。
+
+        摘要与主请求共用同一 stream_fn 时会自动继承认证；这里额外支持
+        显式覆盖：apiKey / headers / env / baseUrl（auth 解析失败时静默回退）。
+        """
+        runtime = self._model_runtime
+        if runtime is None:
+            return {"model": model}
+        try:
+            result = await runtime.get_auth(model)
+        except Exception:
+            return {"model": model}
+        if result is None:
+            return {"model": model}
+        auth = getattr(result, "auth", None) or {}
+        request_model = model
+        base_url = auth.get("base_url")
+        if base_url:
+            request_model = replace(model, base_url=base_url)
+        headers = auth.get("headers") or {}
+        return {
+            "model": request_model,
+            "apiKey": auth.get("api_key"),
+            "headers": {k: v for k, v in headers.items() if v is not None} or None,
+            "env": getattr(result, "env", None),
+        }
 
     async def navigate_to(
         self,
@@ -893,9 +925,13 @@ class AgentSession:
         self._emit({"type": "compaction_start", "reason": reason})
         self._is_compacting = True
         try:
+            summarization_auth = await self._get_summarization_request_auth(self._model)
             result = await compact(
                 preparation,
-                self._model,
+                summarization_auth["model"],
+                api_key=summarization_auth.get("apiKey"),
+                headers=summarization_auth.get("headers"),
+                env=summarization_auth.get("env"),
                 stream_fn=self._agent._resolve_stream_fn(),
                 thinking_level=self._agent.state.thinking_level,
             )
