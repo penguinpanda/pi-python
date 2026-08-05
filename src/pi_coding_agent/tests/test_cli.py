@@ -264,3 +264,13 @@ async def test_no_context_files_skips_agents_in_system_prompt(tmp_path, monkeypa
     code = await _cli._async_main(["-nc", "-p", "hi"])
     assert code == 0
     assert "project rules" not in captured[1].rebuild_system_prompt()
+
+
+def test_extension_label():
+    from types import SimpleNamespace
+
+    assert (
+        _cli._extension_label(SimpleNamespace(path="/x/ext-a.py", resolved_path="/x/ext-a.py"))
+        == "ext-a"
+    )
+    assert _cli._extension_label(SimpleNamespace(path="/x/pkg", resolved_path="/x/pkg")) == "pkg"

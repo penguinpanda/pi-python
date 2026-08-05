@@ -60,7 +60,7 @@ from .slash_commands import (
     SlashCommandRegistry,
     register_builtin_commands,
 )
-from pi_tui.theme import ThemeLoader
+from pi_tui.theme import BUILTIN_THEMES, ThemeLoader
 
 
 class _TuiAuthInteraction:
@@ -207,6 +207,7 @@ class PiTuiApp(App):
         project_trusted: bool = False,
         needs_trust_decision: bool = False,
         no_context_files: bool = False,
+        startup_resources: dict | None = None,
     ) -> None:
         self._keybindings = keybindings_manager or KeybindingsManager()
         self._settings = settings if settings is not None else {}
@@ -221,6 +222,7 @@ class PiTuiApp(App):
         self._project_trusted = project_trusted
         self._needs_trust_decision = needs_trust_decision
         self._no_context_files = no_context_files
+        self._startup_resources = startup_resources
 
         # 实例级 BINDINGS / CSS：必须在 super().__init__() 之前设置。
         self.BINDINGS = [  # type: ignore[misc]
@@ -331,8 +333,7 @@ class PiTuiApp(App):
         self._render_missed_summaries()
         self._update_footer()
         self._editor.focus()
-        if not self._no_context_files:
-            self._show_startup_context_hint()
+        self._show_startup_resources_hint()
         # 启动时对未定信任项目提示（对齐 TS 启动 trust 选择器）。
         if self._needs_trust_decision:
             self.call_after_refresh(self._open_trust_selector)
@@ -772,14 +773,51 @@ class PiTuiApp(App):
 
             self.call_after_refresh(_scroll_to_entry)
 
-    def _show_startup_context_hint(self) -> None:
-        """启动提示：已加载的 AGENTS.md / CLAUDE.md（对齐 TS Loaded resources → Context）。"""
-        context_files = load_project_context_files(self._session.cwd, get_agent_dir())
-        if not context_files:
+    def _show_startup_resources_hint(self) -> None:
+        """启动提示：已加载资源汇总（Context / Skills / Prompts / Extensions / Themes）。
+
+        对齐 TS Loaded resources 面板的紧凑列表；resources 为 None 时
+        回退为仅计算 context files（直接构造 PiTuiApp 的场景）。
+        """
+        sections: list[tuple[str, list[str]]] = []
+        resources = self._startup_resources or {}
+
+        if not self._no_context_files:
+            context_files = resources.get("context_files")
+            if context_files is None:
+                context_files = load_project_context_files(self._session.cwd, get_agent_dir())
+            if context_files:
+                sections.append(
+                    (
+                        "Context",
+                        [
+                            _format_context_path(entry["path"], self._session.cwd)
+                            for entry in context_files
+                        ],
+                    )
+                )
+
+        skills = [str(item["name"]) for item in resources.get("skills", []) if item.get("name")]
+        if skills:
+            sections.append(("Skills", skills))
+        prompts = [str(item["name"]) for item in resources.get("prompts", []) if item.get("name")]
+        if prompts:
+            sections.append(("Prompts", prompts))
+        extensions = [
+            str(item["name"]) for item in resources.get("extensions", []) if item.get("name")
+        ]
+        if extensions:
+            sections.append(("Extensions", extensions))
+        custom_themes = [
+            name for name in self._theme_loader.available() if name not in BUILTIN_THEMES
+        ]
+        if custom_themes:
+            sections.append(("Themes", custom_themes))
+
+        if not sections:
             return
-        paths = [_format_context_path(entry["path"], self._session.cwd) for entry in context_files]
-        text = f"[Context]\n  {', '.join(paths)}"
-        self._set_status("Context files loaded")
+        text = "\n".join(f"[{title}]\n  {', '.join(items)}" for title, items in sections)
+        self._set_status("Resources loaded")
         escaped = text.replace("[", r"\[")
         self._chat.add_message_agent({"role": "system", "content": escaped})
 

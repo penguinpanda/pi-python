@@ -1652,6 +1652,77 @@ async def test_startup_context_hint_suppressed_by_flag(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_startup_resources_hint_shows_all_sections(tmp_path):
+    """启动提示：Context / Skills / Prompts / Extensions / Themes 全汇总。"""
+    import json as _json
+
+    from pi_tui.theme import BUILTIN_THEMES as _BUILTIN_THEMES
+    from pi_tui.theme import ThemeLoader as _ThemeLoader
+
+    themes_dir = tmp_path / "themes"
+    themes_dir.mkdir()
+    theme_colors = dict(_BUILTIN_THEMES["dark"])
+    theme_colors["accent"] = "#123456"
+    (themes_dir / "custom.json").write_text(_json.dumps(theme_colors), encoding="utf-8")
+
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(
+        session,
+        runtime,
+        theme_loader=_ThemeLoader(themes_dir),
+        startup_resources={
+            "context_files": [{"path": str(tmp_path / "AGENTS.md"), "content": "rules"}],
+            "skills": [{"name": "skill-a", "path": "/x/SKILL.md"}],
+            "prompts": [{"name": "review", "path": "/x/review.md"}],
+            "extensions": [{"name": "ext-a", "path": "/x/ext-a.py"}],
+        },
+    )
+    async with app.run_test() as pilot:
+        await _wait_until(
+            lambda: any("[Context]" in entry.entry_text for entry in app._chat.query(MessageEntry)),
+            pilot=pilot,
+            message="resources hint shown",
+        )
+        hint = next(
+            entry for entry in app._chat.query(MessageEntry) if "[Context]" in entry.entry_text
+        )
+        for marker in ("[Context]", "[Skills]", "[Prompts]", "[Extensions]", "[Themes]"):
+            assert marker in hint.entry_text
+        assert "skill-a" in hint.entry_text
+        assert "review" in hint.entry_text
+        assert "ext-a" in hint.entry_text
+        assert "custom" in hint.entry_text
+
+
+@pytest.mark.asyncio
+async def test_startup_resources_hint_respects_no_context_files(tmp_path):
+    """--no-context-files：只隐藏 Context 段，Skills 等仍显示。"""
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(
+        session,
+        runtime,
+        no_context_files=True,
+        startup_resources={
+            "context_files": [{"path": str(tmp_path / "AGENTS.md"), "content": "rules"}],
+            "skills": [{"name": "skill-a", "path": "/x/SKILL.md"}],
+        },
+    )
+    async with app.run_test() as pilot:
+        await _wait_until(
+            lambda: any("[Skills]" in entry.entry_text for entry in app._chat.query(MessageEntry)),
+            pilot=pilot,
+            message="skills section shown",
+        )
+        hint = next(
+            entry for entry in app._chat.query(MessageEntry) if "[Skills]" in entry.entry_text
+        )
+        assert "[Context]" not in hint.entry_text
+        assert "skill-a" in hint.entry_text
+
+
+@pytest.mark.asyncio
 async def test_editor_ctrl_c_copies_selection_or_clears():
     """输入框：ctrl+c 有选区复制，无选区清空（对齐 TS）。"""
     from textual.app import App

@@ -189,7 +189,7 @@ async def _async_main(args: list[str] | None = None) -> int:
     )
     for diagnostic in skill_result.diagnostics:
         print(f"Warning: {diagnostic.message} ({diagnostic.path})", file=sys.stderr)
-    template_loader.load(
+    template_result = template_loader.load(
         explicit_paths=parsed.prompt_templates,
         only_explicit=parsed.no_prompt_templates,
     )
@@ -349,6 +349,21 @@ async def _async_main(args: list[str] | None = None) -> int:
 
     # TUI 模式：Textual 交互界面。
     if parsed.mode == "tui":
+        startup_resources = {
+            "context_files": (
+                [] if parsed.no_context_files else load_project_context_files(cwd, get_agent_dir())
+            ),
+            "skills": [
+                {"name": skill.name, "path": skill.file_path} for skill in skill_result.skills
+            ],
+            "prompts": [
+                {"name": template.name, "path": template.file_path} for template in template_result
+            ],
+            "extensions": [
+                {"name": _extension_label(extension), "path": extension.path}
+                for extension in extension_result.extensions
+            ],
+        }
         return await run_tui_mode(
             session,
             runtime,
@@ -362,6 +377,7 @@ async def _async_main(args: list[str] | None = None) -> int:
             project_trusted=project_trusted,
             needs_trust_decision=needs_trust_decision,
             no_context_files=parsed.no_context_files,
+            startup_resources=startup_resources,
         )
 
     # 运行 print 模式
@@ -385,6 +401,12 @@ async def _async_main(args: list[str] | None = None) -> int:
 # ---------------------------------------------------------------------------
 # OAuth 子命令（pi login / logout / list）
 # ---------------------------------------------------------------------------
+
+
+def _extension_label(extension) -> str:
+    """扩展的紧凑显示名：路径文件名，.py 去掉后缀（对齐 TS 扩展列表）。"""
+    path = Path(getattr(extension, "resolved_path", "") or extension.path)
+    return path.stem if path.suffix else path.name
 
 
 def _auth_store() -> AuthStorage:
