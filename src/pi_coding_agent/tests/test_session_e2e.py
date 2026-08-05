@@ -135,7 +135,8 @@ class TestPlainTextSession:
         assert entries[0]["message"]["role"] == "user"
         assert entries[1]["message"]["role"] == "assistant"
 
-        session_file = Path(tmp_path) / "sessions" / f"{mgr.session_id}.jsonl"
+        assert mgr.session_path is not None
+        session_file = Path(mgr.session_path)
         assert session_file.exists()
         lines = session_file.read_text(encoding="utf-8").strip().splitlines()
         assert len(lines) == 3

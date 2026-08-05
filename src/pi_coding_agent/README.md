@@ -232,7 +232,9 @@ SessionManager.open("~/.pi/agent/sessions/abc.jsonl", cwd_override=".")
 
 ## 会话管理
 
-JSONL 会话文件（`~/.pi/agent/sessions/{session_id}.jsonl`，版本 3），DAG 树结构：
+JSONL 会话文件（`~/.pi/agent/sessions/{encoded_cwd}/{timestamp}_{session_id}.jsonl`，
+版本 3；布局与 TS JsonlSessionStore 对齐，旧平铺文件自动迁移，详见
+[agent-directory.md](../../docs/agent-directory.md)），DAG 树结构：
 
 ```
 {"type":"session","version":3,"id":"abc123...","timestamp":"...","cwd":"/path"}
@@ -295,8 +297,11 @@ AgentSession(
 }
 ```
 
-路径常量：`get_agent_dir()` → `~/.pi/agent/`、`get_sessions_dir()` → `~/.pi/agent/sessions/`、
-`get_settings_path()` → `~/.pi/agent/settings.json`、`get_project_settings_path(cwd)` → `<cwd>/.pi/settings.json`。
+路径常量：`get_agent_dir()` → `~/.pi/agent/`、`get_sessions_dir()` →
+`~/.pi/agent/sessions/`、`get_settings_path()` → `~/.pi/agent/settings.json`、
+`get_project_settings_path(cwd)` → `<cwd>/.pi/settings.json`；`themes/` /
+`tools/` / `bin/` / `pi-debug.log` 仅定义路径约定（占位），见
+[agent-directory.md](../../docs/agent-directory.md)。
 
 ---
 

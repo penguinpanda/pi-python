@@ -75,7 +75,7 @@ class TestSessionManagerOpen:
             asyncio.run(mgr1.append_message(msg))
 
             # 再打开
-            session_path = Path(tmpdir) / f"{mgr1.session_id}.jsonl"
+            session_path = mgr1.session_path
             mgr2 = SessionManager.open(session_path)
             assert mgr2.session_id == mgr1.session_id
             messages = mgr2.build_context()
@@ -230,7 +230,7 @@ class TestSessionManagerCompaction:
             asyncio.run(mgr1.append_compaction("summary", e1, 10))
             asyncio.run(mgr1.append_message(UserMessage(role="user", content="new")))
 
-            session_path = Path(tmpdir) / f"{mgr1.session_id}.jsonl"
+            session_path = mgr1.session_path
             mgr2 = SessionManager.open(session_path)
             messages = mgr2.build_context()
             assert len(messages) == 2
@@ -245,3 +245,77 @@ class TestSessionManagerCompaction:
         asyncio.run(mgr.append_message(UserMessage(role="user", content="b")))
         messages = mgr.build_context()
         assert [m["content"] for m in messages] == ["a", "b"]
+
+
+class TestSessionLayout:
+    """per-cwd 目录布局与旧平铺文件迁移。"""
+
+    def test_create_uses_per_cwd_layout(self, tmp_path):
+        mgr = SessionManager.create(
+            cwd="/tmp/proj",
+            sessions_dir=tmp_path,
+            session_id="sid1",
+        )
+        assert mgr.session_path is not None
+        relative = Path(mgr.session_path).relative_to(tmp_path)
+        assert relative.parts[0] == "--tmp-proj--"
+        assert relative.name.endswith("_sid1.jsonl")
+        assert relative.name.count("_") >= 1
+
+    def test_fork_uses_per_cwd_layout(self, tmp_path):
+        mgr = SessionManager.create(cwd="/tmp/proj", sessions_dir=tmp_path)
+        import asyncio
+
+        asyncio.run(mgr.append_message(UserMessage(role="user", content="hi")))
+        # fork 不传 sessions_dir 时沿用 create 的会话根目录。
+        forked = mgr.fork(mgr.get_leaf_id())
+        assert forked.session_path is not None
+        relative = Path(forked.session_path).relative_to(tmp_path)
+        assert relative.parts[0] == "--tmp-proj--"
+
+    def test_list_sessions_scans_per_cwd_subdirs(self, tmp_path):
+        import os
+
+        older = SessionManager.create(cwd="/tmp/a", sessions_dir=tmp_path, session_id="older")
+        newer = SessionManager.create(cwd="/tmp/b", sessions_dir=tmp_path, session_id="newer")
+        os.utime(older.session_path, (1, 1))
+        os.utime(newer.session_path, (2, 2))
+        infos = SessionManager.list_sessions(tmp_path)
+        assert [info.session_id for info in infos] == ["newer", "older"]
+        assert infos[0].cwd == "/tmp/b"
+
+    def test_migrate_flat_sessions_moves_to_cwd_dir(self, tmp_path):
+        from pi_coding_agent._session_manager import migrate_flat_sessions
+
+        flat = tmp_path / "old.jsonl"
+        flat.write_text(
+            json.dumps(
+                {
+                    "type": "session",
+                    "version": 3,
+                    "id": "old1",
+                    "timestamp": "2026-01-01T00:00:00+00:00",
+                    "cwd": "/tmp/proj",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        assert migrate_flat_sessions(tmp_path) == 1
+        assert not flat.exists()
+        target = tmp_path / "--tmp-proj--" / "2026-01-01T00-00-00+00-00_old1.jsonl"
+        assert target.exists()
+        infos = SessionManager.list_sessions(tmp_path)
+        assert [info.session_id for info in infos] == ["old1"]
+        assert infos[0].cwd == "/tmp/proj"
+
+    def test_migrate_flat_sessions_legacy_fallback(self, tmp_path):
+        from pi_coding_agent._session_manager import migrate_flat_sessions
+
+        flat = tmp_path / "broken.jsonl"
+        flat.write_text("{ not json\n", encoding="utf-8")
+        assert migrate_flat_sessions(tmp_path) == 1
+        assert not flat.exists()
+        legacy_files = list((tmp_path / "--legacy--").glob("*.jsonl"))
+        assert len(legacy_files) == 1

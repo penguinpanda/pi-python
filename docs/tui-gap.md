@@ -186,7 +186,15 @@ TS `utils.ts` 有 `visibleWidth` / `sliceByColumn` / `wrapTextWithAnsi` /
 `stripTerminalSequences` / `getOsc8LinkAtColumn` 等。Python 依赖 Textual/Rich 的
 文本测量与 ANSI 处理，overlay 合成由 Textual 完成，不需要自研。
 
-**建议**：仅当实现组件树 API 时需要“按列截断”工具时再补。
+**已补齐（编码工具展示层）**：`src/pi_coding_agent/tools/render_utils.py`
+对齐 TS `core/tools/render-utils.ts` —— `shorten_path`（home → `~/`）、
+`link_path`（OSC 8 file:// 超链接，保守能力探测）、`str_value` /
+`replace_tabs` / `normalize_display_text` / `strip_ansi`、
+`get_text_output`（text 块规范化 + 图片回退）、`get_image_dimensions`
+（PNG/JPEG/GIF/WebP）、`image_fallback`、`render_tool_path`。
+尚未接入聊天渲染管线（当前 MessageEntry 走 Rich Markdown 路径）。
+
+**建议**：按列截断类工具仅当实现组件树 API 需要时再补。
 
 ## 5. 下一步开发路线
 

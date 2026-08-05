@@ -722,13 +722,9 @@ def _find_latest_session(cwd: str) -> SessionManager:
         # 无会话目录，创建新会话
         return SessionManager.create(cwd)
 
-    jsonl_files = sorted(
-        sessions_dir.glob("*.jsonl"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-    if jsonl_files:
-        return SessionManager.open(jsonl_files[0], cwd_override=cwd)
+    infos = SessionManager.list_sessions(sessions_dir)
+    if infos:
+        return SessionManager.open(infos[0].path, cwd_override=cwd)
 
     # 无会话文件，创建新会话
     return SessionManager.create(cwd)

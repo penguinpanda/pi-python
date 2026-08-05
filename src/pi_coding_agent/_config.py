@@ -53,6 +53,41 @@ def get_prompts_dir(agent_dir: Path | None = None) -> Path:
     return (agent_dir or get_agent_dir()) / "prompts"
 
 
+def get_themes_dir(agent_dir: Path | None = None) -> Path:
+    """用户自定义主题目录: ~/.pi/agent/themes/
+
+    占位：路径约定已定义（对齐 TS getCustomThemesDir），当前 Python 主题
+    仍以内置 dark/light + ThemeLoader(theme_dir) 加载，尚未消费该目录。
+    """
+    return (agent_dir or get_agent_dir()) / "themes"
+
+
+def get_tools_dir(agent_dir: Path | None = None) -> Path:
+    """工具目录: ~/.pi/agent/tools/
+
+    占位：TS 曾用该目录放自定义工具 / fd、rg 二进制；Python 的工具全部
+    内置于 pi_agent / pi_coding_agent，当前未消费该目录。
+    """
+    return (agent_dir or get_agent_dir()) / "tools"
+
+
+def get_bin_dir(agent_dir: Path | None = None) -> Path:
+    """托管二进制目录: ~/.pi/agent/bin/
+
+    占位：TS 把自动解压的 fd/rg 放这里；Python 直接使用系统命令或
+    内置实现，当前未消费该目录。
+    """
+    return (agent_dir or get_agent_dir()) / "bin"
+
+
+def get_debug_log_path(agent_dir: Path | None = None) -> Path:
+    """调试日志文件: ~/.pi/agent/pi-debug.log
+
+    占位：对齐 TS getDebugLogPath；Python 尚无该日志文件。
+    """
+    return (agent_dir or get_agent_dir()) / f"{APP_NAME}-debug.log"
+
+
 def get_settings_path() -> Path:
     """全局设置文件: ~/.pi/agent/settings.json"""
     return get_agent_dir() / "settings.json"

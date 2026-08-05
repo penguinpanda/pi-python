@@ -157,8 +157,13 @@ class TestExtendedEntries:
 
 class TestListAndLock:
     def test_list_sessions_sorted(self, tmp_path):
-        SessionManager.create(cwd="/tmp/a", sessions_dir=str(tmp_path), session_id="older")
-        SessionManager.create(cwd="/tmp/b", sessions_dir=str(tmp_path), session_id="newer")
+        import os
+
+        older = SessionManager.create(cwd="/tmp/a", sessions_dir=str(tmp_path), session_id="older")
+        newer = SessionManager.create(cwd="/tmp/b", sessions_dir=str(tmp_path), session_id="newer")
+        # 文件系统 mtime 粒度可能让两个文件同秒，显式设置保证排序确定。
+        os.utime(older.session_path, (1, 1))
+        os.utime(newer.session_path, (2, 2))
         infos = SessionManager.list_sessions(tmp_path)
         assert [info.session_id for info in infos] == ["newer", "older"]
         assert infos[0].cwd == "/tmp/b"

@@ -22,6 +22,7 @@ from typing import Any, cast
 
 from filelock import FileLock
 from pi_agent import AgentMessage
+from pi_agent.session.jsonl import _encode_cwd
 from pi_ai import now_ms
 
 from ._types import (
@@ -81,10 +82,12 @@ class SessionManager:
         session_id: str,
         session_path: Path | None = None,
         entries: list[SessionEntry] | None = None,
+        sessions_root: Path | None = None,
     ):
         self._cwd = cwd
         self._session_id = session_id
         self._session_path = session_path  # None = 内存模式
+        self._sessions_root = sessions_root  # create 时的根目录，fork 默认沿用
         self._entries: list[SessionEntry] = entries or []
         self._session_name: str | None = None
         # 跟踪最新的 parentId（单链尾）
@@ -106,22 +109,32 @@ class SessionManager:
             cwd: 项目工作目录
             sessions_dir: 会话存储目录（None 则使用默认 ~/.pi/agent/sessions/）
             session_id: 会话 ID（None 则自动生成 UUID）
+
+        目录布局与 JsonlSessionStore 对齐：
+        {sessions_dir}/{encoded_cwd}/{timestamp}_{session_id}.jsonl。
         """
         sid = session_id or uuid.uuid4().hex[:16]
         dir_path = Path(sessions_dir) if sessions_dir else _default_sessions_dir()
-        dir_path.mkdir(parents=True, exist_ok=True)
+        migrate_flat_sessions(dir_path)
 
-        filepath = dir_path / f"{sid}.jsonl"
+        timestamp = datetime.now(timezone.utc).isoformat()
+        filepath = _session_file_path(dir_path, cwd, sid, timestamp)
+        filepath.parent.mkdir(parents=True, exist_ok=True)
         header: SessionHeader = {
             "type": "session",
             "version": CURRENT_SESSION_VERSION,
             "id": sid,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": timestamp,
             "cwd": cwd,
         }
 
         _write_jsonl_line_sync(filepath, header)
-        return SessionManager(cwd=cwd, session_id=sid, session_path=filepath)
+        return SessionManager(
+            cwd=cwd,
+            session_id=sid,
+            session_path=filepath,
+            sessions_root=dir_path,
+        )
 
     @staticmethod
     def open(
@@ -447,14 +460,18 @@ class SessionManager:
             raise ValueError(f"Entry not found: {from_entry_id}")
         kept = path if position == "at" else path[:-1]
         sid = session_id or uuid.uuid4().hex[:16]
-        dir_path = Path(sessions_dir) if sessions_dir else _default_sessions_dir()
-        dir_path.mkdir(parents=True, exist_ok=True)
-        filepath = dir_path / f"{sid}.jsonl"
+        dir_path = (
+            Path(sessions_dir) if sessions_dir else (self._sessions_root or _default_sessions_dir())
+        )
+        migrate_flat_sessions(dir_path)
+        timestamp = datetime.now(timezone.utc).isoformat()
+        filepath = _session_file_path(dir_path, self._cwd, sid, timestamp)
+        filepath.parent.mkdir(parents=True, exist_ok=True)
         header: SessionHeader = {
             "type": "session",
             "version": CURRENT_SESSION_VERSION,
             "id": sid,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": timestamp,
             "cwd": self._cwd,
         }
         _write_jsonl_sync(filepath, header, list(kept))
@@ -617,28 +634,29 @@ class SessionManager:
 
     @staticmethod
     def list_sessions(directory: str | Path) -> list[SessionInfo]:
-        """扫描会话目录，按修改时间倒序返回。"""
+        """扫描会话目录（per-cwd 子目录），按修改时间倒序返回。
+
+        先迁移根目录残留的旧平铺 *.jsonl，再递归扫描。
+        """
         dir_path = Path(directory)
         if not dir_path.is_dir():
             return []
+        migrate_flat_sessions(dir_path)
         results: list[SessionInfo] = []
-        for path in dir_path.glob("*.jsonl"):
+        for path in dir_path.rglob("*.jsonl"):
+            if not path.is_file():
+                continue
             try:
                 modified = path.stat().st_mtime
             except OSError:
                 continue
             session_id = path.stem
             cwd = ""
-            try:
-                with open(path, "r", encoding="utf-8") as handle:
-                    first = handle.readline().strip()
-                header = json.loads(first)
-                if isinstance(header, dict):
-                    if header.get("id"):
-                        session_id = header["id"]
-                    cwd = header.get("cwd", "")
-            except (OSError, json.JSONDecodeError):
-                pass
+            header = _read_session_header(path)
+            if header:
+                if header.get("id"):
+                    session_id = header["id"]
+                cwd = header.get("cwd", "")
             results.append(
                 SessionInfo(
                     path=str(path),
@@ -673,6 +691,75 @@ class SessionManager:
 # ---------------------------------------------------------------------------
 # 内部辅助
 # ---------------------------------------------------------------------------
+
+
+def _session_file_path(sessions_root: Path, cwd: str, session_id: str, timestamp: str) -> Path:
+    """构造会话文件路径（对齐 JsonlSessionStore._session_file_path）。"""
+    safe_timestamp = timestamp.replace(":", "-").replace(".", "-")
+    return sessions_root / _encode_cwd(cwd) / f"{safe_timestamp}_{session_id}.jsonl"
+
+
+def _read_session_header(file_path: Path) -> dict[str, Any] | None:
+    """读取 JSONL 首行 header；文件不存在 / 非 JSON 时返回 None。"""
+    try:
+        with open(file_path, "r", encoding="utf-8") as handle:
+            first = handle.readline().strip()
+        if not first:
+            return None
+        parsed = json.loads(first)
+        return parsed if isinstance(parsed, dict) else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def migrate_flat_sessions(sessions_root: str | Path) -> int:
+    """把历史平铺会话迁移到 per-cwd 子目录（对齐 TS migrateSessionsFromAgentRoot）。
+
+    读取首行 header 的 cwd 决定目标目录；无有效 header 的文件放入
+    --legacy-- 目录，避免丢失。返回迁移文件数。
+    """
+    root = Path(sessions_root)
+    if not root.is_dir():
+        return 0
+    migrated = 0
+    for file_path in list(root.glob("*.jsonl")):
+        try:
+            header = _read_session_header(file_path)
+            if (
+                header is None
+                or header.get("type") != "session"
+                or not isinstance(header.get("cwd"), str)
+                or not header["cwd"]
+            ):
+                has_cwd = False
+                timestamp = None
+                sid = None
+            else:
+                has_cwd = True
+                cwd = header["cwd"]
+                timestamp = header.get("timestamp")
+                sid = header.get("id")
+            if not isinstance(timestamp, str) or not timestamp:
+                try:
+                    timestamp = datetime.fromtimestamp(
+                        file_path.stat().st_mtime, tz=timezone.utc
+                    ).isoformat()
+                except OSError:
+                    timestamp = datetime.now(timezone.utc).isoformat()
+            session_id = str(sid) if isinstance(sid, str) and sid else file_path.stem
+            if has_cwd:
+                target = _session_file_path(root, cwd, session_id, timestamp)
+            else:
+                safe_timestamp = timestamp.replace(":", "-").replace(".", "-")
+                target = root / "--legacy--" / f"{safe_timestamp}_{session_id}.jsonl"
+            if target.exists():
+                target = target.with_name(f"{target.stem}-{file_path.stem}{target.suffix}")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            file_path.replace(target)
+            migrated += 1
+        except OSError:
+            continue
+    return migrated
 
 
 def _default_sessions_dir() -> Path:

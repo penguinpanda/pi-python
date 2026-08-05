@@ -108,3 +108,11 @@ class TestPaths:
 
     def test_project_settings_under_cwd(self, tmp_path):
         assert _config.get_project_settings_path(tmp_path) == (tmp_path / ".pi" / "settings.json")
+
+    def test_agent_dir_placeholder_paths(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(_config, "_get_home_dir", lambda: tmp_path / "home")
+        agent_dir = tmp_path / "home" / ".pi" / "agent"
+        assert _config.get_themes_dir() == agent_dir / "themes"
+        assert _config.get_tools_dir() == agent_dir / "tools"
+        assert _config.get_bin_dir() == agent_dir / "bin"
+        assert _config.get_debug_log_path() == agent_dir / "pi-debug.log"

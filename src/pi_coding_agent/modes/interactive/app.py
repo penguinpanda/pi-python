@@ -16,6 +16,7 @@ from textual.widgets import Static
 
 from ..._config import get_sessions_dir
 from ..._session import AgentSession
+from ..._session_manager import SessionManager
 from pi_agent import AgentEvent
 from ...model_runtime import ModelRuntime
 from ...extensions import ExtensionRunner
@@ -1551,28 +1552,17 @@ class PiTuiApp(App):
 
 
 def _list_sessions() -> list[dict[str, Any]]:
-    """按修改时间倒序列出会话文件。"""
-    sessions_dir = get_sessions_dir()
-    if not sessions_dir.is_dir():
-        return []
-    results: list[dict[str, Any]] = []
-    for path in sessions_dir.glob("*.jsonl"):
-        try:
-            modified = path.stat().st_mtime
-        except OSError:
-            continue
-        session_id = path.stem
-        try:
-            with open(path, "r", encoding="utf-8") as handle:
-                first = handle.readline().strip()
-            header = json.loads(first)
-            if isinstance(header, dict) and header.get("id"):
-                session_id = header["id"]
-        except (OSError, json.JSONDecodeError):
-            pass
-        results.append({"path": str(path), "session_id": session_id, "modified": modified})
-    results.sort(key=lambda entry: entry["modified"], reverse=True)
-    return results
+    """按修改时间倒序列出会话文件（per-cwd 布局，自动迁移旧平铺文件）。"""
+    infos = SessionManager.list_sessions(get_sessions_dir())
+    return [
+        {
+            "path": info.path,
+            "session_id": info.session_id,
+            "cwd": info.cwd,
+            "modified": info.modified,
+        }
+        for info in infos
+    ]
 
 
 def _copy_text(text: str) -> None:
