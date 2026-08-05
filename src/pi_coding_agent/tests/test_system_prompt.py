@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from pi_coding_agent.system_prompt import (
     BuildSystemPromptOptions,
     build_system_prompt,
+    find_git_paths,
+    find_shadowed_context_file,
     load_project_context_files,
     tool_snippets_for,
 )
@@ -351,3 +355,73 @@ class TestSessionRebuild:
         )
         assert session.rebuild_system_prompt() is None
         assert agent.state.system_prompt == "static"
+
+
+def _make_nested_worktree(tmp_path):
+    """构造 主仓库 + 嵌套 linked worktree（sub 在主仓库目录内）。"""
+    main = tmp_path / "main"
+    (main / ".git").mkdir(parents=True)
+    (main / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (main / "AGENTS.md").write_text("main rules", encoding="utf-8")
+
+    sub = main / "sub"
+    sub.mkdir()
+    git_dir = main / ".git" / "worktrees" / "sub"
+    git_dir.mkdir(parents=True)
+    (git_dir / "HEAD").write_text("ref: refs/heads/sub\n", encoding="utf-8")
+    (git_dir / "commondir").write_text("../..", encoding="utf-8")
+    (sub / ".git").write_text("gitdir: ../.git/worktrees/sub\n", encoding="utf-8")
+    (sub / "AGENTS.md").write_text("main rules", encoding="utf-8")
+    return main, sub
+
+
+def test_find_git_paths_regular_repo(tmp_path):
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (repo / "AGENTS.md").write_text("repo rules", encoding="utf-8")
+
+    paths = find_git_paths(repo)
+    assert paths is not None
+    assert paths.repo_dir == repo.resolve()
+    assert paths.common_git_dir == (repo / ".git").resolve()
+    assert find_shadowed_context_file(repo) is None
+    files = load_project_context_files(repo, agent_dir=tmp_path / "agent")
+    assert [Path(f["path"]).resolve() for f in files] == [(repo / "AGENTS.md").resolve()]
+
+
+def test_nested_worktree_shadows_main_repo_agents(tmp_path):
+    """嵌套 linked worktree 的 AGENTS.md 与主仓库同源，只加载一份。"""
+    main, sub = _make_nested_worktree(tmp_path)
+
+    paths = find_git_paths(sub)
+    assert paths is not None
+    assert paths.repo_dir == sub.resolve()
+    assert paths.common_git_dir == (main / ".git").resolve()
+    assert find_shadowed_context_file(sub) == str((main / "AGENTS.md").resolve())
+
+    files = load_project_context_files(sub, agent_dir=tmp_path / "agent")
+    # worktree 自己的副本保留，主仓库祖先副本被遮蔽，总共只加载一份。
+    assert [Path(f["path"]).resolve() for f in files] == [(sub / "AGENTS.md").resolve()]
+    assert len(files) == 1
+
+
+def test_sibling_worktree_not_shadowed(tmp_path):
+    """主仓库外的兄弟 worktree：不遮蔽，各自加载自己的 AGENTS.md。"""
+    main = tmp_path / "main"
+    (main / ".git").mkdir(parents=True)
+    (main / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (main / "AGENTS.md").write_text("main rules", encoding="utf-8")
+
+    feat = tmp_path / "feat"
+    feat.mkdir()
+    git_dir = main / ".git" / "worktrees" / "feat"
+    git_dir.mkdir(parents=True)
+    (git_dir / "HEAD").write_text("ref: refs/heads/feat\n", encoding="utf-8")
+    (git_dir / "commondir").write_text("../..", encoding="utf-8")
+    (feat / ".git").write_text("gitdir: ../main/.git/worktrees/feat\n", encoding="utf-8")
+    (feat / "AGENTS.md").write_text("feat rules", encoding="utf-8")
+
+    assert find_shadowed_context_file(feat) is None
+    files = load_project_context_files(feat, agent_dir=tmp_path / "agent")
+    assert [Path(f["path"]).resolve() for f in files] == [(feat / "AGENTS.md").resolve()]

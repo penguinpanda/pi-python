@@ -48,10 +48,14 @@ def parse_osc11_background(data: str) -> tuple[int, int, int] | None:
     return None
 
 
-def _read_osc_response(timeout: float) -> str:
-    """读取终端响应直到 BEL 或 ST，超时返回已收内容。"""
+def _read_osc_response(timeout: float, drain: float = 0.25) -> str:
+    """读取终端响应直到 BEL 或 ST。
+
+    deadline = timeout + drain：主窗口 timeout 内未收到时再兜底 drain 一段，
+    避免晚到的 OSC 响应残留在输入队列里、退出后漏到 shell 屏幕上。
+    """
     buffer = bytearray()
-    deadline = time.monotonic() + timeout
+    deadline = time.monotonic() + timeout + drain
     if os.name == "posix":
         import select
         import termios
@@ -96,13 +100,15 @@ def _read_osc_response(timeout: float) -> str:
     return buffer.decode("latin-1", "replace")
 
 
-def query_terminal_background(timeout: float = 0.3) -> tuple[int, int, int] | None:
+def query_terminal_background(timeout: float = 0.5) -> tuple[int, int, int] | None:
     """启动时查询终端背景色（OSC 11）；非 TTY / 失败返回 None。"""
     try:
         if not sys.stdin.isatty() or not sys.stdout.isatty():
             return None
-        sys.stdout.write("\x1b]11;?\x07")
-        sys.stdout.flush()
+        if os.environ.get("TERM", "").lower() == "dumb":
+            return None
+        # 直接写 fd，绕开 Python stdout 缓冲，避免查询序列被延迟刷出。
+        os.write(sys.stdout.fileno(), b"\x1b]11;?\x07")
         return parse_osc11_background(_read_osc_response(timeout))
     except Exception:
         return None

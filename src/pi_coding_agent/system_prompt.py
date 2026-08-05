@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -62,11 +63,94 @@ def _load_context_file_from_dir(directory: Path) -> dict | None:
     return None
 
 
+@dataclass(slots=True)
+class _GitPaths:
+    """git 元数据路径（对齐 TS GitPaths）。"""
+
+    repo_dir: Path
+    common_git_dir: Path
+    head_path: Path
+
+
+def find_git_paths(cwd: str | Path) -> _GitPaths | None:
+    """向上查找 git 元数据（普通仓库 .git 目录 / linked worktree .git 文件）。
+
+    对齐 TS findGitPaths：.git 为文件时读 `gitdir:` 指向的 gitdir，
+    再按 gitdir/commondir（缺省为 gitdir 自身）得到公共 git 目录。
+    """
+    current = Path(cwd).expanduser()
+    while True:
+        git_path = current / ".git"
+        if git_path.exists():
+            try:
+                if git_path.is_file():
+                    content = git_path.read_text(encoding="utf-8", errors="replace").strip()
+                    if content.startswith("gitdir: "):
+                        git_dir = (current / content[len("gitdir: ") :].strip()).resolve()
+                        head_path = git_dir / "HEAD"
+                        if not head_path.exists():
+                            return None
+                        common_dir_path = git_dir / "commondir"
+                        if common_dir_path.exists():
+                            common_git_dir = (
+                                git_dir
+                                / common_dir_path.read_text(
+                                    encoding="utf-8", errors="replace"
+                                ).strip()
+                            ).resolve()
+                        else:
+                            common_git_dir = git_dir
+                        return _GitPaths(
+                            repo_dir=current.resolve(),
+                            common_git_dir=common_git_dir,
+                            head_path=head_path,
+                        )
+                elif git_path.is_dir():
+                    head_path = git_path / "HEAD"
+                    if not head_path.exists():
+                        return None
+                    return _GitPaths(
+                        repo_dir=current.resolve(),
+                        common_git_dir=git_path.resolve(),
+                        head_path=head_path,
+                    )
+            except OSError:
+                return None
+        if current.parent == current:
+            return None
+        current = current.parent
+
+
+def find_shadowed_context_file(cwd: str | Path) -> str | None:
+    """返回应被遮蔽的主仓库上下文文件（嵌套 linked worktree 场景）。
+
+    嵌套 linked worktree 的 AGENTS.md/CLAUDE.md 与主仓库是同一份被跟踪
+    文件，加载两次会重复；通过 commonGitDir 识别并返回主仓库副本的
+    规范化路径（对齐 TS findShadowedContextFile）。
+    """
+    git_paths = find_git_paths(cwd)
+    if git_paths is None:
+        return None
+    common_git_dir = str(git_paths.common_git_dir)
+    worktree_root = str(git_paths.repo_dir)
+    main_repo_root = str(Path(common_git_dir).parent)
+    if not worktree_root.startswith(main_repo_root + os.sep):
+        return None
+    if str((Path(main_repo_root) / ".git").resolve()) != common_git_dir:
+        return None
+    worktree_context = _load_context_file_from_dir(git_paths.repo_dir)
+    if worktree_context is None:
+        return None
+    return str((Path(main_repo_root) / Path(worktree_context["path"]).name).resolve())
+
+
 def load_project_context_files(cwd: str | Path, agent_dir: str | Path | None = None) -> list[dict]:
-    """加载全局 agent 目录 + cwd 祖先链上的 AGENTS.md/CLAUDE.md（去重）。"""
+    """加载全局 agent 目录 + cwd 祖先链上的 AGENTS.md/CLAUDE.md（去重 + worktree 遮蔽）。"""
     resolved_agent_dir = (Path(agent_dir) if agent_dir else get_agent_dir()).resolve()
+    resolved_cwd = Path(cwd).expanduser().resolve()
     context_files: list[dict] = []
     seen: set[str] = set()
+    shadowed_context_file = find_shadowed_context_file(resolved_cwd)
 
     global_context = _load_context_file_from_dir(resolved_agent_dir)
     if global_context is not None:
@@ -74,12 +158,12 @@ def load_project_context_files(cwd: str | Path, agent_dir: str | Path | None = N
         seen.add(str(Path(global_context["path"]).resolve()))
 
     ancestor_files: list[dict] = []
-    current = Path(cwd).expanduser().resolve()
+    current = resolved_cwd
     while True:
         context_file = _load_context_file_from_dir(current)
         if context_file is not None:
             canonical = str(Path(context_file["path"]).resolve())
-            if canonical not in seen:
+            if canonical != shadowed_context_file and canonical not in seen:
                 ancestor_files.insert(0, context_file)
                 seen.add(canonical)
         if current.parent == current:

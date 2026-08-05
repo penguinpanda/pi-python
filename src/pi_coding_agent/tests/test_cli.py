@@ -30,6 +30,8 @@ def _fake_settings_manager(cwd, project_trusted=True):
 async def test_unknown_provider_returns_friendly_error(monkeypatch, capsys):
     """回归：--provider bogus 应输出友好错误并返回 1，而不是抛 traceback。"""
 
+    monkeypatch.setattr(_cli, "ensure_agent_dirs", lambda: None)
+
     async def fake_resolve(*_args, **_kwargs):
         raise ValueError(
             'Unknown provider "bogus". Use --list-models to see available providers/models.'
@@ -49,6 +51,8 @@ async def test_unknown_provider_returns_friendly_error(monkeypatch, capsys):
 async def test_bare_pi_defaults_to_tui(tmp_path, monkeypatch):
     """回归：裸 `pi`（TTY、无消息）默认进入 TUI，而非报缺消息。"""
     import io
+
+    monkeypatch.setattr(_cli, "ensure_agent_dirs", lambda: None)
 
     class TtyStdin(io.StringIO):
         def isatty(self) -> bool:
@@ -82,6 +86,8 @@ async def test_bare_pi_defaults_to_tui(tmp_path, monkeypatch):
 async def test_cli_loads_skills_and_templates_on_startup(tmp_path, monkeypatch):
     """回归：CLI 启动时应调用 SkillLoader/PromptTemplateLoader 的 load()，
     否则 /skill: 与 /模板名 永远找不到资源。"""
+
+    monkeypatch.setattr(_cli, "ensure_agent_dirs", lambda: None)
 
     skill_load_calls: list = []
     template_load_calls: list = []
@@ -132,6 +138,7 @@ async def test_cli_loads_skills_and_templates_on_startup(tmp_path, monkeypatch):
 async def test_cli_loads_extensions_and_warns_on_syntax_error(tmp_path, monkeypatch, capsys):
     """回归（E-04/P17）：CLI 启动加载项目扩展；语法错误扩展输出 stderr
     Warning 且不崩溃；好扩展在 print 模式仍注册（跨模式一致性）。"""
+    monkeypatch.setattr(_cli, "ensure_agent_dirs", lambda: None)
     monkeypatch.setattr(_cli.SettingsManager, "create", staticmethod(_fake_settings_manager))
     monkeypatch.setattr(_cli, "_create_runtime", _fake_runtime)
 
@@ -214,3 +221,46 @@ def test_read_stdin_blank_returns_empty(monkeypatch):
 
     monkeypatch.setattr(_cli.sys, "stdin", PipeStdin("   \n"))
     assert _cli._read_stdin() == ""
+
+
+def test_no_context_files_flag_parsed():
+    parser = _cli._create_parser()
+    assert parser.parse_args(["-nc", "-p", "hi"]).no_context_files is True
+    assert parser.parse_args(["--no-context-files", "-p", "hi"]).no_context_files is True
+    assert parser.parse_args(["-p", "hi"]).no_context_files is False
+
+
+async def test_no_context_files_skips_agents_in_system_prompt(tmp_path, monkeypatch):
+    """回归：-nc 时 AGENTS.md 不进系统提示；不加时正常进入。"""
+    (tmp_path / "AGENTS.md").write_text("project rules", encoding="utf-8")
+    monkeypatch.setattr(_cli, "ensure_agent_dirs", lambda: None)
+    monkeypatch.setattr(_cli.SettingsManager, "create", staticmethod(_fake_settings_manager))
+    monkeypatch.setattr(_cli, "_create_runtime", _fake_runtime)
+
+    async def fake_resolve(*_args, **_kwargs):
+        return (
+            Model(id="faux-1", provider="faux", api="openai-completions"),
+            [],
+        )
+
+    captured: list = []
+
+    async def fake_print_mode(session, *_args, **_kwargs):
+        captured.append(session)
+        return 0
+
+    def fake_session_create(cwd, **kwargs):
+        return SessionManager.in_memory(cwd=cwd)
+
+    monkeypatch.setattr(_cli, "_resolve_initial_model", fake_resolve)
+    monkeypatch.setattr(_cli, "run_print_mode", fake_print_mode)
+    monkeypatch.setattr(_cli.SessionManager, "create", staticmethod(fake_session_create))
+    monkeypatch.chdir(tmp_path)
+
+    code = await _cli._async_main(["-p", "hi"])
+    assert code == 0
+    assert "project rules" in captured[0].rebuild_system_prompt()
+
+    code = await _cli._async_main(["-nc", "-p", "hi"])
+    assert code == 0
+    assert "project rules" not in captured[1].rebuild_system_prompt()

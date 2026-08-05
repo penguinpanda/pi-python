@@ -116,3 +116,10 @@ class TestPaths:
         assert _config.get_tools_dir() == agent_dir / "tools"
         assert _config.get_bin_dir() == agent_dir / "bin"
         assert _config.get_debug_log_path() == agent_dir / "pi-debug.log"
+
+    def test_ensure_agent_dirs_creates_convention_dirs(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(_config, "_get_home_dir", lambda: tmp_path / "home")
+        _config.ensure_agent_dirs()
+        agent_dir = tmp_path / "home" / ".pi" / "agent"
+        for name in _config.AGENT_DIR_NAMES:
+            assert (agent_dir / name).is_dir()

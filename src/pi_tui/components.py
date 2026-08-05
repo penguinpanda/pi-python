@@ -14,6 +14,14 @@ from .keybindings import KeybindingsManager
 from .markdown import render_labeled_markdown
 
 
+class CopyRequested(Message):
+    """聊天消息请求复制完整文本（点击消息触发，事件冒泡到宿主）。"""
+
+    def __init__(self, text: str) -> None:
+        super().__init__()
+        self.text = text
+
+
 # ---------------------------------------------------------------------------
 # 消息渲染
 # ---------------------------------------------------------------------------
@@ -204,6 +212,11 @@ class MessageEntry(Static):
     def _refresh_display(self) -> None:
         self.update(render_labeled_markdown(self.label, self.entry_text, speaking=self.speaking))
 
+    async def _on_click(self, event: events.Click) -> None:
+        """点击消息 → 复制整条文本（Textual 不支持鼠标选词）。"""
+        if self.entry_text:
+            self.post_message(CopyRequested(self.entry_text))
+
 
 class BashExecutionEntry(Static):
     """交互 bash 命令条目：流式输出 + 完成状态。"""
@@ -266,6 +279,15 @@ class BashExecutionEntry(Static):
         if self.status:
             text += f"\n{self.status}"
         self.update(f"[b]{self.label}[/b] {text}")
+
+    async def _on_click(self, event: events.Click) -> None:
+        """点击 bash 条目 → 复制命令 + 输出。"""
+        parts = [f"$ {self.command}"]
+        if self.output:
+            parts.append(self.output)
+        if self.status:
+            parts.append(self.status)
+        self.post_message(CopyRequested("\n".join(parts)))
 
 
 class PiHeader(Static):
@@ -357,6 +379,7 @@ class PiEditor(TextArea):
         Binding("enter", "submit", "Send"),
         Binding("shift+enter", "newline", "Insert newline"),
         Binding("tab", "autocomplete", "Autocomplete"),
+        Binding("ctrl+c", "copy_or_clear", "Copy or clear"),
     ]
 
     class AutocompleteRequested(Message):
@@ -402,6 +425,13 @@ class PiEditor(TextArea):
 
     def action_autocomplete(self) -> None:
         self.post_message(self.AutocompleteRequested(self))
+
+    def action_copy_or_clear(self) -> None:
+        """ctrl+c：有选区则复制选中文本，否则清空编辑器（对齐 TS）。"""
+        if self.selected_text:
+            self.action_copy()
+        else:
+            self.clear()
 
     async def _on_key(self, event: events.Key) -> None:
         # TextArea._on_key 会把 enter 直接当换行插入并 stop() 事件，

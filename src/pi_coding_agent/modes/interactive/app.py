@@ -14,9 +14,11 @@ from textual.binding import Binding, BindingsMap
 from textual.geometry import Offset
 from textual.widgets import Static
 
-from ..._config import get_sessions_dir
+from ..._config import get_agent_dir, get_sessions_dir
 from ..._session import AgentSession
 from ..._session_manager import SessionManager, SessionTreeNode
+from ...system_prompt import load_project_context_files
+from ...tools.render_utils import shorten_path
 from pi_agent import AgentEvent
 from ...model_runtime import ModelRuntime
 from ...extensions import ExtensionRunner
@@ -204,6 +206,7 @@ class PiTuiApp(App):
         trust_manager=None,
         project_trusted: bool = False,
         needs_trust_decision: bool = False,
+        no_context_files: bool = False,
     ) -> None:
         self._keybindings = keybindings_manager or KeybindingsManager()
         self._settings = settings if settings is not None else {}
@@ -217,6 +220,7 @@ class PiTuiApp(App):
         self._trust_manager = trust_manager
         self._project_trusted = project_trusted
         self._needs_trust_decision = needs_trust_decision
+        self._no_context_files = no_context_files
 
         # 实例级 BINDINGS / CSS：必须在 super().__init__() 之前设置。
         self.BINDINGS = [  # type: ignore[misc]
@@ -327,6 +331,8 @@ class PiTuiApp(App):
         self._render_missed_summaries()
         self._update_footer()
         self._editor.focus()
+        if not self._no_context_files:
+            self._show_startup_context_hint()
         # 启动时对未定信任项目提示（对齐 TS 启动 trust 选择器）。
         if self._needs_trust_decision:
             self.call_after_refresh(self._open_trust_selector)
@@ -766,6 +772,17 @@ class PiTuiApp(App):
 
             self.call_after_refresh(_scroll_to_entry)
 
+    def _show_startup_context_hint(self) -> None:
+        """启动提示：已加载的 AGENTS.md / CLAUDE.md（对齐 TS Loaded resources → Context）。"""
+        context_files = load_project_context_files(self._session.cwd, get_agent_dir())
+        if not context_files:
+            return
+        paths = [_format_context_path(entry["path"], self._session.cwd) for entry in context_files]
+        text = f"[Context]\n  {', '.join(paths)}"
+        self._set_status("Context files loaded")
+        escaped = text.replace("[", r"\[")
+        self._chat.add_message_agent({"role": "system", "content": escaped})
+
     def _update_footer(self) -> None:
         model = self._session.model
         model_label = f"{model.provider}/{model.id}" if model is not None else "—"
@@ -921,11 +938,11 @@ class PiTuiApp(App):
         self.action_copy_last_message()
 
     def on_copy_requested(self, message) -> None:
-        """列表弹层按 c 复制选中项（TreeSelector / ChoiceSelector / SessionPicker）。"""
+        """复制请求：列表弹层选中项 / 聊天消息点击（TreeSelector、MessageEntry 等）。"""
         text = getattr(message, "text", "")
         if text:
             self._copy_to_clipboard(text)
-            self._notify("Copied selected")
+            self._notify("Copied")
 
     def on_pi_editor_cycle_thinking_requested(self, _message) -> None:
         """shift+tab → 循环 thinking 级别（对齐 TS）。"""
@@ -1646,6 +1663,15 @@ def _user_message_nodes(manager: SessionManager) -> list[SessionTreeNode]:
         )
     nodes.reverse()  # 最新的 user 消息排在最前。
     return nodes
+
+
+def _format_context_path(path: str, cwd: str) -> str:
+    """启动提示用路径：cwd 内显示相对路径，否则 home 缩写（对齐 TS formatContextPath）。"""
+    try:
+        relative = Path(path).resolve().relative_to(Path(cwd).resolve())
+        return relative.as_posix()
+    except ValueError:
+        return shorten_path(path).replace("\\", "/")
 
 
 def _copy_text(text: str) -> None:

@@ -117,6 +117,7 @@ echo "read README.md" | uv run python -m pi_coding_agent -p
 
 其中 `/settings`、`/trust`、`/thinking`、`/oauth`、`/scoped-models`、`/extensions` 在
 TUI 中打开对应选择器；`/reload` 会重建系统提示并纳入 context files（AGENTS.md/CLAUDE.md）。
+启动时若发现 context files，聊天区会显示 `[Context]` 提示（`--no-context-files` 禁用）。
 
 ---
 
@@ -146,6 +147,7 @@ pi login [provider] | pi logout <provider> | pi list
 | `--session` / `-c` / `--no-session` | str/flag | 打开指定会话 / 继续最近会话 / 内存会话 |
 | `--setup` | flag | 首次启动向导 |
 | `--tools` / `--exclude-tools` / `--no-tools` | str/flag | 工具白名单 / 黑名单 / 全禁用 |
+| `--no-context-files` / `-nc` | flag | 禁用 AGENTS.md / CLAUDE.md 发现与加载 |
 | `--version` | flag | 打印版本号 |
 | `login` / `logout` / `list` | 子命令 | OAuth 登录 / 注销 / 查看登录状态 |
 | `message` | positional | 用户消息（可选，可通过 stdin pipe） |

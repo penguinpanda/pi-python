@@ -1603,3 +1603,129 @@ def test_user_message_nodes_filters_user_messages():
     assert [node.id for node in nodes] == [e3, e1]
     assert "first line" in nodes[1].label
     assert r"\[x\]" in nodes[0].label  # 方括号已转义，避免被 Textual 当 Rich markup。
+
+
+def test_format_context_path():
+    from pi_coding_agent.modes.interactive.app import _format_context_path
+
+    assert _format_context_path(str(Path.home() / "work" / "AGENTS.md"), "/tmp/proj") == (
+        "~/work/AGENTS.md"
+    )
+    cwd = Path.cwd()
+    assert _format_context_path(str(cwd / "AGENTS.md"), str(cwd)) == "AGENTS.md"
+    assert _format_context_path(str(cwd / "docs" / "AGENTS.md"), str(cwd)) == "docs/AGENTS.md"
+
+
+@pytest.mark.asyncio
+async def test_startup_context_hint_shows_agents(tmp_path):
+    """启动提示：加载到 AGENTS.md 时聊天区出现 [Context] System 消息。"""
+    (tmp_path / "AGENTS.md").write_text("project rules", encoding="utf-8")
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        await _wait_until(
+            lambda: any(
+                entry.label == "System" and "[Context]" in entry.entry_text
+                for entry in app._chat.query(MessageEntry)
+            ),
+            pilot=pilot,
+            message="startup context hint shown",
+        )
+        hint = next(
+            entry for entry in app._chat.query(MessageEntry) if "[Context]" in entry.entry_text
+        )
+        assert "AGENTS.md" in hint.entry_text
+
+
+@pytest.mark.asyncio
+async def test_startup_context_hint_suppressed_by_flag(tmp_path):
+    """--no-context-files：启动不显示 Context 提示。"""
+    (tmp_path / "AGENTS.md").write_text("project rules", encoding="utf-8")
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime, no_context_files=True)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.pause()
+        assert not any("[Context]" in entry.entry_text for entry in app._chat.query(MessageEntry))
+
+
+@pytest.mark.asyncio
+async def test_editor_ctrl_c_copies_selection_or_clears():
+    """输入框：ctrl+c 有选区复制，无选区清空（对齐 TS）。"""
+    from textual.app import App
+    from textual.selection import Selection
+
+    from pi_tui.components import PiEditor
+
+    copied: list[str] = []
+
+    class Host(App):
+        def compose(self):
+            yield PiEditor()
+
+    app = Host()
+    async with app.run_test() as pilot:
+        app.copy_to_clipboard = lambda text: copied.append(text)
+        editor = app.query_one(PiEditor)
+        editor.focus()
+        editor.text = "hello world"
+        editor.selection = Selection(start=(0, 0), end=(0, 5))
+        await pilot.press("ctrl+c")
+        assert copied == ["hello"]
+        assert editor.text == "hello world"
+        editor.selection = Selection(start=(0, 0), end=(0, 0))
+        await pilot.press("ctrl+c")
+        assert editor.text == ""
+    assert copied == ["hello"]
+
+
+@pytest.mark.asyncio
+async def test_message_entry_click_copies_text():
+    """输出框：点击消息复制整条文本（Textual 无鼠标选词，只能整条复制）。"""
+    from textual.app import App
+
+    from pi_tui.components import MessageEntry
+
+    copied: list[str] = []
+
+    class Host(App):
+        def compose(self):
+            yield MessageEntry("User", "hello **world**")
+
+        def on_copy_requested(self, message):
+            copied.append(message.text)
+
+    app = Host()
+    async with app.run_test() as pilot:
+        await pilot.click(MessageEntry)
+        await pilot.pause()
+    assert copied == ["hello **world**"]
+
+
+@pytest.mark.asyncio
+async def test_bash_entry_click_copies_command_and_output():
+    """输出框：点击 bash 条目复制命令 + 输出。"""
+    from textual.app import App
+
+    from pi_tui.components import BashExecutionEntry
+
+    copied: list[str] = []
+
+    class Host(App):
+        def compose(self):
+            yield BashExecutionEntry("echo hi")
+
+        def on_copy_requested(self, message):
+            copied.append(message.text)
+
+    app = Host()
+    async with app.run_test() as pilot:
+        entry = app.query_one(BashExecutionEntry)
+        entry.output = "hi\n"
+        entry.set_complete(0)
+        await pilot.pause()
+        await pilot.click(BashExecutionEntry)
+        await pilot.pause()
+    assert copied == ["$ echo hi\nhi\n"]

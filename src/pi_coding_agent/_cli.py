@@ -20,7 +20,7 @@ from pi_agent import set_default_stream_fn as set_agent_stream_fn
 from pi_ai import Model
 from pi_ai.auth.oauth import builtin_oauth_providers
 
-from ._config import get_agent_dir, get_sessions_dir
+from ._config import ensure_agent_dirs, get_agent_dir, get_sessions_dir
 from .extensions import ExtensionLoader, ExtensionRunner
 from ._print_mode import run_print_mode, run_print_mode_json
 from .file_processor import process_at_files
@@ -85,6 +85,9 @@ async def _async_main(args: list[str] | None = None) -> int:
 
     parser = _create_parser()
     parsed = parser.parse_args(args)
+
+    # 补齐 ~/.pi/agent 约定目录（sessions/prompts/skills/extensions/themes/tools/bin）。
+    ensure_agent_dirs()
 
     # --help / --version 已在 argparse 中处理
 
@@ -239,7 +242,11 @@ async def _async_main(args: list[str] | None = None) -> int:
                 selected_tools=selected_tools,
                 tool_snippets=tool_snippets,
                 append_system_prompt="\n".join(append_parts) if append_parts else None,
-                context_files=load_project_context_files(cwd, get_agent_dir()),
+                context_files=(
+                    []
+                    if parsed.no_context_files
+                    else load_project_context_files(cwd, get_agent_dir())
+                ),
                 skills=skills,
             )
         )
@@ -354,6 +361,7 @@ async def _async_main(args: list[str] | None = None) -> int:
             trust_manager=trust_manager,
             project_trusted=project_trusted,
             needs_trust_decision=needs_trust_decision,
+            no_context_files=parsed.no_context_files,
         )
 
     # 运行 print 模式
@@ -579,6 +587,12 @@ def _create_parser() -> argparse.ArgumentParser:
         help="Load prompt template file or directory (repeatable)",
     )
     p.add_argument("--no-skills", action="store_true", help="Disable skill discovery")
+    p.add_argument(
+        "--no-context-files",
+        "-nc",
+        action="store_true",
+        help="Disable AGENTS.md and CLAUDE.md discovery and loading",
+    )
     p.add_argument(
         "--no-prompt-templates",
         action="store_true",

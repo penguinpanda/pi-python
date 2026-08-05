@@ -18,6 +18,7 @@ from pathlib import Path
 
 APP_NAME = "pi"
 CONFIG_DIR_NAME = ".pi"
+AGENT_DIR_NAMES = ("sessions", "prompts", "skills", "extensions", "themes", "tools", "bin")
 
 
 def _get_home_dir() -> Path:
@@ -86,6 +87,13 @@ def get_debug_log_path(agent_dir: Path | None = None) -> Path:
     占位：对齐 TS getDebugLogPath；Python 尚无该日志文件。
     """
     return (agent_dir or get_agent_dir()) / f"{APP_NAME}-debug.log"
+
+
+def ensure_agent_dirs(agent_dir: Path | None = None) -> None:
+    """首次启动补齐 ~/.pi/agent 约定目录（文件仍按需懒创建）。"""
+    root = agent_dir or get_agent_dir()
+    for name in AGENT_DIR_NAMES:
+        (root / name).mkdir(parents=True, exist_ok=True)
 
 
 def get_settings_path() -> Path:

@@ -78,7 +78,7 @@ await run_print_mode(session, "read README.md")
 - **Print**：`run_print_mode(session, prompt)`，无 UI，扩展 UI 走 `NoopUIContext`
 - **TUI**：`run_tui_mode(...)`，Textual 应用 `PiTuiApp`
 - **RPC**：`run_rpc_mode` + `RpcMessageHandler` / `RpcClient`（stdin/stdout JSONL 协议，`pi_protocol`）
-- **CLI**：`python -m pi_coding_agent`（`main`），支持 `--model` / `--provider` / `--models` / `--list-models` / `--system-prompt` / `--append-system-prompt` / `--session` / `--no-session` / `--tools` / `--exclude-tools` / `--no-tools` / `--extension`（`-e`）/ `--skill` / `--prompt-template`（均可重复）/ `--no-skills` / `--no-prompt-templates` / `--preset`
+- **CLI**：`python -m pi_coding_agent`（`main`），支持 `--model` / `--provider` / `--models` / `--list-models` / `--system-prompt` / `--append-system-prompt` / `--session` / `--no-session` / `--tools` / `--exclude-tools` / `--no-tools` / `--extension`（`-e`）/ `--skill` / `--prompt-template`（均可重复）/ `--no-skills` / `--no-prompt-templates` / `--no-context-files`（`-nc`）/ `--preset`
 
 ## 完整示例
 

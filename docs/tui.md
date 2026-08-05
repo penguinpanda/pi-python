@@ -35,6 +35,10 @@ PiTuiApp (Textual App)
   Enter 选择时把完整内容直接写入剪贴板（树选择器复制完整消息文本，
   会话选择器复制 session 路径）；文本输入框 `ctrl+c` / `ctrl+v`
   由 Textual Input 原生支持
+- 输入框：`ctrl+c` 有选区时复制选中文本，无选区时清空（对齐 TS）；
+  选区可用鼠标拖选或 Shift+方向键
+- 输出框：点击一条消息复制其完整文本（bash 条目复制 `$ 命令` + 输出）；
+  `ctrl+x` 仍可复制最后一条 assistant 消息
 - 外部编辑器：`ctrl+g`（`$VISUAL` / `$EDITOR` 回退）
 
 ## 主题与快捷键

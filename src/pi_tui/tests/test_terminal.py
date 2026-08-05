@@ -43,3 +43,11 @@ def test_query_non_tty_returns_none(monkeypatch) -> None:
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
     assert query_terminal_background() is None
+
+
+def test_query_dumb_term_returns_none(monkeypatch) -> None:
+    """TERM=dumb（如 docker exec 无真实终端）时不发查询，避免 OSC 漏到屏幕。"""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setenv("TERM", "dumb")
+    assert query_terminal_background() is None

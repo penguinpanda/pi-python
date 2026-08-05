@@ -51,6 +51,7 @@ class DefaultResourceLoader:
         settings_manager: SettingsManager | None = None,
         selected_tools: list[str] | None = None,
         tool_snippets: dict[str, str] | None = None,
+        no_context_files: bool = False,
     ) -> None:
         self._cwd = str(Path(cwd).expanduser().resolve())
         self._agent_dir = Path(agent_dir) if agent_dir else get_agent_dir()
@@ -60,6 +61,7 @@ class DefaultResourceLoader:
         )
         self._selected_tools = selected_tools
         self._tool_snippets = tool_snippets
+        self._no_context_files = no_context_files
 
         self._skill_loader = SkillLoader(
             global_dir=self._agent_dir / "skills",
@@ -164,7 +166,9 @@ class DefaultResourceLoader:
             )
 
         themes = self._load_themes(diagnostics)
-        context_files = load_project_context_files(self._cwd, self._agent_dir)
+        context_files = (
+            [] if self._no_context_files else load_project_context_files(self._cwd, self._agent_dir)
+        )
         self._result = ResourceLoadResult(
             skills=skill_result.skills,
             prompts=templates,

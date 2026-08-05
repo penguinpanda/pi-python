@@ -19,7 +19,7 @@ from ._types import AgentSessionConfig, PrintModeOptions
 from ._session_manager import SessionInfo, SessionManager, SessionTreeNode
 from ._cli import main
 from ._print_mode import run_print_mode
-from ._config import get_agent_dir, get_sessions_dir, load_settings
+from ._config import ensure_agent_dirs, get_agent_dir, get_sessions_dir, load_settings
 from ._config import get_prompts_dir, get_skills_dir
 from .extensions import (
     EventBus,
@@ -91,6 +91,7 @@ __all__ = [
     "get_agent_dir",
     "get_sessions_dir",
     "load_settings",
+    "ensure_agent_dirs",
     "get_skills_dir",
     "get_prompts_dir",
     # Model runtime (Phase 1)

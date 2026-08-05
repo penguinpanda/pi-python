@@ -134,3 +134,16 @@ async def test_settings_manager_system_prompt_used(tmp_path):
     result = await loader.load()
     assert "custom system" in result.system_prompt
     assert "extra rules" in result.system_prompt
+
+
+@pytest.mark.asyncio
+async def test_no_context_files_disables_agents(tmp_path):
+    """no_context_files=True：AGENTS.md/CLAUDE.md 不加载，其余资源不受影响。"""
+    agent_dir, cwd = _seed_project(tmp_path)
+    loader = DefaultResourceLoader(cwd, agent_dir, project_trusted=True, no_context_files=True)
+    result = await loader.load()
+
+    assert result.context_files == []
+    assert {skill.name for skill in result.skills} == {"global-skill", "project-skill"}
+    assert {prompt.name for prompt in result.prompts} == {"review", "project"}
+    assert "project rules" not in result.system_prompt

@@ -12,9 +12,9 @@
 | `sessions/` | 会话存储 | 已实现，per-cwd 布局（见下） |
 | `prompts/` | 提示模板（slash command 模板） | 已实现（`get_prompts_dir`） |
 | `skills/` | 技能目录 | 已实现（`get_skills_dir`） |
-| `themes/` | 用户自定义主题 JSON | 占位：`get_themes_dir()` 已定义，`ThemeLoader` 尚未消费该目录 |
-| `tools/` | 自定义工具 / 旧版二进制 | 占位：`get_tools_dir()` 已定义，工具全部内置，未消费 |
-| `bin/` | 托管二进制（TS 的 fd/rg 自动解压位置） | 占位：`get_bin_dir()` 已定义，Python 未自动提取 |
+| `themes/` | 用户自定义主题 JSON | 启动时自动创建目录；`ThemeLoader` 尚未消费（内容按需放置） |
+| `tools/` | 自定义工具 / 旧版二进制 | 启动时自动创建目录；工具全部内置，未消费 |
+| `bin/` | 托管二进制（TS 的 fd/rg 自动解压位置） | 启动时自动创建目录；Python 未自动提取 |
 | `pi-debug.log` | 调试日志 | 占位：`get_debug_log_path()` 已定义，Python 尚无日志文件 |
 
 路径函数见 `src/pi_coding_agent/_config.py`：
@@ -24,6 +24,10 @@
 - `get_skills_dir()` / `get_prompts_dir()` / `get_themes_dir()` /
   `get_tools_dir()` / `get_bin_dir()`
 - `get_debug_log_path()` → `~/.pi/agent/pi-debug.log`
+
+`ensure_agent_dirs()` 在 CLI/TUI 启动时补齐 `sessions/` `prompts/` `skills/`
+`extensions/` `themes/` `tools/` `bin/` 七个约定目录；`auth.json` /
+`models.json` / `settings.json` 等文件仍按需懒创建（首次读/写时才生成）。
 
 ## sessions/ 布局（与 TS JsonlSessionStore 对齐）
 
