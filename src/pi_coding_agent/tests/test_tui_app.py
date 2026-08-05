@@ -474,10 +474,8 @@ async def test_autocomplete_async_provider(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_slash_autocomplete_opens_and_inserts(tmp_path):
-    """输入 `/` 自动弹出命令补全，Enter 插入 `/name ` 并保留后续参数。"""
-    from pi_tui.selectors import ChoiceSelector
-
+async def test_slash_autocomplete_live_non_modal(tmp_path):
+    """输入 `/` 实时补全：编辑器保持焦点，输入过滤，↑/↓ 选择，Enter 插入，Esc 关闭。"""
     runtime = _make_runtime()
     session = _make_session(runtime, tmp_path)
     app = PiTuiApp(session, runtime)
@@ -486,17 +484,43 @@ async def test_slash_autocomplete_opens_and_inserts(tmp_path):
         editor.focus()
         await pilot.press("/")
         await _wait_until(
-            lambda: app.query(ChoiceSelector).nodes,
+            lambda: bool(app._completion_items),
             pilot=pilot,
-            message="slash autocomplete opened",
+            message="completion items loaded",
         )
-        app.query_one(ChoiceSelector).action_select()
-        await pilot.pause()
+        assert app.screen.focused is editor  # 焦点仍在输入框，可流畅继续打字
+        assert editor.completion_active is True
+
+        await pilot.press("m")
         await _wait_until(
-            lambda: editor.text == "/model ",
+            lambda: (
+                bool(app._completion_items)
+                and all(item["value"].startswith("/m") for item in app._completion_items)
+            ),
             pilot=pilot,
-            message="command inserted",
+            message="completion filtered",
         )
+        await pilot.press("down")
+        await pilot.pause()
+        selected = app._completion_items[app._completion_index]["value"]
+        await pilot.press("enter")
+        await _wait_until(
+            lambda: editor.text == selected,
+            pilot=pilot,
+            message="completion inserted",
+        )
+        assert editor.completion_active is False
+
+        # Esc 关闭补全并保留输入。
+        editor.text = "/"
+        editor.completion_active = True
+        app._completion_items = [{"value": "/model ", "label": "Select model"}]
+        app._render_slash_completion()
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app._completion_items == []
+        assert editor.completion_active is False
+        assert editor.text == "/"
 
 
 @pytest.mark.asyncio

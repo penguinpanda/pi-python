@@ -251,6 +251,8 @@ class PiTuiApp(App):
         self._widget_below: dict[str, str] = {}
         self._overlay_dialog_callbacks: dict[str, Callable[[Any], None] | None] = {}
         self._overlay_renderers: dict[str, Callable[[int, int], list[str]]] = {}
+        self._completion_items: list[dict] = []
+        self._completion_index = 0
         self._overlay_manager = OverlayManager(
             OverlayHooks(
                 make_widget=lambda key, lines, options: OverlayWidget(key, lines, options),
@@ -838,6 +840,7 @@ class PiTuiApp(App):
 
     def on_pi_editor_submitted(self, message: PiEditor.Submitted) -> None:
         text = message.text
+        self._hide_slash_completion()
         if text.startswith("/"):
             self._run_task(self._exec_slash(text))
         elif text.startswith("!"):
@@ -849,34 +852,22 @@ class PiTuiApp(App):
         self,
         message: PiEditor.AutocompleteRequested,
     ) -> None:
-        """Tab / 自动触发：slash 命令 + 扩展 provider 补全，弹选择器并插入。"""
+        """Tab / 自动触发：slash 命令走非模态实时补全，其余走扩展选择器。"""
+        text = message.editor.text
+        if text.startswith("/") and " " not in text:
+            await self._update_slash_completion(text)
+            return
+        self._hide_slash_completion()
         runner = self._session.extension_runner
-        providers: list = [
-            create_slash_command_provider(
-                self._slash_registry,
-                self._session.template_loader,
-            )
-        ]
+        providers: list = []
         if runner is not None:
             providers.extend(runner.get_autocomplete())
-        completions = await CombinedAutocompleteProvider(providers).collect(message.editor.text)
+        completions = await CombinedAutocompleteProvider(providers).collect(text)
         if not completions:
             return
 
         def _label(item: dict) -> str:
             return str(item.get("label", item.get("value", "")))
-
-        def _insert(value: str) -> None:
-            if value.startswith("/"):
-                # slash 补全：替换当前命令 token，保留已输入参数。
-                parts = self._editor.text.split(" ", 1)
-                rest = parts[1] if len(parts) > 1 else ""
-                self._editor.text = value + (f" {rest}" if rest else "")
-                return
-            try:
-                self._editor.insert(value)
-            except Exception:
-                self._editor.text += value
 
         def _callback(selected) -> None:
             if selected is None:
@@ -888,12 +879,75 @@ class PiTuiApp(App):
             if match is None:
                 return
             value = str(match.get("value", match.get("label", "")))
-            _insert(value)
+            self._insert_completion(value)
 
         self.push_screen(
             ChoiceSelector("Autocomplete", [_label(item) for item in completions]),
             callback=_callback,
         )
+
+    async def _update_slash_completion(self, text: str) -> None:
+        """非模态 slash 补全：编辑器保持焦点，实时过滤并渲染到编辑器上方。"""
+        provider = create_slash_command_provider(
+            self._slash_registry,
+            self._session.template_loader,
+        )
+        items = provider(text) or []
+        self._completion_items = items
+        self._completion_index = 0
+        if not items:
+            self._hide_slash_completion()
+            return
+        self._editor.completion_active = True
+        self._render_slash_completion()
+
+    def _render_slash_completion(self) -> None:
+        lines: list[str] = []
+        for index, item in enumerate(self._completion_items):
+            value = str(item.get("value", "")).strip()
+            label = str(item.get("label", value))
+            marker = ">" if index == self._completion_index else " "
+            # 转义方括号，避免被 Textual 当 Rich markup。
+            safe_label = label.replace("[", r"\[").replace("]", r"\]")
+            lines.append(f"{marker} {value}  [dim]{safe_label}[/dim]")
+        self._set_widget("slash-completion", lines)
+
+    def _hide_slash_completion(self) -> None:
+        self._completion_items = []
+        self._completion_index = 0
+        self._editor.completion_active = False
+        self._set_widget("slash-completion", [])
+
+    def _insert_completion(self, value: str) -> None:
+        if value.startswith("/"):
+            # slash 补全：替换当前命令 token，保留已输入参数。
+            parts = self._editor.text.split(" ", 1)
+            rest = parts[1] if len(parts) > 1 else ""
+            self._editor.text = value + (f" {rest}" if rest else "")
+            return
+        try:
+            self._editor.insert(value)
+        except Exception:
+            self._editor.text += value
+
+    def on_pi_editor_completion_navigate_requested(self, message) -> None:
+        if not self._completion_items:
+            return
+        count = len(self._completion_items)
+        self._completion_index = (self._completion_index + message.delta) % count
+        self._render_slash_completion()
+
+    def on_pi_editor_completion_submit_requested(self, message) -> None:
+        if not self._completion_items:
+            return
+        if not (0 <= self._completion_index < len(self._completion_items)):
+            return
+        value = str(self._completion_items[self._completion_index].get("value", ""))
+        self._insert_completion(value)
+        self._hide_slash_completion()
+
+    def on_pi_editor_completion_hide_requested(self, message) -> None:
+        self._hide_slash_completion()
 
     async def _send_prompt(self, text: str) -> None:
         self._set_status(self._working_message)

@@ -382,6 +382,11 @@ class PiEditor(TextArea):
         Binding("ctrl+c", "copy_or_clear", "Copy or clear"),
     ]
 
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        # slash 命令补全激活时：↑/↓ 导航、Enter 插入、Esc 关闭（编辑器保持焦点）。
+        self.completion_active = False
+
     class AutocompleteRequested(Message):
         """Tab 按下且需要扩展自动补全。"""
 
@@ -412,6 +417,23 @@ class PiEditor(TextArea):
 
         pass
 
+    class CompletionNavigateRequested(Message):
+        """补全激活时 ↑/↓ 移动选中项。"""
+
+        def __init__(self, delta: int) -> None:
+            super().__init__()
+            self.delta = delta
+
+    class CompletionSubmitRequested(Message):
+        """补全激活时 Enter 确认选中项。"""
+
+        pass
+
+    class CompletionHideRequested(Message):
+        """补全激活时 Esc 关闭补全。"""
+
+        pass
+
     def action_submit(self) -> None:
         text = self.text.strip()
         if not text:
@@ -436,8 +458,22 @@ class PiEditor(TextArea):
     async def _on_key(self, event: events.Key) -> None:
         # TextArea._on_key 会把 enter 直接当换行插入并 stop() 事件，
         # 导致上面的 "enter -> submit" 绑定永远不触发，必须在这里拦截。
+        if self.completion_active:
+            if event.key in ("up", "down"):
+                self.post_message(self.CompletionNavigateRequested(-1 if event.key == "up" else 1))
+                event.stop()
+                event.prevent_default()
+                return
+            if event.key == "escape":
+                self.post_message(self.CompletionHideRequested())
+                event.stop()
+                event.prevent_default()
+                return
         if event.key == "enter":
-            self.action_submit()
+            if self.completion_active:
+                self.post_message(self.CompletionSubmitRequested())
+            else:
+                self.action_submit()
             event.stop()
             event.prevent_default()
             return
