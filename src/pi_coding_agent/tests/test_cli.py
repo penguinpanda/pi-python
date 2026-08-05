@@ -56,9 +56,7 @@ async def test_bare_pi_defaults_to_tui(tmp_path, monkeypatch):
 
     monkeypatch.setattr(_cli.sys, "stdin", TtyStdin())
     monkeypatch.setattr(_cli, "_create_runtime", _fake_runtime)
-    monkeypatch.setattr(
-        _cli.SettingsManager, "create", staticmethod(_fake_settings_manager)
-    )
+    monkeypatch.setattr(_cli.SettingsManager, "create", staticmethod(_fake_settings_manager))
 
     async def fake_resolve(*_args, **_kwargs):
         return (
@@ -74,9 +72,7 @@ async def test_bare_pi_defaults_to_tui(tmp_path, monkeypatch):
 
     monkeypatch.setattr(_cli, "_resolve_initial_model", fake_resolve)
     monkeypatch.setattr(_cli, "run_tui_mode", fake_tui)
-    monkeypatch.setattr(
-        _cli.SessionManager, "create", staticmethod(fake_session_create)
-    )
+    monkeypatch.setattr(_cli.SessionManager, "create", staticmethod(fake_session_create))
 
     monkeypatch.chdir(tmp_path)
     code = await _cli._async_main([])

@@ -63,10 +63,12 @@ def main(args: list[str] | None = None) -> int:
     # 下游提前关闭管道（如 `--json | grep -m1`）时按 Unix 惯例静默终止，
     # 避免 Python 默认把 EPIPE 转成 BrokenPipeError traceback。
     # Windows 无 SIGPIPE，由 _print_mode 的 BrokenPipeError 兜底。
-    try:
-        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
-    except (AttributeError, OSError, ValueError):
-        pass
+    sigpipe = getattr(signal, "SIGPIPE", None)
+    if sigpipe is not None:
+        try:
+            signal.signal(sigpipe, signal.SIG_DFL)
+        except (OSError, ValueError):
+            pass
     return asyncio.run(_async_main(args))
 
 
@@ -84,12 +86,7 @@ async def _async_main(args: list[str] | None = None) -> int:
     # --help / --version 已在 argparse 中处理
 
     # 对齐 TS：无参数且 stdin 为 TTY 时默认进入 TUI，而不是报缺消息。
-    if (
-        parsed.mode is None
-        and not parsed.message
-        and not parsed.json
-        and sys.stdin.isatty()
-    ):
+    if parsed.mode is None and not parsed.message and not parsed.json and sys.stdin.isatty():
         parsed.mode = "tui"
 
     # 首次启动向导。

@@ -650,13 +650,15 @@ class PythonExecutionEnv:
                 except BaseException:
                     pass
             else:
-                try:
-                    os.killpg(process.pid, 9)
-                except BaseException:
+                killpg = getattr(os, "killpg", None)
+                if killpg is not None:
                     try:
-                        process.kill()
+                        killpg(process.pid, 9)
                     except BaseException:
-                        pass
+                        try:
+                            process.kill()
+                        except BaseException:
+                            pass
 
         abort_waiter: asyncio.Task | None = None
         abort_signal = options.abort_signal
