@@ -7,7 +7,8 @@
 ## 安全边界
 
 - 容器内是 Linux，`find /`、`rm -rf` 等命令只会作用于容器自身的文件系统，碰不到宿主机。
-- 只挂载一次性目录 `work/temp` 作为工作区；不要挂载 `~/.ssh`、`~/.pi`、真实代码库。
+- 只挂载一次性目录 `work/temp/workspace` 作为工作区（容器 `/workspace`）；
+  容器专属配置在 `work/temp/.pi`（挂载到 `/home/pi/.pi`），不要挂载 `~/.ssh`、`~/.pi`、真实代码库。
 - API key 只通过环境变量注入（`docker/.env` 或宿主环境变量），不写入镜像。
 - 会话与认证数据写入命名卷 `pi-home`（隔离在 Docker 卷内，不在宿主机文件系统），
   保留到 `docker compose down -v` 才清空。
@@ -117,7 +118,7 @@ Linux/macOS：
 
 ## 使用纪律（每次实验）
 
-- 只往 `work/temp` 放一次性测试文件；结束后清空或直接删除目录重建。
+- 只往 `work/temp/workspace` 放一次性测试文件；结束后清空或直接删除目录重建。
 - 用完清理：`docker compose -f docker/compose.yaml down`。
 - 定期重建镜像并更新依赖：`docker compose -f docker/compose.yaml build --pull --no-cache`。
 - 会话持久化已默认启用（命名卷 `pi-home`），跨运行验证 C-28..C-33 直接可用；

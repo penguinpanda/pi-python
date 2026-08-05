@@ -46,6 +46,43 @@ async def test_unknown_provider_returns_friendly_error(monkeypatch, capsys):
     assert "Traceback" not in captured.err
 
 
+async def test_bare_pi_defaults_to_tui(tmp_path, monkeypatch):
+    """回归：裸 `pi`（TTY、无消息）默认进入 TUI，而非报缺消息。"""
+    import io
+
+    class TtyStdin(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.setattr(_cli.sys, "stdin", TtyStdin())
+    monkeypatch.setattr(_cli, "_create_runtime", _fake_runtime)
+    monkeypatch.setattr(
+        _cli.SettingsManager, "create", staticmethod(_fake_settings_manager)
+    )
+
+    async def fake_resolve(*_args, **_kwargs):
+        return (
+            Model(id="faux-1", provider="faux", api="openai-completions"),
+            [],
+        )
+
+    async def fake_tui(*_args, **_kwargs):
+        return 0
+
+    def fake_session_create(cwd, **kwargs):
+        return SessionManager.in_memory(cwd=cwd)
+
+    monkeypatch.setattr(_cli, "_resolve_initial_model", fake_resolve)
+    monkeypatch.setattr(_cli, "run_tui_mode", fake_tui)
+    monkeypatch.setattr(
+        _cli.SessionManager, "create", staticmethod(fake_session_create)
+    )
+
+    monkeypatch.chdir(tmp_path)
+    code = await _cli._async_main([])
+    assert code == 0
+
+
 async def test_cli_loads_skills_and_templates_on_startup(tmp_path, monkeypatch):
     """回归：CLI 启动时应调用 SkillLoader/PromptTemplateLoader 的 load()，
     否则 /skill: 与 /模板名 永远找不到资源。"""

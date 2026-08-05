@@ -13,11 +13,17 @@ FROM ghcr.io/astral-sh/uv:0.12.0 AS uv-image
 
 FROM python:3.12-slim
 
+# 构建期 PyPI 镜像源（国内网络可换 TUNA；其它环境可用官方源覆盖：
+# docker compose build --build-arg PYPI_INDEX_URL=https://pypi.org/simple）
+ARG PYPI_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
     PATH="/app/.venv/bin:$PATH" \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
+    UV_DEFAULT_INDEX=${PYPI_INDEX_URL} \
+    UV_HTTP_TIMEOUT=60 \
     PIP_NO_CACHE_DIR=1
 
 # 非 root 用户 pi
@@ -35,6 +41,11 @@ COPY src ./src
 # 只安装运行时依赖，不安装项目本身（PYTHONPATH 指向 src）
 RUN uv sync --no-dev --no-install-project \
     && rm -rf /root/.cache /tmp/*
+
+# 容器内提供与 TS 一致的 `pi` 命令（项目未安装时也生效）。
+RUN printf '#!/bin/sh\nexec /app/.venv/bin/python -m pi_coding_agent "$@"\n' \
+        > /usr/local/bin/pi \
+    && chmod +x /usr/local/bin/pi
 
 USER pi
 WORKDIR /workspace

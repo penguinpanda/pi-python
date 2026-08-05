@@ -20,9 +20,12 @@ services:
       - /tmp:size=256m,mode=1777
     volumes:
       # 一次性工作目录（挂载即双向共享，勿放真实数据）
-      - ../work/temp:/workspace
+      - ../work/temp/workspace:/workspace
       # HOME 持久化到命名卷：会话/认证跨容器保留，down -v 才清空
       - pi-home:/home/pi
+      # 容器专属 .pi（全局 AGENTS.md / settings / auth / trust 等），
+      # 放在仓库 work/temp/.pi，不与本机 ~/.pi 共享。
+      - ../work/temp/.pi:/home/pi/.pi
     environment:
       # 从宿主环境变量或 docker/.env 读取；留空表示未配置
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
@@ -56,8 +59,9 @@ services:
     tmpfs:
       - /tmp:size=256m,mode=1777
     volumes:
-      - ../work/temp:/workspace
+      - ../work/temp/workspace:/workspace
       - pi-home:/home/pi
+      - ../work/temp/.pi:/home/pi/.pi
     environment:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}

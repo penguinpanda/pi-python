@@ -49,9 +49,13 @@ class TestResolveConfigValue:
         assert resolve_config_value("$!literal") == "!literal"
 
     def test_command_value(self):
+        import os
+
         clear_config_value_cache()
         assert is_command_config_value("!echo hello")
-        assert resolve_config_value("!echo hello") == "hello"
+        # echo 是 cmd 内建命令：Windows 上需经 cmd /c，其它平台可直接执行。
+        command = "!cmd /c echo hello" if os.name == "nt" else "!echo hello"
+        assert resolve_config_value(command) == "hello"
 
     def test_env_var_names(self):
         assert get_config_value_env_var_names("a-$FOO-b-${BAR}") == ["FOO", "BAR"]

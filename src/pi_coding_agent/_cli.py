@@ -83,6 +83,15 @@ async def _async_main(args: list[str] | None = None) -> int:
 
     # --help / --version 已在 argparse 中处理
 
+    # 对齐 TS：无参数且 stdin 为 TTY 时默认进入 TUI，而不是报缺消息。
+    if (
+        parsed.mode is None
+        and not parsed.message
+        and not parsed.json
+        and sys.stdin.isatty()
+    ):
+        parsed.mode = "tui"
+
     # 首次启动向导。
     if parsed.setup:
         return await run_first_time_setup(_auth_store())
