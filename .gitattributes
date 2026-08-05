@@ -1,0 +1,5 @@
+# 统一文本行尾：Windows 检出保持 CRLF，WSL/Linux 检出为 LF。
+* text=auto
+
+# Shell 脚本必须 LF（WSL 下直接执行需要）。
+*.sh text eol=lf
