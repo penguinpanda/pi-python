@@ -78,7 +78,7 @@ await run_print_mode(session, "read README.md")
 - **Print**：`run_print_mode(session, prompt)`，无 UI，扩展 UI 走 `NoopUIContext`
 - **TUI**：`run_tui_mode(...)`，Textual 应用 `PiTuiApp`
 - **RPC**：`run_rpc_mode` + `RpcMessageHandler` / `RpcClient`（stdin/stdout JSONL 协议，`pi_protocol`）
-- **CLI**：`python -m pi_coding_agent`（`main`），支持 `--model` / `--provider` / `--models` / `--list-models` / `--system-prompt` / `--append-system-prompt` / `--session` / `--no-session` / `--tools` / `--exclude-tools` / `--no-tools`
+- **CLI**：`python -m pi_coding_agent`（`main`），支持 `--model` / `--provider` / `--models` / `--list-models` / `--system-prompt` / `--append-system-prompt` / `--session` / `--no-session` / `--tools` / `--exclude-tools` / `--no-tools` / `--extension`（`-e`）/ `--skill` / `--prompt-template`（均可重复）/ `--no-skills` / `--no-prompt-templates` / `--preset`
 
 ## 完整示例
 
@@ -87,8 +87,12 @@ import asyncio
 from pi_ai import create_default_models
 from pi_agent import Agent, set_default_stream_fn
 from pi_coding_agent import (
-    AgentSession, SessionManager, create_coding_tools, run_print_mode,
+    AgentSession,
+    SessionManager,
+    create_coding_tools,
+    run_print_mode,
 )
+
 
 async def main() -> None:
     models = create_default_models()
@@ -99,12 +103,11 @@ async def main() -> None:
     session = AgentSession(agent, sm, cwd=".", model=model)
     await run_print_mode(session, "List the files and summarize the project")
 
+
 asyncio.run(main())
 ```
 
 ## 未移植（TS SDK 独有）
 
 - `createAgentSessionRuntime` / `AgentSessionRuntime` 的完整选项集
-- `before_provider_headers` / `after_provider_response` 等 provider 钩子
-- `--preset`、`--skill`、`--prompt-template`、`--extension` 等 CLI 标志
 - 包安装（`pi install` 等）与 OAuth 之外的完整 CLI 子命令

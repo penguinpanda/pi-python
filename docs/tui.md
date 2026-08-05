@@ -53,17 +53,17 @@ async def handler(event, ctx):
 
 Print 模式降级为 `NoopUIContext`；RPC 模式有 `RpcUiContext`。自定义 Textual 组件/渲染器注册（TS 的 `registerMessageRenderer` / `registerEntryRenderer` / overlay）只有底层注册表，UI 接线未完整移植。
 
+**已接线的渲染管线**：`register_message_renderer`（custom 角色消息）、`register_markdown_transformer`（user/assistant/thinking 文本）、`register_entry_renderer`（/tree 的 custom 条目）、`ctx.ui.set_footer` / `set_header`（替换底部栏 / 顶部栏文本）、`ctx.ui.set_editor_component`（用 `PiEditor` 子类替换编辑器）、`ctx.ui.set_widget`（编辑器上方 / 下方多行组件，`aboveEditor` / `belowEditor`）、`ctx.ui.set_overlay`（浮层：锚点 + margin + offset 过渡动画 + `position: absolute` + 边框/标题，按挂载顺序堆叠）。渲染器返回字符串，失败/缺失时回退内置渲染。
+
 ## 剪贴板图片
 
 `src/pi_tui/clipboard_image.py`（`ClipboardImage`）：Windows `alt+v` / 其他平台 `ctrl+v` 从剪贴板粘贴图片（Windows 走 PowerShell/clipboard API，macOS 走 `osascript`，其他平台走 `xclip`）。
 
 ## 未移植（TS TUI 独有）
 
-- Overlay 合成系统（anchors / margins / stacking / 动画）
-- 自定义编辑器组件替换（`setEditorComponent`）、vim 模式编辑器
+- 完整 Overlay 合成系统（复杂边框/边框样式等；`setOverlay` 锚点 / margin / 动画 / 绝对定位 / 分层堆叠与 `setWidget` above/below 已实现）
 - 全屏 alt-screen 滚动、OSC 8 链接点击、鼠标拖选
 - 树过滤模式（default / no-tools / user-only / labeled-only / all）、label 时间戳
-- `registerMessageRenderer` / `registerEntryRenderer` 的完整渲染管线
 - 自动补全 provider 栈（如 GitHub issue autocomplete）
 
 ## 测试

@@ -7,14 +7,17 @@ pi-python 支持两层自定义 provider：底层 `pi_ai` 注册 API 实现，�
 应用层注册（扩展内）：
 
 ```python
-pi.register_provider("my-provider", {
-    "name": "My Provider",
-    "api": "openai-completions",       # 复用内置流实现
-    "base_url": "https://api.example.com/v1",
-    "api_key": "${MY_PROVIDER_API_KEY}",   # 环境变量引用
-    "headers": {"X-Custom": "1"},
-    "models": [{"id": "my-model", "name": "My Model", "reasoning": True}],
-})
+pi.register_provider(
+    "my-provider",
+    {
+        "name": "My Provider",
+        "api": "openai-completions",  # 复用内置流实现
+        "base_url": "https://api.example.com/v1",
+        "api_key": "${MY_PROVIDER_API_KEY}",  # 环境变量引用
+        "headers": {"X-Custom": "1"},
+        "models": [{"id": "my-model", "name": "My Model", "reasoning": True}],
+    },
+)
 ```
 
 `pi.unregister_provider("my-provider")` 注销。
