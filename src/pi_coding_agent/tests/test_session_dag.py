@@ -132,6 +132,10 @@ class TestExtendedEntries:
         assert entries[-2]["type"] == "session_info"
         assert entries[-1]["type"] == "custom"
         assert entries[-1]["data"] == {"key": "value"}
+        tree = mgr.get_tree()
+        labeled = next(node for node in tree if node.id == e1)
+        assert labeled.label == "important"
+        assert labeled.label_timestamp is not None
 
     def test_persisted_leaf_restored(self, tmp_path):
         mgr = SessionManager.create(cwd="/tmp", sessions_dir=str(tmp_path))

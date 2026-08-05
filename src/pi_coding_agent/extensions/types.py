@@ -73,6 +73,8 @@ class UIContext(Protocol):
 
     def set_overlay(self, key: str, lines: list[str], options: dict | None = None) -> None: ...
 
+    def set_overlay_component(self, key: str, component, options: dict | None = None) -> None: ...
+
     def set_hidden_thinking_label(self, label: str | None = None) -> None: ...
 
     def set_working_message(self, text: str | None = None) -> None: ...
@@ -117,6 +119,9 @@ class NoopUIContext:
         pass
 
     def set_overlay(self, key, lines, options=None):
+        pass
+
+    def set_overlay_component(self, key, component, options=None):
         pass
 
     def set_hidden_thinking_label(self, label=None):

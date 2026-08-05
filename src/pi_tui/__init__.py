@@ -5,17 +5,39 @@
 pi_coding_agent.modes.interactive。
 """
 
+from .autocomplete import AutocompleteProvider, CombinedAutocompleteProvider
 from .clipboard_image import ClipboardImage
 from .components import (
     MessageEntry,
     PiChatContainer,
     PiEditor,
+    PiEditorVim,
     PiFooter,
     PiHeader,
     PiStatusBar,
     message_to_entries,
 )
 from .keybindings import DEFAULT_APP_KEYBINDINGS, Keybinding, KeybindingsManager
+from .lists import SelectItem, SelectList, SettingItem, SettingsList
+from .overlay import (
+    Margin,
+    OverlayBehavior,
+    OverlayEntry,
+    OverlayFocusController,
+    OverlayHandle,
+    OverlayHooks,
+    OverlayLayer,
+    OverlayLayout,
+    OverlayManager,
+    OverlayOptions,
+    OverlayRect,
+    OverlayStyle,
+    OverlayWidget,
+    RestoreMode,
+    FocusRestoreState,
+    parse_overlay_options,
+    resolve_layout,
+)
 from .selectors import ModelSelector, SessionPicker
 from .theme import (
     BUILTIN_THEMES,
@@ -30,9 +52,12 @@ from .theme import (
 
 __all__ = [
     "ClipboardImage",
+    "AutocompleteProvider",
+    "CombinedAutocompleteProvider",
     "MessageEntry",
     "PiChatContainer",
     "PiEditor",
+    "PiEditorVim",
     "PiFooter",
     "PiHeader",
     "PiStatusBar",
@@ -40,6 +65,27 @@ __all__ = [
     "DEFAULT_APP_KEYBINDINGS",
     "Keybinding",
     "KeybindingsManager",
+    "SelectItem",
+    "SelectList",
+    "SettingItem",
+    "SettingsList",
+    "Margin",
+    "OverlayBehavior",
+    "OverlayEntry",
+    "OverlayFocusController",
+    "OverlayHandle",
+    "OverlayHooks",
+    "OverlayLayer",
+    "OverlayLayout",
+    "OverlayManager",
+    "OverlayOptions",
+    "OverlayRect",
+    "OverlayStyle",
+    "OverlayWidget",
+    "RestoreMode",
+    "FocusRestoreState",
+    "parse_overlay_options",
+    "resolve_layout",
     "ModelSelector",
     "SessionPicker",
     "BUILTIN_THEMES",

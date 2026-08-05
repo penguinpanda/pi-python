@@ -50,6 +50,7 @@ class SessionTreeNode:
     children: list["SessionTreeNode"] = field(default_factory=list)
     entry: SessionEntry | None = None
     label: str | None = None
+    label_timestamp: str | None = None
 
 
 @dataclass(slots=True)
@@ -407,6 +408,7 @@ class SessionManager:
                 node = nodes.get(cast(str, target))
                 if node is not None:
                     node.label = cast(str | None, entry.get("label"))
+                    node.label_timestamp = cast(str | None, entry.get("timestamp"))
         roots: list[SessionTreeNode] = []
         for entry in self._entries:
             if entry.get("type") == "leaf":

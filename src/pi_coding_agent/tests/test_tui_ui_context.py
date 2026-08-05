@@ -53,6 +53,9 @@ class _StubApp:
     def _set_overlay(self, key, lines, options=None) -> None:
         self._overlay_calls.append((key, list(lines), dict(options or {})))
 
+    def _set_overlay_component(self, key, component, options=None) -> None:
+        self._overlay_calls.append((key, component, dict(options or {})))
+
     def _set_hidden_thinking_label(self, label=None) -> None:
         self._thinking_label = label
 
@@ -83,6 +86,7 @@ def test_set_status_editor_title():
     ctx.set_editor_component(editor_widget)
     ctx.set_widget("w1", ["line1", "line2"], {"placement": "belowEditor"})
     ctx.set_overlay("ov1", ["overlay"], {"anchor": "center", "margin": 2})
+    ctx.set_overlay_component("ov2", "panel", {"anchor": "top-left"})
     ctx.set_hidden_thinking_label("Pondering...")
     ctx.set_working_message("Working... (custom)")
     ctx.set_theme("light")
@@ -93,7 +97,10 @@ def test_set_status_editor_title():
     assert app._header.text == "custom header"
     assert app._replaced_editor is editor_widget
     assert app._widget_calls == [("w1", ["line1", "line2"], {"placement": "belowEditor"})]
-    assert app._overlay_calls == [("ov1", ["overlay"], {"anchor": "center", "margin": 2})]
+    assert app._overlay_calls == [
+        ("ov1", ["overlay"], {"anchor": "center", "margin": 2}),
+        ("ov2", "panel", {"anchor": "top-left"}),
+    ]
     assert app._thinking_label == "Pondering..."
     assert app._working_message == "Working... (custom)"
     assert app._theme_call == "light"
@@ -132,10 +139,12 @@ def test_rpc_ui_context_set_footer_header():
         ["x"],
         {"anchor": "center", "margin": 2, "animate": True, "duration": 0.3, "border": "round"},
     )
+    ctx.set_overlay_component("ov2", object(), {"anchor": "top-left"})
     methods = [entry["method"] for entry in emitted]
-    assert methods == ["setFooter", "setHeader", "setOverlay"]
+    assert methods == ["setFooter", "setHeader", "setOverlay", "setOverlayComponent"]
     assert emitted[0]["text"] == "footer"
     assert emitted[1]["text"] == "header"
     assert emitted[2]["animate"] is True
     assert emitted[2]["duration"] == 0.3
     assert emitted[2]["border"] == "round"
+    assert emitted[3]["componentType"] == "object"

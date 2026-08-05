@@ -132,6 +132,10 @@ class TuiUIContext:
         """显示浮层（锚点 + margin；对齐 TS overlay 的最小子集）。"""
         self._app._set_overlay(key, list(lines), options or {})
 
+    def set_overlay_component(self, key: str, component, options: dict | None = None) -> None:
+        """用任意 Textual 组件作为 overlay（组件树 API）。"""
+        self._app._set_overlay_component(key, component, options or {})
+
     def set_hidden_thinking_label(self, label: str | None = None) -> None:
         """设置折叠 thinking 块的标签（None 恢复默认）。"""
         self._app._set_hidden_thinking_label(label)

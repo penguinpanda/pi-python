@@ -249,6 +249,21 @@ class RpcUiContext:
             }
         )
 
+    def set_overlay_component(self, key: str, component, options: dict | None = None) -> None:
+        """组件 overlay 无法跨 RPC 传输，只发送类型与布局意图。"""
+        options = options or {}
+        self._emit(
+            {
+                "type": "extension_ui_request",
+                "id": self._new_id(),
+                "method": "setOverlayComponent",
+                "key": key,
+                "componentType": type(component).__name__,
+                "anchor": options.get("anchor", "top-left"),
+                "margin": options.get("margin", 1),
+            }
+        )
+
     def set_hidden_thinking_label(self, label: str | None = None) -> None:
         self._emit(
             {

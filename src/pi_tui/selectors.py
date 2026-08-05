@@ -2,15 +2,38 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.css.query import NoMatches
-from textual.screen import ModalScreen
 from textual.widgets import Input, Label, ListItem, ListView
+from textual.widget import Widget
+from datetime import datetime
+
+from .lists import SelectList
+
+
+def format_label_timestamp(iso_value: str | None) -> str:
+    """ISO 时间戳 → 本地 HH:MM:SS（解析失败返回原文）。"""
+    if not iso_value:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(iso_value.replace("Z", "+00:00"))
+        return parsed.astimezone().strftime("%H:%M:%S")
+    except ValueError:
+        return iso_value
+
+
+class OverlayDialog(Widget):
+    """overlay 化对话框基类：dismiss 通过 PiTuiApp 桥接关闭并回调。"""
+
+    def dismiss(self, value: Any = None) -> None:
+        close = getattr(self.app, "_close_overlay_dialog", None)
+        if close is not None:
+            close(self, value)
 
 
 def _model_label(model) -> str:
@@ -40,7 +63,7 @@ class _SearchInput(Input):
         await super()._on_key(event)
 
 
-class ModelSelector(ModalScreen):
+class ModelSelector(OverlayDialog):
     """模型选择器：分组显示 + 实时搜索 + 键盘导航（Ctrl+L）。"""
 
     BINDINGS = [
@@ -126,7 +149,7 @@ class ModelSelector(ModalScreen):
         self.dismiss(None)
 
 
-class SessionPicker(ModalScreen):
+class SessionPicker(OverlayDialog):
     """会话恢复选择器（--resume）：按修改时间排序。"""
 
     BINDINGS = [
@@ -181,41 +204,161 @@ def _flatten_tree(
     nodes: list[Any],
     leaf_id: str | None,
     depth: int = 0,
-) -> list[tuple[int, str, str, str]]:
-    """把会话树展平为 [(depth, connector, label, node_id)]，供 TreeSelector 渲染。"""
-    rows: list[tuple[int, str, str, str]] = []
+    show_label_timestamps: bool = False,
+) -> list[tuple[int, str, str, str, Any]]:
+    """把会话树展平为 [(depth, connector, label, node_id, node)]，供 TreeSelector 渲染。"""
+    rows: list[tuple[int, str, str, str, Any]] = []
     for index, node in enumerate(nodes):
         is_last = index == len(nodes) - 1
         connector = "" if depth == 0 else ("└─" if is_last else "├─")
         marker = ">" if node.id == leaf_id else " "
         entry_type = node.entry.get("type", "?") if node.entry is not None else "?"
-        label = f" [{node.label}]" if node.label else ""
-        rows.append((depth, connector, f"{marker} {node.id[:8]} {entry_type}{label}", node.id))
-        rows.extend(_flatten_tree(node.children, leaf_id, depth + 1))
+        label = ""
+        if node.label:
+            label = f" [{node.label}]"
+            if show_label_timestamps and node.label_timestamp:
+                label += f" @{format_label_timestamp(node.label_timestamp)}"
+        rows.append(
+            (depth, connector, f"{marker} {node.id[:8]} {entry_type}{label}", node.id, node)
+        )
+        rows.extend(_flatten_tree(node.children, leaf_id, depth + 1, show_label_timestamps))
     return rows
 
 
-class TreeSelector(ModalScreen):
+TREE_FILTER_MODES = ("default", "no-tools", "user-only", "labeled-only", "all")
+
+_SETTINGS_ENTRY_TYPES = {
+    "label",
+    "custom",
+    "custom_message",
+    "model_change",
+    "thinking_level_change",
+    "session_info",
+}
+
+
+def _entry_role(node: Any) -> str:
+    entry = node.entry or {}
+    if entry.get("type") == "message":
+        return str(entry.get("role", ""))
+    return str(entry.get("type", ""))
+
+
+def node_passes_tree_filter(node: Any, mode: str) -> bool:
+    """树过滤判定（对齐 TS tree-selector：default/no-tools/user-only/labeled-only/all）。"""
+    entry_type = (node.entry or {}).get("type", "")
+    role = _entry_role(node)
+    if mode == "user-only":
+        return role == "user"
+    if mode == "no-tools":
+        return not (entry_type in _SETTINGS_ENTRY_TYPES or role == "toolResult")
+    if mode == "labeled-only":
+        return node.label is not None
+    if mode == "all":
+        return True
+    # default：隐藏设置/记账类条目。
+    return entry_type not in _SETTINGS_ENTRY_TYPES
+
+
+class TreeSelector(OverlayDialog):
     """会话树选择器（对齐 TS TreeSelectorComponent）：ASCII 树 + 键盘导航。"""
 
     BINDINGS = [
         Binding("escape", "cancel", "Cancel"),
+        Binding("f", "cycle_filter", "Cycle tree filter"),
+        Binding("t", "toggle_label_timestamps", "Toggle label timestamps"),
     ]
 
-    def __init__(self, tree: list[Any], leaf_id: str | None = None) -> None:
+    def __init__(
+        self,
+        tree: list[Any],
+        leaf_id: str | None = None,
+        filter_mode: str = "default",
+        show_label_timestamps: bool = False,
+    ) -> None:
         super().__init__()
-        self._rows = _flatten_tree(tree, leaf_id)
+        self._filter_mode = filter_mode if filter_mode in TREE_FILTER_MODES else "default"
+        self._show_label_timestamps = show_label_timestamps
+        self._tree = tree
+        self._leaf_id = leaf_id
+        self._rebuild_rows()
+        self._rows: list[tuple[int, str, str, str, Any]] = []
+        self._node_ids: list[str] = []
+        self._apply_filter()
+
+    @property
+    def filter_mode(self) -> str:
+        return self._filter_mode
+
+    @property
+    def show_label_timestamps(self) -> bool:
+        return self._show_label_timestamps
+
+    def _rebuild_rows(self) -> None:
+        self._all_rows = _flatten_tree(
+            self._tree,
+            self._leaf_id,
+            show_label_timestamps=self._show_label_timestamps,
+        )
+
+    def _title(self) -> str:
+        suffix = {
+            "no-tools": " [no-tools]",
+            "user-only": " [user]",
+            "labeled-only": " [labeled]",
+            "all": " [all]",
+        }.get(self._filter_mode, "")
+        if self._show_label_timestamps:
+            suffix += " [+label time]"
+        # 转义方括号，避免被 Textual 当成 Rich markup 样式标签吞掉。
+        suffix = suffix.replace("[", r"\[").replace("]", r"\]")
+        return f"Session tree{suffix} (Enter: navigate, Esc: close, f: filter, t: label time)"
+
+    def _apply_filter(self) -> None:
+        self._rows = [
+            row for row in self._all_rows if node_passes_tree_filter(row[4], self._filter_mode)
+        ]
         # 节点 id 可能以数字开头（Textual id 非法），选择逻辑用索引反查。
         self._node_ids = [row[3] for row in self._rows]
 
     def compose(self) -> ComposeResult:
         with Vertical():
-            yield Label("Session tree (Enter: navigate, Esc: close)", classes="selector-title")
+            yield Label(self._title(), classes="selector-title")
             yield ListView(id="tree-list")
 
     def on_mount(self) -> None:
         list_view = self.query_one("#tree-list", ListView)
-        for depth, connector, label, _node_id in self._rows:
+        for depth, connector, label, _node_id, _node in self._rows:
+            indent = "  " * depth
+            prefix = f"{indent}{connector} " if connector else indent
+            list_view.append(ListItem(Label(f"{prefix}{label}")))
+        if len(list_view.children) > 0:
+            list_view.index = 0
+
+    async def action_cycle_filter(self) -> None:
+        """f：循环 default → no-tools → user-only → labeled-only → all。"""
+        modes = TREE_FILTER_MODES
+        self._filter_mode = modes[(modes.index(self._filter_mode) + 1) % len(modes)]
+        self._apply_filter()
+        self.query_one(Label).update(self._title())
+        list_view = self.query_one("#tree-list", ListView)
+        await list_view.clear()
+        for depth, connector, label, _node_id, _node in self._rows:
+            indent = "  " * depth
+            prefix = f"{indent}{connector} " if connector else indent
+            list_view.append(ListItem(Label(f"{prefix}{label}")))
+        if len(list_view.children) > 0:
+            list_view.index = 0
+
+    async def action_toggle_label_timestamps(self) -> None:
+        """t：切换 label 时间戳显示。"""
+        self._show_label_timestamps = not self._show_label_timestamps
+        self._rebuild_rows()
+        self._apply_filter()
+        self.query_one(Label).update(self._title())
+        list_view = self.query_one("#tree-list", ListView)
+        await list_view.clear()
+        for depth, connector, label, _node_id, _node in self._rows:
             indent = "  " * depth
             prefix = f"{indent}{connector} " if connector else indent
             list_view.append(ListItem(Label(f"{prefix}{label}")))
@@ -234,7 +377,7 @@ class TreeSelector(ModalScreen):
         self.dismiss(None)
 
 
-class TextInputDialog(ModalScreen):
+class TextInputDialog(OverlayDialog):
     """通用文本输入弹层（TUI 内 OAuth 登录等需要用户输入的场景）。"""
 
     BINDINGS = [
@@ -266,13 +409,8 @@ class TextInputDialog(ModalScreen):
         self.dismiss(None)
 
 
-class ChoiceSelector(ModalScreen):
+class ChoiceSelector(OverlayDialog):
     """通用选项列表弹层（settings 菜单子项等）。"""
-
-    BINDINGS = [
-        Binding("enter", "select", "Select"),
-        Binding("escape", "cancel", "Cancel"),
-    ]
 
     def __init__(
         self,
@@ -284,41 +422,29 @@ class ChoiceSelector(ModalScreen):
         self._title = title
         self._options = list(options)
         self._current = current
-        self._selected = 0
-        if current is not None and current in self._options:
-            self._selected = self._options.index(current)
 
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Label(self._title, classes="selector-title")
-            yield ListView(id="choice-list")
+            yield SelectList(self._options, current=self._current, list_id="choice-list")
 
-    def on_mount(self) -> None:
-        list_view = self.query_one("#choice-list", ListView)
-        for index, option in enumerate(self._options):
-            marker = ">" if index == self._selected else " "
-            check = " ✓" if option == self._current else ""
-            list_view.append(ListItem(Label(f"{marker} {option}{check}")))
-        if len(list_view.children) > 0:
-            list_view.index = self._selected
-        list_view.focus()
+    def on_select_list_selected(self, event: SelectList.Selected) -> None:
+        self.dismiss(event.item.value)
 
-    def on_list_view_selected(self, event: Any) -> None:
-        self.action_select()
+    def on_select_list_cancelled(self, event: SelectList.Cancelled) -> None:
+        self.dismiss(None)
 
     def action_select(self) -> None:
-        list_view = self.query_one("#choice-list", ListView)
-        index = list_view.index
-        if index is not None and 0 <= index < len(self._options):
-            self.dismiss(self._options[index])
-        else:
-            self.dismiss(None)
+        """兼容旧 API：按当前列表索引选择。"""
+        select = self.query_one(SelectList)
+        item = select.selected_item
+        self.dismiss(item.value if item is not None else None)
 
     def action_cancel(self) -> None:
         self.dismiss(None)
 
 
-class SettingsSelector(ModalScreen):
+class SettingsSelector(OverlayDialog):
     """设置菜单（对齐 TS SettingsSelectorComponent 的 Python 子集）。
 
     items: [{"key", "label", "type": "bool"|"choice"|"string", "choices"?}]
@@ -395,7 +521,7 @@ class SettingsSelector(ModalScreen):
         if item_type == "choice":
             current = self._value(key)
             current_text = str(current) if current is not None else None
-            self.app.push_screen(
+            cast(Any, self.app).push_screen(
                 ChoiceSelector(
                     item.get("label", key),
                     list(item.get("choices", [])),
@@ -405,7 +531,7 @@ class SettingsSelector(ModalScreen):
             )
             return
         current = self._value(key)
-        self.app.push_screen(
+        cast(Any, self.app).push_screen(
             TextInputDialog(
                 f"{item.get('label', key)}:",
                 value=str(current) if current is not None else "",
@@ -424,13 +550,8 @@ class SettingsSelector(ModalScreen):
         self.dismiss(None)
 
 
-class ThinkingSelector(ModalScreen):
+class ThinkingSelector(OverlayDialog):
     """思考级别选择器（对齐 TS thinking-selector）。"""
-
-    BINDINGS = [
-        Binding("enter", "select", "Select"),
-        Binding("escape", "cancel", "Cancel"),
-    ]
 
     def __init__(
         self,
@@ -440,41 +561,29 @@ class ThinkingSelector(ModalScreen):
         super().__init__()
         self._levels = list(levels)
         self._current = current
-        self._selected = 0
-        if current is not None and current in self._levels:
-            self._selected = self._levels.index(current)
 
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Label("Thinking level", classes="selector-title")
-            yield ListView(id="thinking-list")
+            yield SelectList(self._levels, current=self._current, list_id="thinking-list")
 
-    def on_mount(self) -> None:
-        list_view = self.query_one("#thinking-list", ListView)
-        for index, level in enumerate(self._levels):
-            marker = ">" if index == self._selected else " "
-            check = " ✓" if level == self._current else ""
-            list_view.append(ListItem(Label(f"{marker} {level}{check}")))
-        if len(list_view.children) > 0:
-            list_view.index = self._selected
-        list_view.focus()
+    def on_select_list_selected(self, event: SelectList.Selected) -> None:
+        self.dismiss(event.item.value)
 
-    def on_list_view_selected(self, event: Any) -> None:
-        self.action_select()
+    def on_select_list_cancelled(self, event: SelectList.Cancelled) -> None:
+        self.dismiss(None)
 
     def action_select(self) -> None:
-        list_view = self.query_one("#thinking-list", ListView)
-        index = list_view.index
-        if index is not None and 0 <= index < len(self._levels):
-            self.dismiss(self._levels[index])
-        else:
-            self.dismiss(None)
+        """兼容旧 API：按当前列表索引选择。"""
+        select = self.query_one(SelectList)
+        item = select.selected_item
+        self.dismiss(item.value if item is not None else None)
 
     def action_cancel(self) -> None:
         self.dismiss(None)
 
 
-class OAuthSelector(ModalScreen):
+class OAuthSelector(OverlayDialog):
     """OAuth provider 选择器（登录/登出；对齐 TS oauth-selector）。"""
 
     BINDINGS = [
@@ -524,7 +633,7 @@ class OAuthSelector(ModalScreen):
         self.dismiss(None)
 
 
-class ScopedModelsSelector(ModalScreen):
+class ScopedModelsSelector(OverlayDialog):
     """模型范围选择器：Enter 切换选中，Esc 保存（对齐 TS scoped-models-selector）。"""
 
     BINDINGS = [
@@ -591,7 +700,7 @@ class ScopedModelsSelector(ModalScreen):
         self.dismiss(self._selected)
 
 
-class ExtensionSelector(ModalScreen):
+class ExtensionSelector(OverlayDialog):
     """扩展列表选择器（对齐 TS extension-selector）。"""
 
     BINDINGS = [
@@ -633,7 +742,7 @@ class ExtensionSelector(ModalScreen):
         self.dismiss(None)
 
 
-class TrustSelector(ModalScreen):
+class TrustSelector(OverlayDialog):
     """项目信任选择器（对齐 TS TrustSelectorComponent）。"""
 
     BINDINGS = [

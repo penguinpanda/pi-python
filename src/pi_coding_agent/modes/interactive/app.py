@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, cast
 
-from textual.app import App, ComposeResult
+from textual.app import App, AwaitComplete, ComposeResult
 from textual.binding import Binding, BindingsMap
 from textual.geometry import Offset
 from textual.widgets import Static
@@ -21,6 +21,7 @@ from ...model_runtime import ModelRuntime
 from ...extensions import ExtensionRunner
 from ...extensions.registry import ExtensionRegistry
 from pi_tui.clipboard_image import ClipboardImage
+from pi_tui.autocomplete import CombinedAutocompleteProvider
 from pi_tui.components import (
     BashExecutionEntry,
     MessageEntry,
@@ -31,6 +32,14 @@ from pi_tui.components import (
     PiStatusBar,
 )
 from pi_tui.keybindings import KeybindingsManager
+from pi_tui.overlay import (
+    OverlayHandle,
+    OverlayHooks,
+    OverlayLayer,
+    OverlayManager,
+    OverlayRect,
+    OverlayWidget,
+)
 from pi_tui.selectors import (
     ChoiceSelector,
     ExtensionSelector,
@@ -157,12 +166,12 @@ MessageEntry {
     margin: 0 2 1 2;
 }
 
-ModelSelector, SessionPicker, TreeSelector, TextInputDialog {
+OverlayDialog {
     background: __PI_BGPANEL__;
     color: __PI_TEXT__;
     border: round __PI_BORDERACTIVE__;
-    height: 60%;
-    width: 80%;
+    padding: 0 1;
+    height: auto;
 }
 """
 
@@ -233,9 +242,32 @@ class PiTuiApp(App):
         self._custom_editor: PiEditor | None = None
         self._widget_above: dict[str, str] = {}
         self._widget_below: dict[str, str] = {}
-        self._overlays: dict[str, dict] = {}
+        self._overlay_layer: OverlayLayer | None = None
+        self._overlay_dialog_callbacks: dict[str, Callable[[Any], None] | None] = {}
+        self._overlay_manager = OverlayManager(
+            OverlayHooks(
+                make_widget=lambda key, lines, options: OverlayWidget(key, lines, options),
+                update_widget=self._update_overlay_widget,
+                make_component_widget=lambda key, component, options: OverlayWidget(
+                    key, [], options, component=component
+                ),
+                update_component=self._update_overlay_component_widget,
+                mount=self._mount_overlay,
+                remove=lambda widget: widget.remove(),
+                set_visible=lambda widget, visible: setattr(widget, "display", visible),
+                reposition=self._apply_overlay_rect,
+                focus=lambda widget: widget.focus(),
+                current_focus=lambda: self.screen.focused,
+                content_size=lambda widget: (
+                    widget.content_size.width,
+                    widget.content_size.height,
+                ),
+                bring_to_front=self._bring_overlay_to_front,
+            )
+        )
         self._hidden_thinking_label = "Thinking"
         self._working_message = "Working"
+        self._stream_entry: MessageEntry | None = None
 
         self._slash_registry = SlashCommandRegistry()
         register_builtin_commands(self._slash_registry)
@@ -286,6 +318,8 @@ class PiTuiApp(App):
         yield PiEditor(id="pi-editor")
         yield Static("", id="pi-widgets-below")
         yield PiFooter("", id="pi-footer")
+        self._overlay_layer = OverlayLayer(id="pi-overlay-layer")
+        yield self._overlay_layer
 
     def on_mount(self) -> None:
         self._bind_session()
@@ -351,12 +385,18 @@ class PiTuiApp(App):
     def _on_session_event(self, event: dict) -> None:
         try:
             event_type = event.get("type")
-            if event_type == "message_end":
+            if event_type == "message_start":
+                self._begin_stream()
+            elif event_type == "message_update":
+                self._update_stream(event.get("message"))
+            elif event_type == "message_end":
+                self._finish_stream()
                 message = event.get("message")
                 if message is not None:
                     self._chat.add_message_agent(message)
                 self._update_footer()
             elif event_type == "agent_settled":
+                self._finish_stream()
                 self._set_status("Idle")
                 self._update_footer()
             elif event_type == "compaction_start":
@@ -377,6 +417,47 @@ class PiTuiApp(App):
                 )
         except Exception:
             pass
+
+    def _begin_stream(self) -> None:
+        """消息开始：挂一个流式占位条目。"""
+        if self._stream_entry is not None:
+            return
+        entry = MessageEntry("Assistant", "")
+        self._stream_entry = entry
+        self._chat.mount(entry)
+        self._chat.scroll_end(animate=False)
+
+    def _update_stream(self, message) -> None:
+        """消息增量：把 partial 快照渲染到流式条目。"""
+        if not isinstance(message, dict):
+            return
+        if self._stream_entry is None:
+            self._begin_stream()
+        if self._stream_entry is None:
+            return
+        parts: list[str] = []
+        for block in message.get("content") or []:
+            if not isinstance(block, dict):
+                continue
+            block_type = block.get("type")
+            if block_type == "text" and block.get("text"):
+                parts.append(str(block.get("text", "")))
+            elif block_type == "thinking" and block.get("thinking"):
+                parts.append(str(block.get("thinking", "")))
+            elif block_type == "toolCall":
+                parts.append(f"{block.get('name', 'tool')}({block.get('arguments', {})})")
+        self._stream_entry.set_text("\n\n".join(parts))
+        self._chat.scroll_end(animate=False)
+
+    def _finish_stream(self) -> None:
+        """消息结束：移除流式占位（最终消息由 message_end 正常追加）。"""
+        entry = self._stream_entry
+        self._stream_entry = None
+        if entry is not None and entry.is_mounted:
+            try:
+                entry.remove()
+            except Exception:
+                pass
 
     def _extension_custom_message_renderer(self, message):
         """custom 角色消息 → 扩展注册的消息渲染器（返回文本或 None）。"""
@@ -464,81 +545,154 @@ class PiTuiApp(App):
         except Exception:
             pass
 
-    def _set_overlay(self, key: str, lines: list[str], options: dict | None = None) -> None:
-        """显示浮层（对齐 TS overlay 的最小子集：锚点 + margin + 分层堆叠）。
-
-        浮层作为 Static 追加到屏幕末尾（DOM 顺序靠后 → 渲染在上层），
-        用 offset 视觉移动到锚点；空列表移除。
-        """
-        options = options or {}
-        anchor = str(options.get("anchor", "top-left"))
-        margin = int(options.get("margin", 1))
-        animate = bool(options.get("animate", False))
-        duration = float(options.get("duration", 0.5))
-        border = options.get("border")
-        border_color = options.get("border_color")
-        title = options.get("title")
-        entry = self._overlays.get(key)
-        widget = entry["widget"] if entry is not None else None
+    def _set_overlay(
+        self,
+        key: str,
+        lines: list[str],
+        options: dict | None = None,
+    ) -> OverlayHandle | None:
+        """显示 / 更新浮层（OverlayManager + OverlayLayer）；空列表移除。"""
         if not lines:
-            if widget is not None:
-                widget.remove()
-            self._overlays.pop(key, None)
-            return
-        text = "\n".join(lines)
-        if widget is None:
-            widget = Static(text, id=f"pi-overlay-{key}")
-            widget.styles.layer = "overlay"
-            widget.styles.position = "absolute"
-            self.screen.mount(widget)
-        else:
-            widget.update(text)
-        if border:
-            widget.styles.border = (str(border), str(border_color or "white"))
-            widget.border_title = str(title or "")
-        self._overlays[key] = {
-            "widget": widget,
-            "anchor": anchor,
-            "margin": margin,
-            "animate": animate,
-            "duration": duration,
-        }
-        self.call_after_refresh(lambda: self._apply_overlay_position(key))
+            self._overlay_manager.remove(key)
+            return None
+        handle = self._overlay_manager.show(key, list(lines), options or {})
+        self.call_after_refresh(lambda: self._overlay_manager.reposition(key))
+        return handle
 
-    def _apply_overlay_position(self, key: str) -> None:
-        entry = self._overlays.get(key)
-        if entry is None:
-            return
-        widget = entry["widget"]
-        anchor = entry["anchor"]
-        margin = entry["margin"]
-        size = self.screen.size
-        width = widget.content_size.width
-        height = widget.content_size.height
-        x = margin
-        y = margin
-        if "right" in anchor:
-            x = max(margin, size.width - width - margin)
-        if "bottom" in anchor:
-            y = max(margin, size.height - height - margin)
-        if anchor == "center":
-            x = max(0, (size.width - width) // 2)
-            y = max(0, (size.height - height) // 2)
-        # 流式布局基准：浮层在页面流末尾，用 offset 视觉移动到锚点。
-        # absolute 定位时 offset 即屏幕坐标；回退路径按流式布局基准换算。
-        if widget.styles.position == "absolute":
-            target = (x, y)
-        else:
-            target = (x - widget.region.x, y - widget.region.y)
-        if entry.get("animate"):
+    def _set_overlay_component(
+        self,
+        key: str,
+        component,
+        options: dict | None = None,
+    ) -> OverlayHandle | None:
+        """用任意 Textual 组件作为 overlay（组件树 API）；None 移除。"""
+        if component is None:
+            self._overlay_manager.remove(key)
+            return None
+        handle = self._overlay_manager.show_component(key, component, options or {})
+        self.call_after_refresh(lambda: self._overlay_manager.reposition(key))
+        self.call_after_refresh(lambda: self._overlay_manager.ensure_focus(key))
+        return handle
+
+    def _update_overlay_widget(
+        self,
+        widget: OverlayWidget,
+        lines: list[str],
+        options,
+    ) -> None:
+        widget.update_options(options)
+        widget.update_content(lines)
+
+    def _update_overlay_component_widget(self, widget, component, options) -> None:
+        widget.update_options(options)
+        widget.set_component(component)
+
+    def _mount_overlay(self, widget: OverlayWidget) -> None:
+        if self._overlay_layer is not None:
+            self._overlay_layer.mount(widget)
+
+    def _apply_overlay_rect(
+        self,
+        widget: OverlayWidget,
+        rect: OverlayRect,
+        options,
+    ) -> None:
+        """把解析后的绝对矩形应用到 overlay widget（含动画）。"""
+        target = Offset(rect.col, rect.row)
+        if options.behavior.animate:
             widget.animate(
                 "offset",
-                Offset(x, y),
-                duration=float(entry.get("duration", 0.5)),
+                target,
+                duration=float(options.behavior.duration),
                 easing="out_cubic",
             )
         else:
             widget.styles.offset = target
+
+    def _bring_overlay_to_front(self, widget: OverlayWidget) -> None:
+        """重新挂载到 layer 末尾，确保 focusOrder 置顶（DOM 顺序决定同层堆叠）。"""
+        layer = self._overlay_layer
+        if layer is None:
+            return
+
+        async def _reorder() -> None:
+            try:
+                if widget.is_attached:
+                    await widget.remove()
+                await layer.mount(widget)
+            except Exception:
+                pass
+
+        self._run_task(_reorder())
+
+    def on_descendant_focus(self, event) -> None:
+        """Textual 焦点变化 → overlay 焦点状态机同步。"""
+        self._overlay_manager.on_widget_focused(event.widget)
+
+    def on_resize(self, event) -> None:
+        """终端尺寸变化 → overlay 重排 + 可见性 / 焦点重定向。"""
+        size = event.size
+        self._overlay_manager.on_resize((size.width, size.height))
+
+    def on_key(self, event) -> None:
+        """输入前焦点恢复（blocked/active 状态下回到 overlay）。"""
+        self._overlay_manager.route_input()
+
+    def push_screen(self, screen, callback=None, wait_for_dismiss=False, *, mode=None) -> Any:
+        """轻量选择器改走 OverlayLayer；其余（Model/Tree 等）仍走屏幕栈。"""
+        if isinstance(
+            screen,
+            (
+                ChoiceSelector,
+                TextInputDialog,
+                ThinkingSelector,
+                SettingsSelector,
+                ModelSelector,
+                SessionPicker,
+                TreeSelector,
+                OAuthSelector,
+                ScopedModelsSelector,
+                ExtensionSelector,
+                TrustSelector,
+            ),
+        ):
+            self._open_overlay_selector(screen, callback)
+            return None
+        return super().push_screen(
+            screen,
+            callback=callback,
+            wait_for_dismiss=wait_for_dismiss,
+            mode=mode,
+        )
+
+    def _open_overlay_selector(self, component, callback=None) -> None:
+        """把对话框组件挂进 OverlayLayer（选择器即 overlay）。"""
+        key = f"dialog-{id(component):x}"
+        self._overlay_dialog_callbacks[key] = callback
+        self._overlay_manager.show_component(
+            key,
+            component,
+            {"anchor": "center", "width": "80%", "maxHeight": "60%"},
+        )
+        self.call_after_refresh(lambda: self._overlay_manager.reposition(key))
+        self.call_after_refresh(lambda: self._overlay_manager.ensure_focus(key))
+
+    def _close_overlay_dialog(self, component, value=None) -> None:
+        """对话框 dismiss：移除 overlay 并回调结果。"""
+        entry = self._overlay_manager.entry_for_widget(component)
+        if entry is None:
+            return
+        key = entry.key
+        callback = self._overlay_dialog_callbacks.pop(key, None)
+        self._overlay_manager.remove(key)
+        if callback is not None:
+            callback(value)
+
+    def pop_screen(self) -> AwaitComplete:
+        """弹出 ModalScreen 后立即同步 overlay 焦点（Textual 原生恢复 + route_input）。"""
+        result = super().pop_screen()
+        self.call_after_refresh(self._overlay_manager.route_input)
+        return result
 
     def _notify(self, message: str) -> None:
         self._set_status(message)
@@ -597,7 +751,10 @@ class PiTuiApp(App):
         else:
             self._run_task(self._send_prompt(text))
 
-    def on_pi_editor_autocomplete_requested(self, message: PiEditor.AutocompleteRequested) -> None:
+    async def on_pi_editor_autocomplete_requested(
+        self,
+        message: PiEditor.AutocompleteRequested,
+    ) -> None:
         """Tab：查询扩展自动补全 provider，弹选择器并插入选中值。"""
         runner = self._session.extension_runner
         if runner is None:
@@ -605,14 +762,7 @@ class PiTuiApp(App):
         providers = runner.get_autocomplete()
         if not providers:
             return
-        completions: list[dict] = []
-        for provider in providers:
-            try:
-                result = provider(message.editor.text)
-            except Exception:
-                continue
-            if isinstance(result, list):
-                completions.extend(result)
+        completions = await CombinedAutocompleteProvider(providers).collect(message.editor.text)
         if not completions:
             return
 

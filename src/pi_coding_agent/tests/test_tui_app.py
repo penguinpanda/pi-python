@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from textual.widgets import Static
+from textual.widget import Widget
+from textual.widgets import Label, Static
 from pi_agent import Agent, AgentOptions
 from pi_ai import Model, Models
 from pi_ai.providers.faux import faux_assistant_message, faux_provider
@@ -19,6 +20,7 @@ from pi_coding_agent.model_runtime import ModelRuntime
 from pi_coding_agent.modes.interactive.app import PiTuiApp
 from pi_tui.components import BashExecutionEntry, MessageEntry, PiEditor
 from pi_tui.selectors import (
+    ChoiceSelector,
     ExtensionSelector,
     ModelSelector,
     OAuthSelector,
@@ -28,6 +30,15 @@ from pi_tui.selectors import (
     ThinkingSelector,
     TreeSelector,
 )
+
+
+class _FocusablePanel(Widget):
+    """组件树 overlay 测试用：可聚焦的简单面板。"""
+
+    can_focus = True
+
+    def render(self):
+        return "panel"
 
 
 def _make_runtime(
@@ -220,6 +231,146 @@ async def test_set_overlay_animation(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_set_overlay_focus_and_unfocus_restores_editor(tmp_path):
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        assert app.screen.focused is app._editor
+        handle = app._set_overlay("ov1", ["capture"], {"anchor": "top-left"})
+        await pilot.pause()
+        assert handle is not None
+        assert handle.is_focused()
+        assert app.screen.focused is not app._editor
+        handle.unfocus()
+        await pilot.pause()
+        assert app.screen.focused is app._editor
+        assert handle.is_focused() is False
+
+
+@pytest.mark.asyncio
+async def test_set_overlay_non_capturing_keeps_editor_focus(tmp_path):
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        app._set_overlay(
+            "toast",
+            ["notification"],
+            {"anchor": "top-right", "nonCapturing": True},
+        )
+        await pilot.pause()
+        assert app.screen.focused is app._editor
+        assert app.query("#pi-overlay-toast").nodes
+
+
+@pytest.mark.asyncio
+async def test_set_overlay_handle_hide_show(tmp_path):
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        handle = app._set_overlay("ov1", ["x"], {"anchor": "top-left"})
+        await pilot.pause()
+        widget = app.query_one("#pi-overlay-ov1", Static)
+        assert widget.display is True
+        assert handle is not None
+        handle.set_hidden(True)
+        await pilot.pause()
+        assert handle.is_hidden()
+        assert widget.display is False
+        handle.set_hidden(False)
+        await pilot.pause()
+        assert widget.display is True
+        assert not handle.is_hidden()
+        handle.hide()
+        await pilot.pause()
+        assert app.query("#pi-overlay-ov1").nodes == []
+
+
+@pytest.mark.asyncio
+async def test_set_overlay_component_mounts_and_focuses(tmp_path):
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        panel = _FocusablePanel()
+        handle = app._set_overlay_component("c1", panel, {"anchor": "top-left"})
+        await pilot.pause()
+        await pilot.pause()
+        assert handle is not None
+        assert handle.is_focused()
+        assert app.query("#pi-overlay-c1").nodes
+        assert panel.is_attached
+        assert app.screen.focused is panel
+        handle.unfocus()
+        await pilot.pause()
+        assert app.screen.focused is app._editor
+        assert handle.is_focused() is False
+        app._set_overlay_component("c1", None, {})
+        await pilot.pause()
+        assert app.query("#pi-overlay-c1").nodes == []
+
+
+@pytest.mark.asyncio
+async def test_set_overlay_component_replaces_lines_overlay(tmp_path):
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        app._set_overlay("c1", ["lines"], {"anchor": "top-left"})
+        await pilot.pause()
+        assert app.query("#pi-overlay-c1").nodes
+        panel = _FocusablePanel()
+        app._set_overlay_component("c1", panel, {"anchor": "top-left"})
+        await pilot.pause()
+        await pilot.pause()
+        assert app.query_one("#pi-overlay-c1", Widget) is not None
+        assert panel.is_attached
+        assert app.screen.focused is panel
+
+
+@pytest.mark.asyncio
+async def test_overlay_dialog_focus_restores_overlay(tmp_path):
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        handle = app._set_overlay("ov1", ["x"], {"anchor": "top-left"})
+        await pilot.pause()
+        overlay_widget = app.query_one("#pi-overlay-ov1", Widget)
+        assert app.screen.focused is overlay_widget
+        app.push_screen(ChoiceSelector("Pick", ["a", "b"]))
+        await pilot.pause()
+        await pilot.pause()
+        assert app.query(ChoiceSelector).nodes
+        assert app.screen.focused is not overlay_widget
+        app.query_one(ChoiceSelector).dismiss("a")
+        await pilot.pause()
+        await pilot.pause()
+        assert app.screen.focused is overlay_widget
+        assert handle is not None
+        assert handle.is_focused()
+
+
+@pytest.mark.asyncio
+async def test_overlay_dialog_focus_restores_editor(tmp_path):
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        assert app.screen.focused is app._editor
+        app.push_screen(ChoiceSelector("Pick", ["a", "b"]))
+        await pilot.pause()
+        await pilot.pause()
+        assert app.screen.focused is not app._editor
+        app.query_one(ChoiceSelector).dismiss(None)
+        await pilot.pause()
+        await pilot.pause()
+        assert app.screen.focused is app._editor
+
+
+@pytest.mark.asyncio
 async def test_hidden_thinking_label_in_chat(tmp_path):
     runtime = _make_runtime()
     session = _make_session(runtime, tmp_path)
@@ -271,10 +422,122 @@ async def test_autocomplete_inserts_value(tmp_path):
         app._editor.focus()
         await pilot.press("tab")
         await pilot.pause()
-        assert isinstance(app.screen, ChoiceSelector)
-        app.screen.action_select()
+        assert app.query(ChoiceSelector).nodes
+        app.query_one(ChoiceSelector).action_select()
         await pilot.pause()
         assert "#123" in app._editor.text
+
+
+@pytest.mark.asyncio
+async def test_autocomplete_async_provider(tmp_path):
+    from pi_coding_agent.extensions.runner import ExtensionRunner
+    from pi_coding_agent.extensions.types import Extension
+    from pi_tui.selectors import ChoiceSelector
+
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    extension = Extension(path="<inline>", resolved_path="<inline>")
+
+    async def provider(text):
+        return [{"value": "#456", "label": "#456 Fix async"}] if "#" in text else None
+
+    extension.autocomplete.append(provider)
+    session.set_extension_runner(ExtensionRunner([extension], cwd=str(tmp_path)))
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        app._editor.text = "fix #"
+        app._editor.focus()
+        await pilot.press("tab")
+        await pilot.pause()
+        await pilot.pause()
+        assert app.query(ChoiceSelector).nodes
+        app.query_one(ChoiceSelector).action_select()
+        await pilot.pause()
+        assert "#456" in app._editor.text
+
+
+@pytest.mark.asyncio
+async def test_session_streaming_updates_partial_entry(tmp_path):
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        app._on_session_event(
+            {"type": "message_start", "message": {"role": "assistant", "content": []}}
+        )
+        await pilot.pause()
+        app._on_session_event(
+            {
+                "type": "message_update",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "Hel"}],
+                },
+            }
+        )
+        await pilot.pause()
+        entries = app._chat.query(MessageEntry)
+        assert len(entries) == 1
+        assert entries[0].label == "Assistant"
+        assert "Hel" in entries[0].entry_text
+        app._on_session_event(
+            {
+                "type": "message_update",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "Hello"}],
+                },
+            }
+        )
+        await pilot.pause()
+        assert "Hello" in app._chat.query(MessageEntry)[0].entry_text
+        app._on_session_event(
+            {
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "Hello world"}],
+                },
+            }
+        )
+        await _wait_until(
+            lambda: len(app._chat.query(MessageEntry)) == 1,
+            pilot=pilot,
+            message="stream placeholder replaced by final message",
+        )
+        assert "Hello world" in app._chat.query(MessageEntry)[0].entry_text
+
+
+@pytest.mark.asyncio
+async def test_session_streaming_thinking_and_toolcall(tmp_path):
+    runtime = _make_runtime()
+    session = _make_session(runtime, tmp_path)
+    app = PiTuiApp(session, runtime)
+    async with app.run_test() as pilot:
+        app._on_session_event(
+            {
+                "type": "message_update",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "thinking", "thinking": "pondering"},
+                        {"type": "toolCall", "name": "read", "arguments": {"path": "a"}},
+                    ],
+                },
+            }
+        )
+        await pilot.pause()
+        entries = app._chat.query(MessageEntry)
+        assert len(entries) == 1
+        text = entries[0].entry_text
+        assert "pondering" in text
+        assert "read(" in text
+        app._on_session_event({"type": "agent_settled"})
+        await _wait_until(
+            lambda: len(app._chat.query(MessageEntry)) == 0,
+            pilot=pilot,
+            message="stream placeholder cleaned on settle",
+        )
 
 
 @pytest.mark.asyncio
@@ -353,18 +616,18 @@ async def test_model_selector(tmp_path):
     async with app.run_test() as pilot:
         app.action_select_model()
         await _wait_until(
-            lambda: isinstance(app.screen, ModelSelector),
+            lambda: app.query(ModelSelector).nodes,
             pilot=pilot,
             message="model selector screen",
         )
         await _wait_until(
-            lambda: len(app.screen.query_one("#model-list").children) == 2,
+            lambda: len(app.query_one(ModelSelector).query_one("#model-list").children) == 2,
             pilot=pilot,
             message="model list populated",
         )
-        list_view = app.screen.query_one("#model-list")
+        list_view = app.query_one(ModelSelector).query_one("#model-list")
         list_view.index = 1
-        app.screen.action_select()
+        app.query_one(ModelSelector).action_select()
         await _wait_until(
             lambda: session.model is not None and session.model.id == "faux-2",
             pilot=pilot,
@@ -394,18 +657,21 @@ async def test_model_selector_with_colon_model_ids():
     ]
 
     class Host(App):
+        def compose(self):
+            yield ModelSelector(models, current=models[1])
+
         def on_mount(self) -> None:
-            self.push_screen(ModelSelector(models, current=models[1]))
+            self.query_one(ModelSelector).query_one("#model-list").focus()
 
     app = Host()
     async with app.run_test() as pilot:
         await _wait_until(
-            lambda: isinstance(app.screen, ModelSelector),
+            lambda: app.query(ModelSelector).nodes,
             pilot=pilot,
             message="model selector screen",
         )
         await _wait_until(
-            lambda: len(app.screen.query_one("#model-list").children) == 3,
+            lambda: len(app.query_one(ModelSelector).query_one("#model-list").children) == 3,
             pilot=pilot,
             message="model list populated",
         )
@@ -415,24 +681,34 @@ async def test_model_selector_with_colon_model_ids():
 async def test_model_selector_keyboard_navigation():
     """回归：搜索框持焦时 ↑↓/Enter/Esc 应操作列表，而不是被输入框吞掉。"""
     from textual.app import App
+    from textual.widgets import Input
 
     models = [
         Model(id=f"faux-{index}", provider="faux", api="openai-completions") for index in (1, 2, 3)
     ]
-    dismissed: list[Any] = []
 
     class Host(App):
+        def __init__(self) -> None:
+            super().__init__()
+            self.dismissed: list[Any] = []
+
+        def compose(self):
+            yield ModelSelector(models)
+
         def on_mount(self) -> None:
-            self.push_screen(ModelSelector(models), callback=dismissed.append)
+            self.query_one(Input).focus()
+
+        def _close_overlay_dialog(self, component, value=None) -> None:
+            self.dismissed.append(value)
 
     app = Host()
     async with app.run_test() as pilot:
         await _wait_until(
-            lambda: isinstance(app.screen, ModelSelector),
+            lambda: app.query(ModelSelector).nodes,
             pilot=pilot,
             message="model selector screen",
         )
-        list_view = app.screen.query_one("#model-list")
+        list_view = app.query_one(ModelSelector).query_one("#model-list")
 
         # 焦点在搜索框时，方向键应移动列表选择
         base = list_view.index if list_view.index is not None else 0
@@ -445,7 +721,7 @@ async def test_model_selector_keyboard_navigation():
 
         # Enter 应选中并关闭选择器
         await pilot.press("enter")
-        assert dismissed and dismissed[-1].id == models[(base + 1) % len(models)].id
+        assert app.dismissed and app.dismissed[-1].id == models[(base + 1) % len(models)].id
 
 
 @pytest.mark.asyncio
@@ -571,23 +847,29 @@ async def test_session_picker_mounts_with_sessions():
     picked: list[str] = []
 
     class Host(App):
+        def compose(self):
+            yield SessionPicker(sessions)
+
         def on_mount(self) -> None:
-            self.push_screen(SessionPicker(sessions), callback=picked.append)
+            self.query_one("#session-list").focus()
+
+        def _close_overlay_dialog(self, component, value=None) -> None:
+            picked.append(value)
 
     app = Host()
     async with app.run_test() as pilot:
         await _wait_until(
-            lambda: isinstance(app.screen, SessionPicker),
+            lambda: app.query(SessionPicker).nodes,
             pilot=pilot,
             message="session picker screen",
         )
         await _wait_until(
-            lambda: len(app.screen.query_one("#session-list").children) == 2,
+            lambda: len(app.query_one(SessionPicker).query_one("#session-list").children) == 2,
             pilot=pilot,
             message="session list populated",
         )
         # 初始选中第一项；不按方向键直接 Enter 也应选中并关闭选择器
-        assert app.screen.query_one("#session-list").index == 0
+        assert app.query_one(SessionPicker).query_one("#session-list").index == 0
         await pilot.press("enter")
         assert picked == [sessions[0]["path"]]
 
@@ -643,16 +925,23 @@ async def test_slash_tree_in_app(tmp_path):
     async with app.run_test() as pilot:
         app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "/tree"))
         await _wait_until(
-            lambda: isinstance(app.screen, TreeSelector),
+            lambda: app.query(TreeSelector).nodes,
             pilot=pilot,
             message="tree selector opened",
         )
         await _wait_until(
-            lambda: len(app.screen.query_one("#tree-list").children) == 1,
+            lambda: (
+                len(app.query_one(TreeSelector).query_one("#tree-list").children) == 1
+                and app.query_one(TreeSelector)
+                .query_one("#tree-list")
+                .children[0]
+                .query(Label)
+                .nodes
+            ),
             pilot=pilot,
             message="tree list populated",
         )
-        list_view = app.screen.query_one("#tree-list")
+        list_view = app.query_one(TreeSelector).query_one("#tree-list")
         label = list_view.children[0].query_one("Label")
         assert entry_id[:8] in str(label.content)
 
@@ -666,7 +955,7 @@ async def test_slash_model_no_args_opens_selector(tmp_path):
     async with app.run_test() as pilot:
         app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "/model"))
         await _wait_until(
-            lambda: isinstance(app.screen, ModelSelector),
+            lambda: app.query(ModelSelector).nodes,
             pilot=pilot,
             message="model selector opened",
         )
@@ -684,19 +973,19 @@ async def test_slash_settings_opens_selector(tmp_path):
     async with app.run_test() as pilot:
         app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "/settings"))
         await _wait_until(
-            lambda: isinstance(app.screen, SettingsSelector),
+            lambda: app.query(SettingsSelector).nodes,
             pilot=pilot,
             message="settings selector opened",
         )
         await _wait_until(
-            lambda: len(app.screen.query_one("#settings-list").children) == 5,
+            lambda: len(app.query_one(SettingsSelector).query_one("#settings-list").children) == 5,
             pilot=pilot,
             message="settings list populated",
         )
         # 第一项 autoCompaction：选择后切换并落盘到项目 .pi/settings.json。
         # （headless 下 Enter 键路由偶发时序抖动，直接调用 action_select 保持确定。）
         await pilot.pause()
-        app.screen.action_select()
+        app.query_one(SettingsSelector).action_select()
         await _wait_until(
             lambda: app._settings.get("autoCompaction") is (not initial_auto_compact),
             pilot=pilot,
@@ -716,17 +1005,17 @@ async def test_slash_thinking_opens_selector(tmp_path):
     async with app.run_test() as pilot:
         app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "/thinking"))
         await _wait_until(
-            lambda: isinstance(app.screen, ThinkingSelector),
+            lambda: app.query(ThinkingSelector).nodes,
             pilot=pilot,
             message="thinking selector opened",
         )
         await _wait_until(
-            lambda: len(app.screen.query_one("#thinking-list").children) > 0,
+            lambda: len(app.query_one(ThinkingSelector).query_one("#thinking-list").children) > 0,
             pilot=pilot,
             message="thinking list populated",
         )
-        levels = app.screen._levels
-        app.screen.action_select()
+        levels = app.query_one(ThinkingSelector)._levels
+        app.query_one(ThinkingSelector).action_select()
         await _wait_until(
             lambda: session.thinking_level == levels[0],
             pilot=pilot,
@@ -742,17 +1031,19 @@ async def test_slash_scoped_models_opens_selector(tmp_path):
     async with app.run_test() as pilot:
         app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "/scoped-models"))
         await _wait_until(
-            lambda: isinstance(app.screen, ScopedModelsSelector),
+            lambda: app.query(ScopedModelsSelector).nodes,
             pilot=pilot,
             message="scoped models selector opened",
         )
         await _wait_until(
-            lambda: len(app.screen.query_one("#scoped-list").children) == 2,
+            lambda: (
+                len(app.query_one(ScopedModelsSelector).query_one("#scoped-list").children) == 2
+            ),
             pilot=pilot,
             message="scoped list populated",
         )
-        app.screen.action_toggle_scoped()
-        app.screen.action_cancel()
+        app.query_one(ScopedModelsSelector).action_toggle_scoped()
+        app.query_one(ScopedModelsSelector).action_cancel()
         await _wait_until(
             lambda: len(session.scoped_models) == 1,
             pilot=pilot,
@@ -768,12 +1059,12 @@ async def test_slash_oauth_opens_selector(tmp_path):
     async with app.run_test() as pilot:
         app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "/oauth"))
         await _wait_until(
-            lambda: isinstance(app.screen, OAuthSelector),
+            lambda: app.query(OAuthSelector).nodes,
             pilot=pilot,
             message="oauth selector opened",
         )
         await _wait_until(
-            lambda: len(app.screen.query_one("#oauth-list").children) > 0,
+            lambda: len(app.query_one(OAuthSelector).query_one("#oauth-list").children) > 0,
             pilot=pilot,
             message="oauth list populated",
         )
@@ -792,12 +1083,14 @@ async def test_slash_extensions_opens_selector(tmp_path):
     async with app.run_test() as pilot:
         app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "/extensions"))
         await _wait_until(
-            lambda: isinstance(app.screen, ExtensionSelector),
+            lambda: app.query(ExtensionSelector).nodes,
             pilot=pilot,
             message="extension selector opened",
         )
         await _wait_until(
-            lambda: len(app.screen.query_one("#extension-list").children) == 1,
+            lambda: (
+                len(app.query_one(ExtensionSelector).query_one("#extension-list").children) == 1
+            ),
             pilot=pilot,
             message="extension list populated",
         )
@@ -913,18 +1206,18 @@ async def test_text_input_dialog_submits():
     result: list[str] = []
 
     class Host(App):
+        def compose(self):
+            yield TextInputDialog("paste url")
+
         def on_mount(self) -> None:
-            self.push_screen(TextInputDialog("paste url"), callback=result.append)
+            self.query_one(Input).focus()
+
+        def on_input_submitted(self, event) -> None:
+            result.append(event.value)
 
     app = Host()
     async with app.run_test() as pilot:
-        await _wait_until(
-            lambda: isinstance(app.screen, TextInputDialog),
-            pilot=pilot,
-            message="input dialog opened",
-        )
-        inp = app.screen.query_one(Input)
-        inp.focus()
+        await pilot.pause()
         await pilot.press("h", "i")
         await pilot.press("enter")
     assert result == ["hi"]
@@ -970,7 +1263,7 @@ async def test_slash_fork_no_args_opens_selector(tmp_path):
     async with app.run_test() as pilot:
         app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "/fork"))
         await _wait_until(
-            lambda: isinstance(app.screen, TreeSelector),
+            lambda: app.query(TreeSelector).nodes,
             pilot=pilot,
             message="fork selector opened",
         )
@@ -1091,7 +1384,7 @@ async def test_slash_reload_reloads_resources(tmp_path):
         # 重载后的快捷键真实可分发（打开模型选择器）。
         await pilot.press("ctrl+m")
         await _wait_until(
-            lambda: isinstance(app.screen, ModelSelector),
+            lambda: app.query(ModelSelector).nodes,
             pilot=pilot,
             message="reloaded keybinding dispatches",
         )
