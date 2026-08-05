@@ -1300,6 +1300,63 @@ async def test_slash_fork_no_args_opens_selector(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_slash_input_merges_and_continues(tmp_path):
+    """/input：合并文本进历史 user 消息 → 重建会话 → 自动 continue。"""
+    from pi_ai._types import UserMessage
+
+    runtime = _make_runtime(responses=[faux_assistant_message("edited reply")])
+    session = _make_session(runtime, tmp_path)
+    e1 = await session.session_manager.append_message(
+        UserMessage(role="user", content="old instruction")
+    )
+    await session.session_manager.append_message(UserMessage(role="user", content="later msg"))
+
+    def rebuilder(manager):
+        return _make_session_with_manager(runtime, manager, tmp_path)
+
+    app = PiTuiApp(session, runtime, session_rebuilder=rebuilder)
+    async with app.run_test() as pilot:
+        app.on_pi_editor_submitted(PiEditor.Submitted(app._editor, "/input 请改用Python"))
+        await _wait_until(
+            lambda: app.query(TreeSelector).nodes,
+            pilot=pilot,
+            message="input selector opened",
+        )
+        tree = app.query_one(TreeSelector)
+        await _wait_until(
+            lambda: len(tree.query_one("#tree-list").children) == 2,
+            pilot=pilot,
+            message="user messages listed",
+        )
+        await _wait_until(
+            lambda: app.screen.focused is tree.query_one("#tree-list"),
+            pilot=pilot,
+            message="tree list focused",
+        )
+        # 最新在前：index 0 = later msg，index 1 = e1。
+        tree.query_one("#tree-list").index = 1
+        await pilot.press("enter")
+        await _wait_until(
+            lambda: app._session is not session,
+            pilot=pilot,
+            message="session replaced after input",
+        )
+        await _wait_until(
+            lambda: (
+                len(app._session.get_messages()) >= 2
+                and app._session.get_messages()[-1].get("role") == "assistant"
+            ),
+            pilot=pilot,
+            message="edited branch continued",
+        )
+
+        messages = app._session.get_messages()
+        assert messages[0]["content"] == "old instruction\n\n请改用Python"
+        assert app._session.session_manager.get_leaf_id() != e1  # continue 后 leaf 前进
+        assert "edited reply" in (app._session.get_last_assistant_text() or "")
+
+
+@pytest.mark.asyncio
 async def test_slash_reload_reloads_resources(tmp_path):
     import json as _json
 
@@ -1486,3 +1543,23 @@ async def test_bang_command_failure_renders_error(tmp_path):
         )
         bash = session.get_messages()[-1]
         assert bash["exitCode"] == 7
+
+
+def test_user_message_nodes_filters_user_messages():
+    """/input 选择器：只列出 user 消息，最新在前，label 显示内容片段。"""
+    from pi_ai._types import UserMessage
+
+    from pi_coding_agent.modes.interactive.app import _user_message_nodes
+
+    mgr = SessionManager.in_memory(cwd="/tmp")
+    e1 = asyncio.run(
+        mgr.append_message(UserMessage(role="user", content="first line\nsecond line"))
+    )
+    asyncio.run(mgr.append_message(faux_assistant_message("hi")))
+    e3 = asyncio.run(mgr.append_message(UserMessage(role="user", content="latest [x]")))
+
+    nodes = _user_message_nodes(mgr)
+
+    assert [node.id for node in nodes] == [e3, e1]
+    assert "first line" in nodes[1].label
+    assert r"\[x\]" in nodes[0].label  # 方括号已转义，避免被 Textual 当 Rich markup。

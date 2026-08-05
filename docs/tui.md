@@ -26,7 +26,10 @@ PiTuiApp (Textual App)
 ## 输入与命令
 
 - `/name`：提示模板展开；`/skill:name`：技能展开（`_session.expand_prompt`）
-- `/command`：`SlashCommandRegistry` + 内置命令（`slash_commands.py` 的 `register_builtin_commands`）：`/new`、`/resume`、`/tree`、`/fork`、`/model`、`/thinking`、`/tools`、`/settings`、`/export`、`/reload` 等
+- `/command`：`SlashCommandRegistry` + 内置命令（`slash_commands.py` 的 `register_builtin_commands`）：`/new`、`/resume`、`/tree`、`/fork`、`/input`、`/model`、`/thinking`、`/tools`、`/settings`、`/export`、`/reload` 等
+- `/input [text]`：挂起当前任务 → 选择一条历史 user 消息 → 把输入合并进该消息
+  （旧内容 + 空行 + 新内容）→ 会话回卷到该消息并重建 → `continue_()` 继续任务；
+  旧分支保留在 JSONL 文件里，树仍可见（`SessionManager.edit_message`）
 - `!cmd`：直接执行 shell；`alt+enter`：排队 follow-up
 - 外部编辑器：`ctrl+g`（`$VISUAL` / `$EDITOR` 回退）
 

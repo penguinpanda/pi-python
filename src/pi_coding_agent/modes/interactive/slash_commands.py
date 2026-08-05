@@ -48,6 +48,7 @@ class SlashContext:
         open_oauth_selector: Callable[[str], None | Awaitable[None]] | None = None,
         open_scoped_models_selector: Callable[[], None | Awaitable[None]] | None = None,
         open_extensions_selector: Callable[[], None | Awaitable[None]] | None = None,
+        open_input_selector: Callable[[str | None], None | Awaitable[None]] | None = None,
         copy_to_clipboard: Callable[[str], None] | None = None,
         auth_interaction=None,
         rebuild_session=None,
@@ -70,6 +71,7 @@ class SlashContext:
         self._open_oauth_selector = open_oauth_selector
         self._open_scoped_models_selector = open_scoped_models_selector
         self._open_extensions_selector = open_extensions_selector
+        self._open_input_selector = open_input_selector
         self._copy_to_clipboard = copy_to_clipboard or (lambda _text: None)
         self.auth_interaction = auth_interaction
         # 会话重建：fork / clone / resume / import 用（宿主注入）。
@@ -131,6 +133,10 @@ class SlashContext:
     def open_extensions_selector(self) -> None:
         if self._open_extensions_selector is not None:
             self._open_extensions_selector()
+
+    def open_input_selector(self, pending_text: str | None = None) -> None:
+        if self._open_input_selector is not None:
+            self._open_input_selector(pending_text)
 
     def copy_to_clipboard(self, text: str) -> None:
         self._copy_to_clipboard(text)
@@ -406,6 +412,14 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
         context.session = new_session
         return f"Cloned to session {new_session.session_id}"
 
+    async def _input(context: SlashContext, args: str) -> str:
+        """/input [text]：挂起当前任务，把输入合并进一条历史 user 消息并继续。"""
+        if context._open_input_selector is None:
+            return "Usage: /input <text> (available in TUI)"
+        text = args.strip()
+        context.open_input_selector(text or None)
+        return ""
+
     async def _settings(context: SlashContext, args: str) -> str:
         # TUI 环境：/settings 无参数时打开菜单式选择器（对齐 TS）。
         if not args.strip() and context._open_settings_selector is not None:
@@ -655,6 +669,12 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
         ("export", _export, "Export session (HTML/JSONL)", "[path]"),
         ("tree", _tree, "Navigate session tree", "<entryId>"),
         ("fork", _fork, "Create a new fork from a previous message", "<entryId>"),
+        (
+            "input",
+            _input,
+            "Merge input into a previous user message and continue",
+            "[text]",
+        ),
         ("clone", _clone, "Duplicate the current session", ""),
         ("settings", _settings, "Show or edit settings", "[key=value]"),
         (

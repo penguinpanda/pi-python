@@ -112,7 +112,7 @@ echo "read README.md" | uv run python -m pi_coding_agent -p
 ### TUI Slash 命令（26 条）
 
 `/model` `/thinking` `/oauth` `/extensions` `/name` `/compact` `/new` `/quit` `/help`
-`/hotkeys` `/session` `/reload` `/trust` `/changelog` `/copy` `/export` `/tree` `/fork`
+`/hotkeys` `/session` `/reload` `/trust` `/changelog` `/copy` `/export` `/tree` `/fork` `/input`
 `/clone` `/settings` `/scoped-models` `/login` `/logout` `/share` `/import` `/resume`
 
 其中 `/settings`、`/trust`、`/thinking`、`/oauth`、`/scoped-models`、`/extensions` 在

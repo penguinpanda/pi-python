@@ -319,3 +319,61 @@ class TestSessionLayout:
         assert not flat.exists()
         legacy_files = list((tmp_path / "--legacy--").glob("*.jsonl"))
         assert len(legacy_files) == 1
+
+
+class TestEditMessage:
+    """/input：合并文本进历史 user 消息并回卷 leaf。"""
+
+    def test_merge_rewinds_leaf_and_keeps_old_branch(self, tmp_path):
+        import asyncio
+
+        mgr = SessionManager.create(cwd="/tmp/proj", sessions_dir=tmp_path)
+        e1 = asyncio.run(mgr.append_message(UserMessage(role="user", content="old")))
+        asyncio.run(mgr.append_message(UserMessage(role="user", content="second")))
+        asyncio.run(mgr.append_message(UserMessage(role="user", content="third")))
+
+        merged = mgr.edit_message(e1, "new detail")
+
+        assert merged == "old\n\nnew detail"
+        assert mgr.get_leaf_id() == e1
+        assert [m["content"] for m in mgr.build_context()] == ["old\n\nnew detail"]
+        # 旧分支条目保留在文件中（树仍可见），并追加 leaf 指针。
+        entries = mgr.get_entries()
+        assert len(entries) == 4
+        assert entries[-1]["type"] == "leaf"
+        assert entries[-1]["targetId"] == e1
+        # 重开后 leaf 仍指向编辑后的消息。
+        reopened = SessionManager.open(mgr.session_path)
+        assert reopened.get_leaf_id() == e1
+        assert [m["content"] for m in reopened.build_context()] == ["old\n\nnew detail"]
+
+    def test_replace_mode(self, tmp_path):
+        import asyncio
+
+        mgr = SessionManager.create(cwd="/tmp/proj", sessions_dir=tmp_path)
+        e1 = asyncio.run(mgr.append_message(UserMessage(role="user", content="old")))
+        assert mgr.edit_message(e1, "replacement", mode="replace") == "replacement"
+        assert [m["content"] for m in mgr.build_context()] == ["replacement"]
+
+    def test_edit_errors(self, tmp_path):
+        import asyncio
+
+        mgr = SessionManager.create(cwd="/tmp/proj", sessions_dir=tmp_path)
+        e1 = asyncio.run(mgr.append_message(UserMessage(role="user", content="old")))
+        e2 = asyncio.run(
+            mgr.append_message(
+                {
+                    "role": "assistant",
+                    "content": [TextContent(type="text", text="hi")],
+                    "api": "openai-completions",
+                    "provider": "deepseek",
+                    "model": "deepseek-chat",
+                }
+            )
+        )
+        with pytest.raises(ValueError, match="Entry not found"):
+            mgr.edit_message("nope", "x")
+        with pytest.raises(ValueError, match="not a user message"):
+            mgr.edit_message(e2, "x")
+        with pytest.raises(ValueError, match="Unknown edit mode"):
+            mgr.edit_message(e1, "x", mode="nope")

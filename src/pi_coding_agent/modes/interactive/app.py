@@ -16,7 +16,7 @@ from textual.widgets import Static
 
 from ..._config import get_sessions_dir
 from ..._session import AgentSession
-from ..._session_manager import SessionManager
+from ..._session_manager import SessionManager, SessionTreeNode
 from pi_agent import AgentEvent
 from ...model_runtime import ModelRuntime
 from ...extensions import ExtensionRunner
@@ -299,6 +299,7 @@ class PiTuiApp(App):
             open_oauth_selector=self._open_oauth_selector,
             open_scoped_models_selector=self._open_scoped_models_selector,
             open_extensions_selector=self._open_extensions_selector,
+            open_input_selector=self._open_input_selector,
             copy_to_clipboard=self._copy_to_clipboard,
             auth_interaction=_TuiAuthInteraction(self),
             reload_all=self._reload_all,
@@ -1006,6 +1007,53 @@ class PiTuiApp(App):
         )
         return await future
 
+    def _open_input_selector(self, pending_text: str | None = None) -> None:
+        """/input：打开仅含 user 消息的选择器。"""
+        nodes = _user_message_nodes(self._session.session_manager)
+        if not nodes:
+            self._notify("No user messages to edit")
+            return
+        self.push_screen(
+            TreeSelector(nodes, leaf_id=None),
+            callback=lambda entry_id: self._on_input_selected(entry_id, pending_text),
+        )
+
+    def _on_input_selected(self, entry_id, pending_text: str | None) -> None:
+        if entry_id is None:
+            return
+        if pending_text is None:
+            self._run_task(self._await_input_text(entry_id))
+        else:
+            self._run_task(self._apply_input(entry_id, pending_text))
+
+    async def _await_input_text(self, entry_id: str) -> None:
+        """无参数 /input：先选消息，再弹输入框要合并的文本。"""
+        text = await self._await_text_input(
+            "Text to merge into the selected message:",
+            "type here and press Enter",
+        )
+        if text is None or not text.strip():
+            return
+        await self._apply_input(entry_id, text.strip())
+
+    async def _apply_input(self, entry_id: str, text: str) -> None:
+        """挂起当前任务 → 合并文本到目标消息 → 重建会话 → 继续任务。"""
+        try:
+            session = self._session
+            # 1. 挂起：运行中则中止并等待本轮结束（空闲时是 no-op）。
+            await session.abort()
+            await session.wait_for_idle()
+            # 2. 合并文本并回卷 leaf 到目标消息。
+            manager = session.session_manager
+            manager.edit_message(entry_id, text)
+            # 3. 重建会话（从编辑后的消息重新加载上下文）并继续。
+            new_session = await self._apply_rebuilt_session(manager)
+            self._set_status("Continuing from edited message")
+            await new_session.continue_()
+            self._update_footer()
+        except Exception as exc:
+            self._notify(f"/input failed: {exc}")
+
     def _open_tree_selector(self) -> None:
         manager = self._session.session_manager
         tree = manager.get_tree()
@@ -1563,6 +1611,34 @@ def _list_sessions() -> list[dict[str, Any]]:
         }
         for info in infos
     ]
+
+
+def _user_message_nodes(manager: SessionManager) -> list[SessionTreeNode]:
+    """构造仅含 user 消息的扁平树节点（/input 选择器用，label 显示内容片段）。"""
+    nodes: list[SessionTreeNode] = []
+    for entry in manager.get_entries():
+        if entry.get("type") != "message":
+            continue
+        message = entry.get("message")
+        if not isinstance(message, dict) or message.get("role") != "user":
+            continue
+        content = message.get("content")
+        text = content if isinstance(content, str) else ""
+        snippet = " ".join(text.split())
+        if len(snippet) > 60:
+            snippet = f"{snippet[:60]}…"
+        # 转义方括号，避免被 Textual 当成 Rich markup 样式标签吞掉。
+        snippet = snippet.replace("[", r"\[").replace("]", r"\]")
+        nodes.append(
+            SessionTreeNode(
+                id=cast(str, entry.get("id")),
+                parent_id=entry.get("parentId"),
+                entry=entry,
+                label=snippet or "(empty)",
+            )
+        )
+    nodes.reverse()  # 最新的 user 消息排在最前。
+    return nodes
 
 
 def _copy_text(text: str) -> None:

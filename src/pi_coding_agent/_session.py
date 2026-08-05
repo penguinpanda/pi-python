@@ -1532,6 +1532,10 @@ class AgentSession:
             self._abort.set()
         self._agent.abort()
 
+    async def continue_(self) -> None:
+        """从当前 transcript 继续（/input 编辑消息并重建会话后重跑分支用）。"""
+        await self._agent.continue_()
+
     @property
     def is_bash_running(self) -> bool:
         """是否有交互 bash 命令正在运行（一次仅允许一条）。"""

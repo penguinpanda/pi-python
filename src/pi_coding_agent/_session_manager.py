@@ -83,11 +83,13 @@ class SessionManager:
         session_path: Path | None = None,
         entries: list[SessionEntry] | None = None,
         sessions_root: Path | None = None,
+        header: SessionHeader | None = None,
     ):
         self._cwd = cwd
         self._session_id = session_id
         self._session_path = session_path  # None = 内存模式
         self._sessions_root = sessions_root  # create 时的根目录，fork 默认沿用
+        self._header = header  # 持久化会话的 header（重写文件时使用）
         self._entries: list[SessionEntry] = entries or []
         self._session_name: str | None = None
         # 跟踪最新的 parentId（单链尾）
@@ -134,6 +136,7 @@ class SessionManager:
             session_id=sid,
             session_path=filepath,
             sessions_root=dir_path,
+            header=header,
         )
 
     @staticmethod
@@ -163,6 +166,7 @@ class SessionManager:
             session_id=header["id"],
             session_path=fp,
             entries=entries,
+            header=header,
         )
         manager._restore_leaf(entries)
         manager._restore_session_name(entries)
@@ -480,6 +484,7 @@ class SessionManager:
             session_id=sid,
             session_path=filepath,
             entries=list(kept),
+            header=header,
         )
         manager._leaf_parent_id = kept[-1].get("id") if kept else None
         return manager
@@ -627,6 +632,58 @@ class SessionManager:
         if self._session_path:
             _append_jsonl_line_sync_append(self._session_path, entry)
         return entry_id
+
+    def edit_message(
+        self,
+        entry_id: str,
+        new_text: str,
+        *,
+        mode: str = "merge",
+    ) -> str:
+        """把新文本合并/替换进一条历史 user 消息，并把 leaf 回卷到该消息。
+
+        - 仅允许 type=message 且 role=user 的条目。
+        - mode="merge"：新内容以空行分隔追加到原内容后（默认）；
+          mode="replace"：整体替换原内容。
+        - 目标条目原地改写并重写整个会话文件；后续条目保留在文件中
+          （旧分支仍可被树查看），但当前上下文从该消息重新开始
+          （与 move_to 的树语义一致）。
+
+        返回目标消息的新内容；条目不存在或不是纯文本 user 消息时抛 ValueError。
+        """
+        if mode not in ("merge", "replace"):
+            raise ValueError(f"Unknown edit mode: {mode}")
+        target_entry: SessionMessageEntry | None = None
+        for entry in self._entries:
+            if entry.get("id") != entry_id:
+                continue
+            if entry.get("type") != "message":
+                raise ValueError(f"Entry {entry_id} is not a message")
+            message = entry.get("message")
+            if not isinstance(message, dict) or message.get("role") != "user":
+                raise ValueError(f"Entry {entry_id} is not a user message")
+            if not isinstance(message.get("content"), str):
+                raise ValueError(f"Entry {entry_id} is not a plain-text user message")
+            target_entry = cast(SessionMessageEntry, entry)
+            break
+        if target_entry is None:
+            raise ValueError(f"Entry not found: {entry_id}")
+
+        message = cast(dict[str, Any], target_entry["message"])
+        original = cast(str, message.get("content", ""))
+        if mode == "replace":
+            merged = new_text
+        elif original:
+            merged = f"{original}\n\n{new_text}".strip()
+        else:
+            merged = new_text
+        message["content"] = merged
+
+        if self._session_path is not None and self._header is not None:
+            _write_jsonl_sync(self._session_path, self._header, self._entries)
+        # 追加 leaf 指针：重开后 leaf 仍指向被编辑的消息（旧分支保留在文件里）。
+        self._set_leaf(entry_id)
+        return merged
 
     # ------------------------------------------------------------------
     # 会话发现 + 文件锁

@@ -100,6 +100,31 @@ class TestRegistry:
         assert "/quit" in notifications[0]
 
 
+class TestInputCommand:
+    """/input：把输入合并进历史 user 消息并继续。"""
+
+    async def test_opens_selector_with_text(self):
+        registry = _make_registry()
+        opened: list[str | None] = []
+        context = SlashContext(open_input_selector=opened.append)
+        assert await registry.execute("/input 请改用Python", context) is True
+        assert opened == ["请改用Python"]
+
+    async def test_opens_selector_without_text(self):
+        registry = _make_registry()
+        opened: list[str | None] = []
+        context = SlashContext(open_input_selector=opened.append)
+        assert await registry.execute("/input", context) is True
+        assert opened == [None]
+
+    async def test_not_available_outside_tui(self):
+        registry = _make_registry()
+        notifications: list[str] = []
+        context = SlashContext(notify=notifications.append)
+        assert await registry.execute("/input 文本", context) is True
+        assert "TUI" in notifications[0]
+
+
 class FakeSession:
     """极简 session 桩（Phase 7 命令用）。"""
 
