@@ -68,6 +68,7 @@ testpaths = [
     "src/pi_storage/tests",
     "src/pi_server/tests",
     "src/pi_evals/tests",
+    "src/pi_tui/tests",
 ]
 pythonpath = ["src", "."]
 
@@ -81,6 +82,7 @@ omit = [
     "src/pi_storage/tests/*",
     "src/pi_server/tests/*",
     "src/pi_evals/tests/*",
+    "src/pi_tui/tests/*",
 ]
 
 [tool.coverage.report]
