@@ -54,6 +54,21 @@ cd pi-python
 uv sync
 ```
 
+### 本地检查
+
+一键运行与 GitHub Actions 相同的检查（ruff lint / ruff format / mypy / pytest 带覆盖率）：
+
+```bash
+python scripts/check.py
+```
+
+可选：提交前自动检查
+
+```bash
+uv tool install pre-commit
+pre-commit install
+```
+
 ### 认证
 
 ```bash

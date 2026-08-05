@@ -1,0 +1,23 @@
+# 本地提交前检查，与 GitHub Actions 的 ruff/mypy 步骤保持一致。
+#
+# 安装（首次）：
+#   uv tool install pre-commit
+#   pre-commit install
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run --no-sync ruff check
+        language: system
+        types: [python]
+      - id: ruff-format
+        name: ruff format check
+        entry: uv run --no-sync ruff format --check
+        language: system
+        types: [python]
+      - id: mypy
+        name: mypy
+        entry: uv run --no-sync mypy src/pi_ai src/pi_agent src/pi_coding_agent src/pi_tui src/pi_protocol src/pi_storage src/pi_server src/pi_evals
+        language: system
+        pass_filenames: false
