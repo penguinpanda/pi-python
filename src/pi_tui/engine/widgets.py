@@ -13,6 +13,8 @@ from rich.style import Style
 
 from .cells import Cell, Line, blank_line, line_from_text
 from .keys import Key, MouseEvent
+from .layout import render_layout_frame
+from .layout_node import ScrollLayoutNode, StackLayoutEntry, StackLayoutNode
 from .text import render_markdown, render_markup
 
 
@@ -32,6 +34,16 @@ def _style(base: Style | str | None) -> Style | None:
     if isinstance(base, Style):
         return base
     return Style.parse(base)
+
+
+def _natural_size_of(component: Any, width: int) -> tuple[int, int]:
+    method = getattr(component, "natural_size", None)
+    if callable(method):
+        try:
+            return method(width)
+        except Exception:
+            pass
+    return component.content_size()
 
 
 class Widget:
@@ -127,6 +139,10 @@ class Widget:
     def content_size(self) -> tuple[int, int]:
         return (0, 0)
 
+    def natural_size(self, width: int) -> tuple[int, int]:
+        """按实际宽度估算自然尺寸（默认回退 content_size，可被子类覆盖）。"""
+        return self.content_size()
+
     def cursor_position(self) -> tuple[int, int] | None:
         return None
 
@@ -146,13 +162,130 @@ class Widget:
     def __repr__(self) -> str:
         return f"<{type(self).__name__} id={self.id!r}>"
 
+    def invalidate(self) -> None:
+        """清除组件内部缓存（框架级缓存每帧重建，无需额外动作）。"""
+
+    def layout_node(self) -> StackLayoutNode | ScrollLayoutNode | None:
+        return None
+
 
 class Container(Widget):
-    """子组件容器：vertical / horizontal 布局。"""
+    """子组件容器：vertical / horizontal 布局（Flex stack 节点）。"""
 
-    def __init__(self, *, direction: str = "vertical", **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *,
+        direction: str = "vertical",
+        gap: int = 0,
+        align: str = "stretch",
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         self.direction = direction
+        self.gap = max(0, int(gap))
+        self.align = align if align in ("stretch", "start", "center", "end") else "stretch"
+        self._layout_entries: list[StackLayoutEntry] = []
+
+    def mount(
+        self,
+        child: Widget,
+        *,
+        basis: int | str | None = None,
+        grow: int | None = None,
+        shrink: int | None = None,
+        min_size: int | None = None,
+        max_size: int | None = None,
+        visible: Callable[[Any], bool] | None = None,
+    ) -> Widget:
+        """挂载子组件并登记 flex 选项；未显式提供时按旧 width/height spec 推导。"""
+        if child in self.children:
+            self.children.remove(child)
+            self._layout_entries = [e for e in self._layout_entries if e.component is not child]
+        child.parent = self
+        self.children.append(child)
+        for descendant in child.walk():
+            descendant.app = self.app
+        spec = child.height_spec if self.direction == "vertical" else child.width_spec
+        options: dict[str, Any] = {}
+        if basis is not None:
+            options["basis"] = basis
+        if grow is not None:
+            options["grow"] = grow
+        if shrink is not None:
+            options["shrink"] = shrink
+        if min_size is not None:
+            options["min_size"] = min_size
+        if max_size is not None:
+            options["max_size"] = max_size
+        if not options:
+            if isinstance(spec, int):
+                options = {"basis": spec, "shrink": 0}
+            elif spec == "auto":
+                options = {"basis": "auto", "shrink": 0}
+            elif isinstance(spec, str) and spec.endswith("fr"):
+                try:
+                    fraction = max(1, int(spec[:-2] or "1"))
+                except ValueError:
+                    fraction = 1
+                options = {"basis": 0, "grow": fraction, "shrink": 1, "min_size": 0}
+        self._layout_entries.append(StackLayoutEntry(component=child, **options))
+        self.refresh()
+        return child
+
+    def remove(self, child: Widget | None = None) -> None:
+        if child is None:
+            if self.parent is not None:
+                self.parent.remove(self)
+            return
+        if child in self.children:
+            self.children.remove(child)
+            child.parent = None
+            self._layout_entries = [e for e in self._layout_entries if e.component is not child]
+            for descendant in child.walk():
+                descendant.app = None
+            self.refresh()
+
+    def clear(self) -> None:
+        for child in list(self.children):
+            self.remove(child)
+
+    def set_child_basis(self, child: Widget, basis: int | str) -> None:
+        """动态调整子组件的 flex basis（编辑器补全展开时增高）。"""
+        for entry in self._layout_entries:
+            if entry.component is child:
+                entry.basis = basis
+                self.refresh()
+                return
+
+    def layout_node(self) -> StackLayoutNode | None:
+        return StackLayoutNode(
+            type="vstack" if self.direction == "vertical" else "hstack",
+            entries=tuple(self._layout_entries),
+            gap=self.gap,
+            align=self.align,
+        )
+
+    def natural_size(self, width: int) -> tuple[int, int]:
+        """按实际宽度递归估算自然尺寸（消息换行高度不再被 1000 列误导）。"""
+        if self.direction == "vertical":
+            height = 0
+            child_width = 0
+            for child in self.children:
+                if not child.visible:
+                    continue
+                child_w, child_h = _natural_size_of(child, width)
+                child_width = max(child_width, child_w)
+                height += child_h
+            return (max(1, int(width)), height)
+        total_width = 0
+        height = 0
+        for child in self.children:
+            if not child.visible:
+                continue
+            child_w, child_h = _natural_size_of(child, width)
+            total_width += child_w
+            height = max(height, child_h)
+        return (max(1, total_width), height)
 
     def _allocate(self, total: int, dimension: str) -> list[tuple[Widget, int, int]]:
         """分配子组件尺寸：返回 [(child, start, size)]。"""
@@ -217,29 +350,7 @@ class Container(Widget):
         return width if dimension == "width" else height
 
     def render(self, width: int, height: int) -> list[Line]:
-        lines = [blank_line(width, self.base_style) for _ in range(height)]
-        if self.direction == "vertical":
-            for child, start, size in self._allocate(height, "height"):
-                if size <= 0:
-                    continue
-                child_lines = child.render(width, size)
-                child.rect = (start, 0, width, size)
-                for index, cline in enumerate(child_lines):
-                    row = start + index
-                    if row >= height:
-                        break
-                    lines[row].patch(0, cline)
-        else:
-            for child, start, size in self._allocate(width, "width"):
-                if size <= 0:
-                    continue
-                child_lines = child.render(size, height)
-                child.rect = (0, start, size, height)
-                for index, cline in enumerate(child_lines):
-                    if index >= height:
-                        break
-                    lines[index].patch(start, cline)
-        return lines
+        return render_layout_frame(self, width, height).lines
 
     def content_size(self) -> tuple[int, int]:
         if self.direction == "vertical":
@@ -297,6 +408,10 @@ class Spacer(Widget):
 
     def render(self, width: int, height: int) -> list[Line]:
         return [blank_line(width, self.base_style) for _ in range(height)]
+
+    def content_size(self) -> tuple[int, int]:
+        height = self.height_spec if isinstance(self.height_spec, int) else 0
+        return (0, max(0, height))
 
 
 class Static(Widget):
@@ -497,6 +612,9 @@ class Editor(Widget):
         self.history: list[str] = []
         self.history_index = -1  # -1=未浏览，0=最近一条
         self.history_draft: tuple[list[str], int, int] | None = None
+        self.completion_items: list[tuple[str, str]] = []
+        self.completion_index = 0
+        self.completion_max_visible = 5
 
     # ------------------------------------------------------------------
     # 文本属性（兼容 PiEditor API）
@@ -1159,7 +1277,8 @@ class Editor(Widget):
 
     def render(self, width: int, height: int) -> list[Line]:
         border_offset = 1 if self.border else 0
-        content_height = max(1, height - 2 * border_offset)
+        completion_count = self._completion_line_count()
+        content_height = max(1, height - 2 * border_offset - completion_count)
         if self.cursor_row < self.scroll_row:
             self.scroll_row = self.cursor_row
         elif self.cursor_row >= self.scroll_row + content_height:
@@ -1195,11 +1314,15 @@ class Editor(Widget):
             content.append(line)
         while len(content) < content_height:
             content.append(blank_line(width, self.base_style))
-        if not self.border:
-            return content
-        border_style = self.border_style or (self.base_style or Style()) + Style(dim=True)
-        border = line_from_text("─" * width, width, border_style)
-        return [border, *content, border][:height]
+        if self.border:
+            border_style = self.border_style or (self.base_style or Style()) + Style(dim=True)
+            border = line_from_text("─" * width, width, border_style)
+            result = [border, *content, border]
+        else:
+            result = content
+        if completion_count:
+            result.extend(self._completion_lines(width))
+        return result[:height]
 
     def cursor_position(self) -> tuple[int, int] | None:
         border_offset = 1 if self.border else 0
@@ -1209,7 +1332,72 @@ class Editor(Widget):
         )
 
     def content_size(self) -> tuple[int, int]:
-        return (max((len(line) for line in self.lines), default=0), len(self.lines))
+        return (
+            max((len(line) for line in self.lines), default=0),
+            len(self.lines) + self._completion_line_count(),
+        )
+
+    def _completion_line_count(self) -> int:
+        """补全列表占用的行数（可见项 + 滚动指示，未激活时 0）。"""
+        if not self.completion_active or not self.completion_items:
+            return 0
+        count = min(len(self.completion_items), self.completion_max_visible)
+        if len(self.completion_items) > self.completion_max_visible:
+            count += 1
+        return count
+
+    def set_completion(
+        self,
+        items: list[tuple[str, str]],
+        index: int = 0,
+        max_visible: int = 5,
+    ) -> None:
+        """设置编辑器内嵌补全列表（对齐 TS editor 下方的 SelectList）。"""
+        self.completion_items = list(items)
+        self.completion_max_visible = max(1, int(max_visible))
+        self.completion_index = max(0, min(int(index), max(0, len(self.completion_items) - 1)))
+        self.completion_active = bool(self.completion_items)
+        self.refresh()
+
+    def clear_completion(self) -> None:
+        self.completion_items = []
+        self.completion_index = 0
+        self.completion_active = False
+        self.refresh()
+
+    def _completion_lines(self, width: int) -> list[Line]:
+        """渲染补全列表（→ 选中标记 + 值列 + dim 描述 + 滚动指示）。"""
+        items = self.completion_items
+        max_visible = self.completion_max_visible
+        start = max(
+            0,
+            min(
+                self.completion_index - max_visible // 2,
+                len(items) - max_visible,
+            ),
+        )
+        end = min(start + max_visible, len(items))
+        column_width = max((len(value) for value, _label in items), default=0) + 2
+        base = self.base_style
+        lines: list[Line] = []
+        for index in range(start, end):
+            value, label = items[index]
+            selected = index == self.completion_index
+            prefix = "→ " if selected else "  "
+            spacing = " " * max(1, column_width - len(value))
+            line = line_from_text(f"{prefix}{value}{spacing}{label}", width, base)
+            if selected:
+                for cell in line.cells:
+                    cell.style = (cell.style or Style()) + Style(reverse=True)
+            elif label:
+                desc_start = len(prefix) + len(value) + len(spacing)
+                for cell in line.cells[desc_start : desc_start + len(label)]:
+                    cell.style = (cell.style or Style()) + Style(dim=True)
+            lines.append(line)
+        if len(items) > max_visible:
+            info = f"  ({self.completion_index + 1}/{len(items)})"
+            lines.append(line_from_text(info, width, (base or Style()) + Style(dim=True)))
+        return lines
 
     def handle_mouse(self, event: MouseEvent) -> bool:
         if event.type == "wheel" and self.rect[2] > 0:
@@ -1232,26 +1420,123 @@ class PiEditorVim(Editor):
 
 
 class ScrollView(Widget):
-    """垂直滚动视口 + 滚动条（支持拖拽）。"""
+    """垂直滚动视口（Flex scroll 节点）：滚动状态 + 滚动条（支持拖拽）。"""
 
     def __init__(
         self,
         child: Widget | None = None,
         *,
         scroll_offset: int = 0,
+        follow: str = "none",
+        primary: bool = False,
+        overscroll: str = "chain",
+        scrollbar: str = "hidden",
+        scrollbar_style: Style | str | Callable[[Style | None], Style] | None = None,
+        scrollbar_hide_delay_ms: int = 1000,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
+        if follow not in ("none", "end"):
+            raise ValueError(f"Unsupported ScrollView follow: {follow}")
+        if overscroll not in ("chain", "contain"):
+            raise ValueError(f"Unsupported ScrollView overscroll: {overscroll}")
+        if scrollbar not in ("hidden", "auto", "always"):
+            raise ValueError(f"Unsupported ScrollView scrollbar: {scrollbar}")
         self._child = child
-        self.scroll_offset = scroll_offset
+        self._scroll_top = max(0, int(scroll_offset))
+        self._follow = follow
+        self.follow_end = follow == "end"
+        self._following_end = self.follow_end
+        self.primary = bool(primary)
+        self.overscroll = overscroll
+        self._scrollbar = scrollbar
+        self._scrollbar_style = scrollbar_style
+        self._scrollbar_hide_delay_ms = max(0, int(scrollbar_hide_delay_ms))
+        self._content_height = 0
+        self._viewport_height = 0
+        self._request_render: Callable[[], None] | None = None
         self._dragging = False
         self.scrollbar_active = False
         if child is not None:
             child.parent = self
 
+    # ------------------------------------------------------------------
+    # 状态属性（scroll_offset 兼容旧 API，scroll_top 对齐 TS）
+    # ------------------------------------------------------------------
+
+    @property
+    def scroll_offset(self) -> int:
+        return self._scroll_top
+
+    @scroll_offset.setter
+    def scroll_offset(self, value: int) -> None:
+        self._scroll_top = max(0, int(value))
+
+    @property
+    def scroll_top(self) -> int:
+        return self._scroll_top
+
+    @scroll_top.setter
+    def scroll_top(self, value: int) -> None:
+        self.scroll_to(int(value))
+
     @property
     def child(self) -> Widget | None:
         return self._child
+
+    @property
+    def viewport_height(self) -> int:
+        return self._viewport_height
+
+    @property
+    def is_following_end(self) -> bool:
+        return self._following_end
+
+    @property
+    def scrollbar(self) -> str:
+        return self._scrollbar
+
+    @property
+    def is_scrollbar_visible(self) -> bool:
+        if self._scrollbar == "always":
+            return self._viewport_height > 0
+        if self._scrollbar == "auto":
+            return self._content_height > self._viewport_height
+        return False
+
+    def set_scrollbar(self, scrollbar: str) -> None:
+        if scrollbar == self._scrollbar:
+            return
+        self._scrollbar = scrollbar
+        self.refresh()
+
+    def set_scrollbar_active(self, active: bool) -> None:
+        if self.scrollbar_active != bool(active):
+            self.scrollbar_active = bool(active)
+            self.refresh()
+
+    def scrollbar_style(self, base: Style | None) -> Style:
+        style = self._scrollbar_style
+        if callable(style):
+            return style(base)
+        if isinstance(style, Style):
+            return (base or Style()) + style
+        if isinstance(style, str):
+            return (base or Style()) + Style.parse(style)
+        return (base or Style()) + Style(bgcolor="bright_black")
+
+    def _content_max(self) -> int:
+        """最大滚动偏移：布局状态未知时回退到子组件 content_size。"""
+        if self._viewport_height > 0:
+            return max(0, self._content_height - self._viewport_height)
+        if self._child is not None:
+            _, content_height = self._child.content_size()
+            return max(0, content_height - self.rect[3])
+        return 0
+
+    # ------------------------------------------------------------------
+    # 树 / 布局
+    # ------------------------------------------------------------------
 
     def mount_child(self, child: Widget) -> Widget:
         self._child = child
@@ -1268,48 +1553,102 @@ class ScrollView(Widget):
         if self._child is not None:
             yield from self._child.walk()
 
-    def scroll_end(self) -> None:
+    def layout_node(self) -> ScrollLayoutNode | None:
+        return ScrollLayoutNode(type="scroll", component=self._child, state=self)
+
+    def get_content_width(self, width: int) -> int:
+        return max(1, width - 1) if self._scrollbar == "always" and width > 1 else max(1, width)
+
+    def natural_size(self, width: int) -> tuple[int, int]:
+        """滚动视口自然高度 = 子内容高度（regular 文档模式用）。"""
         if self._child is None:
+            return (max(1, int(width)), 0)
+        content_width = self.get_content_width(width)
+        _child_width, height = _natural_size_of(self._child, content_width)
+        return (max(1, int(width)), max(0, int(height)))
+
+    def update_layout(
+        self,
+        content_height: int,
+        viewport_height: int,
+        request_render: Callable[[], None],
+    ) -> None:
+        self._content_height = max(0, int(content_height))
+        self._viewport_height = max(0, int(viewport_height))
+        self._request_render = request_render
+        max_scroll_top = max(0, self._content_height - self._viewport_height)
+        if self._following_end:
+            self._scroll_top = max_scroll_top
+        else:
+            self._scroll_top = max(0, min(self._scroll_top, max_scroll_top))
+        if self.follow_end and self._scroll_top == max_scroll_top:
+            self._following_end = True
+
+    def scroll_to(self, scroll_top: int) -> None:
+        requested = int(scroll_top)
+        max_scroll_top = self._content_max()
+        next_value = max(0, min(max_scroll_top, requested))
+        if next_value == self._scroll_top:
             return
-        _, content_height = self._child.content_size()
-        if self.rect[3] > 0:
-            self.scroll_offset = max(0, content_height - self.rect[3])
+        self._scroll_top = next_value
+        self._following_end = self.follow_end and next_value == max_scroll_top
         self.refresh()
 
     def scroll_by(self, lines: int) -> int:
-        """按行滚动，返回未消费的剩余行数（对齐 TS ScrollView.scrollBy 的 overscroll chain）。"""
-        if self._child is None or lines == 0:
-            return lines
-        _, content_height = self._child.content_size()
-        max_offset = max(0, content_height - self.rect[3])
-        old = self.scroll_offset
-        self.scroll_offset = max(0, min(max_offset, self.scroll_offset + lines))
+        requested = int(lines)
+        if requested == 0:
+            return 0
+        max_scroll_top = self._content_max()
+        start = max_scroll_top if self._following_end else self._scroll_top
+        next_value = max(0, min(max_scroll_top, start + requested))
+        moved = next_value - start
+        self._scroll_top = next_value
+        self._following_end = self.follow_end and next_value == max_scroll_top
+        if moved != 0:
+            self.refresh()
+        return requested - moved
+
+    def scroll_to_start(self) -> None:
+        self._scroll_top = 0
+        self._following_end = self.follow_end and self._content_height <= self._viewport_height
         self.refresh()
-        return lines - (self.scroll_offset - old)
+
+    def scroll_to_end(self) -> None:
+        self._scroll_top = max(0, self._content_height - self._viewport_height)
+        self._following_end = self.follow_end
+        self.refresh()
+
+    def scroll_end(self) -> None:
+        self._scroll_top = self._content_max()
+        self.refresh()
+
+    # ------------------------------------------------------------------
+    # 按键 / 鼠标
+    # ------------------------------------------------------------------
 
     def handle_key(self, key: Key) -> bool:
         if key.name == "up":
-            self.scroll_offset = max(0, self.scroll_offset - 1)
+            self._scroll_top = max(0, self._scroll_top - 1)
             self.refresh()
             return True
         if key.name == "down":
-            self.scroll_offset += 1
+            self._scroll_top += 1
             self.refresh()
             return True
         if key.name == "pageup":
-            self.scroll_offset = max(0, self.scroll_offset - self.rect[3])
+            self._scroll_top = max(0, self._scroll_top - self.rect[3])
             self.refresh()
             return True
         if key.name == "pagedown":
-            self.scroll_offset += self.rect[3]
+            self._scroll_top += self.rect[3]
             self.refresh()
             return True
         return False
 
     def handle_mouse(self, event: MouseEvent) -> bool:
         if event.type == "wheel":
-            self.scroll_offset += -3 if event.button == "up" else 3
-            self.scroll_offset = max(0, self.scroll_offset)
+            self._scroll_top += -3 if event.button == "up" else 3
+            self._scroll_top = max(0, self._scroll_top)
             self.refresh()
             return True
         if event.type == "press" and event.button == "left" and self.rect[2] > 0:
@@ -1333,10 +1672,10 @@ class ScrollView(Widget):
         _row, _col, _width, height = self.rect
         if height <= 1:
             return
-        _, content_height = self._child.content_size() if self._child is not None else (0, 0)
+        max_scroll_top = self._content_max()
         local = screen_row - self.rect[0]
         ratio = local / max(1, height - 1)
-        self.scroll_offset = round(ratio * max(0, content_height - height))
+        self._scroll_top = round(ratio * max_scroll_top)
         self.refresh()
 
     def render(self, width: int, height: int) -> list[Line]:
@@ -1344,13 +1683,13 @@ class ScrollView(Widget):
             return [blank_line(width, self.base_style) for _ in range(height)]
         _, content_height = self._child.content_size()
         max_offset = max(0, content_height - height)
-        self.scroll_offset = min(self.scroll_offset, max_offset)
+        self._scroll_top = min(self._scroll_top, max_offset)
         bar_width = 1 if width > 2 else 0
         view_width = max(1, width - bar_width)
         child_lines = self._child.render(view_width, max(height, content_height))
         lines: list[Line] = []
         for row in range(height):
-            index = self.scroll_offset + row
+            index = self._scroll_top + row
             if index < len(child_lines):
                 line = child_lines[index].copy()
             else:
@@ -1363,18 +1702,13 @@ class ScrollView(Widget):
             lines.append(line)
         return lines
 
-    def set_scrollbar_active(self, active: bool) -> None:
-        if self.scrollbar_active != active:
-            self.scrollbar_active = bool(active)
-            self.refresh()
-
     def _scrollbar_cell(self, row: int, *, viewport: int, content: int) -> Line:
         """当前行是否属于滚动条拇指（hover 时反色高亮）。"""
         if content <= viewport or viewport <= 0:
             return Line([Cell(" ", self.base_style)])
         thumb = max(1, round(viewport * viewport / content))
         max_position = max(0, viewport - thumb)
-        position = round(self.scroll_offset / max(1, content - viewport) * max_position)
+        position = round(self._scroll_top / max(1, content - viewport) * max_position)
         char = "█" if position <= row < position + thumb else " "
         style = self.base_style
         if self.scrollbar_active and char == "█":
@@ -1420,6 +1754,9 @@ class Loader(Widget):
         spinner = self.FRAMES[self.frame % len(self.FRAMES)]
         return [line_from_text(f"{spinner} {self.text}", width, self.base_style)]
 
+    def content_size(self) -> tuple[int, int]:
+        return (max(1, len(self.text) + 2), 1)
+
 
 class CancellableLoader(Loader):
     def __init__(self, text: str = "Loading… (Esc to cancel)", **kwargs: Any) -> None:
@@ -1449,6 +1786,9 @@ class AltScreenFlash(Widget):
             else:
                 lines.append(blank_line(width, self.base_style))
         return lines
+
+    def content_size(self) -> tuple[int, int]:
+        return (max(1, len(self.text)), 1)
 
 
 # ---------------------------------------------------------------------------

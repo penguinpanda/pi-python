@@ -701,3 +701,64 @@ def test_format_tree_entry_renderer():
     # 无渲染器时回退默认 id/type 行。
     default_lines = _format_tree([node], None)
     assert "abc123" in default_lines[0]
+
+
+class TestAutocompleteOptions:
+    def test_menu_matches_ts_builtins(self):
+        from pi_coding_agent.modes.interactive.autocomplete import (
+            create_slash_command_provider,
+        )
+
+        provider = create_slash_command_provider(_make_registry())
+        items = provider("/")
+        names = {str(item["value"]).strip().lstrip("/") for item in items}
+
+        # TS BUILTIN_SLASH_COMMANDS 全量出现。
+        for name in (
+            "settings",
+            "model",
+            "scoped-models",
+            "export",
+            "import",
+            "share",
+            "copy",
+            "name",
+            "session",
+            "changelog",
+            "hotkeys",
+            "fork",
+            "clone",
+            "tree",
+            "trust",
+            "login",
+            "logout",
+            "new",
+            "compact",
+            "resume",
+            "reload",
+            "quit",
+        ):
+            assert name in names, name
+
+        # Python 独有命令不进入补全菜单（仍可手动输入执行）。
+        for name in (
+            "thinking",
+            "oauth",
+            "extensions",
+            "help",
+            "input",
+            "debug",
+            "arminsayshi",
+            "dementedelves",
+        ):
+            assert name not in names, name
+
+    def test_provider_filters_by_prefix(self):
+        from pi_coding_agent.modes.interactive.autocomplete import (
+            create_slash_command_provider,
+        )
+
+        provider = create_slash_command_provider(_make_registry())
+        items = provider("/mo")
+        names = [str(item["value"]).strip().lstrip("/") for item in items]
+        assert names == ["model"]

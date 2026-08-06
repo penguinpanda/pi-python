@@ -6,12 +6,18 @@ import re
 from typing import Any, Sequence
 
 from rich.console import Console
-from rich.markdown import Markdown
 from rich.segment import Segment
 from rich.style import Style
 from rich.text import Text
 
 from .cells import Cell, Line
+from .markdown_render import (
+    DefaultTextStyle,
+    MarkdownOptions,
+    MarkdownTheme,
+    ThemeMarkdownTheme,
+    render_markdown_lines,
+)
 
 _ANSI_PATTERN = re.compile(
     r"\x1b\[[0-9;:?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][0-9A-Z]"
@@ -103,35 +109,18 @@ def render_markdown(
     *,
     code_theme: str = "monokai",
     theme_colors: dict | None = None,
+    theme: MarkdownTheme | None = None,
+    default_style: DefaultTextStyle | None = None,
+    options: MarkdownOptions | None = None,
 ) -> list[Line]:
-    """Markdown → 定宽 Line 列表；theme_colors 时按主题重着色标题/代码。"""
-    lines = render_renderable(Markdown(markdown_text, code_theme=code_theme), width)
-    if theme_colors:
-        _apply_markdown_theme(lines, theme_colors)
-    return lines
+    """Markdown → 定宽 Line 列表（对齐 TS Markdown 组件）。
 
-
-def _apply_markdown_theme(lines: list[Line], theme_colors: dict) -> None:
-    """Rich Markdown 输出 → pi 主题色（标题=accent，代码=面板底色+文本色）。"""
-    from rich.color import Color
-
-    def _color(value):
-        if isinstance(value, tuple):
-            return Color.from_rgb(*value)
-        return value
-
-    heading = _color(theme_colors.get("heading"))
-    code_fg = _color(theme_colors.get("code_fg"))
-    code_bg = _color(theme_colors.get("code_bg"))
-    for line in lines:
-        for cell in line.cells:
-            style = cell.style
-            if style is None:
-                continue
-            if style.bold and style.underline and heading is not None:
-                cell.style = Style(bold=True, color=heading)
-            elif style.bgcolor is not None and (code_fg is not None or code_bg is not None):
-                cell.style = style + Style(color=code_fg, bgcolor=code_bg)
+    theme 缺省时按 theme_colors 构造默认主题；theme_colors 兼容旧调用。
+    """
+    resolved = (
+        theme if theme is not None else ThemeMarkdownTheme(theme_colors, code_theme=code_theme)
+    )
+    return render_markdown_lines(markdown_text, width, resolved, default_style, options)
 
 
 def render_group(items: Sequence[Any], width: int) -> list[Line]:
@@ -145,6 +134,10 @@ __all__ = [
     "markup_to_text",
     "render_markdown",
     "render_markup",
+    "render_markdown_lines",
+    "DefaultTextStyle",
+    "MarkdownOptions",
+    "ThemeMarkdownTheme",
     "render_renderable",
     "render_group",
     "strip_ansi",

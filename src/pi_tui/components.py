@@ -341,6 +341,19 @@ class MessageEntry(Widget):
         lines = _render_labeled_markdown(self.label, self.entry_text, 1000, self.speaking)
         return (1000, len(lines))
 
+    def natural_size(self, width: int) -> tuple[int, int]:
+        """按实际内容宽度估算换行后的高度（长消息不再被截断）。"""
+        content_width = max(1, int(width) - 2)
+        lines = _render_labeled_markdown(
+            self.label,
+            self.entry_text,
+            content_width,
+            self.speaking,
+            self.prompt_marker,
+            self.theme_colors or None,
+        )
+        return (max(1, int(width)), len(lines))
+
 
 class ToolExecutionEntry(Widget):
     """工具执行条目：名称/参数 + 输出 + 状态，可展开/折叠（对齐 TS ToolExecutionComponent）。"""
@@ -523,7 +536,14 @@ class PiChatContainer(ScrollView):
     """消息列表容器。"""
 
     def __init__(self, **kwargs) -> None:
-        super().__init__(Vertical(), **kwargs)
+        # 对齐 TS transcriptScrollView：自动跟随底部、主滚动视口、overscroll chain。
+        super().__init__(
+            Vertical(),
+            follow="end",
+            primary=True,
+            overscroll="chain",
+            **kwargs,
+        )
         self._show_tools = True
         self._show_thinking = True
         self._custom_renderer = None

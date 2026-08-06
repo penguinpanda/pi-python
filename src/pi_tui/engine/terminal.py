@@ -11,7 +11,7 @@ import os
 import sys
 from typing import Any
 
-from .cells import Cell, Line, line_to_ansi
+from .cells import Cell, Line, _visible_slice, line_to_ansi
 from .keys import KeyEvent
 
 
@@ -39,9 +39,9 @@ class ScreenBuffer:
     def _normalize(self, lines: list[Line]) -> list[Line]:
         normalized: list[Line] = []
         for line in lines:
-            cells = list(line.cells[: self.width])
-            if len(cells) < self.width:
-                cells.extend(Cell(" ") for _ in range(self.width - len(cells)))
+            cells, used = _visible_slice(line.cells, self.width)
+            if used < self.width:
+                cells.extend(Cell(" ") for _ in range(self.width - used))
             normalized.append(Line(cells, passthrough=line.passthrough))
         while len(normalized) < self.height:
             normalized.append(Line([Cell(" ") for _ in range(self.width)]))

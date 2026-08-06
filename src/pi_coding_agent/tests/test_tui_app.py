@@ -35,13 +35,19 @@ def _make_session() -> MagicMock:
     return session
 
 
-def _make_app(term: FakeTerminal, session: MagicMock | None = None) -> PiTuiApp:
+def _make_app(
+    term: FakeTerminal,
+    session: MagicMock | None = None,
+    *,
+    ui_mode: str = "regular",
+) -> PiTuiApp:
     return PiTuiApp(
         session or _make_session(),
         MagicMock(),
         terminal=term,
         theme_name="dark",
         no_context_files=True,
+        ui_mode=ui_mode,
     )
 
 
@@ -138,18 +144,18 @@ async def test_streaming_message_events() -> None:
 
 @pytest.mark.asyncio
 async def test_layout_matches_ts_chat_above_editor() -> None:
-    """聊天区在编辑器上方（1fr），编辑器固定在底部且不被挤走。"""
+    """regular 模式（对齐 TS TuiMainScreen）：聊天内容在编辑器上方，dock 跟随文档末尾。"""
     term = FakeTerminal(size=(100, 24))
     app = _make_app(term)
 
     async def actions(_term, _app) -> None:
         await asyncio.sleep(0.15)
         assert app._chat.rect[0] == 1
-        assert app._status.rect[0] == 16
-        assert app._editor.rect == (17, 0, 100, 6)
-        assert app._footer.rect == (23, 0, 100, 1)
+        assert app._editor.rect[0] == app._status.rect[0] + 1
+        assert app._editor.rect[2:] == (100, 6)
+        assert app._footer.rect == (app._editor.rect[0] + 6, 0, 100, 1)
 
-        # 一轮完整 user/assistant 消息后，编辑器位置不变。
+        # 一轮完整 user/assistant 消息后，文档变长，dock 随内容下移（非粘性）。
         app._on_session_event(
             {"type": "message_start", "message": {"role": "user", "content": "hi"}}
         )
@@ -176,7 +182,8 @@ async def test_layout_matches_ts_chat_above_editor() -> None:
             }
         )
         await asyncio.sleep(0.1)
-        assert app._editor.rect == (17, 0, 100, 6)
+        assert app._editor.rect[0] > 2
+        assert app._footer.rect[0] == app._editor.rect[0] + 6
         entries = app._chat.query(MessageEntry)
         assert [entry.label for entry in entries] == ["User", "Assistant"]
         assert not any(entry.speaking for entry in entries)
@@ -203,9 +210,9 @@ async def test_message_start_user_does_not_create_stream_placeholder() -> None:
 
 @pytest.mark.asyncio
 async def test_exit_writes_main_screen_document() -> None:
-    """退出时对齐 TS：把最后一帧文档写入主屏并落在新行。"""
+    """退出时对齐 TS：把最后一帧文档写入主屏并落在新行（fullscreen 退出路径）。"""
     term = FakeTerminal(size=(100, 24))
-    app = _make_app(term)
+    app = _make_app(term, ui_mode="fullscreen")
     task = asyncio.create_task(app.run_async())
     await asyncio.sleep(0.15)
     term.reset_output()
@@ -234,7 +241,7 @@ async def test_slash_notify_adds_system_message() -> None:
 
 
 @pytest.mark.asyncio
-async def test_slash_completion_renders_above_editor() -> None:
+async def test_slash_completion_renders_below_editor() -> None:
     term = FakeTerminal(size=(100, 30))
     app = _make_app(term)
 
@@ -246,14 +253,19 @@ async def test_slash_completion_renders_above_editor() -> None:
         app._completion_index = 1
         app._render_slash_completion()
         await asyncio.sleep(0.1)
-        entry = app._overlay_manager.get("slash-completion")
-        assert entry is not None
-        assert entry.options.behavior.non_capturing is True
-        rendered = "\n".join(entry.widget.render(60, 5)[index].text() for index in range(2))
-        assert "/model" in rendered
-        assert ">" in rendered
-        app._hide_slash_completion()
+        # 对齐 TS：补全渲染在编辑器内部（底部边框下方），不再使用上方 overlay。
         assert app._overlay_manager.get("slash-completion") is None
+        editor = app._editor
+        assert editor.completion_active is True
+        assert [value for value, _label in editor.completion_items] == ["/help", "/model"]
+        assert editor.rect[3] > 6
+        rendered = "\n".join(line.text() for line in editor.render(60, editor.rect[3]))
+        assert "/model" in rendered
+        assert "→" in rendered
+        app._hide_slash_completion()
+        await asyncio.sleep(0.1)
+        assert app._editor.completion_active is False
+        assert app._editor.rect[3] == 6
 
     await _run(app, term, actions)
 
@@ -428,9 +440,62 @@ async def test_editor_border_renders_in_app() -> None:
 
         assert app._editor.base_style is not None
         assert app._editor.base_style.color == Color.from_rgb(166, 173, 200)
+        # 对齐 TS：输入框不涂底色。
+        assert app._editor.base_style.bgcolor is None
+        assert app._editor.border_style is not None
+        assert app._editor.border_style.bgcolor is None
         lines = app._editor.render(20, 6)
         assert lines[0].text().strip() == "─" * 20
         assert lines[-1].text().strip() == "─" * 20
+
+    await _run(app, term, actions)
+
+
+@pytest.mark.asyncio
+async def test_toolbar_widgets_have_no_background() -> None:
+    term = FakeTerminal(size=(100, 24))
+    app = _make_app(term)
+
+    async def actions(_term, _app) -> None:
+        await asyncio.sleep(0.1)
+        for widget in (app._header, app._status, app._editor, app._footer, app.screen):
+            assert widget.base_style is not None
+            assert widget.base_style.bgcolor is None, type(widget).__name__
+        # header 内容与渲染帧都包含快捷键提示。
+        assert "cycle model" in app._header.content
+        frame_text = "\n".join(line.text() for line in app._last_frame_lines or [])
+        assert "cycle model" in frame_text
+        assert "Idle" in frame_text
+
+    await _run(app, term, actions)
+
+
+@pytest.mark.asyncio
+async def test_streaming_message_wraps_and_grows_document() -> None:
+    term = FakeTerminal(size=(100, 24))
+    app = _make_app(term)
+
+    async def actions(_term, _app) -> None:
+        await asyncio.sleep(0.1)
+        app._on_session_event(
+            {"type": "message_start", "message": {"role": "assistant", "content": []}}
+        )
+        await asyncio.sleep(0.05)
+        text = "你好！有什么可以帮你的吗？我可以帮你读写文件、执行命令或搜索代码。还可以帮你分析问题、生成测试、修复 bug。 你只需要告诉我目标。"
+        app._on_session_event(
+            {
+                "type": "message_update",
+                "message": {"role": "assistant", "content": [{"type": "text", "text": text}]},
+            }
+        )
+        await asyncio.sleep(0.1)
+        entries = app._chat.query(MessageEntry)
+        assert entries and "Assistant" in entries[0].label
+        doc = "\n".join(line.text() for line in app._last_frame_lines or [])
+        assert "你好！" in doc
+        assert "你只需要告诉我目标" in doc  # 长消息不截断
+        assert doc.count("🤖 Assistant") == 1  # 标签只渲染一次，不叠行
+        assert app._chat.rect[3] >= 3
 
     await _run(app, term, actions)
 

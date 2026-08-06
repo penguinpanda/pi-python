@@ -113,6 +113,11 @@ def _theme_style(theme: Theme, bg_key: str, fg_key: str) -> Style:
     )
 
 
+def _fg_style(theme: Theme, fg_key: str) -> Style:
+    """仅前景色（对齐 TS：header/footer/status/输入框不涂背景）。"""
+    return Style(color=theme.colors.get(fg_key, theme.colors["text"]))
+
+
 class PiTuiApp(App):
     """pi 编码代理 TUI（引擎版）。"""
 
@@ -154,7 +159,7 @@ class PiTuiApp(App):
         self._no_context_files = no_context_files
         self._startup_resources = startup_resources
 
-        self._ui_mode = ui_mode or str((settings or {}).get("uiMode", "fullscreen"))
+        self._ui_mode = ui_mode or str((settings or {}).get("uiMode", "regular"))
         super().__init__(
             keybindings=self._keybindings,
             terminal=terminal,
@@ -262,15 +267,21 @@ class PiTuiApp(App):
     def on_mount(self) -> None:
         padding_x = int(self._settings.get("editorPaddingX", 0) or 0)
         self._editor_widget = PiEditor(height=6, id="pi-editor", border=True, padding_x=padding_x)
-        self.screen.mount(self._header)
-        self.screen.mount(self._resources)
-        self.screen.mount(self._chat)
-        self.screen.mount(self._pending_messages)
-        self.screen.mount(self._status)
-        self.screen.mount(self._widgets_above)
-        self.screen.mount(self._editor_widget)
-        self.screen.mount(self._widgets_below)
-        self.screen.mount(self._footer)
+        # 布局选项对齐 TS fullscreenLayoutRoot：chat 弹性占满，dock 按自然高度，
+        # 固定组件可 shrink 且有最小高度（editor 3 / footer 1）。
+        # fullscreen：chat 占满剩余空间（basis 0 + grow 1）；
+        # regular：chat 按内容自然高度展开，避免文档被压缩成 1 行。
+        chat_basis: int | str = 0 if self._ui_mode == "fullscreen" else "auto"
+        chat_grow = 1 if self._ui_mode == "fullscreen" else 0
+        self.screen.mount(self._header, basis="auto", grow=0, shrink=1, min_size=0)
+        self.screen.mount(self._resources, basis="auto", grow=0, shrink=1, min_size=0)
+        self.screen.mount(self._chat, basis=chat_basis, grow=chat_grow, shrink=1, min_size=1)
+        self.screen.mount(self._pending_messages, basis="auto", grow=0, shrink=1, min_size=0)
+        self.screen.mount(self._status, basis=1, grow=0, shrink=1, min_size=0)
+        self.screen.mount(self._widgets_above, basis="auto", grow=0, shrink=1, min_size=0)
+        self.screen.mount(self._editor_widget, basis=6, grow=0, shrink=1, min_size=3)
+        self.screen.mount(self._widgets_below, basis="auto", grow=0, shrink=1, min_size=0)
+        self.screen.mount(self._footer, basis=1, grow=0, shrink=1, min_size=1)
         self._chat.set_image_options(
             show_images=self._show_images,
             image_width_cells=self._image_width_cells,
@@ -307,7 +318,8 @@ class PiTuiApp(App):
 
     def _apply_theme(self) -> None:
         theme = self._theme
-        self.screen.base_style = _theme_style(theme, "bg", "text")
+        # 对齐 TS：终端背景透出，header/footer/status/输入框只设前景色。
+        self.screen.base_style = _fg_style(theme, "text")
         for widget in (
             self._header,
             self._resources,
@@ -322,21 +334,20 @@ class PiTuiApp(App):
             if widget is None:
                 continue
             if widget is self._header:
-                widget.base_style = _theme_style(theme, "bgToolbar", "textAlt")
+                widget.base_style = _fg_style(theme, "textAlt")
             elif widget is self._status:
-                widget.base_style = _theme_style(theme, "bgToolbar", "textSystem")
+                widget.base_style = _fg_style(theme, "textSystem")
             elif widget is self._editor_widget:
                 # 正文用 muted textAlt（对齐 TS：编辑器文字不染色、终端默认灰），
-                # 光标保持反色块，避免整行看起来都是光标色。
-                widget.base_style = _theme_style(theme, "bgUserInput", "textAlt")
+                # 光标保持反色块，避免整行看起来都是光标色；不涂输入框底色。
+                widget.base_style = _fg_style(theme, "textAlt")
                 widget.border_style = Style(
                     color=theme.colors.get("border", theme.colors["textAlt"]),
-                    bgcolor=theme.colors.get("bgUserInput", theme.colors["bg"]),
                 )
             elif widget is self._footer:
-                widget.base_style = _theme_style(theme, "bgToolbar", "textDim")
+                widget.base_style = _fg_style(theme, "textDim")
             else:
-                widget.base_style = _theme_style(theme, "bg", "text")
+                widget.base_style = _fg_style(theme, "text")
         self._chat.set_theme_colors(
             {
                 "heading": theme.colors.get("accent"),
@@ -522,7 +533,7 @@ class PiTuiApp(App):
         component.height_spec = 6
         if self._editor_widget is not None and getattr(self._editor_widget, "border_style", None):
             component.border_style = self._editor_widget.border_style
-        self.screen.mount(component)
+        self.screen.mount(component, basis=6, grow=0, shrink=1, min_size=3)
         self._custom_editor = component
         component.focus()
 
@@ -841,7 +852,7 @@ class PiTuiApp(App):
         )
 
     async def _update_slash_completion(self, text: str) -> None:
-        """非模态 slash 补全：编辑器保持焦点，实时过滤并渲染到编辑器上方。"""
+        """非模态 slash 补全：编辑器保持焦点，实时过滤并渲染到编辑器下方（对齐 TS）。"""
         provider = create_slash_command_provider(
             self._slash_registry,
             self._session.template_loader,
@@ -852,42 +863,35 @@ class PiTuiApp(App):
         if not items:
             self._hide_slash_completion()
             return
-        self._editor.completion_active = True
         self._render_slash_completion()
 
     def _render_slash_completion(self) -> None:
-        lines: list[str] = []
-        for index, item in enumerate(self._completion_items):
-            if index >= self._autocomplete_max_visible:
-                break
-            value = str(item.get("value", "")).strip()
-            label = str(item.get("label", value))
-            marker = ">" if index == self._completion_index else " "
-            safe_label = label.replace("[", r"\[").replace("]", r"\]")
-            lines.append(f"{marker} {value}  [dim]{safe_label}[/dim]")
-        # 对齐 TS 编辑器内嵌下拉：非捕获 overlay 悬在编辑器上方。
-        row, col, _w, _h = self._editor.rect
-        if row <= 0 or self._editor.rect[3] <= 0:
-            self._set_widget("slash-completion", lines)
-            return
-        width = max(24, min(64, self.terminal.size[0] // 2))
-        self._set_overlay(
-            "slash-completion",
-            lines,
-            {
-                "row": max(0, row - len(lines) - 1),
-                "col": col,
-                "width": width,
-                "nonCapturing": True,
-            },
+        """把补全项写入编辑器内嵌列表（对齐 TS：列表在编辑器底部边框下方）。"""
+        items = [
+            (
+                str(item.get("value", "")).strip(),
+                str(item.get("label", str(item.get("value", ""))).strip()),
+            )
+            for item in self._completion_items
+        ]
+        self._editor.set_completion(
+            items,
+            self._completion_index,
+            self._autocomplete_max_visible,
         )
+        self._resize_editor_for_completion()
+
+    def _resize_editor_for_completion(self) -> None:
+        """补全展开时增高编辑器，dock/文档随之下移（对齐 TS editorContainer 自适应）。"""
+        editor = self._editor
+        extra = editor._completion_line_count()
+        self.screen.set_child_basis(editor, 6 + extra)
 
     def _hide_slash_completion(self) -> None:
         self._completion_items = []
         self._completion_index = 0
-        self._editor.completion_active = False
-        self._set_widget("slash-completion", [])
-        self._set_overlay("slash-completion", [])
+        self._editor.clear_completion()
+        self.screen.set_child_basis(self._editor, 6)
 
     def _insert_completion(self, value: str) -> None:
         if value.startswith("/"):
@@ -905,6 +909,7 @@ class PiTuiApp(App):
             return
         count = len(self._completion_items)
         self._completion_index = (self._completion_index + message.delta) % count
+        self._editor.completion_index = self._completion_index
         self._render_slash_completion()
 
     def on_pi_editor_completion_submit_requested(self, message) -> None:

@@ -4,6 +4,21 @@ from __future__ import annotations
 
 from typing import Any
 
+# Python 独有命令不出现在 / 补全菜单（对齐 TS BUILTIN_SLASH_COMMANDS）；
+# 仍可手动输入执行。
+_PYTHON_ONLY_BUILTIN_NAMES = frozenset(
+    {
+        "thinking",
+        "oauth",
+        "extensions",
+        "help",
+        "input",
+        "debug",
+        "arminsayshi",
+        "dementedelves",
+    }
+)
+
 
 def create_slash_command_provider(slash_registry, template_loader=None):
     """构造 slash 命令补全 provider。
@@ -25,6 +40,8 @@ def create_slash_command_provider(slash_registry, template_loader=None):
         if slash_registry is not None:
             for command in slash_registry.list():
                 name = getattr(command, "name", "")
+                if name in _PYTHON_ONLY_BUILTIN_NAMES:
+                    continue
                 if not name.startswith(prefix):
                     continue
                 value = f"/{name} "

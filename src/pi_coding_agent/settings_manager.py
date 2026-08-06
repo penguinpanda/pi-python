@@ -580,12 +580,10 @@ class SettingsManager:
         return bool((self._settings.get("terminal") or {}).get("showImages", True))
 
     def get_ui_mode(self) -> str:
-        # 默认 fullscreen（保持当前 Python TUI 体验）；TS 默认 regular，
-        # 通过设置 uiMode 可切换两种模式。
+        # 默认 regular（对齐 TS TuiMainScreen）：内容写入主屏并进入终端 scrollback；
+        # 通过设置 uiMode=fullscreen 切换为带粘性底部 dock 的 alt-screen 视口。
         return (
-            "fullscreen"
-            if self._settings.get("uiMode", "fullscreen") == "fullscreen"
-            else "regular"
+            "fullscreen" if self._settings.get("uiMode", "regular") == "fullscreen" else "regular"
         )
 
     def set_ui_mode(self, mode: str) -> None:

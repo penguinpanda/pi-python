@@ -196,7 +196,7 @@ class TestStorageAbstractions:
 
 def test_ui_mode_setting(tmp_path) -> None:
     manager = SettingsManager.in_memory({}, project_trusted=True)
-    assert manager.get_ui_mode() == "fullscreen"
+    assert manager.get_ui_mode() == "regular"
     manager.set_ui_mode("regular")
     assert manager.get_ui_mode() == "regular"
     manager.set_ui_mode("fullscreen")

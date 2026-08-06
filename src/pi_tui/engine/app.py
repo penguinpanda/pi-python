@@ -17,7 +17,8 @@ from ..overlay.layout import OverlayRect
 from ..overlay.manager import OverlayHooks, OverlayManager
 from ..overlay.model import OverlayOptions
 from ..terminal import parse_osc11_background
-from .cells import Line, line_to_ansi
+from .cells import Line, blank_line, line_to_ansi
+from .layout import LayoutFrame, box_at, render_layout_frame
 from .keys import Key, KeyEvent, KeyParser, normalize_key_name
 from .overlay_widget import OverlayWidget
 from .terminal import FakeTerminal, ScreenBuffer, Terminal
@@ -37,7 +38,7 @@ class App:
         terminal: Terminal | FakeTerminal | None = None,
         size: tuple[int, int] = (80, 24),
         keybindings: KeybindingsManager | None = None,
-        ui_mode: str = "fullscreen",
+        ui_mode: str = "regular",
     ) -> None:
         if terminal is None:
             try:
@@ -77,7 +78,12 @@ class App:
         self.clear_on_shrink = os.environ.get("PI_CLEAR_ON_SHRINK", "") in ("1", "true", "yes")
         self._regular_prev_lines: list[str] = []
         self._regular_cursor_row = -1
+        self._regular_hardware_cursor_row = -1
         self._regular_viewport_top = 0
+        self._regular_prev_width = 0
+        self._regular_prev_height = 0
+        self._regular_max_lines_rendered = 0
+        self._layout_frame: LayoutFrame | None = None
         self._overlays: list[OverlayWidget] = []
         self._overlay_manager = OverlayManager(
             OverlayHooks(
@@ -113,7 +119,9 @@ class App:
 
     def _compose(self) -> list[Line]:
         width, height = self.terminal.size
-        lines = self.screen.render(width, height)
+        frame = render_layout_frame(self.screen, width, height, self.request_render)
+        self._layout_frame = frame
+        lines = frame.lines
         for overlay in self._overlays:
             if not overlay.visible:
                 continue
@@ -153,22 +161,11 @@ class App:
         self.terminal.flush()
 
     def _compose_document(self) -> list[Line]:
-        """regular 模式文档：各组件自然高度 + overlay 合成（对齐 TS TuiMainScreen）。"""
+        """regular 模式文档：布局引擎按自然高度合成 + overlay（对齐 TS TuiMainScreen）。"""
         width, _height = self.terminal.size
-        lines: list[Line] = []
-        for widget in self.screen.children:
-            if not widget.visible:
-                continue
-            if isinstance(widget, ScrollView) and widget.child is not None:
-                _w, content_height = widget.child.content_size()
-                lines.extend(widget.child.render(width, max(1, content_height)))
-                continue
-            spec = widget.height_spec
-            if isinstance(spec, int):
-                height = max(1, spec)
-            else:
-                height = max(1, widget.content_size()[1])
-            lines.extend(widget.render(width, height))
+        frame = render_layout_frame(self.screen, width, None, self.request_render)
+        self._layout_frame = frame
+        lines = frame.lines
         for overlay in self._overlays:
             if not overlay.visible:
                 continue
@@ -176,6 +173,12 @@ class App:
             if overlay_width <= 0 or overlay_height <= 0:
                 continue
             overlay_lines = overlay.render(overlay_width, overlay_height)
+            # 主屏文档比视口短时仍要容纳 overlay（对话框/选择器），
+            # 对齐 TS TuiMainScreen.compositeOverlays 的 padding 行为。
+            needed = row + overlay_height
+            base_style = getattr(self.screen, "base_style", None)
+            while len(lines) < needed:
+                lines.append(blank_line(width, base_style))
             for index, line in enumerate(overlay_lines):
                 target_row = row + index
                 if 0 <= target_row < len(lines):
@@ -183,55 +186,186 @@ class App:
         return lines
 
     def _render_regular(self, force: bool) -> None:
-        """主屏模式渲染：内容追加进 scrollback，必要时重写变化区。"""
+        """主屏模式渲染：差分写入 scrollback（对齐 TS TuiMainScreen）。
+
+        只重写 firstChanged..lastChanged 变化行，光标用增量 A/B 移动；
+        宽度/高度变化或内容收缩时整屏重写。
+        """
         width, height = self.terminal.size
         lines = self._compose_document()
         self._last_frame_lines = lines
         ansi = [line_to_ansi(line, width) for line in lines]
         prev = self._regular_prev_lines
-        first = 0
-        while first < len(prev) and first < len(ansi) and prev[first] == ansi[first]:
-            first += 1
-        if first == len(prev) and first == len(ansi):
-            return
-        buffer = ""
-        if first >= len(prev):
-            # 追加：从文档末尾继续写。
-            if prev:
-                buffer += "\r\n"
-            buffer += "\r\n".join(ansi[first:])
-            self._regular_cursor_row = len(ansi) - 1
-        else:
-            viewport_top = max(0, self._regular_cursor_row - height + 1)
-            if first < viewport_top:
-                # 改动区已滚出视口：全量重写（对齐 TS fullRender）。
-                buffer = "\x1b[2J\x1b[H" + "\r\n".join(ansi)
-                self._regular_viewport_top = 0
-                self._regular_cursor_row = len(ansi) - 1
-            else:
-                delta = first - self._regular_cursor_row
-                if delta > 0:
-                    buffer += f"\x1b[{delta}B"
-                elif delta < 0:
-                    buffer += f"\x1b[{-delta}A"
-                for index in range(first, len(ansi)):
-                    buffer += "\r\x1b[2K" + ansi[index]
-                    if index < len(ansi) - 1:
-                        buffer += "\r\n"
-                if len(ansi) < len(prev):
-                    extra = len(prev) - len(ansi)
-                    for _ in range(extra):
-                        buffer += "\r\n\x1b[2K"
-                    if extra:
-                        buffer += f"\x1b[{extra}A"
-                self._regular_cursor_row = len(ansi) - 1
-        self._regular_prev_lines = ansi
-        self._regular_viewport_top = max(0, self._regular_cursor_row - height + 1)
-        if buffer:
-            if getattr(self.terminal, "sync_output", False):
-                buffer = "\x1b[?2026h" + buffer + "\x1b[?2026l"
+        width_changed = self._regular_prev_width != 0 and self._regular_prev_width != width
+        height_changed = self._regular_prev_height != 0 and self._regular_prev_height != height
+
+        def full_render(clear: bool, clear_viewport: bool = False) -> None:
+            nonlocal ansi
+            buffer = "\x1b[?2026h"
+            if clear:
+                buffer += "\x1b[2J\x1b[H\x1b[3J"
+            elif clear_viewport:
+                # 首帧清视口但保留 scrollback，让文档（含 header）从视口顶部开始。
+                buffer += "\x1b[2J\x1b[H"
+            buffer += "\r\n".join(ansi)
+            buffer += "\x1b[?2026l"
             self.terminal.write(buffer)
             self.terminal.flush()
+            self._regular_prev_lines = ansi
+            self._regular_prev_width = width
+            self._regular_prev_height = height
+            self._regular_cursor_row = max(0, len(ansi) - 1)
+            self._regular_hardware_cursor_row = self._regular_cursor_row
+            self._regular_max_lines_rendered = len(ansi)
+            self._regular_viewport_top = max(0, max(height, len(ansi)) - height)
+
+        if force:
+            self._regular_prev_lines = []
+            self._regular_prev_width = 0
+            self._regular_prev_height = 0
+
+        # 首帧：清视口后从顶部输出（保留 scrollback，header 立即可见）。
+        if not self._regular_prev_lines and not width_changed and not height_changed:
+            full_render(False, clear_viewport=True)
+            return
+        # 宽度变化：换行方式变化，必须整屏重写。
+        if width_changed:
+            full_render(True)
+            return
+        # 高度变化：视口对齐需要整屏重写。
+        if height_changed:
+            full_render(True)
+            return
+        # 内容收缩：清掉残留行（可配置 PI_CLEAR_ON_SHRINK=0 关闭）。
+        if self.clear_on_shrink and len(ansi) < self._regular_max_lines_rendered:
+            full_render(True)
+            return
+
+        prev_buffer_length = self._regular_prev_height if self._regular_prev_height > 0 else height
+        prev_viewport_top = (
+            max(0, prev_buffer_length - height) if height_changed else self._regular_viewport_top
+        )
+        viewport_top = prev_viewport_top
+        hardware_cursor_row = self._regular_hardware_cursor_row
+
+        def compute_line_diff(target_row: int) -> int:
+            current_screen_row = hardware_cursor_row - prev_viewport_top
+            target_screen_row = target_row - viewport_top
+            return target_screen_row - current_screen_row
+
+        first = -1
+        last = -1
+        for index in range(max(len(ansi), len(prev))):
+            old = prev[index] if index < len(prev) else ""
+            new = ansi[index] if index < len(ansi) else ""
+            if old != new:
+                if first == -1:
+                    first = index
+                last = index
+        appended = len(ansi) > len(prev)
+        if appended:
+            if first == -1:
+                first = len(prev)
+            last = len(ansi) - 1
+        if first == -1:
+            self._regular_viewport_top = prev_viewport_top
+            self._regular_prev_height = height
+            return
+
+        # 变化全部在删除行：移动到新内容末尾，清掉多余行。
+        if first >= len(ansi):
+            if len(prev) > len(ansi):
+                target_row = max(0, len(ansi) - 1)
+                if target_row < prev_viewport_top:
+                    full_render(True)
+                    return
+                extra = len(prev) - len(ansi)
+                if extra > height:
+                    full_render(True)
+                    return
+                buffer = "\x1b[?2026h"
+                line_diff = compute_line_diff(target_row)
+                if line_diff > 0:
+                    buffer += f"\x1b[{line_diff}B"
+                elif line_diff < 0:
+                    buffer += f"\x1b[{-line_diff}A"
+                buffer += "\r"
+                clear_start_offset = 0 if len(ansi) == 0 else 1
+                if extra > 0 and clear_start_offset > 0:
+                    buffer += f"\x1b[{clear_start_offset}B"
+                for index in range(extra):
+                    buffer += "\r\x1b[2K"
+                    if index < extra - 1:
+                        buffer += "\x1b[1B"
+                move_back = max(0, extra - 1 + clear_start_offset)
+                if move_back > 0:
+                    buffer += f"\x1b[{move_back}A"
+                buffer += "\x1b[?2026l"
+                self.terminal.write(buffer)
+                self.terminal.flush()
+                self._regular_cursor_row = target_row
+                self._regular_hardware_cursor_row = target_row
+            self._regular_prev_lines = ansi
+            self._regular_prev_width = width
+            self._regular_prev_height = height
+            self._regular_viewport_top = prev_viewport_top
+            return
+
+        # 变化区滚出视口：全量重写。
+        if first < prev_viewport_top:
+            full_render(True)
+            return
+
+        append_start = appended and first == len(prev) and first > 0
+        buffer = "\x1b[?2026h"
+        prev_viewport_bottom = prev_viewport_top + height - 1
+        move_target_row = first - 1 if append_start else first
+        if move_target_row > prev_viewport_bottom:
+            current_screen_row = max(0, min(height - 1, hardware_cursor_row - prev_viewport_top))
+            move_to_bottom = height - 1 - current_screen_row
+            if move_to_bottom > 0:
+                buffer += f"\x1b[{move_to_bottom}B"
+            scroll = move_target_row - prev_viewport_bottom
+            buffer += "\r\n" * scroll
+            prev_viewport_top += scroll
+            viewport_top += scroll
+            hardware_cursor_row = move_target_row
+
+        line_diff = compute_line_diff(move_target_row)
+        if line_diff > 0:
+            buffer += f"\x1b[{line_diff}B"
+        elif line_diff < 0:
+            buffer += f"\x1b[{-line_diff}A"
+        buffer += "\r\n" if append_start else "\r"
+
+        render_end = min(last, len(ansi) - 1)
+        for index in range(first, render_end + 1):
+            if index > first:
+                buffer += "\r\n"
+            buffer += "\x1b[2K" + ansi[index]
+        final_cursor_row = render_end
+
+        if len(prev) > len(ansi):
+            if render_end < len(ansi) - 1:
+                move_down = len(ansi) - 1 - render_end
+                buffer += f"\x1b[{move_down}B"
+                final_cursor_row = len(ansi) - 1
+            extra = len(prev) - len(ansi)
+            for _ in range(extra):
+                buffer += "\r\n\x1b[2K"
+            buffer += f"\x1b[{extra}A"
+        buffer += "\x1b[?2026l"
+
+        self.terminal.write(buffer)
+        self.terminal.flush()
+
+        self._regular_cursor_row = max(0, len(ansi) - 1)
+        self._regular_hardware_cursor_row = final_cursor_row
+        self._regular_max_lines_rendered = max(self._regular_max_lines_rendered, len(ansi))
+        self._regular_viewport_top = max(prev_viewport_top, final_cursor_row - height + 1)
+        self._regular_prev_lines = ansi
+        self._regular_prev_width = width
+        self._regular_prev_height = height
 
     def _write_hardware_cursor(self) -> None:
         """PI_HARDWARE_CURSOR=1 时用硬件光标定位（编辑器提供位置）。"""
@@ -243,7 +377,7 @@ class App:
         local = widget.cursor_position()
         if local is None:
             return
-        row, col, _width, _height = widget.rect
+        row, col = _widget_screen_origin(self._layout_frame, widget)
         self.terminal.set_hardware_cursor(row + local[0] + 1, col + local[1] + 1)
 
     # ------------------------------------------------------------------
@@ -600,13 +734,17 @@ class App:
         return (start, end + 1)
 
     def _widget_at(self, row: int, col: int) -> Widget | None:
-        """屏幕坐标 → 最上层可见组件（含 overlay）。"""
+        """屏幕坐标 → 最上层可见组件（含 overlay；普通组件走 LayoutBox 树）。"""
         for overlay in reversed(self._overlays):
             if not overlay.visible:
                 continue
             r0, c0, w, h = overlay.rect
             if r0 <= row < r0 + h and c0 <= col < c0 + w:
                 return overlay
+        if self._layout_frame is not None:
+            box = box_at(self._layout_frame, col, row)
+            if box is not None and isinstance(box.component, Widget):
+                return box.component
         found: Widget | None = None
         for widget in self.screen.walk():
             if not widget.visible:
@@ -860,6 +998,19 @@ class App:
                     loop.remove_signal_handler(sig)
                 except (NotImplementedError, RuntimeError, ValueError):
                     pass
+
+
+def _widget_screen_origin(frame: LayoutFrame | None, widget: Widget) -> tuple[int, int]:
+    """组件在最近一帧中的屏幕坐标（scroll 内已平移），无帧时回退 widget.rect。"""
+    if frame is not None:
+        stack = [frame.root]
+        while stack:
+            box = stack.pop()
+            if box.component is widget:
+                return box.rect.y, box.rect.x
+            stack.extend(box.children)
+    row, col, _width, _height = widget.rect
+    return row, col
 
 
 def _platform_clipboard(text: str) -> None:

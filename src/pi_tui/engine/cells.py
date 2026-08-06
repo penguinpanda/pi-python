@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
+from rich.cells import cell_len
 from rich.style import Style
 
 
@@ -74,10 +75,23 @@ def blank_line(width: int, style: Style | None = None) -> Line:
     return Line([Cell(" ", style) for _ in range(width)])
 
 
+def _visible_slice(cells: Iterable[Cell], width: int) -> tuple[list[Cell], int]:
+    """按终端可见列宽截取单元格（CJK 等宽字符不拆半、不超宽）。"""
+    result: list[Cell] = []
+    used = 0
+    for cell in cells:
+        char_width = cell_len(cell.char)
+        if used + char_width > width:
+            break
+        result.append(cell)
+        used += char_width
+    return result, used
+
+
 def line_from_text(text: str, width: int, style: Style | None = None) -> Line:
-    """纯文本 → Line（超出宽度截断，不足补空）。"""
-    cells = [Cell(char, style) for char in text[:width]]
-    cells.extend(Cell(" ", style) for _ in range(max(0, width - len(cells))))
+    """纯文本 → Line（按可见列宽截断，不足补空；CJK 按 2 列计）。"""
+    cells, used = _visible_slice((Cell(char, style) for char in text), width)
+    cells.extend(Cell(" ", style) for _ in range(max(0, width - used)))
     return Line(cells)
 
 
@@ -135,8 +149,8 @@ def line_to_ansi(line: Line, width: int) -> str:
     parts: list[str] = []
     previous: Style | None = None
     previous_link: str | None = None
-    for index in range(min(width, len(line.cells))):
-        cell = line.cells[index]
+    cells, used = _visible_slice(line.cells, width)
+    for cell in cells:
         if cell.link != previous_link:
             if cell.link:
                 parts.append(f"\x1b]8;{cell.link}\x1b\\")
@@ -149,7 +163,7 @@ def line_to_ansi(line: Line, width: int) -> str:
                 parts.append(sgr)
             previous = cell.style
         parts.append(cell.char)
-    remaining = width - min(width, len(line.cells))
+    remaining = width - used
     if remaining > 0:
         if previous is not None:
             sgr = _style_sgr(previous)

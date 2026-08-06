@@ -34,6 +34,28 @@ def test_sgr_mouse_coordinates_are_zero_based() -> None:
     assert (mouse.row, mouse.col) == (4, 2)
 
 
+def test_cjk_lines_never_exceed_terminal_width() -> None:
+    from rich.cells import cell_len
+
+    from pi_tui.engine.cells import line_from_text, line_to_ansi
+    from pi_tui.engine.text import strip_ansi
+
+    # 中文按 2 列计：不拆宽字符、不超宽。
+    line = line_from_text("加内存", 6)
+    assert len(line.cells) == 3
+    assert cell_len(line.text()) == 6
+    line = line_from_text("加内存", 4)
+    assert "".join(c.char for c in line.cells).startswith("加内")
+    assert cell_len(line.text()) == 4
+
+    ansi = line_to_ansi(line_from_text("加内存" * 30, 20), 20)
+    assert cell_len(strip_ansi(ansi)) == 20
+
+    buffer = ScreenBuffer(10, 3)
+    normalized = buffer._normalize([line_from_text("加内存" * 30, 10)])
+    assert cell_len(normalized[0].text()) == 10
+
+
 def test_empty_static_has_zero_natural_size() -> None:
     assert Static("").content_size() == (0, 0)
     assert Static("x").content_size()[1] == 1
