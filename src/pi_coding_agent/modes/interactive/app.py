@@ -327,6 +327,10 @@ class PiTuiApp(App):
                 widget.base_style = _theme_style(theme, "bgToolbar", "textSystem")
             elif widget is self._editor_widget:
                 widget.base_style = _theme_style(theme, "bgUserInput", "text")
+                widget.border_style = Style(
+                    color=theme.colors.get("border", theme.colors["textAlt"]),
+                    bgcolor=theme.colors.get("bgUserInput", theme.colors["bg"]),
+                )
             elif widget is self._footer:
                 widget.base_style = _theme_style(theme, "bgToolbar", "textDim")
             else:
@@ -514,6 +518,8 @@ class PiTuiApp(App):
             self._editor_widget.visible = False
         component.id = f"pi-editor-{id(component):x}"
         component.height_spec = 6
+        if self._editor_widget is not None and getattr(self._editor_widget, "border_style", None):
+            component.border_style = self._editor_widget.border_style
         self.screen.mount(component)
         self._custom_editor = component
         component.focus()

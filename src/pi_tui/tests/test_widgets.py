@@ -548,3 +548,20 @@ async def test_ctrl_c_copies_mouse_selection() -> None:
     app._handle_mouse(_mouse("motion", 0, 2, button="none"))
     await app._handle_event(KeyEvent(type="key", key=Key(name="ctrl+c")))
     assert term.clipboard == ["xyz"]
+
+
+def test_editor_border_uses_dedicated_style() -> None:
+    from rich.color import Color
+    from rich.style import Style
+
+    border = Style(color=Color.from_rgb(69, 71, 90), bgcolor=Color.from_rgb(30, 30, 46))
+    editor = Editor(border=True, base_style=Style(color=Color.from_rgb(205, 214, 244)))
+    editor.border_style = border
+    editor.focused = True
+    lines = editor.render(10, 4)
+    assert lines[0].cells[0].style is not None
+    assert lines[0].cells[0].style.color == Color.from_rgb(69, 71, 90)
+    assert lines[-1].cells[0].style.color == Color.from_rgb(69, 71, 90)
+    # 内容行首个单元格是光标（反色），不是边框色。
+    assert lines[1].cells[0].style is not None
+    assert lines[1].cells[0].style.reverse is True

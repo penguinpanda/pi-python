@@ -479,6 +479,7 @@ class Editor(Widget):
         super().__init__(focusable=True, **kwargs)
         self.border = border
         self.padding_x = max(0, int(padding_x))
+        self.border_style: Style | None = None
         self.lines: list[str] = [""] if not text else text.split("\n")
         self.cursor_row = 0
         self.cursor_col = 0
@@ -1196,7 +1197,7 @@ class Editor(Widget):
             content.append(blank_line(width, self.base_style))
         if not self.border:
             return content
-        border_style = (self.base_style or Style()) + Style(dim=True)
+        border_style = self.border_style or (self.base_style or Style()) + Style(dim=True)
         border = line_from_text("─" * width, width, border_style)
         return [border, *content, border][:height]
 
