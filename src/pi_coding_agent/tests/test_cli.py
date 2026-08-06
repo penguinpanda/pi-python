@@ -7,6 +7,7 @@ from pi_coding_agent import _cli
 from pi_coding_agent._session_manager import SessionManager
 from pi_coding_agent.settings_manager import SettingsManager
 from pi_ai import Model
+from pi_ai.models.models_store import FileModelsStore
 
 
 class _FakeRuntime:
@@ -274,3 +275,22 @@ def test_extension_label():
         == "ext-a"
     )
     assert _cli._extension_label(SimpleNamespace(path="/x/pkg", resolved_path="/x/pkg")) == "pkg"
+
+
+async def test_create_runtime_persists_models_store(monkeypatch, tmp_path):
+    """回归：_create_runtime 应把动态模型目录写入 ~/.pi/agent/models-store.json。"""
+
+    captured: dict = {}
+
+    async def fake_create(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(_cli.ModelRuntime, "create", staticmethod(fake_create))
+    monkeypatch.setattr(_cli, "get_agent_dir", lambda: tmp_path)
+
+    await _cli._create_runtime()
+
+    assert isinstance(captured["models_store"], FileModelsStore)
+    assert captured["models_path"] == str(tmp_path / "models.json")
+    assert captured["auth_path"] == str(tmp_path / "auth.json")

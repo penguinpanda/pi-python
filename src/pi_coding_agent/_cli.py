@@ -693,12 +693,14 @@ async def _create_runtime() -> ModelRuntime:
     错误由 Models.refresh 收集，保留静态/上次缓存列表。
     """
     from pi_ai import create_default_models
+    from pi_ai.models.models_store import FileModelsStore
 
     providers = create_default_models().get_providers()
     runtime = await ModelRuntime.create(
         providers=providers,
         auth_path=str(get_agent_dir() / "auth.json"),
         models_path=str(get_agent_dir() / "models.json"),
+        models_store=FileModelsStore(get_agent_dir() / "models-store.json"),
         allow_model_network=_allow_model_network(),
         model_refresh_timeout_ms=15000,
     )

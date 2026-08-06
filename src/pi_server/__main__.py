@@ -6,6 +6,7 @@ import asyncio
 import os
 
 from pi_ai import create_default_models
+from pi_ai.models.models_store import FileModelsStore
 
 from pi_coding_agent._config import get_agent_dir
 from pi_coding_agent.model_runtime import ModelRuntime
@@ -19,6 +20,7 @@ async def _main() -> int:
         providers=create_default_models().get_providers(),
         auth_path=str(get_agent_dir() / "auth.json"),
         models_path=str(get_agent_dir() / "models.json"),
+        models_store=FileModelsStore(get_agent_dir() / "models-store.json"),
         allow_model_network=True,
         model_refresh_timeout_ms=15000,
     )

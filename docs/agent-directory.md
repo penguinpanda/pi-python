@@ -8,7 +8,9 @@
 | --- | --- | --- |
 | `auth.json` | 各 provider 的 api_key / oauth 凭证 | 已实现（`AuthStorage`） |
 | `models.json` | 模型元数据缓存（在线刷新可关闭） | 已实现（模型解析/缓存） |
+| `models-store.json` | 动态模型目录缓存（models + etag / lastModified / checkedAt） | 已实现（`FileModelsStore`，CLI/server 默认路径） |
 | `settings.json` | 全局配置（双层合并：项目 `.pi/settings.json` 覆盖） | 已实现（`load_settings`） |
+| `trust.json` | 项目信任决策记录 | 已实现（`TrustManager` + `resolve_project_trusted`） |
 | `sessions/` | 会话存储 | 已实现，per-cwd 布局（见下） |
 | `prompts/` | 提示模板（slash command 模板） | 已实现（`get_prompts_dir`） |
 | `skills/` | 技能目录 | 已实现（`get_skills_dir`） |
