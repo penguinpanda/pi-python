@@ -1,24 +1,35 @@
-# pi-tui — 终端 UI 框架
+# pi-tui — 终端 UI 框架（内置引擎）
 
 基于 [pi-mono/packages/tui](https://github.com/earendil-works/pi-mono) 的 Python 复刻，
-与 `pi_ai` / `pi_agent` 平级的可复用 Textual 框架包：主题、快捷键、基础组件、选择器与剪贴板图片处理。
+与 `pi_ai` / `pi_agent` 平级的可复用终端 UI 框架包（**无 Textual**）：
+内置引擎、主题、快捷键、基础组件、选择器与剪贴板图片处理。
 应用层（AgentSession 绑定、slash 命令、会话切换）位于 `pi_coding_agent.modes.interactive`。
 
 ---
 
 ## 架构概览
 
-```
-pi_coding_agent.modes.interactive.PiTuiApp
-    ├─ PiHeader / PiChatContainer / PiEditor / PiStatusBar / PiFooter   (components)
-    ├─ KeybindingsManager + DEFAULT_APP_KEYBINDINGS                    (keybindings)
-    ├─ ModelSelector / SessionPicker                                   (selectors)
-    ├─ ThemeLoader + DARK_THEME / LIGHT_THEME / 自定义 JSON            (theme)
-    └─ ClipboardImage                                                  (clipboard_image)
+```text
+pi_tui
+├── engine/                        # 内置终端引擎
+│   ├── cells.py                   # Cell / Line 单元格行模型 + ANSI/OSC8 输出
+│   ├── text.py                    # Rich renderable → 定宽 Line
+│   ├── keys.py                    # UTF-8 / CSI / SS3 / kitty / SGR 鼠标 / paste / OSC
+│   ├── terminal.py                # raw / alt-screen / 尺寸 / 行差分 / OSC 133/2026/52
+│   ├── widgets.py                 # Widget / Container / Text / Input / Editor / ScrollView / 列表
+│   ├── overlay_widget.py          # OverlayWidget（行文本 / 组件树双模）
+│   └── app.py                     # App 基类（事件循环、焦点、overlay 合成、快捷键）
+├── components.py                  # PiHeader / PiChatContainer / PiEditor / PiStatusBar / PiFooter
+├── keybindings.py                 # KeybindingsManager + DEFAULT_APP_KEYBINDINGS
+├── selectors.py                   # ModelSelector / SessionPicker / TreeSelector 等
+├── theme.py                       # ThemeLoader + DARK_THEME / LIGHT_THEME / 自定义 JSON
+├── overlay/                       # overlay 模型 / 布局 / 焦点状态机 / 管理器
+├── markdown.py / autocomplete.py / terminal_image.py / clipboard_image.py
+└── lists.py                       # SelectList / SettingsList
 ```
 
-依赖：`textual`（组件与 ModalScreen）+ `pillow`（剪贴板图片处理）。
-`pi_tui` 不依赖 `pi_ai` / `pi_agent`，可独立复用于其它 Textual 应用。
+依赖：`rich`（文本样式 / markdown 解析）+ `pillow`（剪贴板图片处理）。
+`pi_tui` 不依赖 `pi_ai` / `pi_agent`，可独立复用。
 
 ---
 
@@ -33,40 +44,63 @@ uv sync
 ### 最小示例：组合内置组件
 
 ```python
-from textual.app import App, ComposeResult
+import asyncio
 
+from pi_tui.engine import App, FakeTerminal
 from pi_tui.components import PiChatContainer, PiEditor, PiFooter, PiHeader
 from pi_tui.keybindings import KeybindingsManager
 from pi_tui.theme import ThemeLoader
 
 
 class MyApp(App):
-    def __init__(self) -> None:
+    def __init__(self, terminal=None) -> None:
         self._keybindings = KeybindingsManager()
-        self._theme = ThemeLoader().resolve("auto")  # None/"auto" 按终端背景选择
-        super().__init__()
+        self._theme = ThemeLoader().resolve("dark")
+        super().__init__(terminal=terminal or FakeTerminal(size=(100, 30)))
 
-    def compose(self) -> ComposeResult:
-        yield PiHeader(self._keybindings, id="pi-header")
-        yield PiChatContainer(id="pi-chat")
-        yield PiEditor(id="pi-editor")
-        yield PiFooter("", id="pi-footer")
+    def on_mount(self) -> None:
+        self.screen.mount(PiHeader(self._keybindings, height=1, id="pi-header"))
+        self._chat = PiChatContainer(height="1fr", id="pi-chat")
+        self.screen.mount(self._chat)
+        self.screen.mount(PiEditor(height=6, id="pi-editor"))
+        self.screen.mount(PiFooter("", height=1, id="pi-footer"))
 
     def on_pi_editor_submitted(self, message: PiEditor.Submitted) -> None:
-        self.query_one(PiChatContainer).add_message_agent({"role": "user", "content": message.text})
+        self._chat.add_message_agent({"role": "user", "content": message.text})
 
 
-MyApp().run()
+asyncio.run(MyApp().run_async())
 ```
 
 ### 主题注入
 
-`Theme.css_variables()` 生成 `pi-<key>` 前缀的 CSS 变量表，供 Textual CSS 模板替换：
+主题颜色直接作为 `Rich Style` 应用到组件（`bgcolor` / `color`）：
 
 ```python
 theme = ThemeLoader().load("dark")
-vars_ = theme.css_variables()  # {"pi-bg": "#1e1e2e", ...}
+header.base_style = Style(bgcolor=theme.colors["bgToolbar"], color=theme.colors["textAlt"])
 ```
+
+`Theme.css_variables()` 保留为兼容 API（旧 CSS 模板不再使用）。
+
+---
+
+## 引擎（engine/）
+
+- `cells.py`：`Cell`（字符 + Rich Style + OSC8 link）与 `Line`（定宽单元格行）；
+  `line_to_ansi` 输出 SGR + OSC8 链接 + 尾部重置。
+- `text.py`：`render_markup` / `render_markdown` / `render_renderable` → `list[Line]`。
+- `keys.py`：`KeyParser` 增量解析，`Key` 规范名（`ctrl+p` / `shift+tab` / `f1`），
+  `MouseEvent`（SGR press/motion/wheel）。
+- `terminal.py`：POSIX raw（termios/tty）与 Windows VT（SetConsoleMode）、alt-screen、
+  `ScreenBuffer.diff` 行差分、OSC 133 prompt / OSC 2026 同步输出 / OSC 52 剪贴板、
+  `PI_HARDWARE_CURSOR` 硬件光标；`FakeTerminal` 供无 TTY 测试。
+- `widgets.py`：`Widget` / `Container`（vertical/horizontal、fixed/auto/fr）、
+  `Static`（Rich markup）、`Input`、`Editor`（多行、undo/redo、vim 模式、
+  word navigation、补全导航）、`ScrollView`（滚动条、滚轮）、
+  `SelectList` / `SettingsList`、`Loader` / `CancellableLoader`、`Markdown`。
+- `app.py`：`request_render` / `_compose`（base + overlay 合成）/ `focus` /
+  `dispatch_message`（`on_<namespace>_<snake>` 处理器）/ 快捷键分发 / 剪贴板 / 生命周期。
 
 ---
 
@@ -94,8 +128,8 @@ vars_ = theme.css_variables()  # {"pi-bg": "#1e1e2e", ...}
 | 组件 | 基类 | 职责 |
 |------|------|------|
 | `PiHeader` | `Static` | Logo + 快捷键提示（读取 KeybindingsManager 生成） |
-| `PiChatContainer` | `VerticalScroll` | 消息列表；`add_message_agent()` 追加并滚动到底部，`clear_messages()` 清空，`set_visibility()` 控制工具/思考块显隐 |
-| `PiEditor` | `TextArea` | 多行输入；Enter 提交并发出 `Submitted` 事件（空文本忽略） |
+| `PiChatContainer` | `ScrollView` | 消息列表；`add_message_agent()` 追加并滚动到底部，`clear_messages()` 清空，`set_visibility()` 控制工具/思考块显隐 |
+| `PiEditor` | `Editor` | 多行输入；Enter 提交并发出 `Submitted` 事件（空文本忽略）；vim 模式 `PiEditorVim` |
 | `PiStatusBar` | `Label` | 状态栏：Working / Compacting / Idle 等 |
 | `PiFooter` | `Label` | 底部栏：`update_info(model, thinking, message_count, session_name)` |
 | `PiToolbar` | `Input` | 工具条输入（占位，后续用于搜索等） |
@@ -154,19 +188,19 @@ vars_ = theme.css_variables()  # {"pi-bg": "#1e1e2e", ...}
 | `resolve(key)` → `action_id` | 按键名解析动作 |
 | `get_action_key(action_id)` | 查询默认主键 |
 | `is_enabled(action_id)` | 动作是否已启用 |
-| `all_bindings()` | 全部启用的绑定（供 Textual BINDINGS 使用） |
+| `all_bindings()` | 全部启用的绑定（供 App 快捷键分发） |
 
 ---
 
 ## 选择器（selectors.py）
 
-基于 `ModalScreen` 的模态选择器：
+基于 overlay 的选择器（统一走 `OverlayManager`，不再有 ModalScreen）：
 
 | 组件 | 触发方式 | 功能 |
 |------|----------|------|
 | `ModelSelector` | `Ctrl+L`（`app.model.select`） | 模型选择：按 provider/id/name 分组显示 + 实时搜索 + 键盘导航，`>` 标记当前模型 |
 | `SessionPicker` | `--resume` / `app.session.resume` | 会话恢复选择：按修改时间倒序，显示 session id + 时间 |
-| `TreeSelector` | `/tree` / `/fork` | 会话树导航 / fork 目标选择（ASCII 树 + 键盘导航） |
+| `TreeSelector` | `/tree` / `/fork` | 会话树导航 / fork 目标选择（ASCII 树 + 键盘导航，`f` 过滤模式，`t` label 时间戳） |
 | `TextInputDialog` | OAuth 回调等 | 通用文本输入弹层（Enter 提交，Esc 取消） |
 | `ChoiceSelector` | settings 子项 | 通用选项列表弹层 |
 | `SettingsSelector` | `/settings` | 设置菜单（bool/choice/string 三类设置项，落盘项目 `.pi/settings.json`） |
@@ -176,7 +210,8 @@ vars_ = theme.css_variables()  # {"pi-bg": "#1e1e2e", ...}
 | `ScopedModelsSelector` | `/scoped-models` | 模型范围多选（Enter 切换，Esc 保存） |
 | `ExtensionSelector` | `/extensions` | 扩展列表（显示命令/工具数量） |
 
-挂载竞态处理：`ModelSelector._rebuild` 在子组件尚未挂载时通过 `call_after_refresh` 延迟重试。
+选择器即 overlay：`push_screen` 桥接到 overlay 层（居中、80% 宽、maxHeight 60%），
+dismiss 时移除 overlay 并把焦点恢复到打开前位置。
 
 ---
 
@@ -201,7 +236,7 @@ vars_ = theme.css_variables()  # {"pi-bg": "#1e1e2e", ...}
 |------|------|
 | `available()` | 内置 dark / light + `theme_dir/*.json` 自定义主题名 |
 | `load(name)` | 加载主题；未知名称抛 `ThemeError` |
-| `detect_terminal_background()` | 读取 `COLORFGBG` 环境变量（值 `>= 7` 判为 light），未知默认 dark |
+| `detect_terminal_background()` | 先 OSC 11 查询，失败回退 `COLORFGBG`（值 `>= 7` 判为 light），未知默认 dark |
 | `resolve(name)` | `None` / `"auto"` 时按终端背景自动选择 |
 
 ### 自定义 JSON 主题
@@ -246,9 +281,9 @@ png = ClipboardImage.process(data)  # 规范化 → PNG bytes
 
 `pi_tui` 本身不绑定 Agent；`pi_coding_agent.modes.interactive.app` 中的 `PiTuiApp` 负责组装：
 
-- `compose()` 挂载 Header / ChatContainer / StatusBar / Editor / Footer；
-- `KeybindingsManager` 默认表 + settings 覆盖生成实例级 `BINDINGS`；
-- `ThemeLoader.resolve(theme_name)` 生成主题色 → `_build_css()` 替换 `__PI_<KEY>__` token；
+- `on_mount()` 挂载 Header / ChatContainer / StatusBar / Editor / Footer；
+- `KeybindingsManager` 默认表 + settings 覆盖直接驱动 `App._dispatch_binding`；
+- `ThemeLoader.resolve(theme_name)` 生成主题色 → 应用为各组件的 `base_style`；
 - 会话事件（`message_end` / `agent_settled` / `compaction_start` / `model_changed` 等）驱动 UI 更新；
 - slash 命令经 `SlashCommandRegistry` 执行，模型 / 会话选择器经 `push_screen` 弹出。
 
@@ -265,7 +300,8 @@ uv run python -m pi_coding_agent --mode tui
 # 运行全部测试
 uv run pytest
 
-# 运行 TUI 相关测试（位于 pi_coding_agent/tests/）
+# 引擎与 TUI 测试（无头 FakeTerminal，不需要真实 TTY）
+uv run pytest src/pi_tui/tests/ -v
 uv run pytest src/pi_coding_agent/tests/test_tui_app.py -v
 uv run pytest src/pi_coding_agent/tests/test_tui_keybindings.py -v
 uv run pytest src/pi_coding_agent/tests/test_tui_theme.py -v

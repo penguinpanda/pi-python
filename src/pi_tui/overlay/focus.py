@@ -1,7 +1,7 @@
 """Overlay 焦点控制器。
 
 只管理“哪个 overlay 拥有焦点权”以及恢复关系（pre_focus / blocked / resume），
-不负责具体 Textual widget 的 focus()，也不做输入分发（由 manager/app 完成）。
+不负责具体 widget 的 focus()，也不做输入分发（由 manager/app 完成）。
 """
 
 from __future__ import annotations

@@ -1,20 +1,21 @@
-"""选择器组件（3.6）：ModelSelector / SessionPicker。"""
+"""选择器组件（引擎版）：Model / Session / Tree / OAuth / Scoped / Extension / Trust 等。"""
 
 from __future__ import annotations
 
-from typing import Any, cast
-
-from textual import events
-from textual.app import ComposeResult
-from textual.binding import Binding
-from textual.containers import Vertical
-from textual.css.query import NoMatches
-from textual.message import Message
-from textual.widgets import Input, Label, ListItem, ListView
-from textual.widget import Widget
 from datetime import datetime
+from typing import Any, Callable
 
-from .lists import SelectList
+from pi_tui.engine.cells import Line, blank_line, line_from_text
+from pi_tui.engine.keys import Key
+from pi_tui.engine.widgets import (
+    Input,
+    Label,
+    Message,
+    SelectItem,
+    SelectList,
+    Vertical,
+    Widget,
+)
 
 
 def format_label_timestamp(iso_value: str | None) -> str:
@@ -36,6 +37,9 @@ class OverlayDialog(Widget):
         if close is not None:
             close(self, value)
 
+    def handle_key(self, key: Key) -> bool:
+        return False
+
 
 class CopyRequested(Message):
     """列表弹层请求复制选中项文本（按 c 触发，事件冒泡到宿主）。"""
@@ -45,193 +49,140 @@ class CopyRequested(Message):
         self.text = text
 
 
-class CopySelectedMixin(Widget):
-    """列表弹层复制能力：选中行时直接复制完整内容到剪贴板。
-
-    Textual 不支持鼠标选择，因此“选中即复制”：子类在各自的
-    on_*_selected 中调用 copy_selected()，宿主处理 CopyRequested 消息
-    写入剪贴板。
-    """
+class CopySelectedMixin:
+    """列表弹层复制能力：选中行时直接复制完整内容到剪贴板。"""
 
     def copy_selected(self) -> None:
         text = self._selected_copy_text()
-        if text:
-            self.post_message(CopyRequested(text))
+        if text and isinstance(self, Widget):
+            self.post_message(CopyRequested(text), "")
 
     def _selected_copy_text(self) -> str:
         return ""
 
 
 def _model_label(model) -> str:
-    return f"{model.provider}/{model.id}  [dim]{model.name}[/dim]"
+    return f"{model.provider}/{model.id}  {model.name}"
 
 
-class _SearchInput(Input):
-    """搜索输入框：把 ↑↓/Enter/Esc 转发给选择器，避免按键被输入框吞掉。"""
+class _ResultSelectList(SelectList):
+    """选择结果直接回调（不经 App 消息总线）。"""
 
-    def __init__(self, owner: "ModelSelector", **kwargs) -> None:
-        super().__init__(**kwargs)
-        self._owner = owner
+    def __init__(
+        self,
+        items,
+        *,
+        on_selected: Callable[[SelectItem | None], None],
+        on_cancelled: Callable[[], None],
+        **kwargs,
+    ) -> None:
+        super().__init__(items, **kwargs)
+        self._on_selected = on_selected
+        self._on_cancelled = on_cancelled
 
-    async def _on_key(self, event: events.Key) -> None:
-        if event.key in ("up", "down", "enter", "escape"):
-            event.stop()
-            event.prevent_default()
-            if event.key == "up":
-                self._owner._move(-1)
-            elif event.key == "down":
-                self._owner._move(1)
-            elif event.key == "enter":
-                self._owner.action_select()
-            else:
-                self._owner.action_cancel()
-            return
-        await super()._on_key(event)
+    def handle_key(self, key: Key) -> bool:
+        if key.name == "enter":
+            self._on_selected(self.selected_item)
+            return True
+        if key.name == "escape":
+            self._on_cancelled()
+            return True
+        return super().handle_key(key)
 
 
 class ModelSelector(OverlayDialog):
-    """模型选择器：分组显示 + 实时搜索 + 键盘导航（Ctrl+L）。"""
-
-    BINDINGS = [
-        Binding("escape", "cancel", "Cancel"),
-        Binding("enter", "select", "Select"),
-    ]
+    """模型选择器：分组显示 + 实时搜索 + 键盘导航。"""
 
     def __init__(self, models: list[Any], current: Any | None = None) -> None:
         super().__init__()
         self._models = list(models)
         self._current = current
-        self._query = ""
-
-    def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Label("Select model", classes="selector-title")
-            yield _SearchInput(
-                self,
-                placeholder="Search models...",
-                value=self._query,
-                classes="selector-input",
+        current_key = f"{current.provider}/{current.id}" if current is not None else None
+        items = [
+            SelectItem(
+                value=f"{model.provider}/{model.id}",
+                label=_model_label(model),
             )
-            yield ListView(id="model-list")
-
-    def _move(self, direction: int) -> None:
-        """在模型列表中移动选择（供搜索框按键转发）。"""
-        list_view = self.query_one("#model-list", ListView)
-        count = len(list_view.children)
-        if count == 0:
-            return
-        current = list_view.index
-        index = 0 if current is None else current
-        list_view.index = (index + direction) % count
-
-    def on_mount(self) -> None:
-        self._rebuild()
-
-    def _filtered(self) -> list[Any]:
-        query = self._query.lower()
-        if not query:
-            return self._models
-        return [
-            model
             for model in self._models
-            if query in model.id.lower()
-            or query in model.provider.lower()
-            or query in (model.name or "").lower()
         ]
+        self._list = _ResultSelectList(
+            items,
+            current=current_key,
+            enable_search=True,
+            search_placeholder="Search models...",
+            max_height=12,
+            on_selected=self._on_selected,
+            on_cancelled=lambda: self.dismiss(None),
+        )
+        self._body = Vertical()
+        self._body.mount(Label("Select model", height=1))
+        self._body.mount(self._list)
 
-    def _rebuild(self) -> None:
-        try:
-            list_view = self.query_one("#model-list", ListView)
-        except NoMatches:
-            # 子组件尚未挂载完成（负载高时的竞态）：延迟重试。
-            self.call_after_refresh(self._rebuild)
+    def _on_selected(self, item: SelectItem | None) -> None:
+        if item is None:
+            self.dismiss(None)
             return
-        list_view.clear()
-        current_key = f"{self._current.provider}/{self._current.id}" if self._current else None
-        for model in self._filtered():
-            key = f"{model.provider}/{model.id}"
-            marker = ">" if key == current_key else " "
-            # 不设置 id：模型 id 可能含冒号等 Textual 非法字符
-            # （如 ollama/qwen3:30b），选择逻辑只依赖列表索引。
-            list_view.append(ListItem(Label(f"{marker} {_model_label(model)}")))
-        # 初始选中第一项，否则不按方向键直接 Enter 不会有 Selected 事件。
-        if len(list_view.children) > 0 and list_view.index is None:
-            list_view.index = 0
-
-    def on_input_changed(self, event: Input.Changed) -> None:
-        self._query = event.value
-        self._rebuild()
-
-    def action_select(self) -> None:
-        list_view = self.query_one("#model-list", ListView)
-        index = list_view.index
-        if index is None:
-            index = 0
-        filtered = self._filtered()
-        if 0 <= index < len(filtered):
-            self.dismiss(filtered[index])
-
-    def action_cancel(self) -> None:
+        for model in self._models:
+            if f"{model.provider}/{model.id}" == item.value:
+                self.dismiss(model)
+                return
         self.dismiss(None)
+
+    def handle_key(self, key: Key) -> bool:
+        return self._list.handle_key(key)
+
+    def render(self, width: int, height: int) -> list[Line]:
+        return self._body.render(width, height)
+
+    def content_size(self) -> tuple[int, int]:
+        return self._body.content_size()
 
 
 class SessionPicker(CopySelectedMixin, OverlayDialog):
-    """会话恢复选择器（--resume）：按修改时间排序。"""
-
-    BINDINGS = [
-        Binding("escape", "cancel", "Cancel"),
-        Binding("enter", "select", "Select"),
-    ]
+    """会话恢复选择器：按修改时间排序。"""
 
     def __init__(self, sessions: list[dict[str, Any]]) -> None:
         super().__init__()
-        # [{path, session_id, modified}]
         self._sessions = list(sessions)
-
-    def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Label("Resume session", classes="selector-title")
-            yield ListView(id="session-list")
-
-    def on_mount(self) -> None:
-        """挂载后再填充列表（compose 阶段 ListView 尚未挂载，append 会抛 MountError）。"""
-        from datetime import datetime
-
-        list_view = self.query_one("#session-list", ListView)
+        items: list[SelectItem] = []
         for session in self._sessions:
             when = datetime.fromtimestamp(session["modified"]).strftime("%Y-%m-%d %H:%M")
-            list_view.append(ListItem(Label(f"{session['session_id']}  [dim]{when}[/dim]")))
-        if len(list_view.children) > 0:
-            list_view.index = 0
+            items.append(
+                SelectItem(
+                    value=str(session["path"]),
+                    label=f"{session['session_id']}  {when}",
+                )
+            )
+        self._list = _ResultSelectList(
+            items,
+            enable_search=False,
+            max_height=12,
+            on_selected=self._on_selected,
+            on_cancelled=lambda: self.dismiss(None),
+        )
+        self._body = Vertical()
+        self._body.mount(Label("Resume session", height=1))
+        self._body.mount(self._list)
 
-    def action_select(self) -> None:
-        """兜底选择（ListView 未消费 Enter 时）。"""
-        list_view = self.query_one("#session-list", ListView)
-        index = list_view.index
-        if index is None:
-            index = 0
-        if 0 <= index < len(self._sessions):
-            self.dismiss(self._sessions[index]["path"])
-
-    def on_list_view_selected(self, event: Any) -> None:
-        """ListView 的 Enter 选择（Textual 会先于屏幕绑定消费 enter）。"""
-        list_view = self.query_one("#session-list", ListView)
-        index = list_view.index
-        if index is not None and 0 <= index < len(self._sessions):
-            self.copy_selected()
-            self.dismiss(self._sessions[index]["path"])
-        else:
+    def _on_selected(self, item: SelectItem | None) -> None:
+        if item is None:
             self.dismiss(None)
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
+            return
+        self.copy_selected()
+        self.dismiss(item.value)
 
     def _selected_copy_text(self) -> str:
-        list_view = self.query_one("#session-list", ListView)
-        index = list_view.index
-        if index is None or not (0 <= index < len(self._sessions)):
-            return ""
-        return str(self._sessions[index].get("path", ""))
+        item = self._list.selected_item
+        return str(item.value) if item is not None else ""
+
+    def handle_key(self, key: Key) -> bool:
+        return self._list.handle_key(key)
+
+    def render(self, width: int, height: int) -> list[Line]:
+        return self._body.render(width, height)
+
+    def content_size(self) -> tuple[int, int]:
+        return self._body.content_size()
 
 
 def _flatten_tree(
@@ -240,7 +191,7 @@ def _flatten_tree(
     depth: int = 0,
     show_label_timestamps: bool = False,
 ) -> list[tuple[int, str, str, str, Any]]:
-    """把会话树展平为 [(depth, connector, label, node_id, node)]，供 TreeSelector 渲染。"""
+    """把会话树展平为 [(depth, connector, label, node_id, node)]。"""
     rows: list[tuple[int, str, str, str, Any]] = []
     for index, node in enumerate(nodes):
         is_last = index == len(nodes) - 1
@@ -296,7 +247,7 @@ def _entry_role(node: Any) -> str:
 
 
 def node_passes_tree_filter(node: Any, mode: str) -> bool:
-    """树过滤判定（对齐 TS tree-selector：default/no-tools/user-only/labeled-only/all）。"""
+    """树过滤判定（对齐 TS tree-selector）。"""
     entry_type = (node.entry or {}).get("type", "")
     role = _entry_role(node)
     if mode == "user-only":
@@ -307,18 +258,11 @@ def node_passes_tree_filter(node: Any, mode: str) -> bool:
         return node.label is not None
     if mode == "all":
         return True
-    # default：隐藏设置/记账类条目。
     return entry_type not in _SETTINGS_ENTRY_TYPES
 
 
 class TreeSelector(CopySelectedMixin, OverlayDialog):
     """会话树选择器（对齐 TS TreeSelectorComponent）：ASCII 树 + 键盘导航。"""
-
-    BINDINGS = [
-        Binding("escape", "cancel", "Cancel"),
-        Binding("f", "cycle_filter", "Cycle tree filter"),
-        Binding("t", "toggle_label_timestamps", "Toggle label timestamps"),
-    ]
 
     def __init__(
         self,
@@ -332,7 +276,12 @@ class TreeSelector(CopySelectedMixin, OverlayDialog):
         self._show_label_timestamps = show_label_timestamps
         self._tree = tree
         self._leaf_id = leaf_id
-        self._rebuild_rows()
+        self._selected_index = 0
+        self._all_rows = _flatten_tree(
+            self._tree,
+            self._leaf_id,
+            show_label_timestamps=self._show_label_timestamps,
+        )
         self._rows: list[tuple[int, str, str, str, Any]] = []
         self._node_ids: list[str] = []
         self._apply_filter()
@@ -345,13 +294,6 @@ class TreeSelector(CopySelectedMixin, OverlayDialog):
     def show_label_timestamps(self) -> bool:
         return self._show_label_timestamps
 
-    def _rebuild_rows(self) -> None:
-        self._all_rows = _flatten_tree(
-            self._tree,
-            self._leaf_id,
-            show_label_timestamps=self._show_label_timestamps,
-        )
-
     def _title(self) -> str:
         suffix = {
             "no-tools": " [no-tools]",
@@ -361,112 +303,108 @@ class TreeSelector(CopySelectedMixin, OverlayDialog):
         }.get(self._filter_mode, "")
         if self._show_label_timestamps:
             suffix += " [+label time]"
-        # 转义方括号，避免被 Textual 当成 Rich markup 样式标签吞掉。
-        suffix = suffix.replace("[", r"\[").replace("]", r"\]")
         return f"Session tree{suffix} (Enter: navigate, Esc: close, f: filter, t: label time)"
 
     def _apply_filter(self) -> None:
         self._rows = [
             row for row in self._all_rows if node_passes_tree_filter(row[4], self._filter_mode)
         ]
-        # 节点 id 可能以数字开头（Textual id 非法），选择逻辑用索引反查。
         self._node_ids = [row[3] for row in self._rows]
+        self._selected_index = 0
 
     def _selected_copy_text(self) -> str:
-        list_view = self.query_one("#tree-list", ListView)
-        index = list_view.index
-        if index is None or not (0 <= index < len(self._rows)):
-            return ""
-        _depth, _connector, _label, _node_id, node = self._rows[index]
-        return _node_copy_text(node)
+        if 0 <= self._selected_index < len(self._rows):
+            return _node_copy_text(self._rows[self._selected_index][4])
+        return ""
 
-    def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Label(self._title(), classes="selector-title")
-            yield ListView(id="tree-list")
-
-    def on_mount(self) -> None:
-        list_view = self.query_one("#tree-list", ListView)
-        for depth, connector, label, _node_id, _node in self._rows:
-            indent = "  " * depth
-            prefix = f"{indent}{connector} " if connector else indent
-            list_view.append(ListItem(Label(f"{prefix}{label}")))
-        if len(list_view.children) > 0:
-            list_view.index = 0
-
-    async def action_cycle_filter(self) -> None:
-        """f：循环 default → no-tools → user-only → labeled-only → all。"""
-        modes = TREE_FILTER_MODES
-        self._filter_mode = modes[(modes.index(self._filter_mode) + 1) % len(modes)]
-        self._apply_filter()
-        self.query_one(Label).update(self._title())
-        list_view = self.query_one("#tree-list", ListView)
-        await list_view.clear()
-        for depth, connector, label, _node_id, _node in self._rows:
-            indent = "  " * depth
-            prefix = f"{indent}{connector} " if connector else indent
-            list_view.append(ListItem(Label(f"{prefix}{label}")))
-        if len(list_view.children) > 0:
-            list_view.index = 0
-
-    async def action_toggle_label_timestamps(self) -> None:
-        """t：切换 label 时间戳显示。"""
-        self._show_label_timestamps = not self._show_label_timestamps
-        self._rebuild_rows()
-        self._apply_filter()
-        self.query_one(Label).update(self._title())
-        list_view = self.query_one("#tree-list", ListView)
-        await list_view.clear()
-        for depth, connector, label, _node_id, _node in self._rows:
-            indent = "  " * depth
-            prefix = f"{indent}{connector} " if connector else indent
-            list_view.append(ListItem(Label(f"{prefix}{label}")))
-        if len(list_view.children) > 0:
-            list_view.index = 0
-
-    def on_list_view_selected(self, event: Any) -> None:
-        list_view = self.query_one("#tree-list", ListView)
-        index = list_view.index
-        if index is not None and 0 <= index < len(self._node_ids):
-            self.copy_selected()
-            self.dismiss(self._node_ids[index])
-        else:
+    def handle_key(self, key: Key) -> bool:
+        name = key.name
+        if name == "up":
+            if self._rows:
+                self._selected_index = (self._selected_index - 1) % len(self._rows)
+            self.refresh()
+            return True
+        if name == "down":
+            if self._rows:
+                self._selected_index = (self._selected_index + 1) % len(self._rows)
+            self.refresh()
+            return True
+        if name == "enter":
+            if 0 <= self._selected_index < len(self._node_ids):
+                self.copy_selected()
+                self.dismiss(self._node_ids[self._selected_index])
+            else:
+                self.dismiss(None)
+            return True
+        if name == "escape":
             self.dismiss(None)
+            return True
+        if name == "f":
+            modes = TREE_FILTER_MODES
+            self._filter_mode = modes[(modes.index(self._filter_mode) + 1) % len(modes)]
+            self._apply_filter()
+            self.refresh()
+            return True
+        if name == "t":
+            self._show_label_timestamps = not self._show_label_timestamps
+            self._all_rows = _flatten_tree(
+                self._tree,
+                self._leaf_id,
+                show_label_timestamps=self._show_label_timestamps,
+            )
+            self._apply_filter()
+            self.refresh()
+            return True
+        return False
 
-    def action_cancel(self) -> None:
-        self.dismiss(None)
+    def render(self, width: int, height: int) -> list[Line]:
+        lines: list[Line] = [line_from_text(self._title(), width)]
+        visible = min(height - 1, len(self._rows))
+        for index in range(visible):
+            depth, connector, label, _node_id, _node = self._rows[index]
+            indent = "  " * depth
+            prefix = f"{indent}{connector} " if connector else indent
+            text = f"{prefix}{label}"
+            style = None
+            if index == self._selected_index:
+                from rich.style import Style
+
+                style = Style(reverse=True)
+            lines.append(line_from_text(text, width, style))
+        while len(lines) < height:
+            lines.append(blank_line(width))
+        return lines
+
+    def content_size(self) -> tuple[int, int]:
+        return (1000, min(1 + len(self._rows), 20))
 
 
 class TextInputDialog(OverlayDialog):
     """通用文本输入弹层（TUI 内 OAuth 登录等需要用户输入的场景）。"""
-
-    BINDINGS = [
-        Binding("escape", "cancel", "Cancel"),
-    ]
 
     def __init__(self, message: str, placeholder: str = "", value: str = "") -> None:
         super().__init__()
         self._message = message
         self._placeholder = placeholder
         self._value = value
+        self._input = Input(value=value, placeholder=placeholder)
+        self._body = Vertical()
+        self._body.mount(Label(self._message, height=1))
+        self._body.mount(self._input)
 
-    def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Label(self._message, classes="selector-title")
-            yield Input(
-                placeholder=self._placeholder,
-                value=self._value,
-                classes="selector-input",
-            )
+    def handle_key(self, key: Key) -> bool:
+        if self._input.handle_key(key):
+            return True
+        if key.name == "escape":
+            self.dismiss(None)
+            return True
+        return False
 
-    def on_mount(self) -> None:
-        self.query_one(Input).focus()
+    def render(self, width: int, height: int) -> list[Line]:
+        return self._body.render(width, height)
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        self.dismiss(event.value)
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
+    def content_size(self) -> tuple[int, int]:
+        return self._body.content_size()
 
 
 class ChoiceSelector(CopySelectedMixin, OverlayDialog):
@@ -482,46 +420,41 @@ class ChoiceSelector(CopySelectedMixin, OverlayDialog):
         self._title = title
         self._options = list(options)
         self._current = current
+        self._list = _ResultSelectList(
+            self._options,
+            current=current,
+            enable_search=True,
+            max_height=12,
+            on_selected=self._on_selected,
+            on_cancelled=lambda: self.dismiss(None),
+        )
+        self._body = Vertical()
+        self._body.mount(Label(title, height=1))
+        self._body.mount(self._list)
 
-    def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Label(self._title, classes="selector-title")
-            yield SelectList(self._options, current=self._current, list_id="choice-list")
-
-    def on_select_list_selected(self, event: SelectList.Selected) -> None:
+    def _on_selected(self, item: SelectItem | None) -> None:
+        if item is None:
+            self.dismiss(None)
+            return
         self.copy_selected()
-        self.dismiss(event.item.value)
-
-    def on_select_list_cancelled(self, event: SelectList.Cancelled) -> None:
-        self.dismiss(None)
-
-    def action_select(self) -> None:
-        """兼容旧 API：按当前列表索引选择。"""
-        select = self.query_one(SelectList)
-        item = select.selected_item
-        self.dismiss(item.value if item is not None else None)
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
+        self.dismiss(item.value)
 
     def _selected_copy_text(self) -> str:
-        select = self.query_one(SelectList)
-        item = select.selected_item
+        item = self._list.selected_item
         return str(item.value) if item is not None else ""
+
+    def handle_key(self, key: Key) -> bool:
+        return self._list.handle_key(key)
+
+    def render(self, width: int, height: int) -> list[Line]:
+        return self._body.render(width, height)
+
+    def content_size(self) -> tuple[int, int]:
+        return self._body.content_size()
 
 
 class SettingsSelector(OverlayDialog):
-    """设置菜单（对齐 TS SettingsSelectorComponent 的 Python 子集）。
-
-    items: [{"key", "label", "type": "bool"|"choice"|"string", "choices"?}]
-    current: 当前合并后的 settings 字典。
-    on_change(key, value)：持久化并应用。
-    """
-
-    BINDINGS = [
-        Binding("enter", "select", "Select"),
-        Binding("escape", "cancel", "Cancel"),
-    ]
+    """设置菜单：bool 循环 / choice 弹选择器 / string 弹输入框。"""
 
     def __init__(
         self,
@@ -533,6 +466,7 @@ class SettingsSelector(OverlayDialog):
         self._items = list(items)
         self._current = dict(current)
         self._on_change = on_change
+        self._selected_index = 0
 
     def _value(self, key: str) -> Any:
         return self._current.get(key)
@@ -546,116 +480,118 @@ class SettingsSelector(OverlayDialog):
             display = str(value) if value is not None else "(unset)"
         return f"{item['label']}: {display}"
 
-    def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Label("Settings", classes="selector-title")
-            yield ListView(id="settings-list")
-
-    def on_mount(self) -> None:
-        self._rebuild()
-        self.query_one("#settings-list").focus()
-
-    def _rebuild(self) -> None:
-        list_view = self.query_one("#settings-list", ListView)
-        list_view.clear()
-        for item in self._items:
-            list_view.append(ListItem(Label(self._label(item))))
-        if len(list_view.children) > 0 and list_view.index is None:
-            list_view.index = 0
-
-    def on_list_view_selected(self, event: Any) -> None:
-        self._select_item()
-
-    def action_select(self) -> None:
-        self._select_item()
+    def handle_key(self, key: Key) -> bool:
+        name = key.name
+        if name == "up":
+            self._selected_index = (self._selected_index - 1) % len(self._items)
+            self.refresh()
+            return True
+        if name == "down":
+            self._selected_index = (self._selected_index + 1) % len(self._items)
+            self.refresh()
+            return True
+        if name == "enter":
+            self._select_item()
+            return True
+        if name == "escape":
+            self.dismiss(None)
+            return True
+        return False
 
     def _select_item(self) -> None:
-        list_view = self.query_one("#settings-list", ListView)
-        index = list_view.index
-        if index is None or not (0 <= index < len(self._items)):
+        if not (0 <= self._selected_index < len(self._items)):
             self.dismiss(None)
             return
-        item = self._items[index]
+        item = self._items[self._selected_index]
         item_type = item.get("type", "string")
         key = item["key"]
         if item_type == "bool":
             new_value = not bool(self._value(key))
             self._on_change(key, new_value)
             self._current[key] = new_value
-            self._rebuild()
+            self.refresh()
             return
         if item_type == "choice":
             current = self._value(key)
             current_text = str(current) if current is not None else None
-            cast(Any, self.app).push_screen(
-                ChoiceSelector(
-                    item.get("label", key),
-                    list(item.get("choices", [])),
-                    current_text,
+            cast_app = getattr(self.app, "push_screen", None)
+            if cast_app is not None:
+                cast_app(
+                    ChoiceSelector(
+                        item.get("label", key),
+                        list(item.get("choices", [])),
+                        current_text,
+                    ),
+                    callback=lambda value: self._apply_value(key, value),
+                )
+            return
+        current = self._value(key)
+        cast_app = getattr(self.app, "push_screen", None)
+        if cast_app is not None:
+            cast_app(
+                TextInputDialog(
+                    f"{item.get('label', key)}:",
+                    value=str(current) if current is not None else "",
                 ),
                 callback=lambda value: self._apply_value(key, value),
             )
-            return
-        current = self._value(key)
-        cast(Any, self.app).push_screen(
-            TextInputDialog(
-                f"{item.get('label', key)}:",
-                value=str(current) if current is not None else "",
-            ),
-            callback=lambda value: self._apply_value(key, value),
-        )
 
     def _apply_value(self, key: str, value) -> None:
         if value is None or value == "":
             return
         self._on_change(key, value)
         self._current[key] = value
-        self._rebuild()
+        self.refresh()
 
-    def action_cancel(self) -> None:
-        self.dismiss(None)
+    def render(self, width: int, height: int) -> list[Line]:
+        lines: list[Line] = [line_from_text("Settings", width)]
+        visible = min(height - 1, len(self._items))
+        for index in range(visible):
+            style = None
+            if index == self._selected_index:
+                from rich.style import Style
+
+                style = Style(reverse=True)
+            lines.append(line_from_text(self._label(self._items[index]), width, style))
+        while len(lines) < height:
+            lines.append(blank_line(width))
+        return lines
+
+    def content_size(self) -> tuple[int, int]:
+        return (1000, min(1 + len(self._items), 16))
 
 
 class ThinkingSelector(OverlayDialog):
-    """思考级别选择器（对齐 TS thinking-selector）。"""
+    """思考级别选择器。"""
 
-    def __init__(
-        self,
-        levels: list[str],
-        current: str | None = None,
-    ) -> None:
+    def __init__(self, levels: list[str], current: str | None = None) -> None:
         super().__init__()
         self._levels = list(levels)
         self._current = current
+        self._list = _ResultSelectList(
+            self._levels,
+            current=current,
+            enable_search=False,
+            max_height=12,
+            on_selected=lambda item: self.dismiss(item.value if item is not None else None),
+            on_cancelled=lambda: self.dismiss(None),
+        )
+        self._body = Vertical()
+        self._body.mount(Label("Thinking level", height=1))
+        self._body.mount(self._list)
 
-    def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Label("Thinking level", classes="selector-title")
-            yield SelectList(self._levels, current=self._current, list_id="thinking-list")
+    def handle_key(self, key: Key) -> bool:
+        return self._list.handle_key(key)
 
-    def on_select_list_selected(self, event: SelectList.Selected) -> None:
-        self.dismiss(event.item.value)
+    def render(self, width: int, height: int) -> list[Line]:
+        return self._body.render(width, height)
 
-    def on_select_list_cancelled(self, event: SelectList.Cancelled) -> None:
-        self.dismiss(None)
-
-    def action_select(self) -> None:
-        """兼容旧 API：按当前列表索引选择。"""
-        select = self.query_one(SelectList)
-        item = select.selected_item
-        self.dismiss(item.value if item is not None else None)
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
+    def content_size(self) -> tuple[int, int]:
+        return self._body.content_size()
 
 
 class OAuthSelector(OverlayDialog):
-    """OAuth provider 选择器（登录/登出；对齐 TS oauth-selector）。"""
-
-    BINDINGS = [
-        Binding("enter", "select", "Select"),
-        Binding("escape", "cancel", "Cancel"),
-    ]
+    """OAuth provider 选择器（登录/登出）。"""
 
     def __init__(
         self,
@@ -666,46 +602,37 @@ class OAuthSelector(OverlayDialog):
         super().__init__()
         self._providers = list(providers)
         self._mode = mode
-        self._selected = 0
+        items = [
+            SelectItem(
+                value=provider_id,
+                label=f"{name} ({provider_id}) [{'logged in' if logged_in else 'not logged in'}]",
+            )
+            for provider_id, name, logged_in in self._providers
+        ]
+        title = "Login provider" if mode == "login" else "Logout provider"
+        self._list = _ResultSelectList(
+            items,
+            enable_search=False,
+            max_height=12,
+            on_selected=lambda item: self.dismiss(item.value if item is not None else None),
+            on_cancelled=lambda: self.dismiss(None),
+        )
+        self._body = Vertical()
+        self._body.mount(Label(title, height=1))
+        self._body.mount(self._list)
 
-    def compose(self) -> ComposeResult:
-        title = "Login provider" if self._mode == "login" else "Logout provider"
-        with Vertical():
-            yield Label(title, classes="selector-title")
-            yield ListView(id="oauth-list")
+    def handle_key(self, key: Key) -> bool:
+        return self._list.handle_key(key)
 
-    def on_mount(self) -> None:
-        list_view = self.query_one("#oauth-list", ListView)
-        for index, (provider_id, name, logged_in) in enumerate(self._providers):
-            marker = ">" if index == self._selected else " "
-            status = "logged in" if logged_in else "not logged in"
-            list_view.append(ListItem(Label(f"{marker} {name} ({provider_id}) [{status}]")))
-        if len(list_view.children) > 0:
-            list_view.index = 0
-        list_view.focus()
+    def render(self, width: int, height: int) -> list[Line]:
+        return self._body.render(width, height)
 
-    def on_list_view_selected(self, event: Any) -> None:
-        self.action_select()
-
-    def action_select(self) -> None:
-        list_view = self.query_one("#oauth-list", ListView)
-        index = list_view.index
-        if index is not None and 0 <= index < len(self._providers):
-            self.dismiss(self._providers[index][0])
-        else:
-            self.dismiss(None)
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
+    def content_size(self) -> tuple[int, int]:
+        return self._body.content_size()
 
 
 class ScopedModelsSelector(OverlayDialog):
-    """模型范围选择器：Enter 切换选中，Esc 保存（对齐 TS scoped-models-selector）。"""
-
-    BINDINGS = [
-        Binding("enter", "toggle_scoped", "Toggle"),
-        Binding("escape", "cancel", "Save and close"),
-    ]
+    """模型范围选择器：Enter 切换选中，Esc 保存。"""
 
     def __init__(
         self,
@@ -717,104 +644,105 @@ class ScopedModelsSelector(OverlayDialog):
         self._models = list(models)
         self._selected = set(selected or {})
         self._current = current
+        self._selected_index = 0
 
     def _key(self, model) -> tuple[str, str]:
         return (model.provider, model.id)
 
-    def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Label("Scoped models (Enter: toggle, Esc: save)", classes="selector-title")
-            yield ListView(id="scoped-list")
+    def handle_key(self, key: Key) -> bool:
+        name = key.name
+        if name == "up":
+            self._selected_index = (self._selected_index - 1) % len(self._models)
+            self.refresh()
+            return True
+        if name == "down":
+            self._selected_index = (self._selected_index + 1) % len(self._models)
+            self.refresh()
+            return True
+        if name == "enter":
+            if 0 <= self._selected_index < len(self._models):
+                model_key = self._key(self._models[self._selected_index])
+                if model_key in self._selected:
+                    self._selected.discard(model_key)
+                else:
+                    self._selected.add(model_key)
+                self.refresh()
+            return True
+        if name == "escape":
+            self.dismiss(set(self._selected))
+            return True
+        return False
 
-    def on_mount(self) -> None:
-        list_view = self.query_one("#scoped-list", ListView)
-        for model in self._models:
-            key = self._key(model)
-            check = " ✓" if key in self._selected else ""
-            marker = ">" if self._current is not None and key == self._key(self._current) else " "
-            list_view.append(ListItem(Label(f"{marker} {model.provider}/{model.id}{check}")))
-        if len(list_view.children) > 0:
-            list_view.index = 0
-        list_view.focus()
+    def render(self, width: int, height: int) -> list[Line]:
+        lines: list[Line] = [line_from_text("Scoped models (Enter: toggle, Esc: save)", width)]
+        visible = min(height - 1, len(self._models))
+        for index in range(visible):
+            model = self._models[index]
+            model_key = self._key(model)
+            check = " ✓" if model_key in self._selected else ""
+            marker = ">" if index == self._selected_index else " "
+            style = None
+            if index == self._selected_index:
+                from rich.style import Style
 
-    def _rebuild(self) -> None:
-        list_view = self.query_one("#scoped-list", ListView)
-        list_view.clear()
-        for model in self._models:
-            key = self._key(model)
-            check = " ✓" if key in self._selected else ""
-            list_view.append(ListItem(Label(f"  {model.provider}/{model.id}{check}")))
-        if len(list_view.children) > 0:
-            list_view.index = 0
+                style = Style(reverse=True)
+            lines.append(
+                line_from_text(f"{marker} {model.provider}/{model.id}{check}", width, style)
+            )
+        while len(lines) < height:
+            lines.append(blank_line(width))
+        return lines
 
-    def on_list_view_selected(self, event: Any) -> None:
-        self.action_toggle_scoped()
-
-    def action_toggle_scoped(self) -> None:
-        list_view = self.query_one("#scoped-list", ListView)
-        index = list_view.index
-        if index is None or not (0 <= index < len(self._models)):
-            return
-        key = self._key(self._models[index])
-        if key in self._selected:
-            self._selected.discard(key)
-        else:
-            self._selected.add(key)
-        self._rebuild()
-
-    def action_cancel(self) -> None:
-        self.dismiss(self._selected)
+    def content_size(self) -> tuple[int, int]:
+        return (1000, min(1 + len(self._models), 16))
 
 
 class ExtensionSelector(OverlayDialog):
-    """扩展列表选择器（对齐 TS extension-selector）。"""
-
-    BINDINGS = [
-        Binding("enter", "select", "Show details"),
-        Binding("escape", "cancel", "Cancel"),
-    ]
+    """扩展列表选择器。"""
 
     def __init__(self, extensions: list[dict[str, Any]]) -> None:
         super().__init__()
         self._extensions = list(extensions)
+        items = [
+            SelectItem(
+                value=extension.get("path", str(index)),
+                label=extension.get("label", extension.get("path", "?")),
+            )
+            for index, extension in enumerate(self._extensions)
+        ]
+        self._list = _ResultSelectList(
+            items,
+            enable_search=True,
+            max_height=12,
+            on_selected=self._on_selected,
+            on_cancelled=lambda: self.dismiss(None),
+        )
+        self._body = Vertical()
+        self._body.mount(Label("Extensions", height=1))
+        self._body.mount(self._list)
 
-    def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Label("Extensions", classes="selector-title")
-            yield ListView(id="extension-list")
-
-    def on_mount(self) -> None:
-        list_view = self.query_one("#extension-list", ListView)
-        for index, extension in enumerate(self._extensions):
-            marker = ">" if index == 0 else " "
-            label = extension.get("label", extension.get("path", "?"))
-            list_view.append(ListItem(Label(f"{marker} {label}")))
-        if len(list_view.children) > 0:
-            list_view.index = 0
-        list_view.focus()
-
-    def on_list_view_selected(self, event: Any) -> None:
-        self.action_select()
-
-    def action_select(self) -> None:
-        list_view = self.query_one("#extension-list", ListView)
-        index = list_view.index
-        if index is not None and 0 <= index < len(self._extensions):
-            self.dismiss(self._extensions[index])
-        else:
+    def _on_selected(self, item: SelectItem | None) -> None:
+        if item is None:
             self.dismiss(None)
-
-    def action_cancel(self) -> None:
+            return
+        for extension in self._extensions:
+            if extension.get("path", "") == item.value:
+                self.dismiss(extension)
+                return
         self.dismiss(None)
+
+    def handle_key(self, key: Key) -> bool:
+        return self._list.handle_key(key)
+
+    def render(self, width: int, height: int) -> list[Line]:
+        return self._body.render(width, height)
+
+    def content_size(self) -> tuple[int, int]:
+        return self._body.content_size()
 
 
 class TrustSelector(OverlayDialog):
-    """项目信任选择器（对齐 TS TrustSelectorComponent）。"""
-
-    BINDINGS = [
-        Binding("enter", "select", "Select"),
-        Binding("escape", "cancel", "Cancel"),
-    ]
+    """项目信任选择器。"""
 
     def __init__(
         self,
@@ -829,7 +757,6 @@ class TrustSelector(OverlayDialog):
         self._saved_decision = saved_decision
         self._project_trusted = project_trusted
         self._options = get_project_trust_options(cwd)
-        # 预选当前已保存的选项。
         self._selected = 0
         if saved_decision is not None:
             for index, option in enumerate(self._options):
@@ -838,18 +765,33 @@ class TrustSelector(OverlayDialog):
                 ) == saved_decision.get("decision"):
                     self._selected = index
                     break
-
-    def compose(self) -> ComposeResult:
-        with Vertical():
-            yield Label("Project trust", classes="selector-title")
-            yield Label(self._cwd, classes="selector-title")
-            status = self._format_decision()
-            yield Label(
+        items = [
+            SelectItem(
+                value=option.get("label", ""),
+                label=option.get("label", ""),
+            )
+            for option in self._options
+        ]
+        self._list = _ResultSelectList(
+            items,
+            enable_search=False,
+            max_height=12,
+            on_selected=self._on_selected,
+            on_cancelled=lambda: self.dismiss(None),
+        )
+        self._list._selected_index = self._selected
+        self._body = Vertical()
+        self._body.mount(Label("Project trust", height=1))
+        self._body.mount(Label(self._cwd, height=1))
+        status = self._format_decision()
+        self._body.mount(
+            Label(
                 f"Saved decision: {status}  |  Current session: "
                 f"{'trusted' if self._project_trusted else 'untrusted'}",
-                classes="selector-title",
+                height=1,
             )
-            yield ListView(id="trust-list")
+        )
+        self._body.mount(self._list)
 
     def _format_decision(self) -> str:
         entry = self._saved_decision
@@ -860,39 +802,24 @@ class TrustSelector(OverlayDialog):
             return f"{label} (inherited from {entry.get('path')})"
         return f"{label} ({entry.get('path')})"
 
-    def on_mount(self) -> None:
-        list_view = self.query_one("#trust-list", ListView)
-        for index, option in enumerate(self._options):
-            marker = ">" if index == self._selected else " "
-            saved_decision = self._saved_decision
-            check = (
-                " ✓"
-                if option.get("savedPath") == self._saved_decision
-                and (
-                    option.get("trusted") == saved_decision.get("decision")
-                    if saved_decision is not None
-                    else False
-                )
-                else ""
-            )
-            list_view.append(ListItem(Label(f"{marker} {option['label']}{check}")))
-        if len(list_view.children) > 0:
-            list_view.index = self._selected
-        list_view.focus()
-
-    def on_list_view_selected(self, event: Any) -> None:
-        self.action_select()
-
-    def action_select(self) -> None:
-        list_view = self.query_one("#trust-list", ListView)
-        index = list_view.index
-        if index is not None and 0 <= index < len(self._options):
-            self.dismiss(self._options[index])
-        else:
+    def _on_selected(self, item: SelectItem | None) -> None:
+        if item is None:
             self.dismiss(None)
-
-    def action_cancel(self) -> None:
+            return
+        for option in self._options:
+            if option.get("label", "") == item.value:
+                self.dismiss(option)
+                return
         self.dismiss(None)
+
+    def handle_key(self, key: Key) -> bool:
+        return self._list.handle_key(key)
+
+    def render(self, width: int, height: int) -> list[Line]:
+        return self._body.render(width, height)
+
+    def content_size(self) -> tuple[int, int]:
+        return self._body.content_size()
 
 
 __all__ = [

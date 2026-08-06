@@ -1,7 +1,7 @@
 """pi_tui.overlay — overlay 组件树与焦点管理。
 
 核心模型 / 布局 / 焦点状态机不依赖 Textual，可独立单测；
-Textual 组件（OverlayLayer / OverlayWidget）单独放在 widgets.py。
+引擎组件（OverlayLayer / OverlayWidget）单独放在 widgets.py。
 """
 
 from .focus import FocusRestoreState, OverlayFocusController

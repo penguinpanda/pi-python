@@ -11,7 +11,7 @@ pi-python/
 ├── src/pi_ai/              # LLM API 抽象层（Provider 模式）
 ├── src/pi_agent/           # Agent 循环引擎（纯函数核心 + 有状态包装）
 ├── src/pi_coding_agent/    # CLI 编码代理（工具 + 会话 + 配置）
-├── src/pi_tui/             # Textual TUI 组件（主题/快捷键/选择器）
+├── src/pi_tui/             # 内置引擎 TUI（无 Textual；主题/快捷键/选择器）
 ├── src/pi_protocol/        # protocol v2 线协议（pydantic schema + JSONL framing）
 ├── src/pi_storage/         # PostgreSQL 会话存储（asyncpg + 迁移 + 搜索）
 ├── src/pi_server/          # 常驻 pi 服务（stdio JSONL，attach/detach + 快照推送）
@@ -23,7 +23,7 @@ pi-python/
 | `pi_ai` | [README](src/pi_ai/README.md) | 统一 LLM API，Provider 抽象模式。支持 OpenAI (Responses API)、DeepSeek/Qwen (Completions API)、Ollama 本地与 Faux 测试 Provider | ✓ |
 | `pi_agent` | [README](src/pi_agent/README.md) | 最小核心 Agent 循环。事件驱动、工具调用、循环钩子 | ✓ |
 | `pi_coding_agent` | [README](src/pi_coding_agent/README.md) | CLI 编码代理。7 个编码工具、DAG 会话持久化、双层配置、扩展/技能/信任/压缩 | ✓ |
-| `pi_tui` | [README](src/pi_tui/README.md) | Textual TUI：主题、快捷键、选择器、剪贴板图片 | ✓ |
+| `pi_tui` | [README](src/pi_tui/README.md) | 内置引擎 TUI：主题、快捷键、选择器、剪贴板图片 | ✓ |
 | `pi_protocol` | — | protocol v2：Command/Result/Snapshot/Progress/Error + JSONL framing | ✓ |
 | `pi_storage` | — | PostgreSQL SessionStore/SessionSearch（`docker compose up -d pg`） | ✓ |
 | `pi_server` | — | 常驻服务：`python -m pi_server`（stdio JSONL） | ✓ |
@@ -40,7 +40,7 @@ pi_coding_agent (CLI + Tools + Sessions)
 - **pi_ai** — 底层 LLM 调用：`Models` 注册表管理多个 Provider，`complete()` / `stream()` 统一非流式/流式调用，`EventStream` 生产者-消费者异步事件流
 - **pi_agent** — 中间层 Agent 循环：纯函数引擎 `run_agent_loop()` + 有状态 `Agent` 包装类，事件驱动、工具调用、取消机制、循环钩子
 - **pi_coding_agent** — 顶层 CLI：`pi -p "..."` 单次编码查询，7 个编码工具（read/write/edit/bash/grep/find/ls），JSONL 会话持久化，双层 settings.json 配置，26 个 Slash 命令，项目信任，系统提示构建器（AGENTS.md/CLAUDE.md），turn timings / cache stats
-- **pi_tui / pi_protocol / pi_storage / pi_server / pi_evals** — TUI 组件层、protocol v2、PostgreSQL 存储、常驻服务与评测 harness（见下表）
+- **pi_tui / pi_protocol / pi_storage / pi_server / pi_evals** — TUI 引擎层、protocol v2、PostgreSQL 存储、常驻服务与评测 harness（见下表）
 
 ---
 

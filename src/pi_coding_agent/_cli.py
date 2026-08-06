@@ -348,7 +348,7 @@ async def _async_main(args: list[str] | None = None) -> int:
             session_rebuilder=rebuilder,
         )
 
-    # TUI 模式：Textual 交互界面。
+    # TUI 模式：自研引擎交互界面。
     if parsed.mode == "tui":
         startup_resources = {
             "context_files": (
@@ -543,7 +543,7 @@ def _create_parser() -> argparse.ArgumentParser:
         "--mode",
         choices=["print", "rpc", "tui"],
         default=None,
-        help="Run mode: print (default), rpc (stdin/stdout JSONL), or tui (Textual)",
+        help="Run mode: print (default), rpc (stdin/stdout JSONL), or tui",
     )
     p.add_argument(
         "--setup",

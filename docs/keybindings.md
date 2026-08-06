@@ -1,6 +1,6 @@
 # 快捷键（Python 移植）
 
-实现：`src/pi_tui/keybindings.py`（`KeybindingsManager` + `DEFAULT_APP_KEYBINDINGS`）。pi-python 只实现了**应用级动作**的默认键位表；编辑器光标移动、选择列表、树导航等按键由 Textual 原生处理，未做成 TS 那样的大表。
+实现：`src/pi_tui/keybindings.py`（`KeybindingsManager` + `DEFAULT_APP_KEYBINDINGS`）。pi-python 实现了**应用级动作**的默认键位表；编辑器光标移动、选择列表、树导航等按键由引擎组件直接处理。
 
 ## 配置方式
 

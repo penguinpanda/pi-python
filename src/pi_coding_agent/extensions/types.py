@@ -81,6 +81,16 @@ class UIContext(Protocol):
 
     def set_working_message(self, text: str | None = None) -> None: ...
 
+    def set_working_visible(self, visible: bool) -> None: ...
+
+    def set_working_indicator(self, options: dict | None = None) -> None: ...
+
+    def paste_to_editor(self, text: str) -> None: ...
+
+    def get_editor_text(self) -> str: ...
+
+    async def editor(self, title: str, prefill: str = "") -> str | None: ...
+
     def set_theme(self, theme: str | None = None) -> None: ...
 
 
@@ -134,6 +144,21 @@ class NoopUIContext:
 
     def set_working_message(self, text=None):
         pass
+
+    def set_working_visible(self, visible):
+        pass
+
+    def set_working_indicator(self, options=None):
+        pass
+
+    def paste_to_editor(self, text):
+        pass
+
+    def get_editor_text(self):
+        return ""
+
+    async def editor(self, title, prefill=""):
+        return None
 
     def set_theme(self, theme=None):
         pass

@@ -1,8 +1,4 @@
-"""TUI 扩展 UI 上下文（对齐 TS 的 TUI UIContext）。
-
-把 ExtensionContext.ui 接到 PiTuiApp 的弹层 / 状态栏 / 编辑器，
-并暴露 ctx.ui.theme（fg / bg 颜色函数）。
-"""
+"""TUI 扩展 UI 上下文（对齐 TS 的 TUI UIContext）。"""
 
 from __future__ import annotations
 
@@ -109,10 +105,24 @@ class TuiUIContext:
             self._app._set_status(text)
 
     def set_title(self, title: str) -> None:
-        self._app.title = title
+        self._app.set_title(title)
 
     def set_editor_text(self, text: str) -> None:
         self._app._editor.text = text
+
+    def get_editor_text(self) -> str:
+        return self._app._editor.text
+
+    def paste_to_editor(self, text: str) -> None:
+        """把文本插入编辑器（对齐 TS pasteToEditor）。"""
+        try:
+            self._app._editor.insert(text)
+        except Exception:
+            self._app._editor.text += text
+
+    async def editor(self, title: str, prefill: str = "") -> str | None:
+        """弹出文本编辑对话框（对齐 TS editor(title, prefill)）。"""
+        return await self._app._await_text_input(title, prefill)
 
     def set_footer(self, text: str | None) -> None:
         self._app._footer.update(text or "")
@@ -121,19 +131,19 @@ class TuiUIContext:
         self._app._header.update(text or "")
 
     def set_editor_component(self, component) -> None:
-        """用自定义编辑器组件替换 PiEditor（对齐 TS setEditorComponent）。"""
+        """用自定义编辑器组件替换 PiEditor。"""
         self._app._replace_editor(component)
 
     def set_widget(self, key: str, lines: list[str], options: dict | None = None) -> None:
-        """在编辑器上方（默认）或下方显示多行组件（对齐 TS setWidget）。"""
+        """在编辑器上方（默认）或下方显示多行组件。"""
         self._app._set_widget(key, list(lines), options or {})
 
     def set_overlay(self, key: str, lines: list[str], options: dict | None = None) -> None:
-        """显示浮层（锚点 + margin；对齐 TS overlay 的最小子集）。"""
+        """显示浮层（锚点 + margin）。"""
         self._app._set_overlay(key, list(lines), options or {})
 
     def set_overlay_component(self, key: str, component, options: dict | None = None) -> None:
-        """用任意 Textual 组件作为 overlay（组件树 API）。"""
+        """用任意组件作为 overlay（组件树 API）。"""
         self._app._set_overlay_component(key, component, options or {})
 
     def set_overlay_renderer(self, key: str, renderer, options: dict | None = None) -> None:
@@ -147,6 +157,20 @@ class TuiUIContext:
     def set_working_message(self, text: str | None = None) -> None:
         """设置流式工作提示文案（None 恢复默认）。"""
         self._app._set_working_message(text)
+
+    def set_working_visible(self, visible: bool) -> None:
+        """控制 agent 运行时是否显示 Working 状态（对齐 TS setWorkingVisible）。"""
+        self._app._working_visible = bool(visible)
+
+    def set_working_indicator(self, options: dict | None = None) -> None:
+        """配置 Working 指示器（message/visible，对齐 TS setWorkingIndicator）。"""
+        options = options or {}
+        message = options.get("message")
+        if isinstance(message, str) and message:
+            self._app._set_working_message(message)
+        visible = options.get("visible")
+        if isinstance(visible, bool):
+            self._app._working_visible = visible
 
     def set_theme(self, theme: str | None = None) -> None:
         """切换主题（None 恢复当前配置主题）。"""

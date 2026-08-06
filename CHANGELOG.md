@@ -23,9 +23,18 @@
 - `pi-evals` harness with smoke and extensions evals (faux provider)
 - TUI tool-execution, skill-invocation, compaction/branch-summary message entries
 - TUI thinking/oauth/scoped-models selectors and extension selector (`/thinking`, `/oauth`, `/extensions`)
+- 内置 TUI 引擎 `src/pi_tui/engine/`：单元格渲染与行差分、终端输入解析
+  （UTF-8/CSI/SS3/kitty/SGR 鼠标/paste/OSC）、raw/alt-screen 终端驱动、
+  组件树（Editor vim/undo、ScrollView、SelectList/SettingsList、Loader、Markdown）、
+  App 基类（事件循环、焦点、overlay 合成、快捷键分发）；`FakeTerminal` 无头测试
+- TUI 终端协议：OSC 11 背景色、OSC 52 剪贴板、OSC 133 prompt、OSC 2026 同步输出、
+  `PI_HARDWARE_CURSOR` 硬件光标、SGR 鼠标滚轮与滚动条
+- 新增 `docs/tui-ts-feature-gap.md`：面向界面对齐 TS 的逐项功能差距与实施建议（布局/聊天/编辑器/终端协议/鼠标/设置接线，含里程碑与验证方式）
 
 ### Changed
 
+- **TUI 彻底移除 Textual**：`PiTuiApp` 与全部组件/选择器改到内置引擎之上，
+  依赖改为显式 `rich>=13.0`；`uv.lock` 移除 textual 及其传递依赖
 - mypy 全仓清零（原 664 个错误）：TypedDict 判别字段基类重构（NotRequired/Literal 收窄）、`NotRequired` 改用 `typing_extensions`、运行时凭证/事件/配置对象的类型收窄；CI 中 mypy 由非阻塞报告改为阻塞检查
 - 修复一批运行时隐患：`skills.py`/`prompt_templates.py` 访问不存在的 `.message` 属性（改为 `str(error)`）、TUI `scroll_visible(entry)` 应为 `scroll_to_widget(entry)`、`_CliAuthInteraction` 读取 camelCase 事件键、`openrouter_images` 输出补齐 `url` 键等
 - `!command` 配置值改为 `shlex.split` 参数数组执行（不再经 shell，消除命令注入边界）
@@ -34,6 +43,42 @@
 - 清理 `_agent_loop.py` 游离 docstring 与各类 lint 问题（未使用变量/导入、异常链、zip strict 等）
 - 默认 pytest 不再强制开启覆盖率（CI 中显式开启）
 - `AgentHarness.compact()` / `navigate_tree()` 接入 DAG Session 与 `pi_agent.compaction` / `branch_summarization`，不再抛 `not_implemented`
+- TUI 界面按差距文档补齐：启动资源独立容器、多行可展开 header、队列消息显示区、
+  状态 spinner 动画、编辑器边框与 padding、工具执行条目（可展开）、补全下拉 overlay、
+  OSC133 prompt 滚动（ctrl+shift+up/down）、kitty 键盘协议协商、焦点事件 `?1004h`、
+  OSC 9;4 终端进度、终端标题更新、OSC8 链接点击打开、拖选自动滚动、
+  图片宽度设置接线（showImages/imageWidthCells）、clearOnShrink 选项、
+  regular 主屏模式（uiMode 设置）、滚动条 hover 高亮、颜色方案通知解析、
+  autocompleteMaxVisible/quietStartup 接线、Markdown 标题/代码主题着色、
+  /debug /arminsayshi /dementedelves 彩蛋命令、ScrollView.scroll_by overscroll 语义、
+  drop files 提示（与 TS 一致）
+- 修复退出挂起：POSIX 输入读取改用 select 超时，避免退出时 `asyncio.run` 等待阻塞的读线程，
+  shell 提示符在退出后立即出现（真实 tmux 冒烟验证 fullscreen/regular 两种模式）
+- 编辑器补齐 `ctrl+shift+Home/End` 选区到文档首/尾（对齐 TS）
+- 输入解析补齐 `wantsKeyRelease` 接口：kitty release 事件带 `Key.release` 标记，
+  仅分发给声明 `wants_key_release` 的组件（对齐 TS isKeyRelease 过滤）
+- 扩展 UI API 补齐 `setWorkingVisible` / `setWorkingIndicator` / `pasteToEditor` /
+  `getEditorText` / `editor`（抽象接口 + Noop + TuiUIContext 实现）
+- 文档统一移除“自研”表述
+
+### Fixed
+
+- TUI 布局对齐 TS：容器分配保持挂载顺序，聊天区固定在编辑器上方（1fr），
+  编辑器/状态栏/页脚固定在底部，提交消息后输入框不再被挤出可视区；
+  启动资源提示随聊天区显示在输入框上方
+- TUI 退出对齐 TS：退出 alt-screen 后把最后一帧文档写入主屏并换行，
+  不再残留空行；shell 提示符紧接页脚
+- 修复滚动视口子组件 `app` 未传播导致流式占位（Speaking）无法移除的问题；
+  `message_start` 仅对 assistant 创建流式占位，user/custom 消息由 `message_end` 追加
+- 输入解析：分片 CSI/OSC 序列等待补齐而非被 final flush 丢弃；kitty release
+  与未知 CSI 序列被增量消费
+- 编辑器新增输入历史（对齐 TS）：提交后记录，上下键召回，上限 100 条
+- 编辑器补齐 TS emacs/alt 绑定：`ctrl+b/f` 左右移、`alt+b/f` 词导航、
+  `alt+backspace` / `alt+d` 删词、`alt+y` yank pop、`ctrl+-` undo、
+  `ctrl+]` / `ctrl+alt+]` 字符跳转；`\x1f` 解析为 `ctrl+-`（对齐 TS keys.ts）
+- TUI 注册 SIGINT/SIGTERM/SIGHUP 优雅退出，进程被杀时恢复终端
+- Windows：`GetConsoleScreenBufferInfo` 尺寸读取字段修正（srWindow Right/Bottom），
+  控制台输入模式关闭行缓冲与回显（对齐 raw 模式）
 
 ## [0.1.0]
 

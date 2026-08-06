@@ -1,7 +1,7 @@
 """展示层渲染工具（对齐 TS `core/tools/render-utils.ts`）。
 
 路径缩短、OSC 8 文件超链接、文本规范化、图片尺寸解析与回退渲染。
-Python 侧以纯文本 / OSC 序列输出，不依赖 Textual widget。
+Python 侧以纯文本 / OSC 序列输出，不依赖 UI 框架。
 """
 
 from __future__ import annotations

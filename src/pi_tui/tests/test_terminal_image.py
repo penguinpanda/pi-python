@@ -56,11 +56,13 @@ def test_terminal_image_fallback_without_capabilities(monkeypatch) -> None:
     monkeypatch.setenv("TERM", "xterm-256color")
     monkeypatch.setenv("TERM_PROGRAM", "")
     image = TerminalImage(b"abc", name="pic.png")
-    assert image.render() == "[image: pic.png]"
+    lines = image.render(20, 1)
+    assert lines[0].text().startswith("[image: pic.png]")
 
 
 def test_terminal_image_missing_file_fallback(monkeypatch) -> None:
     monkeypatch.setenv("TERM", "xterm-256color")
-    monkeypatch.setenv("TERM_PROGRAM", "")
-    image = TerminalImage("/nonexistent/pic.png")
-    assert image.render() == "[image: /nonexistent/pic.png]"
+    image = TerminalImage("no-such-file.png")
+    assert image.render_sequence() == ""
+    lines = image.render(20, 1)
+    assert lines[0].text().startswith("[image: no-such-file")

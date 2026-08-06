@@ -19,7 +19,8 @@ settings.json：
 }
 ```
 
-`theme` 缺省或为 `"auto"` 时自动选择：根据 `COLORFGBG` 环境变量判断终端背景（Windows 终端默认深色，未知默认 `dark`）。
+`theme` 缺省或为 `"auto"` 时自动选择：先通过 OSC 11 查询终端背景色，
+失败时回退 `COLORFGBG` 环境变量（Windows 终端默认深色，未知默认 `dark`）。
 
 ## 主题格式
 
@@ -49,7 +50,8 @@ JSON 对象，必须包含 `src/pi_tui/theme.py` `COLOR_KEYS` 里的**全部**�
 - 基础色板：`black` / `red` / `green` / `yellow` / `blue` / `magenta` / `cyan` / `white`
 - Markdown / diff：`markdownHeading`、`markdownLink`、`diffAdd`、`diffRemove`、`diffChange`
 
-`Theme.css_variables(prefix="pi")` 把它们转成 `--pi-<key>` CSS 变量供 Textual CSS 模板使用。
+引擎把主题色直接作为 `Rich Style`（bgcolor/color）应用到各组件；`Theme.css_variables(prefix="pi")`
+保留为兼容 API（旧 CSS 模板不再使用）。
 
 ## 未移植（TS 独有）
 

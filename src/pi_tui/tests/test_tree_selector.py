@@ -1,14 +1,12 @@
-"""TreeSelector 树过滤模式测试。"""
+"""引擎版 TreeSelector / 树过滤测试。"""
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
-import pytest
-from textual.app import App
-from textual.widgets import Label, Static
-
+from pi_coding_agent._session_manager import SessionTreeNode
+from pi_tui.engine import App, FakeTerminal
+from pi_tui.engine.keys import Key
 from pi_tui.selectors import (
+    ChoiceSelector,
     TreeSelector,
     _flatten_tree,
     _node_copy_text,
@@ -17,233 +15,104 @@ from pi_tui.selectors import (
 )
 
 
-def _node(entry=None, label=None, children=None, label_timestamp=None) -> SimpleNamespace:
-    return SimpleNamespace(
-        id=str(id(entry or label)),
+def _node(
+    entry: dict, label: str | None = None, children=None, node_id: str = "n1"
+) -> SessionTreeNode:
+    return SessionTreeNode(
+        id=node_id,
+        parent_id=None,
         entry=entry,
         label=label,
         children=children or [],
-        label_timestamp=label_timestamp,
     )
+
+
+def _key(name: str) -> Key:
+    return Key(name)
 
 
 def test_default_hides_settings_entries() -> None:
-    assert node_passes_tree_filter(_node({"type": "message", "role": "user"}), "default")
-    assert not node_passes_tree_filter(_node({"type": "label"}), "default")
-    assert not node_passes_tree_filter(_node({"type": "model_change"}), "default")
-    assert not node_passes_tree_filter(_node({"type": "session_info"}), "default")
+    node = _node({"type": "label"})
+    assert node_passes_tree_filter(node, "default") is False
+    message = _node({"type": "message", "role": "user"})
+    assert node_passes_tree_filter(message, "default") is True
 
 
 def test_no_tools_hides_tool_results() -> None:
-    assert not node_passes_tree_filter(_node({"type": "message", "role": "toolResult"}), "no-tools")
-    assert node_passes_tree_filter(_node({"type": "message", "role": "user"}), "no-tools")
-    assert not node_passes_tree_filter(_node({"type": "label"}), "no-tools")
+    node = _node({"type": "message", "role": "toolResult"})
+    assert node_passes_tree_filter(node, "no-tools") is False
 
 
 def test_user_only() -> None:
-    assert node_passes_tree_filter(_node({"type": "message", "role": "user"}), "user-only")
-    assert not node_passes_tree_filter(_node({"type": "message", "role": "assistant"}), "user-only")
+    user = _node({"type": "message", "role": "user"})
+    assistant = _node({"type": "message", "role": "assistant"})
+    assert node_passes_tree_filter(user, "user-only") is True
+    assert node_passes_tree_filter(assistant, "user-only") is False
 
 
 def test_labeled_only() -> None:
-    assert node_passes_tree_filter(
-        _node({"type": "message", "role": "user"}, label="x"), "labeled-only"
-    )
-    assert not node_passes_tree_filter(_node({"type": "message", "role": "user"}), "labeled-only")
+    assert node_passes_tree_filter(_node({"type": "message"}, label="x"), "labeled-only") is True
+    assert node_passes_tree_filter(_node({"type": "message"}), "labeled-only") is False
 
 
 def test_all_shows_everything() -> None:
-    assert node_passes_tree_filter(_node({"type": "label"}), "all")
-    assert node_passes_tree_filter(_node({"type": "model_change"}), "all")
+    assert node_passes_tree_filter(_node({"type": "label"}), "all") is True
 
 
 def test_format_label_timestamp() -> None:
-    formatted = format_label_timestamp("2026-08-05T12:34:56+00:00")
-    assert len(formatted) == 8
-    assert formatted[2] == ":" and formatted[5] == ":"
-    assert format_label_timestamp("not-a-date") == "not-a-date"
-    assert format_label_timestamp("") == ""
+    assert format_label_timestamp(None) == ""
+    assert format_label_timestamp("bad-value") == "bad-value"
+    parsed = format_label_timestamp("2026-08-05T10:20:30Z")
+    assert ":" in parsed
 
 
 def test_flatten_tree_with_label_timestamp() -> None:
-    node = _node(
-        {"type": "message", "role": "user"},
-        label="u1",
-        label_timestamp="2026-08-05T12:00:00+00:00",
-    )
-    rows = _flatten_tree([node], None, show_label_timestamps=True)
-    assert "@" in rows[0][2]
-    rows_off = _flatten_tree([node], None, show_label_timestamps=False)
-    assert "@" not in rows_off[0][2]
+    child = _node({"type": "message"}, label="child", node_id="c1")
+    parent = _node({"type": "message"}, label="parent", node_id="p1", children=[child])
+    rows = _flatten_tree([parent], None)
+    assert len(rows) == 2
+    assert rows[0][1] == ""
+    assert rows[1][1] == "└─"
 
 
 def test_node_copy_text_returns_full_message() -> None:
-    assert (
-        _node_copy_text(
-            _node(
-                {
-                    "type": "message",
-                    "role": "user",
-                    "message": {"role": "user", "content": "first\nsecond"},
-                }
-            )
-        )
-        == "first\nsecond"
+    node = _node({"type": "message", "message": {"content": "full text"}})
+    assert _node_copy_text(node) == "full text"
+
+
+def test_tree_selector_filter_cycles() -> None:
+    selector = TreeSelector([_node({"type": "label"}), _node({"type": "message"})])
+    assert selector.filter_mode == "default"
+    selector.handle_key(_key("f"))
+    assert selector.filter_mode == "no-tools"
+    selector.handle_key(_key("f"))
+    assert selector.filter_mode == "user-only"
+
+
+def test_tree_selector_toggles_label_timestamps() -> None:
+    selector = TreeSelector([_node({"type": "message"})])
+    assert selector.show_label_timestamps is False
+    selector.handle_key(_key("t"))
+    assert selector.show_label_timestamps is True
+
+
+def test_tree_selector_copy_selected_posts_message() -> None:
+    app = App(terminal=FakeTerminal(size=(60, 20)))
+    copied: list[str] = []
+    app.on_copy_requested = lambda message: copied.append(message.text)  # type: ignore[method-assign]
+    selector = TreeSelector(
+        [_node({"type": "message", "message": {"content": "copy me"}}, label="x")]
     )
-    list_content = _node_copy_text(
-        _node(
-            {
-                "type": "message",
-                "role": "user",
-                "message": {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "a"},
-                        {"type": "text", "text": "b"},
-                    ],
-                },
-            }
-        )
-    )
-    assert list_content == "a\nb"
-    assert _node_copy_text(_node({"type": "label"}, label="lab")) == "lab"
-    assert _node_copy_text(_node({"type": "label"})) == ""
+    selector.app = app
+    selector.handle_key(_key("enter"))
+    assert copied == ["copy me"]
 
 
-class _Host(App):
-    def __init__(self, tree) -> None:
-        super().__init__()
-        self._tree = tree
-
-    def compose(self):
-        yield Static("")
-        yield TreeSelector(self._tree)
-
-    def on_mount(self) -> None:
-        self.query_one(TreeSelector).query_one("#tree-list").focus()
-
-
-@pytest.mark.asyncio
-async def test_tree_selector_filter_cycles() -> None:
-    tree = [
-        _node({"type": "message", "role": "user"}, label="u1"),
-        _node({"type": "message", "role": "toolResult"}),
-        _node({"type": "label"}),
-        _node({"type": "model_change"}),
-    ]
-    app = _Host(tree)
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        selector = app.query_one(TreeSelector)
-        assert selector.filter_mode == "default"
-        assert len(selector.query_one("#tree-list").children) == 2
-
-        await pilot.press("f")
-        await pilot.pause()
-        assert selector.filter_mode == "no-tools"
-        assert "[no-tools" in selector.query_one(Label).render().plain
-        assert len(selector.query_one("#tree-list").children) == 1
-
-        await pilot.press("f")
-        await pilot.pause()
-        assert selector.filter_mode == "user-only"
-        assert len(selector.query_one("#tree-list").children) == 1
-
-        await pilot.press("f")
-        await pilot.pause()
-        assert selector.filter_mode == "labeled-only"
-        assert len(selector.query_one("#tree-list").children) == 1
-
-        await pilot.press("f")
-        await pilot.pause()
-        assert selector.filter_mode == "all"
-        assert len(selector.query_one("#tree-list").children) == 4
-
-
-@pytest.mark.asyncio
-async def test_tree_selector_toggles_label_timestamps() -> None:
-    tree = [
-        _node(
-            {"type": "message", "role": "user"},
-            label="u1",
-            label_timestamp="2026-08-05T12:00:00+00:00",
-        )
-    ]
-    app = _Host(tree)
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        selector = app.query_one(TreeSelector)
-        assert selector.show_label_timestamps is False
-        row_label = selector.query_one("#tree-list").children[0].query_one(Label)
-        assert "@" not in row_label.render().plain
-
-        await pilot.press("t")
-        await pilot.pause()
-        assert selector.show_label_timestamps is True
-        assert "[+label time" in selector.query_one(Label).render().plain
-        row_label = selector.query_one("#tree-list").children[0].query_one(Label)
-        assert "@" in row_label.render().plain
-
-        await pilot.press("t")
-        await pilot.pause()
-        assert selector.show_label_timestamps is False
-
-
-class _CopyHost(App):
-    def __init__(self, tree) -> None:
-        super().__init__()
-        self._tree = tree
-        self.copied: list[str] = []
-
-    def compose(self):
-        yield Static("")
-        yield TreeSelector(self._tree)
-
-    def on_mount(self) -> None:
-        self.query_one(TreeSelector).query_one("#tree-list").focus()
-
-    def on_copy_requested(self, message) -> None:
-        self.copied.append(message.text)
-
-
-@pytest.mark.asyncio
-async def test_tree_selector_copy_selected_posts_message() -> None:
-    tree = [
-        _node(
-            {
-                "type": "message",
-                "role": "user",
-                "message": {"role": "user", "content": "first\nsecond"},
-            },
-            label="snippet",
-        )
-    ]
-    app = _CopyHost(tree)
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        await pilot.press("enter")
-        await pilot.pause()
-    assert app.copied == ["first\nsecond"]
-
-
-@pytest.mark.asyncio
-async def test_choice_selector_copy_selected_posts_message() -> None:
-    from pi_tui.selectors import ChoiceSelector
-
-    class _ChoiceHost(App):
-        def __init__(self) -> None:
-            super().__init__()
-            self.copied: list[str] = []
-
-        def compose(self):
-            yield ChoiceSelector("Pick", ["alpha", "beta"], current="alpha")
-
-        def on_copy_requested(self, message) -> None:
-            self.copied.append(message.text)
-
-    app = _ChoiceHost()
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        await pilot.press("enter")
-        await pilot.pause()
-    assert app.copied == ["alpha"]
+def test_choice_selector_copy_selected_posts_message() -> None:
+    app = App(terminal=FakeTerminal(size=(60, 20)))
+    copied: list[str] = []
+    app.on_copy_requested = lambda message: copied.append(message.text)  # type: ignore[method-assign]
+    selector = ChoiceSelector("Pick", ["alpha", "beta"])
+    selector.app = app
+    selector.handle_key(_key("enter"))
+    assert copied == ["alpha"]

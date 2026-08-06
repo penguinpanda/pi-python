@@ -1,17 +1,32 @@
-"""TUI 组件：Header / ChatContainer / Editor / StatusBar / Footer。"""
+"""TUI 组件（引擎版）：Header / ChatContainer / Editor / StatusBar / Footer。"""
 
 from __future__ import annotations
 
+import base64
 from typing import Any
 
-from textual import events
-from textual.binding import Binding
-from textual.containers import VerticalScroll
-from textual.message import Message
-from textual.widgets import Input, Label, Static, TextArea
+from pi_tui.engine.cells import Line, blank_line, line_from_text
+from pi_tui.engine.text import render_markdown, render_markup
+from pi_tui.engine.widgets import (
+    Editor,
+    Input,
+    Label,
+    Message,
+    ScrollView,
+    Static,
+    Vertical,
+    Widget,
+)
 
 from .keybindings import KeybindingsManager
-from .markdown import render_labeled_markdown
+from .links import has_abs_paths, linkify_lines, linkify_paths, normalize_path_slashes
+from .markdown import label_icon
+from .terminal_image import (
+    detect_capabilities,
+    encode_iterm2_image,
+    encode_kitty_delete,
+    encode_kitty_placement,
+)
 
 
 class CopyRequested(Message):
@@ -39,6 +54,23 @@ def _block_text(block: dict[str, Any]) -> str:
     if block_type == "image":
         return "[image]"
     return ""
+
+
+def _collect_image_data(content: Any, images_out: list[bytes] | None) -> None:
+    """收集内容块里的 image data（base64 字符串或 bytes）到 images_out。"""
+    if images_out is None or not isinstance(content, list):
+        return
+    for block in content:
+        if not isinstance(block, dict) or block.get("type") != "image":
+            continue
+        data = block.get("data")
+        if isinstance(data, str):
+            try:
+                images_out.append(base64.b64decode(data))
+            except Exception:
+                pass
+        elif isinstance(data, (bytes, bytearray)):
+            images_out.append(bytes(data))
 
 
 def _apply_markdown_transformers(
@@ -73,10 +105,13 @@ def message_to_entries(
     markdown_transformers=None,
     hidden_thinking_label: str = "Thinking",
     tool_renderer=None,
+    skip_tool_calls: bool = False,
+    images_out: list[bytes] | None = None,
 ) -> list[tuple[str, str]]:
     """AgentMessage → [(label, text)]，供聊天容器渲染。"""
     role = message.get("role")
     content = message.get("content")
+    _collect_image_data(content, images_out)
 
     if role == "user":
         if isinstance(content, str):
@@ -92,11 +127,11 @@ def message_to_entries(
         if tool_renderer is not None:
             rendered = tool_renderer(message)
             if isinstance(rendered, str) and rendered:
-                return [(label, rendered)]
+                return [(label, linkify_paths(rendered))]
         if isinstance(content, str):
-            return [(label, content)]
+            return [(label, linkify_paths(content))]
         text = "\n".join(_block_text(block) for block in content or [])
-        return [(label, text)]
+        return [(label, linkify_paths(text))]
 
     if role == "assistant":
         entries: list[tuple[str, str]] = []
@@ -112,10 +147,10 @@ def message_to_entries(
                 if show_thinking:
                     thinking_parts.append(block.get("thinking", ""))
             elif block_type == "toolCall":
-                if show_tools:
+                if show_tools and not skip_tool_calls:
                     name = block.get("name", "tool")
                     arguments = block.get("arguments") or {}
-                    tool_calls.append(f"{name}({arguments})")
+                    tool_calls.append(f"{name}({linkify_paths(str(arguments))})")
             elif block_type == "text":
                 text_parts.append(block.get("text", ""))
         if thinking_parts:
@@ -138,6 +173,8 @@ def message_to_entries(
             )
         for tool_call in tool_calls:
             entries.append(("Tool call", tool_call))
+        if not entries and images_out:
+            entries.append((label, "[image]"))
         return entries
 
     if role == "compactionSummary":
@@ -168,16 +205,16 @@ def message_to_entries(
         if custom_renderer is not None:
             rendered = custom_renderer(message)
             if isinstance(rendered, str) and rendered:
-                return [(custom_type, rendered)]
+                return [(custom_type, linkify_paths(rendered))]
         if isinstance(content, str):
-            return [(custom_type, content)]
+            return [(custom_type, linkify_paths(content))]
         text = "\n".join(_block_text(block) for block in content or [])
-        return [(custom_type, text)] if text else []
-    # 其它角色（custom/branchSummary 等）降级为文本。
+        return [(custom_type, linkify_paths(text))] if text else []
+    # 其它角色降级为文本。
     if isinstance(content, str):
-        return [("Agent", content)]
+        return [("Agent", linkify_paths(content))]
     text = "\n".join(_block_text(block) for block in content or [])
-    return [("Agent", text)] if text else []
+    return [("Agent", linkify_paths(text))] if text else []
 
 
 # ---------------------------------------------------------------------------
@@ -185,40 +222,190 @@ def message_to_entries(
 # ---------------------------------------------------------------------------
 
 
-class MessageEntry(Static):
-    """聊天消息条目。"""
+def _render_labeled_markdown(
+    label: str,
+    text: str,
+    width: int,
+    speaking: bool = False,
+    prompt_marker: bool = False,
+    theme_colors: dict | None = None,
+) -> list[Line]:
+    """消息条目渲染：图标 + label（粗体，单独一行）+ 缩进正文。"""
+    from rich.style import Style
 
-    def __init__(self, label: str, text: str, **kwargs) -> None:
-        super().__init__("", **kwargs)
+    suffix = " Speaking…" if speaking else ""
+    label_line = line_from_text(f"{label_icon(label)} {label}{suffix}", width, Style(bold=True))
+    body = normalize_path_slashes(text)
+    if "[/" not in body and not has_abs_paths(body):
+        body_lines = render_markdown(body, max(0, width - 2), theme_colors=theme_colors)
+    else:
+        body_lines = []
+        for raw_line in linkify_paths(body).splitlines() or [""]:
+            body_lines.extend(render_markup(raw_line, max(0, width - 2)))
+    lines: list[Line] = [label_line]
+    for body_line in body_lines:
+        indented = blank_line(width)
+        indented.patch(2, body_line)
+        lines.append(indented)
+    linkify_lines(lines)
+    if prompt_marker and lines:
+        lines[0].passthrough = "\x1b]133;A\x07" + lines[0].passthrough
+    return lines
+
+
+class MessageEntry(Widget):
+    """聊天消息条目（支持终端图像 placement passthrough）。"""
+
+    def __init__(
+        self,
+        label: str,
+        text: str,
+        images: list[bytes] | None = None,
+        *,
+        image_width: int | None = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
         self.label = label
         self.entry_text = text
+        self.images = list(images or [])
+        self.image_width = image_width
+        self.prompt_marker = False
+        self.theme_colors: dict = {}
+        self._image_id_base = id(self) & 0xFFFFFF
         self.speaking = False
 
-    def on_mount(self) -> None:
-        self._refresh_display()
+    @property
+    def is_mounted(self) -> bool:
+        return self.app is not None
 
     def set_text(self, text: str) -> None:
-        """流式更新正文（未挂载时只记录，挂载后重渲染）。"""
+        """流式更新正文。"""
         self.entry_text = text
-        if self.is_mounted:
-            self._refresh_display()
+        self.refresh()
 
     def set_speaking(self, speaking: bool) -> None:
         """标记当前是否正在说话（流式回复中显示 Speaking…）。"""
         self.speaking = speaking
-        if self.is_mounted:
-            self._refresh_display()
+        self.refresh()
 
-    def _refresh_display(self) -> None:
-        self.update(render_labeled_markdown(self.label, self.entry_text, speaking=self.speaking))
+    def remove(self, child=None) -> None:
+        """移除时清理已显示的 kitty 图片。"""
+        if self.images and "kitty" in detect_capabilities() and self.app is not None:
+            for index in range(len(self.images)):
+                self.app.terminal.write(encode_kitty_delete(self._image_id_base + index))
+        super().remove(child)
 
-    async def _on_click(self, event: events.Click) -> None:
-        """点击消息 → 复制整条文本（Textual 不支持鼠标选词）。"""
-        if self.entry_text:
-            self.post_message(CopyRequested(self.entry_text))
+    def render(self, width: int, height: int) -> list[Line]:
+        lines = _render_labeled_markdown(
+            self.label,
+            self.entry_text,
+            width,
+            self.speaking,
+            self.prompt_marker,
+            self.theme_colors or None,
+        )
+        if self.images:
+            capabilities = detect_capabilities()
+            if capabilities:
+                while len(lines) < 2:
+                    lines.append(blank_line(width, self.base_style))
+                if "kitty" in capabilities:
+                    lines[1].passthrough = "".join(
+                        encode_kitty_placement(
+                            image,
+                            image_id=self._image_id_base + index,
+                            width=self.image_width,
+                            height=self.image_width,
+                        )
+                        for index, image in enumerate(self.images)
+                    )
+                elif "iterm2" in capabilities:
+                    lines[1].passthrough = "".join(
+                        encode_iterm2_image(image, name=f"image-{index}")
+                        for index, image in enumerate(self.images)
+                    )
+        if len(lines) > height:
+            lines = lines[:height]
+        while len(lines) < height:
+            lines.append(blank_line(width, self.base_style))
+        return lines
+
+    def handle_mouse(self, event) -> bool:
+        if event.type == "release" and self.entry_text:
+            self.post_message(CopyRequested(self.entry_text), "")
+            return True
+        return False
+
+    def content_size(self) -> tuple[int, int]:
+        lines = _render_labeled_markdown(self.label, self.entry_text, 1000, self.speaking)
+        return (1000, len(lines))
 
 
-class BashExecutionEntry(Static):
+class ToolExecutionEntry(Widget):
+    """工具执行条目：名称/参数 + 输出 + 状态，可展开/折叠（对齐 TS ToolExecutionComponent）。"""
+
+    def __init__(
+        self,
+        tool_name: str,
+        tool_call_id: str,
+        arguments: Any = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.tool_name = tool_name
+        self.tool_call_id = tool_call_id
+        self.arguments = arguments
+        self.output = ""
+        self.status = "running"  # running / success / error
+        self.expanded = False
+
+    def update_arguments(self, arguments) -> None:
+        self.arguments = arguments
+        self.refresh()
+
+    def set_result(self, output: str, is_error: bool = False) -> None:
+        self.output = output
+        self.status = "error" if is_error else "success"
+        self.refresh()
+
+    def set_expanded(self, expanded: bool) -> None:
+        self.expanded = bool(expanded)
+        self.refresh()
+
+    def handle_mouse(self, event) -> bool:
+        if event.type == "release":
+            self.expanded = not self.expanded
+            self.refresh()
+            return True
+        return False
+
+    def _format_arguments(self) -> str:
+        if isinstance(self.arguments, dict):
+            return ", ".join(f"{key}={value}" for key, value in self.arguments.items())
+        return str(self.arguments or "")
+
+    def content_size(self) -> tuple[int, int]:
+        lines = 1
+        if self.expanded and self.output:
+            lines += len(str(self.output).splitlines())
+        return (1000, lines)
+
+    def render(self, width: int, height: int) -> list[Line]:
+        status = {"running": "...", "success": "ok", "error": "error"}[self.status]
+        label = f"Tool: {self.tool_name} ({status})"
+        lines = [line_from_text(f"{label}  {self._format_arguments()}", width, self.base_style)]
+        if self.expanded and self.output:
+            for raw in str(self.output).splitlines():
+                body = blank_line(width)
+                body.patch(2, line_from_text(raw, max(0, width - 2), self.base_style))
+                lines.append(body)
+        while len(lines) < height:
+            lines.append(blank_line(width, self.base_style))
+        return lines[:height]
+
+
+class BashExecutionEntry(Widget):
     """交互 bash 命令条目：流式输出 + 完成状态。"""
 
     def __init__(
@@ -228,22 +415,23 @@ class BashExecutionEntry(Static):
         exclude_from_context: bool = False,
         **kwargs,
     ) -> None:
-        super().__init__("", **kwargs)
+        super().__init__(**kwargs)
         self.command = command
         self.exclude_from_context = exclude_from_context
         self.output = ""
         self.status: str | None = None
 
     @property
+    def is_mounted(self) -> bool:
+        return self.app is not None
+
+    @property
     def label(self) -> str:
         return "Bash (excluded)" if self.exclude_from_context else "Bash"
 
-    def on_mount(self) -> None:
-        self._update_display()
-
     def append_output(self, chunk: str) -> None:
         self.output += chunk
-        self._schedule_update()
+        self.refresh()
 
     def set_complete(
         self,
@@ -261,68 +449,113 @@ class BashExecutionEntry(Static):
         if truncated and full_output_path:
             prefix = f"{self.status} " if self.status else ""
             self.status = f"{prefix}Output truncated. Full output: {full_output_path}"
-        self._schedule_update()
+        self.refresh()
 
     def set_error(self, message: str) -> None:
         self.status = f"(failed: {message})"
-        self._schedule_update()
+        self.refresh()
 
-    def _schedule_update(self) -> None:
-        if self.is_mounted:
-            self.call_after_refresh(self._update_display)
-
-    def _update_display(self) -> None:
-        escaped = self.output.replace("[", r"\[")
+    def render(self, width: int, height: int) -> list[Line]:
         text = f"$ {self.command}"
-        if escaped:
-            text += f"\n{escaped}"
+        if self.output:
+            text += f"\n{self.output}"
         if self.status:
             text += f"\n{self.status}"
-        self.update(f"[b]{self.label}[/b] {text}")
+        lines = [line_from_text(f"{self.label}  {text}", width, self.base_style)]
+        while len(lines) < height:
+            lines.append(blank_line(width, self.base_style))
+        return lines
 
-    async def _on_click(self, event: events.Click) -> None:
-        """点击 bash 条目 → 复制命令 + 输出。"""
-        parts = [f"$ {self.command}"]
-        if self.output:
-            parts.append(self.output)
-        if self.status:
-            parts.append(self.status)
-        self.post_message(CopyRequested("\n".join(parts)))
+    def handle_mouse(self, event) -> bool:
+        if event.type == "release":
+            parts = [f"$ {self.command}"]
+            if self.output:
+                parts.append(self.output)
+            if self.status:
+                parts.append(self.status)
+            self.post_message(CopyRequested("\n".join(parts)), "")
+            return True
+        return False
+
+    def content_size(self) -> tuple[int, int]:
+        height = 1 + (2 if self.output else 0) + (1 if self.status else 0)
+        return (1000, height)
 
 
 class PiHeader(Static):
-    """Logo + 快捷键提示。"""
+    """Logo + 快捷键提示（紧凑/展开两种形态，对齐 TS builtInHeader）。"""
 
     def __init__(self, keybindings: KeybindingsManager, **kwargs) -> None:
         super().__init__("", **kwargs)
         self._keybindings = keybindings
+        self._expanded = False
+        self.refresh_hints()
+
+    def set_expanded(self, expanded: bool) -> None:
+        self._expanded = bool(expanded)
+        self.refresh_hints()
 
     def refresh_hints(self) -> None:
         model_forward = self._keybindings.get_action_key("app.model.cycleForward")
         model_select = self._keybindings.get_action_key("app.model.select")
         exit_key = self._keybindings.get_action_key("app.exit")
-        self.update(
-            "[b]pi[/b]  "
-            f"cycle model {model_forward or ''}  "
-            f"select model {model_select or ''}  "
-            f"exit {exit_key or ''}"
-        )
+        if self._expanded:
+            self.update(
+                "[b]pi[/b]\n"
+                f"interrupt {self._keybindings.get_action_key('app.interrupt') or 'escape'}\n"
+                f"clear {self._keybindings.get_action_key('app.clear') or 'ctrl+c'}\n"
+                f"exit {exit_key or 'ctrl+d'}\n"
+                f"cycle model {model_forward or 'ctrl+p'}\n"
+                f"select model {model_select or 'ctrl+l'}\n"
+                "/  commands    !  bash    !!  bash (no context)\n"
+                "drop files  to attach"
+            )
+        else:
+            self.update(
+                "[b]pi[/b]  "
+                f"cycle model {model_forward or ''}  "
+                f"select model {model_select or ''}  "
+                f"exit {exit_key or ''}"
+            )
 
-    def on_mount(self) -> None:
-        self.refresh_hints()
 
-
-class PiChatContainer(VerticalScroll):
+class PiChatContainer(ScrollView):
     """消息列表容器。"""
 
     def __init__(self, **kwargs) -> None:
-        super().__init__(**kwargs)
+        super().__init__(Vertical(), **kwargs)
         self._show_tools = True
         self._show_thinking = True
         self._custom_renderer = None
         self._markdown_transformers = None
         self._hidden_thinking_label = "Thinking"
         self._tool_renderer = None
+        self._show_images = True
+        self._image_width_cells: int | None = None
+        self._theme_colors: dict = {}
+
+    def set_image_options(
+        self,
+        *,
+        show_images: bool = True,
+        image_width_cells: int | None = None,
+    ) -> None:
+        self._show_images = show_images
+        self._image_width_cells = image_width_cells
+        self.refresh()
+
+    def set_theme_colors(self, colors: dict) -> None:
+        self._theme_colors = dict(colors)
+        self.refresh()
+
+    def _body(self) -> Vertical:
+        body = self.child
+        assert isinstance(body, Vertical)
+        return body
+
+    def mount(self, child: Widget) -> Widget:
+        """条目挂载进内部消息列表（而非滚动视口本身）。"""
+        return self._body().mount(child)
 
     def set_visibility(self, *, show_tools: bool, show_thinking: bool) -> None:
         self._show_tools = show_tools
@@ -352,7 +585,9 @@ class PiChatContainer(VerticalScroll):
         *,
         show_tools: bool | None = None,
         show_thinking: bool | None = None,
+        skip_tool_calls: bool = False,
     ) -> None:
+        images: list[bytes] = []
         entries = message_to_entries(
             message,
             show_tools=self._show_tools if show_tools is None else show_tools,
@@ -361,282 +596,54 @@ class PiChatContainer(VerticalScroll):
             markdown_transformers=getattr(self, "_markdown_transformers", None),
             hidden_thinking_label=getattr(self, "_hidden_thinking_label", "Thinking"),
             tool_renderer=getattr(self, "_tool_renderer", None),
+            skip_tool_calls=skip_tool_calls,
+            images_out=images,
         )
         for label, text in entries:
-            self.mount(MessageEntry(label, text))
-        self.scroll_end(animate=False)
+            self.mount(
+                MessageEntry(
+                    label,
+                    text,
+                    images=images if self._show_images else [],
+                    image_width=self._image_width_cells,
+                )
+            )
+            if entries:
+                last = self._body().children[-1]
+                if isinstance(last, MessageEntry):
+                    last.prompt_marker = message.get("role") == "user"
+                    last.theme_colors = dict(self._theme_colors)
+        self.scroll_end()
 
     def clear_messages(self) -> None:
-        entries = list(self.query(MessageEntry)) + list(self.query(BashExecutionEntry))
-        for entry in entries:
-            entry.remove()
+        for entry in list(self._body().children):
+            self._body().remove(entry)
+        self.scroll_offset = 0
+        self.refresh()
+
+    def query(self, widget_type: type) -> list[Widget]:
+        return [widget for widget in self._body().walk() if isinstance(widget, widget_type)]
+
+    def scroll_to_widget(self, widget: Widget) -> None:
+        """把指定条目滚入视口。"""
+        row, _col, _w, _h = widget.rect
+        if row < self.scroll_offset:
+            self.scroll_offset = row
+        elif row >= self.scroll_offset + self.rect[3]:
+            self.scroll_offset = max(0, row - self.rect[3] + 1)
+        self.refresh()
 
 
-class PiEditor(TextArea):
-    """多行输入编辑器：Enter 提交，Shift+Enter 插入换行。"""
-
-    BINDINGS = [
-        Binding("enter", "submit", "Send"),
-        Binding("shift+enter", "newline", "Insert newline"),
-        Binding("tab", "autocomplete", "Autocomplete"),
-        Binding("ctrl+c", "copy_or_clear", "Copy or clear"),
-    ]
-
-    def __init__(self, **kwargs) -> None:
-        super().__init__(**kwargs)
-        # slash 命令补全激活时：↑/↓ 导航、Enter 插入、Esc 关闭（编辑器保持焦点）。
-        self.completion_active = False
-
-    class AutocompleteRequested(Message):
-        """Tab 按下且需要扩展自动补全。"""
-
-        def __init__(self, editor: "PiEditor") -> None:
-            super().__init__()
-            self.editor = editor
-
-    class Submitted(Message):
-        """编辑器提交事件。"""
-
-        def __init__(self, editor: "PiEditor", text: str) -> None:
-            super().__init__()
-            self.editor = editor
-            self.text = text
-
-    class ExitRequested(Message):
-        """编辑器为空时按下 ctrl+d（退出快捷键）。"""
-
-        pass
-
-    class CopyRequested(Message):
-        """ctrl+x：复制最后一条 assistant 消息（对齐 TS app.message.copy）。"""
-
-        pass
-
-    class CycleThinkingRequested(Message):
-        """shift+tab：循环 thinking 级别（对齐 TS app.thinking.cycle）。"""
-
-        pass
-
-    class CompletionNavigateRequested(Message):
-        """补全激活时 ↑/↓ 移动选中项。"""
-
-        def __init__(self, delta: int) -> None:
-            super().__init__()
-            self.delta = delta
-
-    class CompletionSubmitRequested(Message):
-        """补全激活时 Enter 确认选中项。"""
-
-        pass
-
-    class CompletionHideRequested(Message):
-        """补全激活时 Esc 关闭补全。"""
-
-        pass
-
-    def action_submit(self) -> None:
-        text = self.text.strip()
-        if not text:
-            return
-        self.clear()
-        self.post_message(self.Submitted(self, text))
-
-    def action_newline(self) -> None:
-        """Shift+Enter：插入换行（TextArea 会吞掉单独的 enter）。"""
-        self._replace_via_keyboard("\n", *self.selection)
-
-    def action_autocomplete(self) -> None:
-        self.post_message(self.AutocompleteRequested(self))
-
-    def action_copy_or_clear(self) -> None:
-        """ctrl+c：有选区则复制选中文本，否则清空编辑器（对齐 TS）。"""
-        if self.selected_text:
-            self.action_copy()
-        else:
-            self.clear()
-
-    async def _on_key(self, event: events.Key) -> None:
-        # TextArea._on_key 会把 enter 直接当换行插入并 stop() 事件，
-        # 导致上面的 "enter -> submit" 绑定永远不触发，必须在这里拦截。
-        if self.completion_active:
-            if event.key in ("up", "down"):
-                self.post_message(self.CompletionNavigateRequested(-1 if event.key == "up" else 1))
-                event.stop()
-                event.prevent_default()
-                return
-            if event.key == "escape":
-                self.post_message(self.CompletionHideRequested())
-                event.stop()
-                event.prevent_default()
-                return
-        if event.key == "enter":
-            if self.completion_active:
-                self.post_message(self.CompletionSubmitRequested())
-            else:
-                self.action_submit()
-            event.stop()
-            event.prevent_default()
-            return
-        if event.key == "ctrl+d":
-            if not self.text:
-                # 编辑器为空时 ctrl+d = 退出请求（TextArea 默认会把它当删除键吞掉，
-                # 冒泡到应用绑定不可靠，改为显式发消息）。
-                self.post_message(self.ExitRequested())
-                event.stop()
-                event.prevent_default()
-                return
-            # 非空：保留 TextArea 默认行为（删除右侧字符）。
-            await super()._on_key(event)
-            return
-        if event.key == "ctrl+x":
-            # TextArea 默认把 ctrl+x 当剪切；对齐 TS：ctrl+x 复制最后一条消息。
-            self.post_message(self.CopyRequested())
-            event.stop()
-            event.prevent_default()
-            return
-        if event.key == "shift+tab":
-            # Textual 默认用 shift+tab 切换焦点；对齐 TS：循环 thinking 级别。
-            self.post_message(self.CycleThinkingRequested())
-            event.stop()
-            event.prevent_default()
-            return
-        await super()._on_key(event)
-        # 自动触发 slash 命令补全：输入 `/cmd` 且尚未出现空格时。
-        character = getattr(event, "character", None)
-        if (
-            character
-            and character.isprintable()
-            and self.text.startswith("/")
-            and " " not in self.text
-        ):
-            self.post_message(self.AutocompleteRequested(self))
+class PiEditor(Editor):
+    """多行输入编辑器（引擎版）。"""
 
 
 class PiEditorVim(PiEditor):
-    """vim 风格编辑器：Esc 切换 normal/insert，normal 模式支持移动与编辑。
-
-    normal 模式快捷键：h/j/k/l 移动、0/$ 行首/行尾、i/a/o 进入插入、
-    dd 删行、x 删字符、u 撤销；Enter 提交（与 PiEditor 一致）。
-    """
-
-    class ModeChanged(Message):
-        """normal / insert 模式切换。"""
-
-        def __init__(self, editor: "PiEditorVim", mode: str) -> None:
-            super().__init__()
-            self.editor = editor
-            self.mode = mode
+    """vim 风格编辑器（引擎版）。"""
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        self.vim_mode = "insert"
-        self._pending: str = ""
-
-    def toggle_mode(self) -> None:
-        self.vim_mode = "normal" if self.vim_mode == "insert" else "insert"
-        self._pending = ""
-        self.post_message(self.ModeChanged(self, self.vim_mode))
-
-    async def _on_key(self, event: events.Key) -> None:
-        if self.vim_mode == "insert":
-            await self._on_insert_key(event)
-            return
-        await self._on_normal_key(event)
-
-    async def _on_insert_key(self, event: events.Key) -> None:
-        if event.key == "escape":
-            event.stop()
-            event.prevent_default()
-            self.toggle_mode()
-            return
-        await super()._on_key(event)
-
-    async def _on_normal_key(self, event: events.Key) -> None:
-        key = event.key
-        if key == "escape":
-            event.stop()
-            event.prevent_default()
-            self.toggle_mode()
-            return
-        if key == "enter":
-            self.action_submit()
-            event.stop()
-            event.prevent_default()
-            return
-        if key == "i":
-            self.toggle_mode()
-            event.stop()
-            event.prevent_default()
-            return
-        if key == "a":
-            self.move_cursor_relative(columns=1)
-            self.toggle_mode()
-            event.stop()
-            event.prevent_default()
-            return
-        if key == "o":
-            self._open_line_below()
-            event.stop()
-            event.prevent_default()
-            return
-        if key == "h":
-            self.move_cursor_relative(columns=-1)
-        elif key == "l":
-            self.move_cursor_relative(columns=1)
-        elif key == "j":
-            self.move_cursor_relative(rows=1)
-        elif key == "k":
-            self.move_cursor_relative(rows=-1)
-        elif key == "0":
-            self.move_cursor((self.cursor_location[0], 0))
-        elif key == "$":
-            row = self.cursor_location[0]
-            self.move_cursor((row, len(self.document.lines[row])))
-        elif key == "x":
-            self._delete_char()
-        elif key == "u":
-            self.undo()
-        elif key == "d":
-            if self._pending == "d":
-                self._pending = ""
-                self._delete_line()
-            else:
-                self._pending = "d"
-            event.stop()
-            event.prevent_default()
-            return
-        else:
-            self._pending = ""
-            return
-        self._pending = ""
-        event.stop()
-        event.prevent_default()
-
-    def _open_line_below(self) -> None:
-        row = self.cursor_location[0]
-        lines = self.document.lines
-        if row >= len(lines):
-            row = max(0, len(lines) - 1)
-        self.insert("\n", (row, len(lines[row])))
-        self.move_cursor((row + 1, 0))
-        self.toggle_mode()
-
-    def _delete_line(self) -> None:
-        row = self.cursor_location[0]
-        lines = self.document.lines
-        if row >= len(lines):
-            return
-        if row == len(lines) - 1:
-            self.delete((row, 0), (row, len(lines[row])))
-        else:
-            self.delete((row, 0), (row + 1, 0))
-
-    def _delete_char(self) -> None:
-        row, col = self.cursor_location
-        lines = self.document.lines
-        if row >= len(lines) or col >= len(lines[row]):
-            return
-        self.delete((row, col), (row, col + 1))
+        self.vim_enabled = True
 
 
 class PiStatusBar(Label):

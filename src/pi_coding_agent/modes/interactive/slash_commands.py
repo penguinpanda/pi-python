@@ -688,9 +688,31 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
         ("share", _share, "Share session as a secret GitHub gist", ""),
         ("import", _import_session, "Import and resume a session from a JSONL file", "<path>"),
         ("resume", _resume, "Resume a different session", "[path]"),
+        ("debug", _debug, "Show session debug info", ""),
+        ("arminsayshi", _armin_says_hi, "Armin says hi", ""),
+        ("dementedelves", _demented_delves, "The demented delves", ""),
     ]
     for name, handler, description, hint in builtins:
         registry.register(name, handler, description=description, argument_hint=hint)
+
+
+async def _debug(context: SlashContext, _args: str) -> str:
+    session = context.session
+    model = f"{session.model.provider}/{session.model.id}" if session.model is not None else "none"
+    return (
+        f"session: {session.session_id}\n"
+        f"model: {model}\n"
+        f"messages: {len(session.get_messages())}\n"
+        f"thinking: {session.thinking_level}"
+    )
+
+
+async def _armin_says_hi(_context: SlashContext, _args: str) -> str:
+    return "Armin says hi!"
+
+
+async def _demented_delves(_context: SlashContext, _args: str) -> str:
+    return "The demented delves are deep, but not as deep as your session history."
 
 
 def _format_tree(

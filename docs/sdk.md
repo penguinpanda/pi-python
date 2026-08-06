@@ -7,7 +7,7 @@ pi-python 分几个包，对应 TS 的 `pi-ai` / `pi-agent-core` / `pi-coding-ag
 | `pi_ai` | 模型注册表、Provider、API 流、类型、认证 | `Models`、`Provider`、`Context`、`stream` |
 | `pi_agent` | 最小 agent 循环、有状态 Agent、harness、会话树、压缩/分支摘要 | `Agent`、`AgentHarness`、`Session` |
 | `pi_coding_agent` | CLI 编码代理：会话、资源、扩展、ModelRuntime、RPC、TUI | `AgentSession`、`ResourceLoader`、`run_print_mode` / `run_tui_mode` / `run_rpc_mode` |
-| `pi_tui` | Textual 组件、选择器、主题、快捷键 | `PiTuiApp`（在 `pi_coding_agent.modes.interactive`） |
+| `pi_tui` | 内置引擎 TUI 组件、选择器、主题、快捷键 | `PiTuiApp`（在 `pi_coding_agent.modes.interactive`） |
 | `pi_protocol` / `pi_storage` / `pi_server` | RPC 协议 / 存储 / 服务端（移植中） | 见各自 `__init__.py` |
 
 ## 快速开始
@@ -76,7 +76,7 @@ await run_print_mode(session, "read README.md")
 ## 运行模式
 
 - **Print**：`run_print_mode(session, prompt)`，无 UI，扩展 UI 走 `NoopUIContext`
-- **TUI**：`run_tui_mode(...)`，Textual 应用 `PiTuiApp`
+- **TUI**：`run_tui_mode(...)`，内置引擎应用 `PiTuiApp`（无 Textual）
 - **RPC**：`run_rpc_mode` + `RpcMessageHandler` / `RpcClient`（stdin/stdout JSONL 协议，`pi_protocol`）
 - **CLI**：`python -m pi_coding_agent`（`main`），支持 `--model` / `--provider` / `--models` / `--list-models` / `--system-prompt` / `--append-system-prompt` / `--session` / `--no-session` / `--tools` / `--exclude-tools` / `--no-tools` / `--extension`（`-e`）/ `--skill` / `--prompt-template`（均可重复）/ `--no-skills` / `--no-prompt-templates` / `--no-context-files`（`-nc`）/ `--preset`
 

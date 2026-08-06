@@ -1,4 +1,4 @@
-"""Overlay 数据模型（不依赖 Textual，可单测）。"""
+"""Overlay 数据模型（无 UI 框架依赖，可单测）。"""
 
 from __future__ import annotations
 

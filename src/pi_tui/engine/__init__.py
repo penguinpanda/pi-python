@@ -1,0 +1,96 @@
+"""pi_tui.engine — Textual-free 终端 UI 引擎。
+
+对齐 TS pi-tui 的内置渲染器 / 输入解析 / 组件树：
+终端由本包直接控制（raw 模式、alt-screen、光标、OSC），
+组件渲染为单元格行后按行差分写入屏幕。
+"""
+
+from .app import App, OverlayWidget
+from .cells import Cell, Line, blank_line, line_from_text, line_to_ansi
+from .keys import Key, KeyEvent, KeyParser, MouseEvent, normalize_key_name, parse_input
+from .terminal import FakeTerminal, ScreenBuffer, Terminal
+from .text import (
+    markup_to_text,
+    render_group,
+    render_markdown,
+    render_markup,
+    render_renderable,
+    strip_ansi,
+    visible_width,
+)
+from .widgets import (
+    Box,
+    CancellableLoader,
+    Container,
+    Editor,
+    HStack,
+    Horizontal,
+    Input,
+    Label,
+    Loader,
+    Markdown,
+    Message,
+    PiEditor,
+    PiEditorVim,
+    ScrollView,
+    SelectItem,
+    SelectList,
+    SettingItem,
+    SettingsList,
+    Spacer,
+    Static,
+    Text,
+    VStack,
+    Vertical,
+    Widget,
+)
+
+__all__ = [
+    "App",
+    "OverlayWidget",
+    "Cell",
+    "Line",
+    "blank_line",
+    "line_from_text",
+    "line_to_ansi",
+    "Key",
+    "KeyEvent",
+    "KeyParser",
+    "MouseEvent",
+    "normalize_key_name",
+    "parse_input",
+    "FakeTerminal",
+    "ScreenBuffer",
+    "Terminal",
+    "markup_to_text",
+    "render_group",
+    "render_markdown",
+    "render_markup",
+    "render_renderable",
+    "strip_ansi",
+    "visible_width",
+    "Box",
+    "CancellableLoader",
+    "Container",
+    "Editor",
+    "HStack",
+    "Horizontal",
+    "Input",
+    "Label",
+    "Loader",
+    "Markdown",
+    "Message",
+    "PiEditor",
+    "PiEditorVim",
+    "ScrollView",
+    "SelectItem",
+    "SelectList",
+    "SettingItem",
+    "SettingsList",
+    "Spacer",
+    "Static",
+    "Text",
+    "VStack",
+    "Vertical",
+    "Widget",
+]

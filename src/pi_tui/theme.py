@@ -188,7 +188,7 @@ class Theme:
         return self.colors[name]
 
     def css_variables(self, prefix: str = "pi") -> dict[str, str]:
-        """生成 CSS 变量名 → 色值（供 Textual CSS 模板注入）。"""
+        """生成 CSS 变量名 → 色值（兼容 API，引擎不再使用）。"""
         return {f"{prefix}-{key}": value for key, value in self.colors.items()}
 
 

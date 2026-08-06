@@ -58,3 +58,37 @@ def test_drain_pending_noop_without_tty(monkeypatch) -> None:
     """退出 drain：非 TTY 时静默返回，不抛异常。"""
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     drain_pending_osc_response()
+
+
+class _StubOut:
+    def __init__(self) -> None:
+        self.data: list[str] = []
+
+    def write(self, data: str) -> None:
+        self.data.append(data)
+
+    def flush(self) -> None:
+        pass
+
+
+def test_terminal_set_progress_writes_osc94() -> None:
+    from pi_tui.engine.terminal import Terminal
+
+    term = Terminal(stdout=_StubOut())
+    term._entered = True
+    term.set_progress(True)
+    term.set_progress(False)
+    assert "".join(term.stdout.data) == "\x1b]9;4;3\x07\x1b]9;4;0\x07"
+
+
+def test_terminal_enter_writes_focus_and_kitty_query(monkeypatch) -> None:
+    import asyncio
+
+    from pi_tui.engine.terminal import Terminal
+
+    term = Terminal(stdout=_StubOut())
+    monkeypatch.setattr(term, "_enable_windows_vt", lambda: None)
+    asyncio.run(term.enter())
+    out = "".join(term.stdout.data)
+    assert "\x1b[?1004h" in out
+    assert "\x1b[>7u\x1b[?u\x1b[c" in out

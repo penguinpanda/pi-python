@@ -1,48 +1,35 @@
-"""pi TUI 主应用（对齐 TS modes/interactive/）。"""
+"""pi TUI 主应用（引擎版，对齐 TS modes/interactive/）。"""
 
 from __future__ import annotations
 
 import asyncio
 import inspect
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any, Callable, cast
 
-from textual.app import App, AwaitComplete, ComposeResult
-from textual.binding import Binding, BindingsMap
-from textual.geometry import Offset
-from textual.widgets import Static
+from rich.style import Style
 
-from ..._config import get_agent_dir, get_sessions_dir
-from ..._session import AgentSession
-from ..._session_manager import SessionManager, SessionTreeNode
-from ...system_prompt import load_project_context_files
-from ...tools.render_utils import shorten_path
 from pi_agent import AgentEvent
-from ...model_runtime import ModelRuntime
-from ...extensions import ExtensionRunner
-from ...extensions.registry import ExtensionRegistry
-from .autocomplete import create_slash_command_provider
-from pi_tui.clipboard_image import ClipboardImage
 from pi_tui.autocomplete import CombinedAutocompleteProvider
+from pi_tui.clipboard_image import ClipboardImage
 from pi_tui.components import (
     BashExecutionEntry,
     MessageEntry,
+    ToolExecutionEntry,
     PiChatContainer,
     PiEditor,
     PiFooter,
     PiHeader,
     PiStatusBar,
 )
+from pi_tui.engine import App, FakeTerminal, Terminal
+from pi_tui.engine.keys import KeyEvent
+from pi_tui.engine.widgets import Static
 from pi_tui.keybindings import KeybindingsManager
-from pi_tui.overlay import (
-    OverlayHandle,
-    OverlayHooks,
-    OverlayManager,
-    OverlayRect,
-    OverlayWidget,
-)
+from pi_tui.overlay import OverlayHandle
 from pi_tui.selectors import (
     ChoiceSelector,
     ExtensionSelector,
@@ -56,19 +43,25 @@ from pi_tui.selectors import (
     TreeSelector,
     TrustSelector,
 )
-from .slash_commands import (
-    SlashContext,
-    SlashCommandRegistry,
-    register_builtin_commands,
-)
-from pi_tui.theme import BUILTIN_THEMES, ThemeLoader
+from pi_tui.theme import BUILTIN_THEMES, Theme, ThemeLoader
+
+from ..._config import get_agent_dir, get_sessions_dir
+from ..._session import AgentSession
+from ..._session_manager import SessionManager, SessionTreeNode
+from ...extensions import ExtensionRunner
+from ...extensions.registry import ExtensionRegistry
+from ...model_runtime import ModelRuntime
+from ...system_prompt import load_project_context_files
+from ...tools.render_utils import shorten_path
+from .autocomplete import create_slash_command_provider
+from .slash_commands import SlashContext, SlashCommandRegistry, register_builtin_commands
+
+
+_SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 
 
 class _TuiAuthInteraction:
-    """TUI 内 OAuth 交互：URL/设备码发到聊天区，需要粘贴时弹输入框。
-
-    对齐 TS 的 showLoginDialog：不阻塞 Textual 事件循环（不能用 input()）。
-    """
+    """TUI 内 OAuth 交互：URL/设备码发到聊天区，需要粘贴时弹输入框。"""
 
     def __init__(self, app: "PiTuiApp") -> None:
         self.app = app
@@ -78,7 +71,6 @@ class _TuiAuthInteraction:
     def notify(self, event: dict) -> None:
         if event.get("type") == "auth_url":
             self._last_auth_url = event["url"]
-            # 自动复制完整 URL，避免终端折行截断导致链接不完整。
             self.app.copy_to_clipboard(event["url"])
             self.app._slash_notify(
                 "请在浏览器完成授权（URL 已复制到剪贴板），"
@@ -100,7 +92,6 @@ class _TuiAuthInteraction:
             return None
         message = prompt.get("message", "")
         if prompt.get("type") == "manual_code" and self._last_auth_url:
-            # 对话框里同时显示授权 URL，方便复制（用户手动打开浏览器）。
             message = (
                 "使用步骤：\n"
                 "1. 授权 URL 已复制到剪贴板，直接粘贴到浏览器地址栏打开并完成授权\n"
@@ -114,81 +105,16 @@ class _TuiAuthInteraction:
         )
 
 
-_CSS_TEMPLATE = """
-Screen {
-    layout: vertical;
-    background: __PI_BG__;
-    color: __PI_TEXT__;
-}
-
-#pi-header {
-    height: 1;
-    background: __PI_BGPANEL__;
-    color: __PI_TEXTALT__;
-}
-
-#pi-chat {
-    height: 1fr;
-    background: __PI_BG__;
-    border: round __PI_BORDERINACTIVE__;
-    padding: 0 1;
-    scrollbar-size: 1 1;
-}
-
-MessageEntry {
-    color: __PI_TEXT__;
-    margin: 0 0 0 0;
-}
-
-#pi-status {
-    height: 1;
-    background: __PI_BGTOOLBAR__;
-    color: __PI_TEXTSYSTEM__;
-}
-
-#pi-editor {
-    height: 6;
-    background: __PI_BGUSERINPUT__;
-    color: __PI_TEXT__;
-    border: round __PI_BORDERACTIVE__;
-}
-
-#pi-footer {
-    height: 1;
-    background: __PI_BGTOOLBAR__;
-    color: __PI_TEXTDIM__;
-}
-
-.selector-title {
-    color: __PI_ACCENT__;
-    text-style: bold;
-    margin: 1 2;
-}
-
-.selector-input {
-    margin: 0 2 1 2;
-}
-
-OverlayDialog {
-    background: __PI_BGPANEL__;
-    color: __PI_TEXT__;
-    border: round __PI_BORDERACTIVE__;
-    padding: 0 1;
-    height: auto;
-}
-"""
-
-
-def _build_css(colors: dict[str, str]) -> str:
-    """把 __PI_<KEY>__ token 替换为主题色。"""
-    css = _CSS_TEMPLATE
-    for key, value in colors.items():
-        css = css.replace(f"__PI_{key.upper()}__", value)
-    return css
+def _theme_style(theme: Theme, bg_key: str, fg_key: str) -> Style:
+    """主题色 → Rich Style。"""
+    return Style(
+        bgcolor=theme.colors.get(bg_key, theme.colors["bg"]),
+        color=theme.colors.get(fg_key, theme.colors["text"]),
+    )
 
 
 class PiTuiApp(App):
-    """pi 编码代理 TUI。"""
+    """pi 编码代理 TUI（引擎版）。"""
 
     def __init__(
         self,
@@ -209,12 +135,15 @@ class PiTuiApp(App):
         needs_trust_decision: bool = False,
         no_context_files: bool = False,
         startup_resources: dict | None = None,
+        terminal: Terminal | FakeTerminal | None = None,
+        size: tuple[int, int] = (80, 24),
+        ui_mode: str | None = None,
     ) -> None:
         self._keybindings = keybindings_manager or KeybindingsManager()
         self._settings = settings if settings is not None else {}
-        self._settings_manager = settings_manager
         if self._settings:
             self._keybindings.load_from_settings(self._settings)
+        self._settings_manager = settings_manager
         self._theme_loader = theme_loader or ThemeLoader()
         self._theme_name = theme_name
         self._theme = self._theme_loader.resolve(theme_name)
@@ -225,16 +154,13 @@ class PiTuiApp(App):
         self._no_context_files = no_context_files
         self._startup_resources = startup_resources
 
-        # 实例级 BINDINGS / CSS：必须在 super().__init__() 之前设置。
-        self.BINDINGS = [  # type: ignore[misc]
-            Binding(binding.key, binding.action, binding.description)
-            for binding in self._keybindings.all_bindings()
-        ]
-        self.CSS = _build_css(self._theme.colors)  # type: ignore[misc]
-        super().__init__()
-        # Textual 8 的运行时绑定来自 node._bindings（类级 BINDINGS 构建）；
-        # 实例级 self.BINDINGS 需显式重建映射，否则快捷键不会分发。
-        self._bindings = BindingsMap(self.BINDINGS)
+        self._ui_mode = ui_mode or str((settings or {}).get("uiMode", "fullscreen"))
+        super().__init__(
+            keybindings=self._keybindings,
+            terminal=terminal,
+            size=size,
+            ui_mode=self._ui_mode,
+        )
 
         self._session = session
         self._model_runtime = model_runtime
@@ -244,7 +170,6 @@ class PiTuiApp(App):
         self._unsubscribe: Callable[[], None] | None = None
         self._show_tools = True
         self._show_thinking = True
-        self._tasks: set[asyncio.Task] = set()
         self._rendered_summary_ids: set[str] = set()
         self._custom_editor: PiEditor | None = None
         self._widget_above: dict[str, str] = {}
@@ -253,30 +178,37 @@ class PiTuiApp(App):
         self._overlay_renderers: dict[str, Callable[[int, int], list[str]]] = {}
         self._completion_items: list[dict] = []
         self._completion_index = 0
-        self._overlay_manager = OverlayManager(
-            OverlayHooks(
-                make_widget=lambda key, lines, options: OverlayWidget(key, lines, options),
-                update_widget=self._update_overlay_widget,
-                make_component_widget=lambda key, component, options: OverlayWidget(
-                    key, [], options, component=component
-                ),
-                update_component=self._update_overlay_component_widget,
-                mount=self._mount_overlay,
-                remove=lambda widget: widget.remove(),
-                set_visible=lambda widget, visible: setattr(widget, "display", visible),
-                reposition=self._apply_overlay_rect,
-                focus=lambda widget: widget.focus(),
-                current_focus=lambda: self.screen.focused,
-                content_size=lambda widget: (
-                    widget.content_size.width,
-                    widget.content_size.height,
-                ),
-                bring_to_front=self._bring_overlay_to_front,
-            )
-        )
         self._hidden_thinking_label = "Thinking"
         self._working_message = "Working"
+        self._working_visible = True
         self._stream_entry: MessageEntry | None = None
+        self._tool_entries: dict[str, ToolExecutionEntry] = {}
+        self._pending_image: bytes | None = None
+
+        # 布局组件（on_mount 挂载）：对齐 TS transcript + dock 顺序。
+        self._header = PiHeader(self._keybindings, height="auto", id="pi-header")
+        self._resources = Static("", height="auto", id="pi-resources")
+        self._chat = PiChatContainer(height="1fr", id="pi-chat")
+        self._pending_messages = Static("", height="auto", id="pi-pending-messages")
+        self._widgets_above = Static("", height="auto", id="pi-widgets-above")
+        self._status = PiStatusBar("Idle", height=1, id="pi-status")
+        self._editor_widget: PiEditor | None = None
+        self._widgets_below = Static("", height="auto", id="pi-widgets-below")
+        self._footer = PiFooter("", height=1, id="pi-footer")
+        self._status_animated = False
+        self._status_frame = 0
+        self._status_base = "Idle"
+        self._follow_up_queue: list[str] = []
+        terminal_settings = (self._settings or {}).get("terminal") or {}
+        self._show_images = bool(terminal_settings.get("showImages", True))
+        width_cells = terminal_settings.get("imageWidthCells")
+        self._image_width_cells = max(1, int(width_cells)) if width_cells else None
+        self._show_terminal_progress = bool(terminal_settings.get("showTerminalProgress", False))
+        self._quiet_startup = bool((settings or {}).get("quietStartup", False))
+        self._autocomplete_max_visible = max(
+            3, int((settings or {}).get("autocompleteMaxVisible", 5) or 5)
+        )
+        self.open_url = self._open_external_url
 
         self._slash_registry = SlashCommandRegistry()
         register_builtin_commands(self._slash_registry)
@@ -316,20 +248,34 @@ class PiTuiApp(App):
         )
         self._slash_context.rebuild_session = self._apply_rebuilt_session
 
+    @property
+    def _editor(self) -> PiEditor:
+        """当前编辑器：扩展替换后返回自定义组件。"""
+        editor = self._custom_editor if self._custom_editor is not None else self._editor_widget
+        assert editor is not None
+        return editor
+
     # ------------------------------------------------------------------
     # 生命周期
     # ------------------------------------------------------------------
 
-    def compose(self) -> ComposeResult:
-        yield PiHeader(self._keybindings, id="pi-header")
-        yield PiChatContainer(id="pi-chat")
-        yield Static("", id="pi-widgets-above")
-        yield PiStatusBar("Idle", id="pi-status")
-        yield PiEditor(id="pi-editor")
-        yield Static("", id="pi-widgets-below")
-        yield PiFooter("", id="pi-footer")
-
     def on_mount(self) -> None:
+        padding_x = int(self._settings.get("editorPaddingX", 0) or 0)
+        self._editor_widget = PiEditor(height=6, id="pi-editor", border=True, padding_x=padding_x)
+        self.screen.mount(self._header)
+        self.screen.mount(self._resources)
+        self.screen.mount(self._chat)
+        self.screen.mount(self._pending_messages)
+        self.screen.mount(self._status)
+        self.screen.mount(self._widgets_above)
+        self.screen.mount(self._editor_widget)
+        self.screen.mount(self._widgets_below)
+        self.screen.mount(self._footer)
+        self._chat.set_image_options(
+            show_images=self._show_images,
+            image_width_cells=self._image_width_cells,
+        )
+        self._apply_theme()
         self._bind_session()
         for message in self._session.get_messages():
             self._chat.add_message_agent(cast(dict[str, Any], message))
@@ -339,14 +285,12 @@ class PiTuiApp(App):
         self._show_startup_resources_hint()
         # 启动时对未定信任项目提示（对齐 TS 启动 trust 选择器）。
         if self._needs_trust_decision:
-            self.call_after_refresh(self._open_trust_selector)
+            self._open_trust_selector()
 
     def on_unmount(self) -> None:
         if self._unsubscribe is not None:
             self._unsubscribe()
             self._unsubscribe = None
-        for task in list(self._tasks):
-            task.cancel()
 
     def _bind_session(self) -> None:
         if self._unsubscribe is not None:
@@ -361,31 +305,40 @@ class PiTuiApp(App):
             cast(Callable[[AgentEvent], None], self._on_session_event)
         )
 
-    # ------------------------------------------------------------------
-    # 组件快捷访问
-    # ------------------------------------------------------------------
-
-    @property
-    def _chat(self) -> PiChatContainer:
-        return self.query_one("#pi-chat", PiChatContainer)
-
-    @property
-    def _editor(self) -> PiEditor:
-        if self._custom_editor is not None:
-            return self._custom_editor
-        return self.query_one("#pi-editor", PiEditor)
-
-    @property
-    def _status(self) -> PiStatusBar:
-        return self.query_one("#pi-status", PiStatusBar)
-
-    @property
-    def _header(self) -> PiHeader:
-        return self.query_one("#pi-header", PiHeader)
-
-    @property
-    def _footer(self) -> PiFooter:
-        return self.query_one("#pi-footer", PiFooter)
+    def _apply_theme(self) -> None:
+        theme = self._theme
+        self.screen.base_style = _theme_style(theme, "bg", "text")
+        for widget in (
+            self._header,
+            self._resources,
+            self._chat,
+            self._pending_messages,
+            self._widgets_above,
+            self._status,
+            self._editor_widget,
+            self._widgets_below,
+            self._footer,
+        ):
+            if widget is None:
+                continue
+            if widget is self._header:
+                widget.base_style = _theme_style(theme, "bgToolbar", "textAlt")
+            elif widget is self._status:
+                widget.base_style = _theme_style(theme, "bgToolbar", "textSystem")
+            elif widget is self._editor_widget:
+                widget.base_style = _theme_style(theme, "bgUserInput", "text")
+            elif widget is self._footer:
+                widget.base_style = _theme_style(theme, "bgToolbar", "textDim")
+            else:
+                widget.base_style = _theme_style(theme, "bg", "text")
+        self._chat.set_theme_colors(
+            {
+                "heading": theme.colors.get("accent"),
+                "code_fg": theme.colors.get("text"),
+                "code_bg": theme.colors.get("bgPanel", theme.colors.get("bgAlt")),
+            }
+        )
+        self.request_render()
 
     # ------------------------------------------------------------------
     # 会话事件 → UI
@@ -395,27 +348,44 @@ class PiTuiApp(App):
         try:
             event_type = event.get("type")
             if event_type == "message_start":
-                self._begin_stream()
+                # 对齐 TS：只有 assistant 消息才创建流式占位；user/custom
+                # 由 message_end 统一追加，避免出现空的 Speaking 残留条目。
+                role = (event.get("message") or {}).get("role")
+                if role == "assistant":
+                    self._begin_stream()
             elif event_type == "message_update":
                 self._update_stream(event.get("message"))
             elif event_type == "message_end":
                 self._finish_stream()
                 message = event.get("message")
                 if message is not None:
-                    self._chat.add_message_agent(message)
+                    self._render_tool_calls(message)
+                    self._chat.add_message_agent(
+                        message, skip_tool_calls=(message.get("role") == "assistant")
+                    )
                 self._update_footer()
             elif event_type == "agent_settled":
                 self._finish_stream()
-                self._set_status("Idle")
+                self.terminal.set_progress(False)
+                self._set_status("Idle", animated=False)
                 self._update_footer()
             elif event_type == "compaction_start":
-                self._set_status("Compacting")
+                self._set_status("Compacting", animated=True)
             elif event_type in ("compaction_end",):
-                self._set_status("Idle")
+                self._set_status("Idle", animated=False)
             elif event_type in ("model_changed", "thinking_level_changed"):
                 self._update_footer()
+            elif event_type == "queue_update":
+                self._update_pending_messages(event)
+            elif event_type == "session_info_changed":
+                self._update_terminal_title()
             elif event_type == "agent_start":
-                self._set_status(self._working_message)
+                self._follow_up_queue.clear()
+                self.terminal.set_progress(self._show_terminal_progress)
+                if self._working_visible:
+                    self._set_status(self._working_message, animated=True)
+                else:
+                    self._set_status("Idle", animated=False)
             elif event_type == "skill_invocation":
                 skill = event.get("skill", "")
                 self._chat.add_message_agent(
@@ -435,7 +405,7 @@ class PiTuiApp(App):
         entry.set_speaking(True)
         self._stream_entry = entry
         self._chat.mount(entry)
-        self._chat.scroll_end(animate=False)
+        self._chat.scroll_end()
 
     def _update_stream(self, message) -> None:
         """消息增量：把 partial 快照渲染到流式条目。"""
@@ -456,8 +426,9 @@ class PiTuiApp(App):
                 parts.append(str(block.get("thinking", "")))
             elif block_type == "toolCall":
                 parts.append(f"{block.get('name', 'tool')}({block.get('arguments', {})})")
+        self._render_tool_calls(message)
         self._stream_entry.set_text("\n\n".join(parts))
-        self._chat.scroll_end(animate=False)
+        self._chat.scroll_end()
 
     def _finish_stream(self) -> None:
         """消息结束：移除流式占位（最终消息由 message_end 正常追加）。"""
@@ -469,8 +440,41 @@ class PiTuiApp(App):
             except Exception:
                 pass
 
+    def _render_tool_calls(self, message) -> None:
+        """从 assistant 消息内容创建/更新工具执行条目（对齐 TS ToolExecutionComponent）。"""
+        if not isinstance(message, dict):
+            return
+        content = message.get("content") or []
+        if not isinstance(content, list):
+            return
+        created = False
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "toolCall":
+                continue
+            call_id = str(block.get("id") or block.get("index") or len(self._tool_entries))
+            entry = self._tool_entries.get(call_id)
+            if entry is None:
+                entry = ToolExecutionEntry(
+                    str(block.get("name", "tool")),
+                    call_id,
+                    block.get("arguments", {}),
+                )
+                self._tool_entries[call_id] = entry
+                self._chat.mount(entry)
+                created = True
+            else:
+                entry.update_arguments(block.get("arguments", entry.arguments))
+            result = block.get("result")
+            if isinstance(result, dict):
+                output = str(result.get("content", result.get("text", "")) or result)
+                entry.set_result(
+                    output,
+                    is_error=bool(result.get("isError") or result.get("is_error")),
+                )
+        if created:
+            self._chat.scroll_end()
+
     def _extension_custom_message_renderer(self, message):
-        """custom 角色消息 → 扩展注册的消息渲染器（返回文本或 None）。"""
         runner = self._session.extension_runner
         if runner is None:
             return None
@@ -479,19 +483,16 @@ class PiTuiApp(App):
             return None
         result = renderer(message)
         if asyncio.iscoroutine(result):
-            # 渲染是同步路径；异步渲染器暂不等待。
             return None
         return result
 
     def _extension_markdown_transformers(self):
-        """扩展注册的 markdown 变换器链。"""
         runner = self._session.extension_runner
         if runner is None:
             return []
         return runner.get_markdown_transformers()
 
     def _extension_tool_renderer(self, message):
-        """内置工具结果 → 扩展注册的工具渲染器（返回字符串或 None）。"""
         runner = self._session.extension_runner
         if runner is None:
             return None
@@ -504,54 +505,99 @@ class PiTuiApp(App):
         return result
 
     def _replace_editor(self, component) -> None:
-        """用扩展提供的编辑器组件替换 PiEditor（对齐 TS setEditorComponent）。
-
-        组件必须是 PiEditor 子类（继承提交/快捷键语义），替换后聚焦新编辑器。
-        """
+        """用扩展提供的编辑器组件替换 PiEditor。"""
         from pi_tui import PiEditor as PiEditorType
 
         if not isinstance(component, PiEditorType):
             raise TypeError("set_editor_component requires a PiEditor subclass")
-        old = self.query_one("#pi-editor", PiEditorType)
-        old.display = False
+        if self._editor_widget is not None:
+            self._editor_widget.visible = False
         component.id = f"pi-editor-{id(component):x}"
-        footer = self.query_one("#pi-footer")
-        self.screen.mount(component, before=footer)
+        component.height_spec = 6
+        self.screen.mount(component)
         self._custom_editor = component
         component.focus()
 
-    def _set_status(self, text: str) -> None:
-        self._status.update(text)
+    def _set_status(self, text: str, animated: bool = False) -> None:
+        """状态栏文本；animated=True 时显示 spinner（对齐 TS 状态指示器）。"""
+        self._status_base = text
+        self._status_animated = bool(animated)
+        if self._status is not None:
+            if animated:
+                spinner = _SPINNER_FRAMES[self._status_frame % len(_SPINNER_FRAMES)]
+                self._status.update(f"{spinner} {text}")
+            else:
+                self._status.update(text)
 
     def _set_widget(self, key: str, lines: list[str], options: dict | None = None) -> None:
-        """编辑器上方（默认）或下方显示多行组件（对齐 TS setWidget）。"""
+        """编辑器上方（默认）或下方显示多行组件。"""
         below = (options or {}).get("placement") == "belowEditor"
         target = self._widget_below if below else self._widget_above
         if lines:
             target[key] = "\n".join(lines)
         else:
             target.pop(key, None)
-        widget = self.query_one(
-            "#pi-widgets-below" if below else "#pi-widgets-above",
-            Static,
-        )
-        widget.update("\n".join(target.values()))
+        widget = self._widgets_below if below else self._widgets_above
+        if widget is not None:
+            widget.update("\n".join(target.values()))
 
     def _set_hidden_thinking_label(self, label: str | None = None) -> None:
-        """设置折叠 thinking 块的标签（None 恢复默认 "Thinking"）。"""
         self._hidden_thinking_label = label or "Thinking"
-        self._chat.set_hidden_thinking_label(self._hidden_thinking_label)
+        if self._chat is not None:
+            self._chat.set_hidden_thinking_label(self._hidden_thinking_label)
 
     def _set_working_message(self, text: str | None = None) -> None:
-        """设置流式工作提示文案（None 恢复默认 "Working"）。"""
         self._working_message = text or "Working"
 
+    def _update_pending_messages(self, event: dict | None = None) -> None:
+        """渲染 follow-up / steer 队列（对齐 TS pendingMessagesContainer）。"""
+        lines: list[str] = []
+        if event is not None:
+            groups = (
+                ("Steer", event.get("steer") or []),
+                ("Follow-up", event.get("follow_up") or []),
+                ("Next", event.get("next_turn") or []),
+            )
+            for label, items in groups:
+                texts = [
+                    str(getattr(item, "content", item))
+                    if not isinstance(item, dict)
+                    else str(item.get("content", item))
+                    for item in items
+                ]
+                texts = [text for text in texts if text]
+                if texts:
+                    lines.append(f"[dim]{label}: {', '.join(texts)}[/dim]")
+        else:
+            if self._follow_up_queue:
+                lines.append(f"[dim]Follow-up: {', '.join(self._follow_up_queue)}[/dim]")
+        self._pending_messages.update("\n".join(lines))
+
+    def _update_terminal_title(self) -> None:
+        """对齐 TS updateTerminalTitle：pi - 会话名 - cwd 目录名。"""
+        try:
+            session_name = self._session.session_name
+            cwd = str(self._session.cwd or "")
+            basename = os.path.basename(cwd.rstrip("/\\")) or cwd
+            if session_name:
+                self.set_title(f"pi - {session_name} - {basename}")
+            else:
+                self.set_title(f"pi - {basename}")
+        except Exception:
+            pass
+
+    def on_tick(self) -> None:
+        """状态 spinner 动画（由 App 每帧 tick 驱动）。"""
+        if self._status_animated:
+            self._status_frame += 1
+            if self._status is not None:
+                spinner = _SPINNER_FRAMES[self._status_frame % len(_SPINNER_FRAMES)]
+                self._status.update(f"{spinner} {self._status_base}")
+
     def _set_theme(self, theme: str | None = None) -> None:
-        """切换主题（None 恢复当前配置主题）。"""
         try:
             self._theme = self._theme_loader.resolve(theme or self._theme_name)
-            self.CSS = _build_css(self._theme.colors)  # type: ignore[misc]
-            self.refresh_css()
+            self._apply_theme()
         except Exception:
             pass
 
@@ -561,14 +607,14 @@ class PiTuiApp(App):
         lines: list[str],
         options: dict | None = None,
     ) -> OverlayHandle | None:
-        """显示 / 更新浮层（OverlayManager + overlay 层）；空列表移除。"""
+        """显示 / 更新浮层；空列表移除。"""
         if not lines:
             self._overlay_renderers.pop(key, None)
             self._overlay_manager.remove(key)
             return None
         self._overlay_renderers.pop(key, None)
         handle = self._overlay_manager.show(key, list(lines), options or {})
-        self.call_after_refresh(lambda: self._overlay_manager.reposition(key))
+        self._overlay_manager.reposition(key)
         return handle
 
     def _set_overlay_component(
@@ -577,15 +623,16 @@ class PiTuiApp(App):
         component,
         options: dict | None = None,
     ) -> OverlayHandle | None:
-        """用任意 Textual 组件作为 overlay（组件树 API）；None 移除。"""
+        """用任意组件作为 overlay；None 移除。"""
         if component is None:
             self._overlay_renderers.pop(key, None)
             self._overlay_manager.remove(key)
             return None
+        component.app = self
         self._overlay_renderers.pop(key, None)
         handle = self._overlay_manager.show_component(key, component, options or {})
-        self.call_after_refresh(lambda: self._overlay_manager.reposition(key))
-        self.call_after_refresh(lambda: self._overlay_manager.ensure_focus(key))
+        self._overlay_manager.reposition(key)
+        self._overlay_manager.ensure_focus(key)
         return handle
 
     def _set_overlay_renderer(
@@ -601,7 +648,7 @@ class PiTuiApp(App):
             return None
         self._overlay_renderers[key] = renderer
         handle = self._overlay_manager.show(key, [], options or {})
-        self.call_after_refresh(lambda: self._render_overlay_renderer(key))
+        self._render_overlay_renderer(key)
         return handle
 
     def _render_overlay_renderer(self, key: str) -> None:
@@ -619,102 +666,9 @@ class PiTuiApp(App):
         entry.widget.update_content([str(line) for line in lines])
         self._overlay_manager.reposition(key)
 
-    def _update_overlay_widget(
-        self,
-        widget: OverlayWidget,
-        lines: list[str],
-        options,
-    ) -> None:
-        widget.update_options(options)
-        widget.update_content(lines)
-
-    def _update_overlay_component_widget(self, widget, component, options) -> None:
-        widget.update_options(options)
-        widget.set_component(component)
-
-    def _mount_overlay(self, widget: OverlayWidget) -> None:
-        self.screen.mount(widget)
-
-    def _apply_overlay_rect(
-        self,
-        widget: OverlayWidget,
-        rect: OverlayRect,
-        options,
-    ) -> None:
-        """把解析后的绝对矩形应用到 overlay widget（含动画）。"""
-        target = Offset(rect.col, rect.row)
-        if options.behavior.animate:
-            widget.animate(
-                "offset",
-                target,
-                duration=float(options.behavior.duration),
-                easing="out_cubic",
-            )
-        else:
-            widget.styles.offset = target
-
-    def _bring_overlay_to_front(self, widget: OverlayWidget) -> None:
-        """重新挂载到屏幕末尾，确保 focusOrder 置顶（DOM 顺序决定同层堆叠）。"""
-
-        async def _reorder() -> None:
-            try:
-                if widget.is_attached:
-                    await widget.remove()
-                await self.screen.mount(widget)
-            except Exception:
-                pass
-            finally:
-                # 重挂载会重建组件子树，焦点可能被 Textual 挪走；完成后重新落位。
-                entry = self._overlay_manager.entry_for_widget(widget)
-                if entry is not None:
-                    self._overlay_manager.ensure_focus(entry.key)
-
-        self._run_task(_reorder())
-
-    def on_descendant_focus(self, event) -> None:
-        """Textual 焦点变化 → overlay 焦点状态机同步。"""
-        self._overlay_manager.on_widget_focused(event.widget)
-
-    def on_resize(self, event) -> None:
-        """终端尺寸变化 → overlay 重排 + 可见性 / 焦点重定向。"""
-        size = event.size
-        self._overlay_manager.on_resize((size.width, size.height))
-        for key in list(self._overlay_renderers):
-            self.call_after_refresh(lambda k=key: self._render_overlay_renderer(k))
-
-    def on_key(self, event) -> None:
-        """输入前焦点恢复（blocked/active 状态下回到 overlay）。"""
-        self._overlay_manager.route_input()
-
-    def push_screen(self, screen, callback=None, wait_for_dismiss=False, *, mode=None) -> Any:
-        """选择器改走 overlay 层；其余（内置帮助等）仍走屏幕栈。"""
-        if isinstance(
-            screen,
-            (
-                ChoiceSelector,
-                TextInputDialog,
-                ThinkingSelector,
-                SettingsSelector,
-                ModelSelector,
-                SessionPicker,
-                TreeSelector,
-                OAuthSelector,
-                ScopedModelsSelector,
-                ExtensionSelector,
-                TrustSelector,
-            ),
-        ):
-            self._open_overlay_selector(screen, callback)
-            return None
-        return super().push_screen(
-            screen,
-            callback=callback,
-            wait_for_dismiss=wait_for_dismiss,
-            mode=mode,
-        )
-
-    def _open_overlay_selector(self, component, callback=None) -> None:
-        """把对话框组件挂进 overlay 层（选择器即 overlay）。"""
+    def push_screen(self, component, callback=None, wait_for_dismiss=False, *, mode=None) -> Any:
+        """选择器挂进 overlay 层（选择器即 overlay）。"""
+        component.app = self
         key = f"dialog-{id(component):x}"
         self._overlay_dialog_callbacks[key] = callback
         self._overlay_manager.show_component(
@@ -722,12 +676,19 @@ class PiTuiApp(App):
             component,
             {"anchor": "center", "width": "80%", "maxHeight": "60%"},
         )
-        self.call_after_refresh(lambda: self._overlay_manager.reposition(key))
-        self.call_after_refresh(lambda: self._overlay_manager.ensure_focus(key))
+        self._overlay_manager.reposition(key)
+        self._overlay_manager.ensure_focus(key)
+        return None
 
     def _close_overlay_dialog(self, component, value=None) -> None:
         """对话框 dismiss：移除 overlay 并回调结果。"""
         entry = self._overlay_manager.entry_for_widget(component)
+        if entry is None:
+            # 组件未挂到 overlay 树上（引擎 overlay 根直接持有 component）。
+            for candidate in self._overlay_manager.entries.values():
+                if candidate.widget is component or candidate.widget.component() is component:
+                    entry = candidate
+                    break
         if entry is None:
             return
         key = entry.key
@@ -736,52 +697,34 @@ class PiTuiApp(App):
         if callback is not None:
             callback(value)
 
-    def pop_screen(self) -> AwaitComplete:
-        """弹出 ModalScreen 后立即同步 overlay 焦点（Textual 原生恢复 + route_input）。"""
-        result = super().pop_screen()
-        self.call_after_refresh(self._overlay_manager.route_input)
-        return result
-
     def _notify(self, message: str) -> None:
         self._set_status(message)
 
+    def _open_external_url(self, url: str) -> None:
+        """打开 OSC8 链接（对齐 TS openUrl → openBrowser）。"""
+        try:
+            import webbrowser
+
+            webbrowser.open(url)
+        except Exception:
+            pass
+
     def _copy_to_clipboard(self, text: str) -> None:
-        """复制到剪贴板：优先 OSC 52（终端处理，可穿过 docker exec），失败回退系统工具。"""
         try:
             self.copy_to_clipboard(text)
         except Exception:
             _copy_text(text)
 
     def _slash_notify(self, message: str) -> None:
-        """slash 命令输出：状态栏 + 聊天区。
-
-        多行输出（如 /tree）在单行状态栏会被裁剪，看起来像没反应，
-        因此同时渲染为聊天区的 System 消息。
-        """
+        """slash 命令输出：状态栏 + 聊天区。"""
         self._set_status(message)
-        # 转义方括号，避免树文本里的 [label] 被 Textual 标记解析。
-        escaped = message.replace("[", r"\[")
-        self._chat.add_message_agent({"role": "system", "content": escaped})
-        # add_message_agent 会 scroll_end 到最底部，长消息只露出最后一行；
-        # 这里把整条 System 消息滚进视口（等 mount 完成后再滚）。
+        self._chat.add_message_agent({"role": "system", "content": message})
         entries = self._chat.query(MessageEntry)
         if entries:
-            entry = entries[-1]
-
-            def _scroll_to_entry() -> None:
-                try:
-                    self._chat.scroll_to_widget(entry, animate=False)
-                except Exception:
-                    pass
-
-            self.call_after_refresh(_scroll_to_entry)
+            self._chat.scroll_to_widget(entries[-1])
 
     def _show_startup_resources_hint(self) -> None:
-        """启动提示：已加载资源汇总（Context / Skills / Prompts / Extensions / Themes）。
-
-        对齐 TS Loaded resources 面板的紧凑列表；resources 为 None 时
-        回退为仅计算 context files（直接构造 PiTuiApp 的场景）。
-        """
+        """启动提示：已加载资源汇总。"""
         sections: list[tuple[str, list[str]]] = []
         resources = self._startup_resources or {}
 
@@ -817,12 +760,12 @@ class PiTuiApp(App):
         if custom_themes:
             sections.append(("Themes", custom_themes))
 
-        if not sections:
+        if self._quiet_startup or not sections:
+            self._resources.update("")
             return
         text = "\n".join(f"[{title}]\n  {', '.join(items)}" for title, items in sections)
         self._set_status("Resources loaded")
-        escaped = text.replace("[", r"\[")
-        self._chat.add_message_agent({"role": "system", "content": escaped})
+        self._resources.update(text)
 
     def _update_footer(self) -> None:
         model = self._session.model
@@ -833,6 +776,7 @@ class PiTuiApp(App):
             message_count=len(self._session.get_messages()),
             session_name=self._session.session_name,
         )
+        self._update_terminal_title()
 
     # ------------------------------------------------------------------
     # 编辑器
@@ -844,8 +788,10 @@ class PiTuiApp(App):
         if text.startswith("/"):
             self._run_task(self._exec_slash(text))
         elif text.startswith("!"):
+            self._editor.add_to_history(text)
             self._run_task(self._exec_bash(text))
         else:
+            self._editor.add_to_history(text)
             self._run_task(self._send_prompt(text))
 
     async def on_pi_editor_autocomplete_requested(
@@ -904,23 +850,39 @@ class PiTuiApp(App):
     def _render_slash_completion(self) -> None:
         lines: list[str] = []
         for index, item in enumerate(self._completion_items):
+            if index >= self._autocomplete_max_visible:
+                break
             value = str(item.get("value", "")).strip()
             label = str(item.get("label", value))
             marker = ">" if index == self._completion_index else " "
-            # 转义方括号，避免被 Textual 当 Rich markup。
             safe_label = label.replace("[", r"\[").replace("]", r"\]")
             lines.append(f"{marker} {value}  [dim]{safe_label}[/dim]")
-        self._set_widget("slash-completion", lines)
+        # 对齐 TS 编辑器内嵌下拉：非捕获 overlay 悬在编辑器上方。
+        row, col, _w, _h = self._editor.rect
+        if row <= 0 or self._editor.rect[3] <= 0:
+            self._set_widget("slash-completion", lines)
+            return
+        width = max(24, min(64, self.terminal.size[0] // 2))
+        self._set_overlay(
+            "slash-completion",
+            lines,
+            {
+                "row": max(0, row - len(lines) - 1),
+                "col": col,
+                "width": width,
+                "nonCapturing": True,
+            },
+        )
 
     def _hide_slash_completion(self) -> None:
         self._completion_items = []
         self._completion_index = 0
         self._editor.completion_active = False
         self._set_widget("slash-completion", [])
+        self._set_overlay("slash-completion", [])
 
     def _insert_completion(self, value: str) -> None:
         if value.startswith("/"):
-            # slash 补全：替换当前命令 token，保留已输入参数。
             parts = self._editor.text.split(" ", 1)
             rest = parts[1] if len(parts) > 1 else ""
             self._editor.text = value + (f" {rest}" if rest else "")
@@ -957,7 +919,6 @@ class PiTuiApp(App):
             self._notify(f"Prompt failed: {exc}")
 
     async def _exec_slash(self, text: str) -> None:
-        # Phase 4：/skill:name 与 /templateName 先经会话管道展开。
         expanded = self._session.expand_prompt(text)
         if expanded != text:
             await self._send_prompt(expanded)
@@ -980,7 +941,7 @@ class PiTuiApp(App):
             return
         entry = BashExecutionEntry(command, exclude_from_context=is_excluded)
         self._chat.mount(entry)
-        self._chat.scroll_end(animate=False)
+        self._chat.scroll_end()
         self._set_status("Running bash")
         try:
             result = await self._session.execute_bash(
@@ -1035,26 +996,23 @@ class PiTuiApp(App):
             self._editor.clear()
 
     def on_pi_editor_exit_requested(self, _message) -> None:
-        """编辑器为空时 ctrl+d → 退出。"""
         self.action_exit()
 
     def on_pi_editor_copy_requested(self, _message) -> None:
-        """ctrl+x → 复制最后一条 assistant 消息（对齐 TS）。"""
         self.action_copy_last_message()
 
     def on_copy_requested(self, message) -> None:
-        """复制请求：列表弹层选中项 / 聊天消息点击（TreeSelector、MessageEntry 等）。"""
+        """复制请求：列表弹层选中项 / 聊天消息点击。"""
         text = getattr(message, "text", "")
         if text:
             self._copy_to_clipboard(text)
             self._notify("Copied")
 
     def on_pi_editor_cycle_thinking_requested(self, _message) -> None:
-        """shift+tab → 循环 thinking 级别（对齐 TS）。"""
         self.action_cycle_thinking()
 
     def action_external_editor(self) -> None:
-        """ctrl+g：用外部编辑器编辑当前输入（对齐 TS app.editor.external）。"""
+        """ctrl+g：用外部编辑器编辑当前输入。"""
         import os
         import shlex
         import subprocess
@@ -1127,7 +1085,7 @@ class PiTuiApp(App):
         self._update_footer()
 
     async def _await_text_input(self, message: str, placeholder: str = "") -> str | None:
-        """弹输入框并等待结果（OAuth 登录等 TUI 交互用，不阻塞事件循环）。"""
+        """弹输入框并等待结果（不阻塞事件循环）。"""
         loop = asyncio.get_running_loop()
         future: asyncio.Future = loop.create_future()
         self.push_screen(
@@ -1169,13 +1127,10 @@ class PiTuiApp(App):
         """挂起当前任务 → 合并文本到目标消息 → 重建会话 → 继续任务。"""
         try:
             session = self._session
-            # 1. 挂起：运行中则中止并等待本轮结束（空闲时是 no-op）。
             await session.abort()
             await session.wait_for_idle()
-            # 2. 合并文本并回卷 leaf 到目标消息。
             manager = session.session_manager
             manager.edit_message(entry_id, text)
-            # 3. 重建会话（从编辑后的消息重新加载上下文）并继续。
             new_session = await self._apply_rebuilt_session(manager)
             self._set_status("Continuing from edited message")
             await new_session.continue_()
@@ -1248,32 +1203,16 @@ class PiTuiApp(App):
 
     def _open_settings_selector(self) -> None:
         items: list[dict[str, Any]] = [
-            {
-                "key": "autoCompaction",
-                "label": "Auto-compact",
-                "type": "bool",
-            },
+            {"key": "autoCompaction", "label": "Auto-compact", "type": "bool"},
             {
                 "key": "defaultProjectTrust",
                 "label": "Default project trust",
                 "type": "choice",
                 "choices": ["ask", "trust", "block"],
             },
-            {
-                "key": "trustOverride",
-                "label": "Trust override",
-                "type": "bool",
-            },
-            {
-                "key": "defaultProvider",
-                "label": "Default provider",
-                "type": "string",
-            },
-            {
-                "key": "defaultModel",
-                "label": "Default model",
-                "type": "string",
-            },
+            {"key": "trustOverride", "label": "Trust override", "type": "bool"},
+            {"key": "defaultProvider", "label": "Default provider", "type": "string"},
+            {"key": "defaultModel", "label": "Default model", "type": "string"},
         ]
         current = dict(self._settings)
         current.setdefault("autoCompaction", self._session.auto_compaction_enabled)
@@ -1295,10 +1234,7 @@ class PiTuiApp(App):
                 self._session.set_auto_compaction_enabled(bool(value))
             self._notify(f"Saved {key} = {value}")
             return
-        from ..._config import (
-            _load_json,
-            get_project_settings_path,
-        )
+        from ..._config import _load_json, get_project_settings_path
 
         cwd = self._session.cwd
         path = get_project_settings_path(cwd)
@@ -1445,27 +1381,72 @@ class PiTuiApp(App):
 
     def action_toggle_tools(self) -> None:
         self._show_tools = not self._show_tools
+        self._header.set_expanded(not self._header._expanded)
         self._rerender_chat()
 
     def action_toggle_thinking(self) -> None:
         self._show_thinking = not self._show_thinking
         self._rerender_chat()
 
+    def action_previous_prompt(self) -> None:
+        self._scroll_to_prompt(-1)
+
+    def action_next_prompt(self) -> None:
+        self._scroll_to_prompt(1)
+
+    def _scroll_to_prompt(self, direction: int) -> None:
+        """对齐 TS scrollToPrompt：按 OSC133 语义在 user prompt 间滚动。"""
+        body = self._chat._body()
+        rows: list[int] = []
+        y = 0
+        for widget in body.children:
+            if isinstance(widget, MessageEntry) and widget.label == "User":
+                rows.append(y)
+            y += widget.content_size()[1]
+        if not rows:
+            return
+        current = self._chat.scroll_offset
+        target: int | None = None
+        if direction < 0:
+            for row in reversed(rows):
+                if row < current:
+                    target = row
+                    break
+        else:
+            for row in rows:
+                if row > current:
+                    target = row
+                    break
+        if target is None:
+            return
+        self._chat.scroll_offset = max(0, target)
+        self._chat.refresh()
+
     def _rerender_chat(self) -> None:
         self._chat.set_visibility(show_tools=self._show_tools, show_thinking=self._show_thinking)
         self._chat.clear_messages()
+        self._tool_entries.clear()
         for message in self._session.get_messages():
-            self._chat.add_message_agent(cast(dict[str, Any], message))
+            if message.get("role") == "assistant":
+                self._render_tool_calls(message)
+            self._chat.add_message_agent(
+                cast(dict[str, Any], message),
+                skip_tool_calls=(message.get("role") == "assistant"),
+            )
 
     def action_follow_up(self) -> None:
         text = self._editor.text.strip()
         if not text:
             return
         self._editor.clear()
+        self._follow_up_queue.append(text)
+        self._update_pending_messages()
         self._session.follow_up(text)
         self._set_status("Follow-up queued")
 
     def action_dequeue(self) -> None:
+        self._follow_up_queue.clear()
+        self._update_pending_messages()
         self._session._agent.clear_all_queues()
         self._set_status("Queued messages cleared")
 
@@ -1513,7 +1494,7 @@ class PiTuiApp(App):
         self._set_status("New session")
 
     async def _apply_rebuilt_session(self, manager):
-        """按给定 SessionManager 重建会话并替换（fork/clone/resume/import 用）。"""
+        """按给定 SessionManager 重建会话并替换。"""
         if self._session_rebuilder is None:
             raise RuntimeError("Session rebuild is not available")
         result = self._session_rebuilder(manager)
@@ -1526,7 +1507,6 @@ class PiTuiApp(App):
         details: list[str] = []
         session = self._session
 
-        # 1. 技能 / 提示模板（加载器原地重扫）。
         skill_loader = session.skill_loader
         if skill_loader is not None:
             try:
@@ -1548,7 +1528,6 @@ class PiTuiApp(App):
             except Exception as exc:
                 details.append(f"prompts failed: {exc}")
 
-        # 2. 扩展：重扫磁盘 → 新 runner → 替换会话绑定。
         new_runner = None
         if self._extension_loader is not None:
             old_runner = session.extension_runner
@@ -1587,10 +1566,9 @@ class PiTuiApp(App):
             except Exception as exc:
                 details.append(f"extensions failed: {exc}")
         elif session.extension_runner is not None:
-            # 无 loader（测试 / 嵌入场景）：保留现有 runner，仅重放注册。
             new_runner = session.extension_runner
 
-        # 3. 快捷键 + 扩展命令：重建注册表与 BINDINGS。
+        # 快捷键 + 扩展命令：重建注册表与键位表。
         try:
             registry = SlashCommandRegistry()
             register_builtin_commands(registry)
@@ -1604,27 +1582,20 @@ class PiTuiApp(App):
                 ).apply()
             self._slash_registry = registry
             self._slash_context.slash_registry = registry
-            self.BINDINGS = [  # type: ignore[misc]
-                Binding(binding.key, binding.action, binding.description)
-                for binding in self._keybindings.all_bindings()
-            ]
-            self._bindings = BindingsMap(self.BINDINGS)
-            self.refresh_bindings()
-            self._header.refresh_hints()
+            if self._header is not None:
+                self._header.refresh_hints()
             details.append("keybindings refreshed")
         except Exception as exc:
             details.append(f"keybindings failed: {exc}")
 
-        # 4. 主题：重新解析并刷新 CSS。
+        # 主题：重新解析并刷新样式。
         try:
             self._theme = self._theme_loader.resolve(self._theme_name)
-            self.CSS = _build_css(self._theme.colors)  # type: ignore[misc]
-            self.refresh_css()
+            self._apply_theme()
             details.append(f"theme {self._theme.name}")
         except Exception as exc:
             details.append(f"theme failed: {exc}")
 
-        # 5. 系统提示 / 上下文文件：随技能与 AGENTS.md 变化重建。
         try:
             if session.rebuild_system_prompt() is not None:
                 details.append("context files + system prompt")
@@ -1640,6 +1611,7 @@ class PiTuiApp(App):
         self._slash_context.session = new_session
         self._bind_session()
         self._chat.clear_messages()
+        self._tool_entries.clear()
         self._rendered_summary_ids = set()
         for message in new_session.get_messages():
             self._chat.add_message_agent(cast(dict[str, Any], message))
@@ -1679,6 +1651,7 @@ class PiTuiApp(App):
         self._slash_context.session = new_session
         self._bind_session()
         self._chat.clear_messages()
+        self._tool_entries.clear()
         self._rendered_summary_ids = set()
         for message in new_session.get_messages():
             self._chat.add_message_agent(cast(dict[str, Any], message))
@@ -1722,10 +1695,12 @@ class PiTuiApp(App):
     # 内部
     # ------------------------------------------------------------------
 
-    def _run_task(self, coroutine) -> None:
-        task = asyncio.create_task(coroutine)
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+    async def _handle_event(self, event: KeyEvent) -> None:
+        was_resize = event.type == "resize"
+        await super()._handle_event(event)
+        if was_resize:
+            for key in list(self._overlay_renderers):
+                self._render_overlay_renderer(key)
 
 
 def _list_sessions() -> list[dict[str, Any]]:
@@ -1743,7 +1718,7 @@ def _list_sessions() -> list[dict[str, Any]]:
 
 
 def _user_message_nodes(manager: SessionManager) -> list[SessionTreeNode]:
-    """构造仅含 user 消息的扁平树节点（/input 选择器用，label 显示内容片段）。"""
+    """构造仅含 user 消息的扁平树节点（/input 选择器用）。"""
     nodes: list[SessionTreeNode] = []
     for entry in manager.get_entries():
         if entry.get("type") != "message":
@@ -1756,8 +1731,6 @@ def _user_message_nodes(manager: SessionManager) -> list[SessionTreeNode]:
         snippet = " ".join(text.split())
         if len(snippet) > 60:
             snippet = f"{snippet[:60]}…"
-        # 转义方括号，避免被 Textual 当成 Rich markup 样式标签吞掉。
-        snippet = snippet.replace("[", r"\[").replace("]", r"\]")
         nodes.append(
             SessionTreeNode(
                 id=cast(str, entry.get("id")),
@@ -1771,7 +1744,7 @@ def _user_message_nodes(manager: SessionManager) -> list[SessionTreeNode]:
 
 
 def _format_context_path(path: str, cwd: str) -> str:
-    """启动提示用路径：cwd 内显示相对路径，否则 home 缩写（对齐 TS formatContextPath）。"""
+    """启动提示用路径：cwd 内显示相对路径，否则 home 缩写。"""
     try:
         relative = Path(path).resolve().relative_to(Path(cwd).resolve())
         return relative.as_posix()
@@ -1812,7 +1785,6 @@ async def run_tui_mode(
     try:
         await app.run_async()
     finally:
-        # 兜底消费 OSC 11 查询的晚到响应，防止退出后漏到 shell。
         from pi_tui.terminal import drain_pending_osc_response
 
         drain_pending_osc_response()

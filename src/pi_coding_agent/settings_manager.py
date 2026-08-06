@@ -579,6 +579,28 @@ class SettingsManager:
     def get_show_images(self) -> bool:
         return bool((self._settings.get("terminal") or {}).get("showImages", True))
 
+    def get_ui_mode(self) -> str:
+        # 默认 fullscreen（保持当前 Python TUI 体验）；TS 默认 regular，
+        # 通过设置 uiMode 可切换两种模式。
+        return (
+            "fullscreen"
+            if self._settings.get("uiMode", "fullscreen") == "fullscreen"
+            else "regular"
+        )
+
+    def set_ui_mode(self, mode: str) -> None:
+        self._set_global("uiMode", "fullscreen" if mode == "fullscreen" else "regular")
+
+    def get_show_terminal_progress(self) -> bool:
+        return bool((self._settings.get("terminal") or {}).get("showTerminalProgress", False))
+
+    def set_show_terminal_progress(self, enabled: bool) -> None:
+        terminal = dict(self._global_settings.get("terminal") or {})
+        terminal["showTerminalProgress"] = bool(enabled)
+        self._global_settings["terminal"] = terminal
+        self._modified_global.add("terminal")
+        self._save_global()
+
     def set_show_images(self, show: bool) -> None:
         terminal = dict(self._global_settings.get("terminal") or {})
         terminal["showImages"] = bool(show)

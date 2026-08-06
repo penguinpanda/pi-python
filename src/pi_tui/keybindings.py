@@ -25,6 +25,18 @@ DEFAULT_APP_KEYBINDINGS: dict[str, Keybinding] = {
     "app.interrupt": Keybinding("escape", "app.interrupt", "interrupt", "Cancel or abort"),
     "app.clear": Keybinding("ctrl+c", "app.clear", "clear", "Clear editor"),
     "app.exit": Keybinding("ctrl+d", "app.exit", "exit", "Exit when editor is empty"),
+    "tui.altScreen.previousPrompt": Keybinding(
+        "ctrl+shift+up",
+        "tui.altScreen.previousPrompt",
+        "previous_prompt",
+        "Jump to previous semantic prompt",
+    ),
+    "tui.altScreen.nextPrompt": Keybinding(
+        "ctrl+shift+down",
+        "tui.altScreen.nextPrompt",
+        "next_prompt",
+        "Jump to next semantic prompt",
+    ),
     "app.thinking.cycle": Keybinding(
         "shift+tab", "app.thinking.cycle", "cycle_thinking", "Cycle thinking level"
     ),
@@ -170,7 +182,7 @@ class KeybindingsManager:
         return binding is not None and bool(binding.key)
 
     def all_bindings(self) -> list[Keybinding]:
-        """全部启用的绑定（供 Textual BINDINGS 使用）。"""
+        """全部启用的绑定（供 App 快捷键分发使用）。"""
         return [
             Keybinding(b.key, b.action_id, b.action, b.description)
             for b in self._bindings.values()

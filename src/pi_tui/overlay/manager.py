@@ -1,4 +1,4 @@
-"""OverlayManager：生命周期、z-order、可见性与事件路由（不依赖 Textual）。"""
+"""OverlayManager：生命周期、z-order、可见性与事件路由（无 UI 框架依赖）。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from .model import OverlayEntry, OverlayHandle, OverlayOptions, parse_overlay_op
 
 @dataclass
 class OverlayHooks:
-    """manager 与宿主 UI（Textual 等）之间的适配点。"""
+    """manager 与宿主 UI 之间的适配点。"""
 
     make_widget: Callable[[str, list[str], OverlayOptions], Any]
     update_widget: Callable[[Any, list[str], OverlayOptions], None]
@@ -146,7 +146,7 @@ class OverlayManager:
             self._entries[key] = entry
             self._hooks.mount(widget)
             return self._finish_show(entry, False)
-        # 复用同一根 widget（Textual remove 是异步的，换根会撞同 id）。
+        # 复用同一根 widget（避免换根导致的挂载/焦点竞态）。
         entry.hidden = False
         entry.kind = "component"
         entry.options = opts
@@ -291,7 +291,7 @@ class OverlayManager:
     # ------------------------------------------------------------------
 
     def on_widget_focused(self, widget: Any) -> None:
-        """宿主（Textual DescendantFocus）报告某 widget 获得焦点。"""
+        """宿主（引擎 focus 同步）报告某 widget 获得焦点。"""
         entry = self._entry_for_widget(widget)
         if entry is not None:
             if self.controller.focused is not entry:

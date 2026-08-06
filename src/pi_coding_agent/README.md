@@ -88,7 +88,7 @@ uv run python -m pi_coding_agent --json -p "hi"
 # RPC 模式（stdin/stdout JSONL，32 命令）
 uv run python -m pi_coding_agent --mode rpc
 
-# TUI 模式（Textual 交互界面）
+# TUI 模式（内置引擎交互界面）
 uv run python -m pi_coding_agent --mode tui
 
 # 自定义系统提示 / 追加
@@ -138,7 +138,7 @@ pi login [provider] | pi logout <provider> | pi list
 | 参数 | 类型 | 说明 |
 |------|------|------|
 | `-p, --print` | flag | 单次 print 模式（有 message 时默认） |
-| `--mode` | print/rpc/tui | 运行模式：print（默认）/ rpc（JSONL）/ tui（Textual） |
+| `--mode` | print/rpc/tui | 运行模式：print（默认）/ rpc（JSONL）/ tui（内置引擎） |
 | `--json` | flag | print 模式输出 JSON Lines 事件 |
 | `--model` | str | 模型 ID（如 `deepseek-v4-flash`、`gpt-5-chat-latest`） |
 | `--provider` | str | Provider ID（如 `deepseek`、`openai`、`qwen`、`ollama`、`faux`） |
@@ -326,7 +326,7 @@ stdin/stdout JSONL 无头协议，32 个命令（`prompt`/`abort`/`steer`/`follo
 
 ### TUI 模式（`--mode tui`）
 
-Textual 交互界面：主题（dark/light + 自定义 JSON）、快捷键（settings 覆盖）、
+内置引擎交互界面：主题（dark/light + 自定义 JSON）、快捷键（settings 覆盖）、
 26 个 Slash 命令、模型/会话/设置/信任/思考/OAuth/作用域模型/扩展选择器、
 剪贴板图片、外部编辑器（Ctrl+G）、树导航与 fork。
 

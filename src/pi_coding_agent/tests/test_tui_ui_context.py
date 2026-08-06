@@ -13,6 +13,9 @@ from pi_coding_agent.modes.interactive.ui_context import TuiUIContext
 class _StubEditor:
     text = ""
 
+    def insert(self, value: str) -> None:
+        self.text += value
+
 
 class _StubWidget:
     def __init__(self) -> None:
@@ -36,7 +39,11 @@ class _StubApp:
         self._overlay_calls: list[tuple] = []
         self._thinking_label = None
         self._working_message = None
+        self._working_visible = True
         self._theme_call = None
+
+    def set_title(self, title: str) -> None:
+        self.title = title
 
     def push_screen(self, screen, callback=None) -> None:
         self._screens.append((screen, callback))
@@ -67,6 +74,9 @@ class _StubApp:
 
     def _set_theme(self, theme=None) -> None:
         self._theme_call = theme
+
+    async def _await_text_input(self, title: str, placeholder: str = "") -> str | None:
+        return placeholder or title
 
 
 def test_theme_facade_fg_bg():
@@ -163,3 +173,36 @@ def test_rpc_ui_context_set_footer_header():
     assert emitted[3]["componentType"] == "object"
     assert emitted[4]["method"] == "setOverlayRenderer"
     assert emitted[4]["componentType"] == "renderer"
+
+
+def test_easter_egg_slash_commands_registered() -> None:
+    from pi_coding_agent.modes.interactive.slash_commands import (
+        SlashCommandRegistry,
+        register_builtin_commands,
+    )
+
+    registry = SlashCommandRegistry()
+    register_builtin_commands(registry)
+    for name in ("debug", "arminsayshi", "dementedelves"):
+        assert registry.get(name) is not None
+
+
+def test_extension_working_and_editor_api() -> None:
+    app = _StubApp()
+    ctx = TuiUIContext(app)
+    ctx.set_working_visible(False)
+    assert app._working_visible is False
+    ctx.set_working_indicator({"message": "Thinking...", "visible": True})
+    assert app._working_message == "Thinking..."
+    assert app._working_visible is True
+    ctx.paste_to_editor("pasted")
+    assert app._editor.text == "pasted"
+    assert ctx.get_editor_text() == "pasted"
+
+
+@pytest.mark.asyncio
+async def test_extension_editor_dialog() -> None:
+    app = _StubApp()
+    ctx = TuiUIContext(app)
+    result = await ctx.editor("Edit", "prefill")
+    assert result == "prefill"
