@@ -551,6 +551,9 @@ class App:
         row2, col2 = self._mouse_select_current
         if (row2, col2) < (row1, col1):
             row1, col1, row2, col2 = row2, col2, row1, col1
+        # 多行选区每帧逐格重建反色 Style 开销很大（Rich Style 加法昂贵）；
+        # 按基础样式缓存反色结果，同一帧内相同样式只构建一次。
+        reversed_cache: dict[Style | None, Style] = {}
         for row in range(row1, row2 + 1):
             if not (0 <= row < len(lines)):
                 continue
@@ -559,7 +562,12 @@ class App:
             end_col = col2 if row == row2 else len(line.cells) - 1
             for col in range(max(0, start_col), min(len(line.cells), end_col + 1)):
                 cell = line.cells[col]
-                cell.style = (cell.style or Style()) + Style(reverse=True)
+                base = cell.style
+                reversed_style = reversed_cache.get(base)
+                if reversed_style is None:
+                    reversed_style = (base or Style()) + Style(reverse=True)
+                    reversed_cache[base] = reversed_style
+                cell.style = reversed_style
 
     def _link_at(self, row: int, col: int) -> str | None:
         """合成帧上指定单元格的 OSC8 链接（无则 None）。"""
@@ -820,6 +828,19 @@ class App:
                 if event is None:
                     break
                 await self._handle_event(event)
+                # 合并同一轮到达的输入（鼠标 motion 高频事件），批量处理后只渲染一次，
+                # 避免每个事件都触发全量 diff/高亮导致拖选与复制卡顿。
+                while True:
+                    try:
+                        queued = self._events.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                    if queued is None:
+                        event = None
+                        break
+                    await self._handle_event(queued)
+                if event is None:
+                    break
             await self._render_if_requested(force=True)
         finally:
             self._running = False
