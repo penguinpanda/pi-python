@@ -423,6 +423,11 @@ async def test_editor_border_renders_in_app() -> None:
     async def actions(_term, _app) -> None:
         await asyncio.sleep(0.1)
         assert app._editor.border is True
+        # 正文为 muted textAlt（#a6adc8），光标保持反色块。
+        from rich.color import Color
+
+        assert app._editor.base_style is not None
+        assert app._editor.base_style.color == Color.from_rgb(166, 173, 200)
         lines = app._editor.render(20, 6)
         assert lines[0].text().strip() == "─" * 20
         assert lines[-1].text().strip() == "─" * 20

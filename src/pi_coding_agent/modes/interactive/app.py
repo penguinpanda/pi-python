@@ -326,7 +326,9 @@ class PiTuiApp(App):
             elif widget is self._status:
                 widget.base_style = _theme_style(theme, "bgToolbar", "textSystem")
             elif widget is self._editor_widget:
-                widget.base_style = _theme_style(theme, "bgUserInput", "text")
+                # 正文用 muted textAlt（对齐 TS：编辑器文字不染色、终端默认灰），
+                # 光标保持反色块，避免整行看起来都是光标色。
+                widget.base_style = _theme_style(theme, "bgUserInput", "textAlt")
                 widget.border_style = Style(
                     color=theme.colors.get("border", theme.colors["textAlt"]),
                     bgcolor=theme.colors.get("bgUserInput", theme.colors["bg"]),
