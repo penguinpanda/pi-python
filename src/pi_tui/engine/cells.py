@@ -81,10 +81,14 @@ def line_from_text(text: str, width: int, style: Style | None = None) -> Line:
     return Line(cells)
 
 
-def _style_sgr(style: Style | None) -> str:
-    """Rich Style → SGR 前缀。"""
+def _style_sgr(style: Style | None, previous: Style | None = None) -> str:
+    """Rich Style → SGR 前缀；previous 提供时补发属性关闭码（如 27 关闭反色）。
+
+    只发开启码会让被移除的属性（bold/underline/reverse 等）残留到整行，
+    例如光标格反色后下一格未发 \x1b[27m，导致整行都被反色覆盖。
+    """
     if style is None:
-        return ""
+        return "\x1b[0m" if previous is not None else ""
     codes: list[str] = []
     if style.bold:
         codes.append("1")
@@ -101,9 +105,28 @@ def _style_sgr(style: Style | None) -> str:
     if style.strike:
         codes.append("9")
     if style.color is not None:
-        codes.extend(str(code) for code in style.color.get_ansi_codes(foreground=True))
+        codes.extend(style.color.get_ansi_codes(foreground=True))
     if style.bgcolor is not None:
-        codes.extend(str(code) for code in style.bgcolor.get_ansi_codes(foreground=False))
+        codes.extend(style.bgcolor.get_ansi_codes(foreground=False))
+    if previous is not None:
+        if not style.bold and previous.bold:
+            codes.append("22")
+        if not style.dim and previous.dim and "22" not in codes:
+            codes.append("22")
+        if not style.italic and previous.italic:
+            codes.append("23")
+        if not style.underline and previous.underline:
+            codes.append("24")
+        if not style.blink and previous.blink:
+            codes.append("25")
+        if not style.reverse and previous.reverse:
+            codes.append("27")
+        if not style.strike and previous.strike:
+            codes.append("29")
+        if style.color is None and previous.color is not None:
+            codes.append("39")
+        if style.bgcolor is None and previous.bgcolor is not None:
+            codes.append("49")
     return f"\x1b[{';'.join(codes)}m" if codes else ""
 
 
@@ -121,7 +144,7 @@ def line_to_ansi(line: Line, width: int) -> str:
                 parts.append("\x1b]8;;\x1b\\")
             previous_link = cell.link
         if cell.style != previous:
-            sgr = _style_sgr(cell.style)
+            sgr = _style_sgr(cell.style, previous)
             if sgr:
                 parts.append(sgr)
             previous = cell.style

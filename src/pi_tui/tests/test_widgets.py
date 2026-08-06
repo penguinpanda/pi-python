@@ -565,3 +565,23 @@ def test_editor_border_uses_dedicated_style() -> None:
     # 内容行首个单元格是光标（反色），不是边框色。
     assert lines[1].cells[0].style is not None
     assert lines[1].cells[0].style.reverse is True
+
+
+def test_line_to_ansi_turns_off_reverse_and_keeps_rgb() -> None:
+    from pi_tui.engine.cells import line_to_ansi
+    from rich.color import Color
+    from rich.style import Style
+
+    base = Style(color=Color.from_rgb(166, 173, 200), bgcolor=Color.from_rgb(30, 30, 46))
+    line = Line(
+        [
+            Cell(" ", base + Style(reverse=True)),
+            Cell(" ", base),
+            Cell(" ", base),
+            Cell(" ", base),
+        ]
+    )
+    ansi = line_to_ansi(line, 4)
+    # 光标格：反色 + 完整 RGB；后续格补发 27 关闭反色，RGB 参数不被去重。
+    assert "\x1b[7;38;2;166;173;200;48;2;30;30;46m" in ansi
+    assert "\x1b[38;2;166;173;200;48;2;30;30;46;27m" in ansi
