@@ -117,7 +117,7 @@ class Terminal:
             elif os.name == "nt":
                 import ctypes
 
-                kernel32 = ctypes.windll.kernel32
+                kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
                 handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
                 info = ctypes.create_string_buffer(22)
                 if kernel32.GetConsoleScreenBufferInfo(handle, info):
@@ -258,9 +258,9 @@ class Terminal:
         import ctypes
         import msvcrt
 
-        msvcrt.setmode(self.stdin.fileno(), os.O_BINARY)
-        msvcrt.setmode(self.stdout.fileno(), os.O_BINARY)
-        kernel32 = ctypes.windll.kernel32
+        msvcrt.setmode(self.stdin.fileno(), os.O_BINARY)  # type: ignore[attr-defined]
+        msvcrt.setmode(self.stdout.fileno(), os.O_BINARY)  # type: ignore[attr-defined]
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
         in_handle = kernel32.GetStdHandle(-10)
         out_handle = kernel32.GetStdHandle(-11)
         mode = ctypes.c_uint32()
@@ -281,7 +281,7 @@ class Terminal:
 
         if self._old_console_mode is None:
             return
-        kernel32 = ctypes.windll.kernel32
+        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
         in_handle = kernel32.GetStdHandle(-10)
         kernel32.SetConsoleMode(in_handle, self._old_console_mode)
 
@@ -318,7 +318,7 @@ class Terminal:
         import msvcrt
         import time
 
-        if not msvcrt.kbhit():
+        if not msvcrt.kbhit():  # type: ignore[attr-defined]
             time.sleep(0.02)
             return b""
         return os.read(self.stdin.fileno(), 4096)

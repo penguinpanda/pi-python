@@ -78,13 +78,13 @@ def _read_osc_response_windows(timeout: float, drain: float) -> str:
     buffer = bytearray()
     deadline = time.monotonic() + timeout + drain
     while time.monotonic() < deadline:
-        if not msvcrt.kbhit():
+        if not msvcrt.kbhit():  # type: ignore[attr-defined]
             continue
-        char = msvcrt.getwch()
+        char = msvcrt.getwch()  # type: ignore[attr-defined]
         if char in ("\x00", "\xe0"):
             # 功能键前缀：跳过后续扫描码。
-            if msvcrt.kbhit():
-                msvcrt.getwch()
+            if msvcrt.kbhit():  # type: ignore[attr-defined]
+                msvcrt.getwch()  # type: ignore[attr-defined]
             continue
         code = ord(char)
         if code <= 0xFF:

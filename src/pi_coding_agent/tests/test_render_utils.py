@@ -168,7 +168,8 @@ def test_invalid_arg_text() -> None:
     assert theme.calls == ["error"]
 
 
-def test_render_tool_path_none_and_empty() -> None:
+def test_render_tool_path_none_and_empty(monkeypatch) -> None:
+    monkeypatch.setattr("pi_coding_agent.tools.render_utils._hyperlink_supported", lambda: False)
     theme = _FakeTheme()
     assert render_tool_path(None, theme, "/tmp") == "<error:[invalid arg]>"
     assert render_tool_path("", theme, "/tmp") == "<toolOutput:...>"
