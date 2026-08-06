@@ -28,8 +28,8 @@ from pi_ai.types import (
     now_ms,
 )
 
-from ._agent import _default_convert_to_llm
 from ._agent_loop import run_agent_loop
+from ._messages import convert_to_llm
 from .branch_summarization import collect_entries_for_branch_summary, generate_branch_summary
 from .compaction import (
     DEFAULT_COMPACTION_SETTINGS,
@@ -580,6 +580,8 @@ class AgentHarness:
             merged["headers"] = dict(request_options.headers)
         if request_options.cache_retention is not None:
             merged["cache_retention"] = request_options.cache_retention
+        if request_options.transport is not None:
+            merged["transport"] = request_options.transport
         if self._thinking_level != "off":
             merged["reasoning"] = self._thinking_level
         return merged
@@ -701,12 +703,12 @@ class AgentHarness:
         turn_state = get_turn_state()
         return AgentLoopConfig(
             model=turn_state.model,
-            convert_to_llm=_default_convert_to_llm,
+            convert_to_llm=convert_to_llm,
             transform_context=self._transform_context,
             before_tool_call=self._before_tool_call,
             after_tool_call=self._after_tool_call,
             prepare_next_turn=lambda ctx: self._prepare_next_turn(
-                get_turn_state, set_turn_state, ctx
+                get_turn_state, set_turn_state, ctx.context
             ),
             get_steering_messages=self._drain_steering,
             get_follow_up_messages=self._drain_follow_up,

@@ -40,8 +40,10 @@ from pi_ai.types import (
     Model,
     StreamOptions,
     TextContent,
+    ThinkingBudgets,
     ToolCall,
     ToolResultMessage,
+    Transport,
     Usage,
 )
 from pi_ai.utils._event_stream import AssistantMessageEventStream
@@ -361,6 +363,20 @@ class AgentLoopTurnUpdate:
 
 
 @dataclass(slots=True)
+class PrepareNextTurnContext:
+    """prepareNextTurnWithContext 上下文（对齐 TS PrepareNextTurnContext）。
+
+    TS 中 PrepareNextTurnContext extends ShouldStopAfterTurnContext，
+    因此同时携带本轮 assistant 消息、工具结果与运行中的上下文。
+    """
+
+    message: AssistantMessage  # 刚完成本轮的 assistant 消息
+    tool_results: list[ToolResultMessage]  # 本轮工具结果消息（turn_end 同款）
+    context: AgentContext  # 本轮消息与工具结果追加后的当前上下文
+    new_messages: list[AgentMessage]  # 本次 loop 调用新增的消息（含 prompts / steering）
+
+
+@dataclass(slots=True)
 class AgentLoopConfig:
     """Agent 循环的所有可注入配置。
 
@@ -374,12 +390,13 @@ class AgentLoopConfig:
         get_steering_messages: 轮间注入引导消息
         get_follow_up_messages: Agent 即将停止时注入后续消息
         should_stop_after_turn: 提前终止判断
-        prepare_next_turn: 轮间状态准备
+        prepare_next_turn: 轮间状态准备（接收 PrepareNextTurnContext）
         before_tool_call: 工具执行前拦截
         after_tool_call: 工具执行后拦截
 
     配置:
         tool_execution: 工具执行模式（最小核心仅 "sequential"）
+        thinking_budgets / transport: 透传给 StreamOptions
     """
 
     model: Model
@@ -391,7 +408,7 @@ class AgentLoopConfig:
     should_stop_after_turn: Callable[[AgentContext], bool | Awaitable[bool]] | None = None
     prepare_next_turn: (
         Callable[
-            [AgentContext],
+            [PrepareNextTurnContext],
             AgentLoopTurnUpdate | Awaitable[AgentLoopTurnUpdate | None] | None,
         ]
         | None
@@ -423,6 +440,10 @@ class AgentLoopConfig:
     # 提示缓存与会话标识（透传给 StreamOptions）
     session_id: str | None = None
     cache_retention: CacheRetention | None = None
+
+    # 透传给 StreamOptions（SimpleStreamOptions）
+    thinking_budgets: ThinkingBudgets | None = None
+    transport: Transport | None = None
 
     # 重试策略。None 表示使用默认策略（enabled=True, max_retries=3）。
     # 显式传入 RetryPolicy(enabled=False) 可关闭重试。

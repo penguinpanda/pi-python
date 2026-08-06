@@ -10,6 +10,7 @@ from pi_agent._types import (
     AgentTool,
     AgentToolResult,
     BeforeToolCallResult,
+    PrepareNextTurnContext,
 )
 
 
@@ -184,6 +185,31 @@ class TestAgentLoopConfig:
         assert config.prepare_next_turn is None
         assert config.before_tool_call is None
         assert config.after_tool_call is None
+
+    def test_stream_option_fields_default_to_none(self):
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+        )
+        assert config.thinking_budgets is None
+        assert config.transport is None
+
+    def test_prepare_next_turn_context_construct(self):
+        ctx = PrepareNextTurnContext(
+            message={
+                "role": "assistant",
+                "content": [TextContent(type="text", text="ok")],
+                "api": "test",
+                "provider": "test",
+                "model": "test-model",
+            },
+            tool_results=[],
+            context=AgentContext(system_prompt="test", messages=[]),
+            new_messages=[],
+        )
+        assert ctx.message["role"] == "assistant"
+        assert ctx.context.system_prompt == "test"
+        assert ctx.new_messages == []
 
 
 class TestBeforeAfterToolCall:

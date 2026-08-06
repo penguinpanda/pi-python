@@ -19,6 +19,7 @@ Agent (有状态包装)
 run_agent_loop()  ◄── 纯函数引擎
     │
     ├─ emit agent_start
+    ├─ emit turn_start（首轮，先于 prompts 注入）
     ├─ 注入 prompts → emit message_start / message_end
     │
     ▼
@@ -31,7 +32,7 @@ _run_loop()  ◄── 双重嵌套循环
     ┌──────────────────────────────────────────────┐
     │ 每轮 (turn):                                   │
     │  1. check_signal (取消检查)                     │
-    │  2. emit turn_start                            │
+    │  2. emit turn_start（仅第 2 轮起；首轮已由外层发射）│
     │  3. _stream_assistant_response() → LLM 调用     │
     │     ├─ transformContext (可选)                   │
     │     ├─ convertToLlm (消息转换)                   │
@@ -140,6 +141,7 @@ AgentOptions(
     before_tool_call: Callable | None = None,
     after_tool_call: Callable | None = None,
     prepare_next_turn: Callable | None = None,
+    prepare_next_turn_with_context: Callable | None = None,
     should_stop_after_turn: Callable | None = None,
     tool_execution: ToolExecutionMode = "parallel",
     # 双消息队列消费策略（"all" / "one-at-a-time"）
@@ -148,6 +150,9 @@ AgentOptions(
     # 提示缓存与会话标识（透传给 StreamOptions）
     session_id: str | None = None,
     cache_retention: CacheRetention | None = None,
+    # 推理 token 预算与传输协议（透传给 StreamOptions / SimpleStreamOptions）
+    thinking_budgets: ThinkingBudgets | None = None,
+    transport: Transport | None = None,
     # 重试策略。None = 默认启用（max_retries=3）；RetryPolicy(enabled=False) 关闭
     retry_policy: RetryPolicy | None = None,
 )
@@ -267,11 +272,12 @@ class AgentToolResult:
 | 钩子 | 签名 | 说明 |
 |------|------|------|
 | `transform_context` | `(messages) → messages` | 预处理消息列表（如压缩、摘要） |
-| `convert_to_llm` | `(messages) → LLM Message[]` | 消息格式转换（唯一转换点；默认透传标准 role，compactionSummary/branchSummary 包装为 user 消息） |
+| `convert_to_llm` | `(messages) → LLM Message[]` | 消息格式转换（唯一转换点；默认只透传 user/assistant/toolResult，完整转换见 `pi_agent._messages.convert_to_llm`） |
 | `get_api_key` | `(provider_id) → str \| None` | 动态获取 API Key |
 | `before_tool_call` | `(BeforeToolCallContext) → BeforeToolCallResult \| None` | 工具执行前检查（可 block） |
 | `after_tool_call` | `(AfterToolCallContext) → AfterToolCallResult \| None` | 工具执行后处理（字段级覆盖） |
-| `prepare_next_turn` | `(context) → AgentLoopTurnUpdate \| None` | 准备下一轮（可替换 context / model / thinking_level） |
+| `prepare_next_turn` | `(context) → AgentLoopTurnUpdate \| None` | 准备下一轮（接收 `AgentContext`；可替换 context / model / thinking_level） |
+| `prepare_next_turn_with_context` | `(PrepareNextTurnContext) → AgentLoopTurnUpdate \| None` | 带完整轮次上下文（message / tool_results / context / new_messages）的变体，优先于 `prepare_next_turn` |
 | `should_stop_after_turn` | `(context) → bool` | 判断是否提前终止循环 |
 | `get_steering_messages` | `() → list[AgentMessage]` | 轮间注入引导消息（steering 队列） |
 | `get_follow_up_messages` | `() → list[AgentMessage]` | Agent 即将停止时注入后续消息（follow-up 队列） |
@@ -280,6 +286,7 @@ class AgentToolResult:
 
 - `tool_execution`: `"sequential"` / `"parallel"`（默认 `parallel`）；
 - `session_id` / `cache_retention`: 透传给 `StreamOptions`（提示缓存）；
+- `thinking_budgets` / `transport`: 透传给 `StreamOptions` / `SimpleStreamOptions`；
 - `retry_policy`: 重试策略（默认启用，max_retries=3；传入 `RetryPolicy(enabled=False)` 关闭）。
 
 同步/异步钩子自动适配（通过 `asyncio.iscoroutine()` 检测）。

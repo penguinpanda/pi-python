@@ -1284,3 +1284,104 @@ class TestAgentLoopEventStream:
         )
         with pytest.raises(ValueError, match="assistant"):
             agent_loop_continue(assistant_last_ctx, config, None, stream_fn)
+
+
+class TestTurnStartPlacement:
+    """turn_start 由外层入口发射（对齐 TS runAgentLoop / runAgentLoopContinue）。"""
+
+    @pytest.mark.asyncio
+    async def test_run_agent_loop_turn_start_before_prompt_messages(self):
+        prompts = [UserMessage(role="user", content="Hello")]
+        context = AgentContext(system_prompt="test", messages=[])
+        stream_fn = _make_stream_fn(_make_llm_text_response("Hi there!"))
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+        )
+
+        _, events = await _collect_events(prompts, context, config, stream_fn)
+        event_types = [e["type"] for e in events]
+
+        # turn_start 在 prompt 的 message_start 之前；首轮只发射一次
+        assert event_types.index("turn_start") < event_types.index("message_start")
+        assert len(_find_events(events, "turn_start")) == 1
+
+    @pytest.mark.asyncio
+    async def test_run_agent_loop_continue_emits_turn_start(self):
+        context = AgentContext(
+            system_prompt="test",
+            messages=[UserMessage(role="user", content="Hi")],
+        )
+        stream_fn = _make_stream_fn(_make_llm_text_response("Hello!"))
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+        )
+
+        events: list[AgentEvent] = []
+
+        async def _emit(evt: AgentEvent) -> None:
+            events.append(evt)
+
+        await run_agent_loop_continue(context, config, _emit, None, stream_fn)
+        event_types = [e["type"] for e in events]
+        assert event_types[0] == "agent_start"
+        assert event_types[1] == "turn_start"
+        assert len(_find_events(events, "turn_start")) == 1
+
+
+class TestPrepareNextTurnContext:
+    """prepare_next_turn 接收 PrepareNextTurnContext（对齐 TS）。"""
+
+    @pytest.mark.asyncio
+    async def test_receives_turn_details(self):
+        prompts = [UserMessage(role="user", content="Hi")]
+        context = AgentContext(system_prompt="test", messages=[])
+        stream_fn = _make_stream_fn(_make_llm_text_response("Hello"))
+        received: list = []
+
+        def _prepare(ctx):
+            received.append(ctx)
+            return None
+
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+            prepare_next_turn=_prepare,
+        )
+
+        await _collect_events(prompts, context, config, stream_fn)
+        assert len(received) == 1
+        ctx = received[0]
+        assert ctx.message.get("role") == "assistant"
+        assert ctx.tool_results == []
+        assert [m.get("role") for m in ctx.new_messages] == ["user", "assistant"]
+        assert [m.get("role") for m in ctx.context.messages] == ["user", "assistant"]
+
+
+class TestAgentLoopStreamOptionForwarding:
+    """AgentLoopConfig 的 thinking_budgets / transport 透传给 StreamOptions。"""
+
+    @pytest.mark.asyncio
+    async def test_thinking_budgets_and_transport_forwarded(self):
+        prompts = [UserMessage(role="user", content="Hi")]
+        context = AgentContext(system_prompt="test", messages=[])
+        core = _make_faux([_make_llm_text_response("Hello")])
+        original = core.stream
+        captured: list[dict] = []
+
+        async def _stream(model, ctx, options=None):
+            captured.append(dict(options or {}))
+            return await original(model, ctx, options)
+
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+            thinking_budgets={"high": 4096},
+            transport="websocket",
+        )
+
+        await _collect_events(prompts, context, config, _stream)
+        assert captured
+        assert captured[0]["thinking_budgets"] == {"high": 4096}
+        assert captured[0]["transport"] == "websocket"

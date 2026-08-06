@@ -33,6 +33,7 @@ from pi_agent import (
     BeforeToolCallResult,
     PythonExecutionEnv,
 )
+from pi_agent._agent import _default_convert_to_llm as _agent_default_convert_to_llm
 from pi_agent.shell_output import execute_shell_with_capture
 from pi_ai import AssistantMessage, Model, Usage, UserMessage, now_ms
 from pi_ai.api._shared import empty_usage
@@ -47,6 +48,7 @@ from pi_ai.utils.retry import (
 
 from ._session_manager import SessionManager
 from .frontmatter import strip_frontmatter
+from .messages import convert_to_llm
 from .model_resolver import ScopedModel
 from .model_runtime import ModelRuntime
 from pi_agent.prompt_templates import substitute_args
@@ -128,6 +130,11 @@ class AgentSession:
         restrict_untrusted_tools: bool = False,
     ):
         self._agent = agent
+        # 编码代理使用完整消息转换器（bashExecution/compactionSummary/custom 等
+        # 包装为 user 消息，对齐 TS coding-agent messages.ts）。显式传入的自定义
+        # 转换器保持优先（AgentOptions.convert_to_llm 非默认值时不被覆盖）。
+        if agent.convert_to_llm is _agent_default_convert_to_llm:
+            agent.convert_to_llm = convert_to_llm
         self._session_manager = session_manager
         self._cwd = cwd
         self._model = model

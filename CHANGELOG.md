@@ -20,7 +20,10 @@
 - `pi-protocol` v2 package: commands/results/snapshots/events with JSONL framing
 - `pi-storage` PostgreSQL session store (asyncpg) with migrations and tsvector/pg_trgm search
 - `pi-server` persistent stdio service with attach/detach and snapshot push
-- `pi-evals` harness with smoke and extensions evals (faux provider)
+- `pi-evals` 完整移植 TS `packages/evals`：`createPiCodingAgentHarness`
+  （隔离工作区 / transform / output / session 快照）、vitest-evals 等价物
+  （judge / harness table / artifacts / summary）、`pi-evals` CLI runner，
+  附 smoke / extensions evals（默认 faux provider）
 - TUI tool-execution, skill-invocation, compaction/branch-summary message entries
 - TUI thinking/oauth/scoped-models selectors and extension selector (`/thinking`, `/oauth`, `/extensions`)
 - 内置 TUI 引擎 `src/pi_tui/engine/`：单元格渲染与行差分、终端输入解析
@@ -30,6 +33,10 @@
 - TUI 终端协议：OSC 11 背景色、OSC 52 剪贴板、OSC 133 prompt、OSC 2026 同步输出、
   `PI_HARDWARE_CURSOR` 硬件光标、SGR 鼠标滚轮与滚动条
 - 新增 `docs/tui-ts-feature-gap.md`：面向界面对齐 TS 的逐项功能差距与实施建议（布局/聊天/编辑器/终端协议/鼠标/设置接线，含里程碑与验证方式）
+- `AgentOptions` 新增 `prepare_next_turn_with_context`（接收 `PrepareNextTurnContext`：message / tool_results / context / new_messages）以及 `thinking_budgets` / `transport` 透传字段
+- 新增 `pi_agent._messages.convert_to_llm` / `pi_coding_agent.messages`：应用层完整消息转换（bashExecution / compactionSummary / branchSummary / custom 包装为 user 消息）
+- CLI / `pi_server` 默认用 `~/.pi/agent/models-store.json` 持久化动态模型目录缓存
+  （`FileModelsStore`：models + etag / lastModified / checkedAt，跨进程复用条件刷新）
 
 ### Changed
 
@@ -60,14 +67,19 @@
 - 扩展 UI API 补齐 `setWorkingVisible` / `setWorkingIndicator` / `pasteToEditor` /
   `getEditorText` / `editor`（抽象接口 + Noop + TuiUIContext 实现）
 - 文档统一移除“自研”表述
+- `turn_start` 改为由 `run_agent_loop` / `run_agent_loop_continue` 外层发射（先于 prompts 注入，对齐 TS agent-loop.ts），`_run_loop` 首轮不再重复发射
+- `pi_agent` 默认 `convert_to_llm` 改为最小过滤（只透传 user/assistant/toolResult，对齐 TS `defaultConvertToLlm`）；压缩/分支摘要等丰富转换移至应用层转换器，`AgentHarness` 与 `AgentSession` 已接线
+- TUI 大内容量渲染优化：`MessageEntry` 跨帧缓存（natural_size / render 按内容版本失效）、
+  布局合成整行复用 + 共享行写时复制、regular 模式按行对象同一性增量 diff 且只对变化行
+  转 ANSI；1000 条消息的逐帧渲染从数百毫秒降至 ~10-20ms，输入/退出不再被渲染阻塞
 
 ### Fixed
 
 - TUI 布局对齐 TS：容器分配保持挂载顺序，聊天区固定在编辑器上方（1fr），
   编辑器/状态栏/页脚固定在底部，提交消息后输入框不再被挤出可视区；
   启动资源提示随聊天区显示在输入框上方
-- TUI 退出对齐 TS：退出 alt-screen 后把最后一帧文档写入主屏并换行，
-  不再残留空行；shell 提示符紧接页脚
+- TUI 退出行为：退出 alt-screen 后清空主屏视口，只保留 shell 提示符，
+  不再残留 TUI 的 header / status / footer 文档
 - 修复滚动视口子组件 `app` 未传播导致流式占位（Speaking）无法移除的问题；
   `message_start` 仅对 assistant 创建流式占位，user/custom 消息由 `message_end` 追加
 - 输入解析：分片 CSI/OSC 序列等待补齐而非被 final flush 丢弃；kitty release
@@ -79,6 +91,11 @@
 - TUI 注册 SIGINT/SIGTERM/SIGHUP 优雅退出，进程被杀时恢复终端
 - Windows：`GetConsoleScreenBufferInfo` 尺寸读取字段修正（srWindow Right/Bottom），
   控制台输入模式关闭行缓冲与回显（对齐 raw 模式）
+- TUI 默认把硬件光标定位到输入光标处并显示（对齐 TS CURSOR_MARKER），
+  Windows IME 候选窗口跟随输入位置而不是停在最右侧；regular 模式同样生效，
+  `PI_HARDWARE_CURSOR=0` 可关闭；编辑器光标列按可见宽度计算（CJK/emoji 不偏移）
+- TUI 退出后清空主屏，不再回写最后一帧文档（原先对齐 TS 的退出行为会残留
+  header / status / footer，导致 shell 提示符上方堆满 TUI 内容）
 
 ## [0.1.0]
 

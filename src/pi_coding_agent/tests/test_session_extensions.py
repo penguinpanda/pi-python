@@ -992,7 +992,7 @@ async def test_emit_input_streaming_behavior(tmp_path):
 
 @pytest.mark.asyncio
 async def test_custom_message_enters_context(tmp_path):
-    from pi_agent._agent import _default_convert_to_llm
+    from pi_coding_agent.messages import convert_to_llm
 
     manager = SessionManager.in_memory(cwd=str(tmp_path))
     await manager.append_custom_message_entry(
@@ -1003,7 +1003,7 @@ async def test_custom_message_enters_context(tmp_path):
     messages = manager.build_context()
     custom = [message for message in messages if message.get("role") == "custom"]
     assert custom and custom[-1]["customType"] == "note"
-    llm_messages = _default_convert_to_llm(messages)
+    llm_messages = convert_to_llm(messages)
     assert any(message.get("role") == "user" for message in llm_messages)
 
 

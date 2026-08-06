@@ -11,12 +11,18 @@ from pi_ai._types import (
     TextContent,
     UserMessage,
 )
-from pi_ai.providers.faux import FauxCore, faux_assistant_message, faux_provider
+from pi_ai.providers.faux import (
+    FauxCore,
+    faux_assistant_message,
+    faux_provider,
+    faux_tool_call,
+)
 
 from pi_agent._agent import Agent, AgentOptions
 from pi_agent._stream_fn import set_default_stream_fn
 from pi_agent._types import (
     AgentEvent,
+    AgentLoopTurnUpdate,
     AgentTool,
     AgentToolResult,
     StreamFn,
@@ -764,9 +770,43 @@ class TestAsyncListeners:
         assert listener_done.is_set()
 
 
-def test_default_convert_to_llm_bash_execution():
-    """bashExecution 包装为 user 消息；!!（excludeFromContext）跳过。"""
+def test_default_convert_to_llm_filters_non_standard_roles():
+    """默认转换器只透传 user/assistant/toolResult（对齐 TS defaultConvertToLlm）。"""
     from pi_agent._agent import _default_convert_to_llm
+
+    messages = [
+        {"role": "user", "content": "hi", "timestamp": 1},
+        {
+            "role": "assistant",
+            "content": [TextContent(type="text", text="ok")],
+            "timestamp": 2,
+        },
+        {
+            "role": "toolResult",
+            "tool_call_id": "t1",
+            "tool_name": "x",
+            "content": [],
+            "is_error": False,
+            "timestamp": 3,
+        },
+        {"role": "compactionSummary", "summary": "old history", "timestamp": 4},
+        {
+            "role": "bashExecution",
+            "command": "ls",
+            "output": "",
+            "exitCode": 0,
+            "cancelled": False,
+            "truncated": False,
+            "timestamp": 5,
+        },
+    ]
+    llm_messages = _default_convert_to_llm(messages)
+    assert [m["role"] for m in llm_messages] == ["user", "assistant", "toolResult"]
+
+
+def test_convert_to_llm_wraps_custom_roles():
+    """应用层转换器包装 bashExecution/compactionSummary/branchSummary/custom。"""
+    from pi_agent._messages import convert_to_llm
 
     messages = [
         {
@@ -788,11 +828,101 @@ def test_default_convert_to_llm_bash_execution():
             "excludeFromContext": True,
             "timestamp": 2,
         },
+        {"role": "compactionSummary", "summary": "compacted", "timestamp": 3},
+        {"role": "branchSummary", "summary": "branched", "timestamp": 4},
+        {"role": "custom", "customType": "note", "content": "hello custom", "timestamp": 5},
+        {"role": "user", "content": "keep", "timestamp": 6},
     ]
-    llm_messages = _default_convert_to_llm(messages)
-    assert len(llm_messages) == 1
-    assert llm_messages[0]["role"] == "user"
-    content = str(llm_messages[0]["content"])
-    assert "Ran `npm run lint`" in content
-    assert "All checks passed" in content
-    assert "secret-command" not in content
+    llm_messages = convert_to_llm(messages)
+    assert [m["role"] for m in llm_messages] == ["user"] * 5
+    assert "Ran `npm run lint`" in str(llm_messages[0]["content"])
+    assert "secret-command" not in str(llm_messages[0]["content"])
+    assert "compacted" in str(llm_messages[1]["content"])
+    assert "branched" in str(llm_messages[2]["content"])
+    assert llm_messages[3]["content"] == "hello custom"
+    assert llm_messages[4]["content"] == "keep"
+
+
+class TestAgentStreamOptionForwarding:
+    """AgentOptions 的 thinking_budgets / transport 透传给 StreamOptions。"""
+
+    @pytest.mark.asyncio
+    async def test_thinking_budgets_and_transport_forwarded(self):
+        captured: list[dict] = []
+        core = _make_faux([faux_assistant_message("Hello")])
+        original = core.stream
+
+        async def _capturing_stream(model, context, options=None):
+            captured.append(dict(options or {}))
+            return await original(model, context, options)
+
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=_capturing_stream,
+                thinking_budgets={"high": 4096},
+                transport="sse",
+            )
+        )
+        await agent.prompt("Hi")
+
+        assert captured
+        assert captured[0]["thinking_budgets"] == {"high": 4096}
+        assert captured[0]["transport"] == "sse"
+
+
+class TestAgentPrepareNextTurnWithContext:
+    """prepare_next_turn_with_context 接收 PrepareNextTurnContext 并可替换状态。"""
+
+    @pytest.mark.asyncio
+    async def test_receives_turn_context(self):
+        received: list = []
+
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=_make_faux_stream_fn("Hello"),
+                prepare_next_turn_with_context=lambda ctx: received.append(ctx) or None,
+            )
+        )
+        await agent.prompt("Hi")
+
+        assert len(received) == 1
+        ctx = received[0]
+        assert ctx.message.get("role") == "assistant"
+        assert ctx.tool_results == []
+        assert ctx.context.messages[-1].get("role") == "assistant"
+        roles = [m.get("role") for m in ctx.new_messages]
+        assert roles == ["user", "assistant"]
+
+    @pytest.mark.asyncio
+    async def test_with_context_update_replaces_model(self):
+        seen_models: list[str] = []
+        core = _make_faux(
+            [
+                faux_assistant_message(
+                    [faux_tool_call("finish", {})],
+                    stop_reason="tool_call",
+                ),
+                faux_assistant_message("done"),
+            ]
+        )
+        original = core.stream
+
+        async def _capturing_stream(model, context, options=None):
+            seen_models.append(model.id)
+            return await original(model, context, options)
+
+        model_b = _make_model()
+        model_b.id = "model-b"
+        agent = Agent(
+            AgentOptions(
+                model=_make_model(),
+                stream_fn=_capturing_stream,
+                tools=[_make_tool("finish")],
+                prepare_next_turn_with_context=lambda ctx: AgentLoopTurnUpdate(model=model_b),
+            )
+        )
+        await agent.prompt("Run the tool")
+
+        assert seen_models == ["test-model", "model-b"]

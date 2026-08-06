@@ -41,13 +41,14 @@ from ._types import (
     AgentTool,
     BeforeToolCallContext,
     BeforeToolCallResult,
+    PrepareNextTurnContext,
     QueueMode,
     StreamFn,
     ThinkingLevel,
     ToolExecutionMode,
 )
 
-from pi_ai.types import AssistantMessage
+from pi_ai.types import AssistantMessage, ThinkingBudgets, Transport
 
 # 监听器签名：async (event, signal) → None；同步监听器返回 None 也支持
 AgentListener = Callable[[AgentEvent, asyncio.Event | None], Awaitable[None] | None]
@@ -131,6 +132,7 @@ class AgentOptions:
             | None
         ) = None,
         prepare_next_turn: (Callable[[AgentContext], Any] | None) = None,
+        prepare_next_turn_with_context: (Callable[[PrepareNextTurnContext], Any] | None) = None,
         should_stop_after_turn: Callable[[AgentContext], bool] | None = None,
         tool_execution: ToolExecutionMode = "parallel",
         # 消息队列消费策略（1.2 前置；默认逐条消费）
@@ -139,6 +141,9 @@ class AgentOptions:
         # 提示缓存与会话标识（透传给 StreamOptions）
         session_id: str | None = None,
         cache_retention: CacheRetention | None = None,
+        # 推理 token 预算与传输协议（透传给 StreamOptions / SimpleStreamOptions）
+        thinking_budgets: ThinkingBudgets | None = None,
+        transport: Transport | None = None,
         # 重试策略。None = 默认启用（enabled=True, max_retries=3, base_delay_ms=2000）；
         # 传入 RetryPolicy(enabled=False) 可关闭重试。
         retry_policy: RetryPolicy | None = None,
@@ -155,12 +160,15 @@ class AgentOptions:
         self.before_tool_call = before_tool_call
         self.after_tool_call = after_tool_call
         self.prepare_next_turn = prepare_next_turn
+        self.prepare_next_turn_with_context = prepare_next_turn_with_context
         self.should_stop_after_turn = should_stop_after_turn
         self.tool_execution = tool_execution
         self.steering_mode = steering_mode
         self.follow_up_mode = follow_up_mode
         self.session_id = session_id
         self.cache_retention = cache_retention
+        self.thinking_budgets = thinking_budgets
+        self.transport = transport
         self.retry_policy = retry_policy
 
 
@@ -203,10 +211,13 @@ class Agent:
         self.before_tool_call = opts.before_tool_call
         self.after_tool_call = opts.after_tool_call
         self.prepare_next_turn = opts.prepare_next_turn
+        self.prepare_next_turn_with_context = opts.prepare_next_turn_with_context
         self.should_stop_after_turn = opts.should_stop_after_turn
         self.tool_execution: ToolExecutionMode = opts.tool_execution
         self.session_id: str | None = opts.session_id
         self.cache_retention: CacheRetention | None = opts.cache_retention
+        self.thinking_budgets: ThinkingBudgets | None = opts.thinking_budgets
+        self.transport: Transport | None = opts.transport
         self.retry_policy: RetryPolicy | None = opts.retry_policy
 
         # -- 双消息队列（steering / follow-up）--
@@ -492,18 +503,33 @@ class Agent:
                 return []
             return self._steering_queue.drain()
 
+        if self.prepare_next_turn_with_context is not None or self.prepare_next_turn is not None:
+
+            def _prepare_next_turn(ctx: PrepareNextTurnContext) -> Any:
+                if self.prepare_next_turn_with_context is not None:
+                    return self.prepare_next_turn_with_context(ctx)
+                if self.prepare_next_turn is not None:
+                    return self.prepare_next_turn(ctx.context)
+                return None
+
+            prepare_next_turn = _prepare_next_turn
+        else:
+            prepare_next_turn = None
+
         return AgentLoopConfig(
             model=self._state.model,
             convert_to_llm=self.convert_to_llm,
             transform_context=_maybe_async(self.transform_context),
             get_api_key=self.get_api_key,
             should_stop_after_turn=self.should_stop_after_turn,
-            prepare_next_turn=self.prepare_next_turn,
+            prepare_next_turn=prepare_next_turn,
             before_tool_call=self.before_tool_call,
             after_tool_call=self.after_tool_call,
             tool_execution=self.tool_execution,
             session_id=self.session_id,
             cache_retention=self.cache_retention,
+            thinking_budgets=self.thinking_budgets,
+            transport=self.transport,
             retry_policy=self.retry_policy,
             get_steering_messages=_get_steering,
             get_follow_up_messages=self._get_follow_up_messages,
@@ -586,81 +612,20 @@ def _normalize_input(
     return [input]
 
 
-# 压缩/分支摘要消息包装（对齐 TS coding-agent messages.ts）。
-COMPACTION_SUMMARY_PREFIX = "The conversation history before this point was compacted into the following summary:\n\n<summary>\n"
-COMPACTION_SUMMARY_SUFFIX = "\n</summary>"
-BRANCH_SUMMARY_PREFIX = (
-    "The following is a summary of a branch that this conversation came back from:\n\n<summary>\n"
-)
-BRANCH_SUMMARY_SUFFIX = "</summary>"
-
-
-def bash_execution_to_text(msg: dict[str, Any]) -> str:
-    """把 bashExecution 消息转为 LLM user 消息文本（对齐 TS bashExecutionToText）。"""
-    command = str(msg.get("command", ""))
-    output = str(msg.get("output", ""))
-    text = f"Ran `{command}`\n"
-    if output:
-        text += f"```\n{output}\n```"
-    else:
-        text += "(no output)"
-    if msg.get("cancelled"):
-        text += "\n\n(command cancelled)"
-    elif msg.get("exitCode") not in (None, 0):
-        text += f"\n\nCommand exited with code {msg.get('exitCode')}"
-    if msg.get("truncated") and msg.get("fullOutputPath"):
-        text += f"\n\n[Output truncated. Full output: {msg.get('fullOutputPath')}]"
-    return text
-
-
 def _default_convert_to_llm(
     messages: list[AgentMessage],
 ) -> list[Message]:
-    """默认 AgentMessage → LLM Message 转换：直接透传。
+    """默认 AgentMessage → LLM Message 转换（对齐 TS agent 包 defaultConvertToLlm）。
 
-    - system/user/assistant/toolResult 直接透传
-    - compactionSummary / branchSummary 包装为 user 消息（对齐 TS convertToLlm）
-    - bashExecution 包装为 user 消息；excludeFromContext 时跳过（!! 前缀）
-    - 其余不支持 role 的消息被过滤
+    只透传 user / assistant / toolResult；其余 role（含 compactionSummary、
+    bashExecution、custom 等）由应用层转换器处理
+    （pi_agent._messages.convert_to_llm / pi_coding_agent.messages）。
     """
     result: list[Message] = []
     for m in messages:
         role = m.get("role", "")
-        if role in ("system", "user", "assistant", "toolResult"):
+        if role in ("user", "assistant", "toolResult"):
             result.append(m)
-        elif role == "bashExecution":
-            if cast(dict[str, Any], m).get("excludeFromContext"):
-                continue
-            result.append(
-                {
-                    "role": "user",
-                    "content": bash_execution_to_text(cast(dict[str, Any], m)),
-                    "timestamp": m.get("timestamp"),
-                }
-            )
-        elif role in ("compactionSummary", "branchSummary"):
-            summary = m.get("summary", "")
-            prefix = (
-                COMPACTION_SUMMARY_PREFIX if role == "compactionSummary" else BRANCH_SUMMARY_PREFIX
-            )
-            suffix = (
-                COMPACTION_SUMMARY_SUFFIX if role == "compactionSummary" else BRANCH_SUMMARY_SUFFIX
-            )
-            result.append(
-                {
-                    "role": "user",
-                    "content": prefix + summary + suffix,
-                    "timestamp": m.get("timestamp"),
-                }
-            )
-        elif role == "custom":
-            result.append(
-                {
-                    "role": "user",
-                    "content": m.get("content"),
-                    "timestamp": m.get("timestamp"),
-                }
-            )
     return result
 
 

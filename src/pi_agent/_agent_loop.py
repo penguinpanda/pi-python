@@ -227,9 +227,9 @@ from pi_ai.types import (
     AssistantMessage,
     DoneEvent,
     ErrorEvent,
+    SimpleStreamOptions,
     StartEvent,
     StopReason,
-    StreamOptions,
     TextContent,
     ToolCall,
     ToolResultMessage,
@@ -256,6 +256,7 @@ from ._types import (
     AgentToolResult,
     BeforeToolCallContext,
     BeforeToolCallResult,
+    PrepareNextTurnContext,
     StreamFn,
 )
 
@@ -351,15 +352,13 @@ async def run_agent_loop(
 
     """
 
-    # 不可变：复制上下文
+    # 不可变：复制上下文并注入新提示（对齐 TS runAgentLoop）
     messages: list[AgentMessage] = list(context.messages)
     tools = list(context.tools) if context.tools else []
+    new_messages: list[AgentMessage] = list(prompts)
 
-    # 注入新提示
     for p in prompts:
         messages.append(p)
-        await emit({"type": "message_start", "message": p})
-        await emit({"type": "message_end", "message": p})
 
     inner_context = AgentContext(
         system_prompt=context.system_prompt,
@@ -367,10 +366,23 @@ async def run_agent_loop(
         tools=tools,
     )
 
+    # 对齐 TS：agent_start / turn_start 由外层发射，且先于 prompts 注入。
     await emit({"type": "agent_start"})
+    await emit({"type": "turn_start"})
+    for p in prompts:
+        await emit({"type": "message_start", "message": p})
+        await emit({"type": "message_end", "message": p})
 
     try:
-        result = await _run_loop(inner_context, config, emit, signal, stream_fn)
+        result = await _run_loop(
+            inner_context,
+            config,
+            emit,
+            signal,
+            stream_fn,
+            new_messages=new_messages,
+            first_turn=True,
+        )
     except asyncio.CancelledError:
         await emit({"type": "agent_end", "messages": messages})
         raise
@@ -398,10 +410,20 @@ async def run_agent_loop_continue(
         tools=tools,
     )
 
+    # 对齐 TS：agent_start / turn_start 由外层发射。
     await emit({"type": "agent_start"})
+    await emit({"type": "turn_start"})
 
     try:
-        result = await _run_loop(inner_context, config, emit, signal, stream_fn)
+        result = await _run_loop(
+            inner_context,
+            config,
+            emit,
+            signal,
+            stream_fn,
+            new_messages=[],
+            first_turn=True,
+        )
     except asyncio.CancelledError:
         await emit({"type": "agent_end", "messages": messages})
         raise
@@ -499,6 +521,9 @@ async def _run_loop(
     emit: AgentEventSink,
     signal: asyncio.Event | None,
     stream_fn: StreamFn,
+    *,
+    new_messages: list[AgentMessage] | None = None,
+    first_turn: bool = True,
 ) -> list[AgentMessage]:
     """双重嵌套循环（对齐 TS agent-loop.ts runLoop）。
 
@@ -517,7 +542,9 @@ async def _run_loop(
     # 不直接使用 context.messages（Agent Loop 纯函数思想，避免外部引用被修改）
     messages: list[AgentMessage] = list(context.messages)
     tools = list(context.tools) if context.tools else []
+    loop_new_messages: list[AgentMessage] = list(new_messages) if new_messages is not None else []
     current_model = config.model
+    first = first_turn
 
     # 首轮开始前轮询一次 steering 队列（用户可能在等待期间已 steer()）
     pending_messages: list[AgentMessage] = []
@@ -530,12 +557,17 @@ async def _run_loop(
         while has_more_tool_calls or pending_messages:  # ← 内层：Tool + Steering
             _check_signal(signal)
 
-            await emit({"type": "turn_start"})
+            # 首轮 turn_start 已由 run_agent_loop / run_agent_loop_continue 外层发射。
+            if first:
+                first = False
+            else:
+                await emit({"type": "turn_start"})
 
             # -- 注入待处理消息（steering / follow-up）--
             if pending_messages:
                 for m in pending_messages:
                     messages.append(m)
+                    loop_new_messages.append(m)
                     await emit({"type": "message_start", "message": m})
                     await emit({"type": "message_end", "message": m})
                 pending_messages = []
@@ -552,6 +584,7 @@ async def _run_loop(
                 turn_context, config, emit, signal, stream_fn
             )
             messages.append(assistant_msg)
+            loop_new_messages.append(assistant_msg)
 
             # 检查错误/中止
             stop_reason = assistant_msg.get("stop_reason", "stop")
@@ -599,6 +632,7 @@ async def _run_loop(
                 # 追加工具结果消息到上下文
                 for tr in tool_results:
                     messages.append(tr)
+                    loop_new_messages.append(tr)
                     await emit({"type": "message_start", "message": tr})
                     await emit({"type": "message_end", "message": tr})
 
@@ -613,23 +647,33 @@ async def _run_loop(
 
             # -- prepare_next_turn --
             if config.prepare_next_turn is not None:
-                raw_update = config.prepare_next_turn(turn_context)
-                update: object = None
+                next_turn_context = AgentContext(
+                    system_prompt=context.system_prompt,
+                    messages=list(messages),
+                    tools=tools,
+                )
+                prepare_ctx = PrepareNextTurnContext(
+                    message=assistant_msg,
+                    tool_results=list(tool_results),
+                    context=next_turn_context,
+                    new_messages=list(loop_new_messages),
+                )
+                raw_update = config.prepare_next_turn(prepare_ctx)
                 if asyncio.iscoroutine(raw_update):
                     update = await raw_update
                 else:
                     update = raw_update
                 if update is not None:
                     _update = cast(AgentLoopTurnUpdate, update)
-                if _update.context is not None:
-                    context = _update.context
-                    messages = list(context.messages)
-                    tools = list(context.tools) if context.tools else []
-                if _update.model is not None:
-                    current_model = _update.model
-                    # 下一次 LLM 调用读取 config.model（_stream_assistant_response 不感知
-                    # 局部 current_model），此处同步以让 prepare_next_turn 的模型替换生效。
-                    config.model = current_model
+                    if _update.context is not None:
+                        context = _update.context
+                        messages = list(context.messages)
+                        tools = list(context.tools) if context.tools else []
+                    if _update.model is not None:
+                        current_model = _update.model
+                        # 下一次 LLM 调用读取 config.model（_stream_assistant_response 不感知
+                        # 局部 current_model），此处同步以让 prepare_next_turn 的模型替换生效。
+                        config.model = current_model
 
             # -- should_stop_after_turn --
             if config.should_stop_after_turn is not None:
@@ -730,7 +774,7 @@ async def _stream_assistant_response(
     )
 
     # 5. 调用 LLM（带应用层重试）。
-    options = StreamOptions()
+    options: SimpleStreamOptions = SimpleStreamOptions()
     if api_key is not None:
         options["api_key"] = api_key
 
@@ -739,6 +783,12 @@ async def _stream_assistant_response(
         options["session_id"] = config.session_id
     if config.cache_retention is not None:
         options["cache_retention"] = config.cache_retention
+
+    # 推理预算与传输协议（对齐 TS AgentLoopConfig extends SimpleStreamOptions）。
+    if config.thinking_budgets is not None:
+        options["thinking_budgets"] = config.thinking_budgets
+    if config.transport is not None:
+        options["transport"] = config.transport
 
     # retry_policy 为 None 时使用默认策略（enabled=True, max_retries=3）。
     # 显式传入 RetryPolicy(enabled=False) 可关闭重试。
