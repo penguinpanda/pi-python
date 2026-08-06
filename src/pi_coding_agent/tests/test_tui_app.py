@@ -209,8 +209,8 @@ async def test_message_start_user_does_not_create_stream_placeholder() -> None:
 
 
 @pytest.mark.asyncio
-async def test_exit_writes_main_screen_document() -> None:
-    """退出时对齐 TS：把最后一帧文档写入主屏并落在新行（fullscreen 退出路径）。"""
+async def test_exit_clears_main_screen() -> None:
+    """退出 fullscreen 时清空主屏视口，只保留 shell 提示符。"""
     term = FakeTerminal(size=(100, 24))
     app = _make_app(term, ui_mode="fullscreen")
     task = asyncio.create_task(app.run_async())
@@ -220,9 +220,29 @@ async def test_exit_writes_main_screen_document() -> None:
     await asyncio.sleep(0.2)
     await task
     output = term.output_text
-    assert "\r\x1b[2K" in output
-    assert output.endswith("\x1b[0m\r\n\x1b[?25h")
-    assert "thinking:" in output
+    # 退出路径最后一步必须是清屏：主屏不再回写 TUI 文档。
+    assert output.endswith("\x1b[2J\x1b[H")
+    # 旧路径以“文档内容 + 换行 + 显示光标”结尾，不再出现。
+    assert not output.endswith("\x1b[0m\r\n\x1b[?25h")
+
+
+@pytest.mark.asyncio
+async def test_regular_exit_clears_main_screen_without_duplicate_document() -> None:
+    """regular 模式退出：不再整份重写文档，清屏后只留下 shell 提示符。"""
+    term = FakeTerminal(size=(100, 24))
+    app = _make_app(term, ui_mode="regular")
+    task = asyncio.create_task(app.run_async())
+    await asyncio.sleep(0.15)
+    app._chat.add_message_agent({"role": "user", "content": "hello"})
+    await asyncio.sleep(0.15)
+    term.reset_output()
+    app.exit()
+    await asyncio.sleep(0.2)
+    await task
+    output = term.output_text
+    # 退出只做增量刷新 + 一次清屏；旧代码会再整份重写文档（出现第二次 2J）。
+    assert output.endswith("\x1b[2J\x1b[H")
+    assert output.count("\x1b[2J\x1b[H") == 1
 
 
 @pytest.mark.asyncio

@@ -1295,14 +1295,12 @@ class Editor(Widget):
             ]
             text = " " * self.padding_x + raw
             line = line_from_text(text, width, self.base_style)
-            if (
-                self.focused
-                and row == self.cursor_row
-                and self.padding_x + self.cursor_col - self.scroll_col < width
-            ):
-                index = self.padding_x + self.cursor_col - self.scroll_col
-                cell = line.cells[index]
-                cell.style = (cell.style or Style()) + Style(reverse=True)
+            if self.focused and row == self.cursor_row:
+                cursor_visible_col = self._cursor_visible_col()
+                if self.padding_x + cursor_visible_col < width:
+                    index = self.padding_x + cursor_visible_col
+                    cell = line.cells[index]
+                    cell.style = (cell.style or Style()) + Style(reverse=True)
             if start is not None and end is not None and start[0] <= row <= end[0]:
                 from_col = start[1] if row == start[0] else 0
                 to_col = end[1] if row == end[0] else len(self.lines[row])
@@ -1328,8 +1326,17 @@ class Editor(Widget):
         border_offset = 1 if self.border else 0
         return (
             border_offset + self.cursor_row - self.scroll_row,
-            self.padding_x + self.cursor_col - self.scroll_col,
+            self.padding_x + self._cursor_visible_col(),
         )
+
+    def _cursor_visible_col(self) -> int:
+        """光标前的可见列宽（CJK/emoji 按 2 列计），相对 scroll_col 的偏移。"""
+        from rich.cells import cell_len
+
+        line = self.lines[self.cursor_row]
+        prefix_columns = sum(cell_len(char) for char in line[: self.cursor_col])
+        scroll_columns = sum(cell_len(char) for char in line[: self.scroll_col])
+        return max(0, prefix_columns - scroll_columns)
 
     def content_size(self) -> tuple[int, int]:
         return (

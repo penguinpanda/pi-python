@@ -21,16 +21,21 @@ class Cell:
 class Line:
     """定宽单元格行，可携带行前 passthrough 协议序列（如 kitty 图像 placement）。"""
 
-    __slots__ = ("cells", "passthrough")
+    __slots__ = ("cells", "passthrough", "shared", "_columns")
 
     def __init__(
         self,
         cells: Iterable[Cell] | None = None,
         *,
         passthrough: str = "",
+        shared: bool = False,
     ) -> None:
         self.cells: list[Cell] = list(cells or [])
         self.passthrough = passthrough
+        # 共享行来自跨帧缓存：被 patch / 高亮等原地修改前必须写时复制，
+        # 否则会污染缓存，导致后续帧 diff 全部判定为变化。
+        self.shared = shared
+        self._columns: int | None = None
 
     def __len__(self) -> int:
         return len(self.cells)
@@ -49,16 +54,25 @@ class Line:
         )
 
     def copy(self) -> "Line":
-        return Line(
+        copied = Line(
             [Cell(c.char, c.style, c.link) for c in self.cells],
             passthrough=self.passthrough,
         )
+        copied._columns = self._columns
+        return copied
+
+    def columns(self) -> int:
+        """行的可见列宽（宽字符按 2 列计），结果缓存在行对象上。"""
+        if self._columns is None:
+            self._columns = sum(cell_len(cell.char) for cell in self.cells)
+        return self._columns
 
     def text(self) -> str:
         return "".join(cell.char for cell in self.cells)
 
     def patch(self, col: int, other: "Line") -> None:
         """把 other 覆盖到本行 col 处（越界自动裁剪）。"""
+        self._columns = None
         for offset, cell in enumerate(other.cells):
             index = col + offset
             if index < 0:

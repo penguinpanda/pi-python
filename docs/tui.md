@@ -127,7 +127,7 @@ provider 栈（多 provider 并发收集、按 value 去重、保持注册顺序
 用于 `auto` 主题的深/浅选择；`src/pi_tui/terminal_image.py` 提供 kitty/iTerm2
 图像序列生成（kitty placement / iTerm2 inline 已接入消息渲染）；`src/pi_tui/links.py` 把工具结果 /
 工具调用 / markdown 正文中的绝对路径自动转成 OSC 8 可点击链接；`TerminalImage` 可作 overlay 图片组件且移除时清理 kitty 图片；引擎支持硬件光标
-（`PI_HARDWARE_CURSOR=1`）、同步输出（OSC 2026）、OSC 133 prompt 标记、
+（默认开启，`PI_HARDWARE_CURSOR=0` 关闭）、同步输出（OSC 2026）、OSC 133 prompt 标记、
 OSC 52 剪贴板、SGR 鼠标滚轮、滚动条拖拽、鼠标拖选复制（高亮 + 双击选词）、overlay 动画、`App.flash` 闪烁提示。
 
 流式渲染：`message_start` 挂一个 Assistant 占位条目，`message_update` 用 partial

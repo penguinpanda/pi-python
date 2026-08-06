@@ -226,6 +226,14 @@ class Terminal:
         """硬件光标定位（1-based）。"""
         self.write(f"\x1b[{row};{col}H")
 
+    def show_cursor(self) -> None:
+        """显示硬件光标（IME 候选窗口需要光标位置锚定）。"""
+        self.write("\x1b[?25h")
+
+    def hide_cursor(self) -> None:
+        """隐藏硬件光标（软件光标由引擎绘制）。"""
+        self.write("\x1b[?25l")
+
     def set_color_scheme_notifications(self, enabled: bool) -> None:
         """启用/关闭颜色方案通知（?2031h，对齐 TS setTerminalColorSchemeNotifications）。"""
         if not self._entered:
@@ -363,6 +371,12 @@ class FakeTerminal:
 
     def set_hardware_cursor(self, row: int, col: int) -> None:
         self.write(f"\x1b[{row};{col}H")
+
+    def show_cursor(self) -> None:
+        self.write("\x1b[?25h")
+
+    def hide_cursor(self) -> None:
+        self.write("\x1b[?25l")
 
     def set_color_scheme_notifications(self, enabled: bool) -> None:
         self.color_scheme_notifications = bool(enabled)

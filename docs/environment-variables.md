@@ -31,7 +31,7 @@ AgentSession 创建工具时给 bash 工具注入会话环境变量（`_session_
 
 ## 未移植（TS 独有）
 
-- 进程配置：`PI_SKIP_VERSION_CHECK`、`PI_TELEMETRY`、`PI_SHARE_VIEWER_URL`、`PI_HARDWARE_CURSOR`、`VISUAL` / `EDITOR` 均未读取。
+- 进程配置：`PI_SKIP_VERSION_CHECK`、`PI_TELEMETRY`、`PI_SHARE_VIEWER_URL`、`VISUAL` / `EDITOR` 均未读取。
 
 ## 用途
 

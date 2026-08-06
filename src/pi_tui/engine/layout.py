@@ -412,19 +412,34 @@ def paint_box(box: LayoutBox, screen: list[Line], total_width: int) -> None:
             box.clip.y + box.clip.height,
         )
         for row in range(first_row, last_row):
-            _ensure_row(screen, row, total_width, None)
             source_line = box.lines[offset + row - box.rect.y]
             if source_line is None:
                 continue
-            target = screen[row]
-            if source_line.passthrough and box.rect.x == 0 and box.rect.width >= total_width:
-                target.passthrough = source_line.passthrough
             visible_x = max(box.rect.x, box.clip.x, 0)
             visible_right = min(
                 box.rect.x + box.rect.width,
                 box.clip.x + box.clip.width,
                 total_width,
             )
+            # 整行完整覆盖时直接复用源 Line 对象：
+            # 跨帧 diff 可用对象同一性快速跳过未变化行，避免逐格比较。
+            if (
+                visible_x == 0
+                and visible_right >= total_width
+                and source_line.columns() >= total_width
+            ):
+                # 整行覆盖：直接追加/替换源行，避免创建空白行与逐格拷贝。
+                if len(screen) <= row:
+                    while len(screen) < row:
+                        screen.append(blank_line(total_width, None))
+                    screen.append(source_line)
+                else:
+                    screen[row] = source_line
+                continue
+            _ensure_row(screen, row, total_width, None)
+            target = screen[row]
+            if source_line.passthrough and box.rect.x == 0 and box.rect.width >= total_width:
+                target.passthrough = source_line.passthrough
             source_x = visible_x - box.rect.x
             _patch_clipped(
                 target,
@@ -493,11 +508,15 @@ def paint_scrollbar(box: LayoutBox, screen: list[Line], total_width: int) -> Non
         if row < box.clip.y or row >= box.clip.y + box.clip.height or row < 0 or row >= len(screen):
             continue
         line = screen[row]
+        if line.shared:
+            line = line.copy()
+            screen[row] = line
         if column >= len(line.cells):
             continue
         cell = line.cells[column]
         if cell.char == " ":
             cell.char = "█"
+            line._columns = None
         style = state.scrollbar_style(cell.style)
         cell.style = style
 

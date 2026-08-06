@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 from typing import Any
 
-from pi_tui.engine.cells import Line, blank_line, line_from_text
+from pi_tui.engine.cells import Cell, Line, blank_line, line_from_text
 from pi_tui.engine.text import render_markdown, render_markup
 from pi_tui.engine.widgets import (
     Editor,
@@ -244,8 +244,12 @@ def _render_labeled_markdown(
             body_lines.extend(render_markup(raw_line, max(0, width - 2)))
     lines: list[Line] = [label_line]
     for body_line in body_lines:
-        indented = blank_line(width)
-        indented.patch(2, body_line)
+        # 直接构造前导两空格 + 定宽正文行（整行覆盖），
+        # 让布局引擎可以整行复用，避免每帧逐格 patch。
+        cells = ([Cell(" "), Cell(" ")] + list(body_line.cells))[:width]
+        if len(cells) < width:
+            cells.extend(Cell(" ") for _ in range(width - len(cells)))
+        indented = Line(cells)
         lines.append(indented)
     linkify_lines(lines)
     if prompt_marker and lines:
@@ -274,6 +278,11 @@ class MessageEntry(Widget):
         self.theme_colors: dict = {}
         self._image_id_base = id(self) & 0xFFFFFF
         self.speaking = False
+        # 内容版本缓存：流式更新只使当前条目失效，历史条目跨帧复用渲染结果。
+        self._content_version = 0
+        self._render_cache: dict[tuple[int, int], list[Line]] = {}
+        self._size_cache: dict[int, int] = {}
+        self._content_size_cache: tuple[int, int] | None = None
 
     @property
     def is_mounted(self) -> bool:
@@ -281,13 +290,25 @@ class MessageEntry(Widget):
 
     def set_text(self, text: str) -> None:
         """流式更新正文。"""
+        if text == self.entry_text:
+            return
         self.entry_text = text
+        self._bump_version()
         self.refresh()
 
     def set_speaking(self, speaking: bool) -> None:
         """标记当前是否正在说话（流式回复中显示 Speaking…）。"""
+        if speaking == self.speaking:
+            return
         self.speaking = speaking
+        self._bump_version()
         self.refresh()
+
+    def _bump_version(self) -> None:
+        self._content_version += 1
+        self._render_cache.clear()
+        self._size_cache.clear()
+        self._content_size_cache = None
 
     def remove(self, child=None) -> None:
         """移除时清理已显示的 kitty 图片。"""
@@ -297,6 +318,10 @@ class MessageEntry(Widget):
         super().remove(child)
 
     def render(self, width: int, height: int) -> list[Line]:
+        key = (width, height)
+        cached = self._render_cache.get(key)
+        if cached is not None:
+            return cached
         lines = _render_labeled_markdown(
             self.label,
             self.entry_text,
@@ -329,6 +354,9 @@ class MessageEntry(Widget):
             lines = lines[:height]
         while len(lines) < height:
             lines.append(blank_line(width, self.base_style))
+        for line in lines:
+            line.shared = True
+        self._render_cache[key] = lines
         return lines
 
     def handle_mouse(self, event) -> bool:
@@ -338,21 +366,27 @@ class MessageEntry(Widget):
         return False
 
     def content_size(self) -> tuple[int, int]:
-        lines = _render_labeled_markdown(self.label, self.entry_text, 1000, self.speaking)
-        return (1000, len(lines))
+        if self._content_size_cache is None:
+            lines = _render_labeled_markdown(self.label, self.entry_text, 1000, self.speaking)
+            self._content_size_cache = (1000, len(lines))
+        return self._content_size_cache
 
     def natural_size(self, width: int) -> tuple[int, int]:
         """按实际内容宽度估算换行后的高度（长消息不再被截断）。"""
         content_width = max(1, int(width) - 2)
-        lines = _render_labeled_markdown(
-            self.label,
-            self.entry_text,
-            content_width,
-            self.speaking,
-            self.prompt_marker,
-            self.theme_colors or None,
-        )
-        return (max(1, int(width)), len(lines))
+        height = self._size_cache.get(content_width)
+        if height is None:
+            lines = _render_labeled_markdown(
+                self.label,
+                self.entry_text,
+                content_width,
+                self.speaking,
+                self.prompt_marker,
+                self.theme_colors or None,
+            )
+            height = len(lines)
+            self._size_cache[content_width] = height
+        return (max(1, int(width)), height)
 
 
 class ToolExecutionEntry(Widget):

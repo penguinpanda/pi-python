@@ -76,7 +76,7 @@ class App:
         self._kitty_protocol_active = False
         self.open_url: Any | None = None
         self.clear_on_shrink = os.environ.get("PI_CLEAR_ON_SHRINK", "") in ("1", "true", "yes")
-        self._regular_prev_lines: list[str] = []
+        self._regular_prev_lines: list[Line] = []
         self._regular_cursor_row = -1
         self._regular_hardware_cursor_row = -1
         self._regular_viewport_top = 0
@@ -132,7 +132,11 @@ class App:
             for index, line in enumerate(overlay_lines):
                 target_row = row + index
                 if 0 <= target_row < height:
-                    lines[target_row].patch(col, line)
+                    target = lines[target_row]
+                    if target.shared:
+                        target = target.copy()
+                        lines[target_row] = target
+                    target.patch(col, line)
         if (
             self._mouse_selecting
             and self._mouse_select_start is not None
@@ -147,6 +151,8 @@ class App:
         self._render_requested.clear()
         if self.ui_mode != "fullscreen":
             self._render_regular(force)
+            self._write_hardware_cursor()
+            self.terminal.flush()
             return
         size = self.terminal.size
         self._buffer.resize(size[0], size[1])
@@ -182,7 +188,11 @@ class App:
             for index, line in enumerate(overlay_lines):
                 target_row = row + index
                 if 0 <= target_row < len(lines):
-                    lines[target_row].patch(col, line)
+                    target = lines[target_row]
+                    if target.shared:
+                        target = target.copy()
+                        lines[target_row] = target
+                    target.patch(col, line)
         return lines
 
     def _render_regular(self, force: bool) -> None:
@@ -194,30 +204,28 @@ class App:
         width, height = self.terminal.size
         lines = self._compose_document()
         self._last_frame_lines = lines
-        ansi = [line_to_ansi(line, width) for line in lines]
         prev = self._regular_prev_lines
         width_changed = self._regular_prev_width != 0 and self._regular_prev_width != width
         height_changed = self._regular_prev_height != 0 and self._regular_prev_height != height
 
         def full_render(clear: bool, clear_viewport: bool = False) -> None:
-            nonlocal ansi
             buffer = "\x1b[?2026h"
             if clear:
                 buffer += "\x1b[2J\x1b[H\x1b[3J"
             elif clear_viewport:
                 # 首帧清视口但保留 scrollback，让文档（含 header）从视口顶部开始。
                 buffer += "\x1b[2J\x1b[H"
-            buffer += "\r\n".join(ansi)
+            buffer += "\r\n".join(line_to_ansi(line, width) for line in lines)
             buffer += "\x1b[?2026l"
             self.terminal.write(buffer)
             self.terminal.flush()
-            self._regular_prev_lines = ansi
+            self._regular_prev_lines = list(lines)
             self._regular_prev_width = width
             self._regular_prev_height = height
-            self._regular_cursor_row = max(0, len(ansi) - 1)
+            self._regular_cursor_row = max(0, len(lines) - 1)
             self._regular_hardware_cursor_row = self._regular_cursor_row
-            self._regular_max_lines_rendered = len(ansi)
-            self._regular_viewport_top = max(0, max(height, len(ansi)) - height)
+            self._regular_max_lines_rendered = len(lines)
+            self._regular_viewport_top = max(0, max(height, len(lines)) - height)
 
         if force:
             self._regular_prev_lines = []
@@ -237,7 +245,7 @@ class App:
             full_render(True)
             return
         # 内容收缩：清掉残留行（可配置 PI_CLEAR_ON_SHRINK=0 关闭）。
-        if self.clear_on_shrink and len(ansi) < self._regular_max_lines_rendered:
+        if self.clear_on_shrink and len(lines) < self._regular_max_lines_rendered:
             full_render(True)
             return
 
@@ -255,31 +263,35 @@ class App:
 
         first = -1
         last = -1
-        for index in range(max(len(ansi), len(prev))):
-            old = prev[index] if index < len(prev) else ""
-            new = ansi[index] if index < len(ansi) else ""
-            if old != new:
+        for index in range(max(len(lines), len(prev))):
+            old = prev[index] if index < len(prev) else None
+            new = lines[index] if index < len(lines) else None
+            # 跨帧复用同一 Line 对象（缓存行）时直接跳过；
+            # 内容相同的重建行也无需重写。
+            if old is new:
+                continue
+            if old is None or new is None or old != new:
                 if first == -1:
                     first = index
                 last = index
-        appended = len(ansi) > len(prev)
+        appended = len(lines) > len(prev)
         if appended:
             if first == -1:
                 first = len(prev)
-            last = len(ansi) - 1
+            last = len(lines) - 1
         if first == -1:
             self._regular_viewport_top = prev_viewport_top
             self._regular_prev_height = height
             return
 
         # 变化全部在删除行：移动到新内容末尾，清掉多余行。
-        if first >= len(ansi):
-            if len(prev) > len(ansi):
-                target_row = max(0, len(ansi) - 1)
+        if first >= len(lines):
+            if len(prev) > len(lines):
+                target_row = max(0, len(lines) - 1)
                 if target_row < prev_viewport_top:
                     full_render(True)
                     return
-                extra = len(prev) - len(ansi)
+                extra = len(prev) - len(lines)
                 if extra > height:
                     full_render(True)
                     return
@@ -290,7 +302,7 @@ class App:
                 elif line_diff < 0:
                     buffer += f"\x1b[{-line_diff}A"
                 buffer += "\r"
-                clear_start_offset = 0 if len(ansi) == 0 else 1
+                clear_start_offset = 0 if len(lines) == 0 else 1
                 if extra > 0 and clear_start_offset > 0:
                     buffer += f"\x1b[{clear_start_offset}B"
                 for index in range(extra):
@@ -305,7 +317,7 @@ class App:
                 self.terminal.flush()
                 self._regular_cursor_row = target_row
                 self._regular_hardware_cursor_row = target_row
-            self._regular_prev_lines = ansi
+            self._regular_prev_lines = list(lines)
             self._regular_prev_width = width
             self._regular_prev_height = height
             self._regular_viewport_top = prev_viewport_top
@@ -338,19 +350,19 @@ class App:
             buffer += f"\x1b[{-line_diff}A"
         buffer += "\r\n" if append_start else "\r"
 
-        render_end = min(last, len(ansi) - 1)
+        render_end = min(last, len(lines) - 1)
         for index in range(first, render_end + 1):
             if index > first:
                 buffer += "\r\n"
-            buffer += "\x1b[2K" + ansi[index]
+            buffer += "\x1b[2K" + line_to_ansi(lines[index], width)
         final_cursor_row = render_end
 
-        if len(prev) > len(ansi):
-            if render_end < len(ansi) - 1:
-                move_down = len(ansi) - 1 - render_end
+        if len(prev) > len(lines):
+            if render_end < len(lines) - 1:
+                move_down = len(lines) - 1 - render_end
                 buffer += f"\x1b[{move_down}B"
-                final_cursor_row = len(ansi) - 1
-            extra = len(prev) - len(ansi)
+                final_cursor_row = len(lines) - 1
+            extra = len(prev) - len(lines)
             for _ in range(extra):
                 buffer += "\r\n\x1b[2K"
             buffer += f"\x1b[{extra}A"
@@ -359,26 +371,55 @@ class App:
         self.terminal.write(buffer)
         self.terminal.flush()
 
-        self._regular_cursor_row = max(0, len(ansi) - 1)
+        self._regular_cursor_row = max(0, len(lines) - 1)
         self._regular_hardware_cursor_row = final_cursor_row
-        self._regular_max_lines_rendered = max(self._regular_max_lines_rendered, len(ansi))
+        self._regular_max_lines_rendered = max(self._regular_max_lines_rendered, len(lines))
         self._regular_viewport_top = max(prev_viewport_top, final_cursor_row - height + 1)
-        self._regular_prev_lines = ansi
+        self._regular_prev_lines = list(lines)
         self._regular_prev_width = width
         self._regular_prev_height = height
 
     def _write_hardware_cursor(self) -> None:
-        """PI_HARDWARE_CURSOR=1 时用硬件光标定位（编辑器提供位置）。"""
-        if os.environ.get("PI_HARDWARE_CURSOR", "") not in ("1", "true", "yes"):
+        """把硬件光标定位到聚焦组件光标处（IME 候选窗口跟随输入光标）。
+
+        对齐 TS：编辑器在光标格发射 CURSOR_MARKER，TUI 提取后移动硬件光标并
+        显示；Python 用 widget.cursor_position() + 布局帧屏幕原点实现同等效果。
+        PI_HARDWARE_CURSOR=0 可关闭。
+        """
+        if not self._hardware_cursor_enabled():
             return
         widget = self.focused
         if widget is None:
+            self.terminal.hide_cursor()
             return
         local = widget.cursor_position()
-        if local is None:
+        if local is None or self._layout_frame is None:
+            self.terminal.hide_cursor()
             return
         row, col = _widget_screen_origin(self._layout_frame, widget)
-        self.terminal.set_hardware_cursor(row + local[0] + 1, col + local[1] + 1)
+        document_row = row + local[0]
+        document_col = col + local[1]
+        if self.ui_mode != "fullscreen":
+            _width, height = self.terminal.size
+            if not (
+                self._regular_viewport_top <= document_row < self._regular_viewport_top + height
+            ):
+                self.terminal.hide_cursor()
+                return
+            # 差分渲染从当前硬件光标行继续移动，必须同步跟踪行号。
+            self._regular_hardware_cursor_row = document_row
+            screen_row = document_row - self._regular_viewport_top
+        else:
+            screen_row = document_row
+        self.terminal.show_cursor()
+        self.terminal.set_hardware_cursor(screen_row + 1, document_col + 1)
+
+    def _hardware_cursor_enabled(self) -> bool:
+        """默认开启（对齐 TS）；PI_HARDWARE_CURSOR=0/false/no 关闭。"""
+        value = os.environ.get("PI_HARDWARE_CURSOR")
+        if value is None:
+            return True
+        return value.strip().lower() not in ("", "0", "false", "no")
 
     # ------------------------------------------------------------------
     # 焦点 / 事件
@@ -692,6 +733,9 @@ class App:
             if not (0 <= row < len(lines)):
                 continue
             line = lines[row]
+            if line.shared:
+                line = line.copy()
+                lines[row] = line
             start_col = col1 if row == row1 else 0
             end_col = col2 if row == row2 else len(line.cells) - 1
             for col in range(max(0, start_col), min(len(line.cells), end_col + 1)):
@@ -883,20 +927,13 @@ class App:
     def exit(self) -> None:
         self._running = False
 
-    def _write_main_screen_document(self) -> None:
-        """退出 alt-screen 后把最后一帧文档写入主屏（对齐 TS 退出行为）。
+    def _clear_main_screen(self) -> None:
+        """退出后清空主屏视口，只留下 shell 提示符。
 
-        TS 在 stop 时切换到 regular renderer 渲染一帧再退出，主屏保留 TUI
-        内容，光标落在内容之后的新行，shell 提示符紧接 footer。
+        fullscreen 在恢复主屏后清屏；regular 模式直接清掉会话文档。
+        两种模式都避免退出后残留 TUI 的 header / status / footer。
         """
-        if self.ui_mode != "fullscreen":
-            return
-        width, _height = self.terminal.size
-        lines = self._compose_document()
-        if not lines:
-            return
-        document = "\r\n".join(f"\r\x1b[2K{line_to_ansi(line, width)}" for line in lines)
-        self.terminal.write(f"{document}\x1b[0m\r\n\x1b[?25h")
+        self.terminal.write("\x1b[2J\x1b[H")
         self.terminal.flush()
 
     # ------------------------------------------------------------------
@@ -979,7 +1016,9 @@ class App:
                     await self._handle_event(queued)
                 if event is None:
                     break
-            await self._render_if_requested(force=True)
+            # 退出前只刷新待处理的增量帧；force=True 会整份重写文档，
+            # 在 regular 模式把整个会话重复写进 scrollback。
+            await self._render_if_requested()
         finally:
             self._running = False
             read_task.cancel()
@@ -992,7 +1031,7 @@ class App:
             await asyncio.gather(*self._tasks, return_exceptions=True)
             self.on_unmount()
             await self.terminal.exit(alt_screen=(self.ui_mode == "fullscreen"))
-            self._write_main_screen_document()
+            self._clear_main_screen()
             for sig in handled_signals:
                 try:
                     loop.remove_signal_handler(sig)
