@@ -385,6 +385,7 @@ async def test_drag_selection_autoscroll_starts_and_stops() -> None:
     view.rect = (0, 0, 80, 20)
     app._mouse_select_start = (0, 0)
     app._mouse_select_current = (0, 0)
+    app._mouse_button_down = True
     app._selection_scroll_widget = view
     app._handle_mouse(_mouse("motion", 22, 5, button="none"))
     assert app._selection_autoscroll_direction == 1
@@ -517,3 +518,33 @@ async def test_release_key_filtered_unless_wanted() -> None:
     widget.wants_key_release = False
     await app._handle_event(KeyEvent(type="key", key=Key("b", char="b", release=True)))
     assert len(widget.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_drag_release_copies_keeps_highlight_and_no_stuck_selection() -> None:
+    term = FakeTerminal(size=(80, 24))
+    app = App(terminal=term)
+    cells = [Cell("a"), Cell("b"), Cell("c")] + [Cell(" ") for _ in range(77)]
+    app._last_frame_lines = [Line(cells)]
+    app._handle_mouse(_mouse("press", 0, 0))
+    app._handle_mouse(_mouse("motion", 0, 2, button="none"))
+    app._handle_mouse(_mouse("release", 0, 2, button="none"))
+    assert term.clipboard == ["abc"]
+    # release 后保留高亮，但无按键移动不再扩展选区。
+    assert app._mouse_selecting is True
+    assert app._mouse_select_current == (0, 2)
+    app._handle_mouse(_mouse("motion", 0, 5, button="none"))
+    assert app._mouse_select_current == (0, 2)
+    assert term.clipboard == ["abc"]
+
+
+@pytest.mark.asyncio
+async def test_ctrl_c_copies_mouse_selection() -> None:
+    term = FakeTerminal(size=(80, 24))
+    app = App(terminal=term)
+    cells = [Cell("x"), Cell("y"), Cell("z")] + [Cell(" ") for _ in range(77)]
+    app._last_frame_lines = [Line(cells)]
+    app._handle_mouse(_mouse("press", 0, 0))
+    app._handle_mouse(_mouse("motion", 0, 2, button="none"))
+    await app._handle_event(KeyEvent(type="key", key=Key(name="ctrl+c")))
+    assert term.clipboard == ["xyz"]

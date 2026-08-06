@@ -73,6 +73,17 @@ async def test_osc11_background_notification() -> None:
     assert app.osc_background == (30, 30, 30)
 
 
+def test_sgr_mouse_lowercase_m_is_release() -> None:
+    events = parse_input(b"\x1b[<0;5;5m")
+    mouse = events[0].mouse
+    assert mouse is not None
+    assert mouse.type == "release"
+    assert (mouse.row, mouse.col) == (4, 4)
+    events = parse_input(b"\x1b[<0;5;5M")
+    assert events[0].mouse is not None
+    assert events[0].mouse.type == "press"
+
+
 def test_focus_events_parse() -> None:
     events = parse_input(b"\x1b[I")
     assert [(event.type, event.data) for event in events] == [("focus", "in")]

@@ -62,6 +62,7 @@ class App:
         self._mouse_select_start: tuple[int, int] | None = None
         self._mouse_select_current: tuple[int, int] | None = None
         self._mouse_selecting = False
+        self._mouse_button_down = False
         self._mouse_word_select: tuple[int, int, int] | None = None
         self._mouse_last_press: tuple[float, tuple[int, int]] | None = None
         self._selection_autoscroll_direction = 0
@@ -305,6 +306,18 @@ class App:
         # 对齐 TS：release 事件只分发给声明 wantsKeyRelease 的组件。
         if key.release and not getattr(self.focused, "wants_key_release", False):
             return
+        # ctrl+c：存在鼠标选区时优先复制选区（编辑器自身选区仍由编辑器处理）。
+        if (
+            key.name == "ctrl+c"
+            and self._mouse_selecting
+            and self._mouse_select_start is not None
+            and self._mouse_select_current is not None
+        ):
+            text = self._extract_selection(self._mouse_select_start, self._mouse_select_current)
+            if text:
+                self.copy_to_clipboard(text)
+            self.request_render()
+            return
         self._overlay_manager.route_input()
         if self.focused is not None and self.focused.handle_key(key):
             self.request_render()
@@ -357,6 +370,7 @@ class App:
                 and self._mouse_last_press[1] == cell
             )
             self._mouse_last_press = (now, cell)
+            self._mouse_button_down = True
             self._mouse_press_target = self._widget_at(event.row, event.col)
             self._selection_scroll_widget = (
                 self._mouse_press_target
@@ -381,7 +395,7 @@ class App:
         if event_type == "motion":
             if self._mouse_word_select is not None:
                 return
-            if self._mouse_select_start is not None:
+            if self._mouse_select_start is not None and self._mouse_button_down:
                 self._mouse_select_current = (event.row, event.col)
                 if (event.row, event.col) != self._mouse_select_start:
                     self._mouse_selecting = True
@@ -395,6 +409,7 @@ class App:
                 return
             return
         if event_type == "release":
+            self._mouse_button_down = False
             if (
                 self._mouse_selecting
                 and self._mouse_select_start is not None
@@ -410,7 +425,7 @@ class App:
                         self._mouse_word_select[2],
                     )
                 text = self._extract_selection(self._mouse_select_start, self._mouse_select_current)
-                self._clear_mouse_selection()
+                # 复制后保留选区高亮（对齐 TS：直到下次 press / 失焦才清除）。
                 if text:
                     self.copy_to_clipboard(text)
                 return
@@ -463,6 +478,7 @@ class App:
         return "\n".join(parts).rstrip()
 
     def _clear_mouse_selection(self) -> None:
+        self._mouse_button_down = False
         if self._selection_autoscroll_task is not None:
             task = self._selection_autoscroll_task
             self._selection_autoscroll_task = None

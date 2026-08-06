@@ -363,7 +363,7 @@ class KeyParser:
             return KeyEvent(type="color_scheme", data=params[1]), consumed
 
         if final in ("M", "m"):
-            mouse = _parse_sgr_mouse(payload)
+            mouse = _parse_sgr_mouse(payload, is_release=(final == "m"))
             if mouse is not None:
                 return KeyEvent(type="mouse", mouse=mouse), consumed
             return None, consumed
@@ -413,8 +413,8 @@ def _first_int(payload: str) -> int | None:
         return None
 
 
-def _parse_sgr_mouse(payload: str) -> MouseEvent | None:
-    """SGR 鼠标：< b;c;m (M|m)。"""
+def _parse_sgr_mouse(payload: str, is_release: bool = False) -> MouseEvent | None:
+    """SGR 鼠标：< b;c;m (M=按下/移动，m=松开)。"""
     if not payload.startswith("<"):
         return None
     parts = payload[1:].split(";")
@@ -438,7 +438,7 @@ def _parse_sgr_mouse(payload: str) -> MouseEvent | None:
     elif motion:
         event_type = "motion"
         button = "none"
-    elif button_bits == 3:
+    elif button_bits == 3 or is_release:
         event_type = "release"
         button = "none"
     else:
