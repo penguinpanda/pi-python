@@ -16,8 +16,10 @@ from pi_coding_agent.auth_storage import AuthStorage
 from pi_coding_agent.model_runtime import ModelRuntime
 
 from pi_evals.harness import (
+    PiCodingAgentHarnessOptions,
     create_pi_coding_agent_harness,
     resolve_model_selection,
+    _make_runtime,
 )
 from pi_evals.vitest_evals.harness import HarnessContext
 
@@ -50,6 +52,16 @@ class TestResolveModelSelection:
         monkeypatch.delenv("PI_MODEL", raising=False)
         with pytest.raises(ValueError):
             resolve_model_selection()
+
+
+@pytest.mark.asyncio
+async def test_default_runtime_resolves_real_models(monkeypatch, tmp_path):
+    """默认运行时与 CLI 一致：能解析真实模型（deepseek/deepseek-v4-flash）。"""
+    monkeypatch.setattr("pi_evals.harness.get_agent_dir", lambda: tmp_path)
+    runtime = await _make_runtime(PiCodingAgentHarnessOptions())
+    model = runtime.get_model("deepseek", "deepseek-v4-flash")
+    assert model is not None
+    assert model.provider == "deepseek"
 
 
 @pytest.mark.asyncio

@@ -1,7 +1,9 @@
 """评测 harness（完整对齐 TS packages/evals/src/pi-harness.ts）。
 
-默认使用 faux provider（零网络、可脚本化响应）；设置 PI_PROVIDER /
-PI_MODEL 可切换到真实模型。每次 run 都在隔离的临时 workspace / agent /
+默认构造与 CLI 一致的 ModelRuntime（真实 providers + ~/.pi/agent 的
+auth.json / models.json / models-store.json），模型由 PI_PROVIDER /
+PI_MODEL 或显式 model 选项选择；测试通过 runtime 注入 faux provider
+（零网络、可脚本化响应）。每次 run 都在隔离的临时 workspace / agent /
 sessions 目录中创建 AgentSession，并在结束后把 session JSONL 快照写入
 artifacts。
 """
@@ -19,12 +21,12 @@ from pathlib import Path
 from typing import Any, TypeAlias, cast
 
 from pi_agent import Agent, AgentOptions
-from pi_ai import Models
-from pi_ai.providers.faux import faux_provider
+from pi_ai import create_default_models
+from pi_ai.models.models_store import FileModelsStore
 from pi_ai.types.model import Model
 from pi_coding_agent._session import AgentSession
 from pi_coding_agent._session_manager import SessionManager
-from pi_coding_agent.auth_storage import AuthStorage
+from pi_coding_agent._config import get_agent_dir
 from pi_coding_agent.extensions import ExtensionLoader, ExtensionRunner
 from pi_coding_agent.model_runtime import ModelRuntime
 from pi_coding_agent.prompt_templates import PromptTemplateLoader
@@ -239,14 +241,23 @@ async def _reload_session(
     session.rebuild_system_prompt()
 
 
-def _make_runtime(options: PiCodingAgentHarnessOptions) -> ModelRuntime:
-    """测试注入优先；否则构造离线默认运行时（faux 已注册）。"""
+async def _make_runtime(options: PiCodingAgentHarnessOptions) -> ModelRuntime:
+    """测试注入优先；否则构造与 CLI 一致的默认运行时。
+
+    默认运行时使用真实 providers + ~/.pi/agent 下的 auth.json / models.json /
+    models-store.json（对齐 TS ModelRuntime.create()）；测试通过 options.runtime
+    注入 faux provider。
+    """
     if options.runtime is not None:
         return options.runtime
-    store = AuthStorage.in_memory()
-    models = Models(credentials=store)
-    models.add_provider(faux_provider().provider)
-    return ModelRuntime(models, store)
+    return await ModelRuntime.create(
+        providers=create_default_models().get_providers(),
+        auth_path=str(get_agent_dir() / "auth.json"),
+        models_path=str(get_agent_dir() / "models.json"),
+        models_store=FileModelsStore(get_agent_dir() / "models-store.json"),
+        allow_model_network=False,
+        model_refresh_timeout_ms=15000,
+    )
 
 
 async def run_pi_coding_agent(
@@ -258,7 +269,7 @@ async def run_pi_coding_agent(
     """运行 pi-coding-agent eval（对齐 TS runPiCodingAgent）。"""
     started = time.perf_counter()
     selection = resolve_model_selection(options.model)
-    runtime = _make_runtime(options)
+    runtime = await _make_runtime(options)
     model = runtime.get_model(selection["provider"], selection["id"])
     if model is None:
         raise ValueError(f"Eval model not found: {selection['provider']}/{selection['id']}")

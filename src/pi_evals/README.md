@@ -2,8 +2,10 @@
 
 对齐 TS [packages/evals](https://github.com/earendil-works/pi-mono/tree/main/packages/evals)：
 把 pi-harness、vitest-evals 等价物（judge / harness table / artifacts /
-summary / runner）移植为 Python，默认 faux provider（零网络），并提供
-smoke / extensions 两类 eval。
+summary / runner）移植为 Python，并提供 smoke / extensions 两类 eval。
+默认运行时与 CLI 一致（真实 providers + `~/.pi/agent` 的 auth.json /
+models.json / models-store.json）；测试通过 `runtime` 注入 faux provider
+（零网络、可脚本化响应）。
 
 ## 内容
 
