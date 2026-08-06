@@ -83,12 +83,32 @@ def test_terminal_set_progress_writes_osc94() -> None:
 
 def test_terminal_enter_writes_focus_and_kitty_query(monkeypatch) -> None:
     import asyncio
+    import os
 
     from pi_tui.engine.terminal import Terminal
 
-    term = Terminal(stdout=_StubOut())
-    monkeypatch.setattr(term, "_enable_windows_vt", lambda: None)
-    asyncio.run(term.enter())
+    if os.name == "posix":
+        # 测试环境 stdin 是 pytest 伪文件（无 fileno）；桩掉 raw 模式切换。
+        import termios
+        import tty
+
+        monkeypatch.setattr(termios, "tcgetattr", lambda _fd: None)
+        monkeypatch.setattr(tty, "setraw", lambda _fd: None)
+
+    class _StubIn:
+        def __init__(self, fd: int) -> None:
+            self._fd = fd
+
+        def fileno(self) -> int:
+            return self._fd
+
+    fd = os.open(os.devnull, os.O_RDONLY)
+    try:
+        term = Terminal(stdin=_StubIn(fd), stdout=_StubOut())
+        monkeypatch.setattr(term, "_enable_windows_vt", lambda: None)
+        asyncio.run(term.enter())
+    finally:
+        os.close(fd)
     out = "".join(term.stdout.data)
     assert "\x1b[?1004h" in out
     assert "\x1b[>7u\x1b[?u\x1b[c" in out
