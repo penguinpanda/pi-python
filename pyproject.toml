@@ -36,6 +36,7 @@ dependencies = [
 [project.scripts]
 pi-ai = "pi_ai.cli:main"
 pi = "pi_coding_agent._cli:main"
+pi-evals = "pi_evals.runner:main"
 
 [dependency-groups]
 dev = [

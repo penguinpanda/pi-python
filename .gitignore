@@ -26,6 +26,7 @@ bak/
 work/
 docs/nd_upload/
 .pi/
+src/pi_evals/.eval/
 src/hello_world.py
 .qodo/
 # examples/

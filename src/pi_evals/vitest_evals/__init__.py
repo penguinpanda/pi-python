@@ -1,59 +1,57 @@
-"""evals — TS packages/evals 的 Python 完整移植。
-
-包含 pi-coding-agent harness（faux provider 默认，支持 PI_PROVIDER/
-PI_MODEL 选择真实模型）、vitest-evals 等价物（judge / harness table /
-artifacts / summary / runner），以及 smoke / extensions 两类 eval。
-"""
+"""vitest-evals 的 Python 最小移植：harness / judge / 对比表 / artifacts / summary。"""
 
 from __future__ import annotations
 
-from .harness import (
-    PiCodingAgentHarnessOptions,
-    PiCodingAgentInput,
-    create_pi_coding_agent_harness,
-    resolve_model_selection,
-    run_pi_coding_agent,
+from .artifacts import (
+    PI_EVAL_SOURCES_ARTIFACT,
+    PI_SESSION_SNAPSHOT_ARTIFACT,
+    persist_eval_artifact_references,
 )
-from .vitest_evals import (
-    EVAL_HARNESS_ITERATION_ARTIFACT,
-    CorrectnessLiftSummary,
-    EvalCase,
-    EvalCaseContext,
-    EvalHarnessRow,
+from .harness import (
     EvalInput,
-    EvalRegistry,
     FunctionHarness,
     Harness,
-    HarnessComparisonDiagnostic,
-    HarnessComparisonReport,
     HarnessContext,
-    HarnessEvalSetReport,
-    HarnessObservation,
-    HarnessPairComparison,
     HarnessRun,
     JsonValue,
+    canonicalize_json,
+    create_harness,
+)
+from .harness_table import (
+    EVAL_HARNESS_ITERATION_ARTIFACT,
+    EvalHarnessRow,
+    derive_eval_group_key,
+    derive_input_key,
+    eval_harness_table,
+    parse_eval_harness_iteration_artifact,
+)
+from .judge import (
     Judge,
     JudgeContext,
     JudgeResult,
-    PairedMetricSummary,
-    PI_EVAL_SOURCES_ARTIFACT,
-    PI_SESSION_SNAPSHOT_ARTIFACT,
+    average_judge_scores,
+    create_judge,
+    normalize_tool_calls,
+)
+from .suite import (
     CaseFn,
     CaseResult,
-    average_judge_scores,
-    canonicalize_json,
-    create_harness,
-    create_judge,
-    derive_eval_group_key,
-    derive_input_key,
+    EvalCase,
+    EvalCaseContext,
+    EvalRegistry,
     describe_eval,
-    eval_harness_table,
-    format_harness_comparison_report,
     get_registry,
-    normalize_tool_calls,
-    parse_eval_harness_iteration_artifact,
-    persist_eval_artifact_references,
     run_case,
+)
+from .summary import (
+    CorrectnessLiftSummary,
+    HarnessComparisonDiagnostic,
+    HarnessComparisonReport,
+    HarnessEvalSetReport,
+    HarnessObservation,
+    HarnessPairComparison,
+    PairedMetricSummary,
+    format_harness_comparison_report,
     summarize_harness_comparisons,
 )
 
@@ -81,15 +79,12 @@ __all__ = [
     "PairedMetricSummary",
     "PI_EVAL_SOURCES_ARTIFACT",
     "PI_SESSION_SNAPSHOT_ARTIFACT",
-    "PiCodingAgentHarnessOptions",
-    "PiCodingAgentInput",
     "CaseFn",
     "CaseResult",
     "average_judge_scores",
     "canonicalize_json",
     "create_harness",
     "create_judge",
-    "create_pi_coding_agent_harness",
     "derive_eval_group_key",
     "derive_input_key",
     "describe_eval",
@@ -99,8 +94,6 @@ __all__ = [
     "normalize_tool_calls",
     "parse_eval_harness_iteration_artifact",
     "persist_eval_artifact_references",
-    "resolve_model_selection",
     "run_case",
-    "run_pi_coding_agent",
     "summarize_harness_comparisons",
 ]

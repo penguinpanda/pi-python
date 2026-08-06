@@ -15,7 +15,7 @@ pi-python/
 ├── src/pi_protocol/        # protocol v2 线协议（pydantic schema + JSONL framing）
 ├── src/pi_storage/         # PostgreSQL 会话存储（asyncpg + 迁移 + 搜索）
 ├── src/pi_server/          # 常驻 pi 服务（stdio JSONL，attach/detach + 快照推送）
-└── src/pi_evals/           # 评测 harness（faux provider + smoke/extensions eval）
+└── src/pi_evals/           # TS packages/evals 完整移植（harness + runner + 对比评测）
 ```
 
 | 包 | 文档 | 说明 | 打包 |
@@ -27,7 +27,7 @@ pi-python/
 | `pi_protocol` | — | protocol v2：Command/Result/Snapshot/Progress/Error + JSONL framing | ✓ |
 | `pi_storage` | — | PostgreSQL SessionStore/SessionSearch（`docker compose up -d pg`） | ✓ |
 | `pi_server` | — | 常驻服务：`python -m pi_server`（stdio JSONL） | ✓ |
-| `pi_evals` | — | pytest 评测 harness + smoke/extensions eval | ✓ |
+| `pi_evals` | [README](src/pi_evals/README.md) | TS `packages/evals` 完整移植：pi-coding-agent harness、judge/harness table/artifacts/summary、`pi-evals` CLI runner | ✓ |
 
 ### 架构
 
@@ -191,6 +191,9 @@ uv run pytest src/pi_ai/tests/ -v
 uv run pytest src/pi_agent/tests/ -v
 uv run pytest src/pi_coding_agent/tests/ -v
 uv run pytest src/pi_protocol/tests/ src/pi_server/tests/ src/pi_evals/ -v
+
+# 运行评测（CLI 模型选择或 PI_PROVIDER/PI_MODEL 环境变量；默认 faux）
+uv run pi-evals
 
 # PostgreSQL 存储测试（先启动 compose 的 pg 服务）
 docker compose -f docker/compose.yaml up -d pg

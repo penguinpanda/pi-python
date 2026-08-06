@@ -1,36 +1,22 @@
-"""smoke eval：基本 prompt 端到端（faux provider，零网络）。"""
+"""smoke eval：基本 prompt 端到端（对齐 TS packages/evals/src/smoke.eval.ts）。"""
 
 from __future__ import annotations
 
-import pytest
-from pi_ai import Models
-from pi_ai.providers.faux import faux_assistant_message, faux_provider
+import os
 
-from pi_coding_agent.auth_storage import AuthStorage
-from pi_coding_agent.model_runtime import ModelRuntime
+from .harness import create_pi_coding_agent_harness
+from .vitest_evals.suite import describe_eval
 
-from .harness import PiCodingAgentHarness
+pi_coding_agent_harness = create_pi_coding_agent_harness(no_tools=True)
 
 
-def _runtime() -> ModelRuntime:
-    store = AuthStorage.in_memory()
-    models = Models(credentials=store)
-    core = faux_provider()
-    core.set_responses([faux_assistant_message("Paris")])
-    models.add_provider(core.provider)
-    return ModelRuntime(models, store)
-
-
-@pytest.mark.asyncio
-async def test_smoke_eval_basic_prompt():
-    runtime = _runtime()
-    harness = PiCodingAgentHarness(
-        runtime=runtime,
-        model={"provider": "faux", "id": "faux-1"},
-    )
-    result = await harness.run("What's the capital of France? Respond with only the city name.")
-    assert result.output.strip() == "Paris"
+@describe_eval("Pi Coding Agent smoke", harness=pi_coding_agent_harness)
+async def _smoke_basic_prompt(ctx):
+    result = await ctx.run("What's the capital of France? Respond with only the city name.")
+    output = result.output
+    assert isinstance(output, str)
+    assert output.strip() == "Paris"
     assert result.errors == []
-    assert result.usage["provider"] == "faux"
-    assert result.usage["model"] == "faux-1"
+    assert result.usage["provider"] == os.environ.get("PI_PROVIDER")
+    assert result.usage["model"] == os.environ.get("PI_MODEL")
     assert result.usage["totalTokens"] > 0
