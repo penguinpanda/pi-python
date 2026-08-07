@@ -52,7 +52,9 @@ class PiCodingAgentHarnessOptions:
 
     name: str = "pi-coding-agent"
     model: dict[str, str] | None = None
-    no_tools: bool = False
+    no_tools: bool | str = (
+        False  # False / True / "all"（对齐 TS CreateAgentSessionOptions["noTools"]）
+    )
     transform_system_prompt: Callable[[str], str] | None = None
     output: PiCodingAgentOutputFn | None = None
     # 测试注入：默认 None 时创建真实 ModelRuntime。
@@ -157,6 +159,7 @@ def _build_usage(model: Model, stats: dict[str, Any]) -> dict[str, Any]:
         },
     }
     if _has_pricing(model):
+        # pi_ai 已按模型单价逐请求计算 usage.cost，这里直接聚合（对齐 TS）。
         usage["metadata"]["estimatedCostUsd"] = stats["cost"]
     return usage
 
@@ -317,7 +320,7 @@ async def run_pi_coding_agent(
 
         selected_tools: list[str] = []
         tool_snippets: dict[str, str] = {}
-        if not options.no_tools:
+        if options.no_tools != "all" and options.no_tools is not True:
             default_tools = create_all_tools(str(cwd))
             selected_tools = [tool.name for tool in default_tools]
             tool_snippets = tool_snippets_for(default_tools)
@@ -362,7 +365,7 @@ async def run_pi_coding_agent(
             skill_loader=skill_loader,
             template_loader=template_loader,
             extension_runner=extension_runner,
-            tools_override=[] if options.no_tools else None,
+            tools_override=[] if (options.no_tools == "all" or options.no_tools is True) else None,
             system_prompt_builder=system_prompt_builder,
         )
         session.project_trusted = True
@@ -439,7 +442,7 @@ def create_pi_coding_agent_harness(
     *,
     name: str = "pi-coding-agent",
     model: dict[str, str] | None = None,
-    no_tools: bool = False,
+    no_tools: bool | str = False,
     transform_system_prompt: Callable[[str], str] | None = None,
     output: PiCodingAgentOutputFn | None = None,
     runtime: ModelRuntime | None = None,

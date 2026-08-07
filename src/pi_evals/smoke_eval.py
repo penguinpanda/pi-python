@@ -7,7 +7,7 @@ import os
 from .harness import create_pi_coding_agent_harness
 from .vitest_evals.suite import describe_eval
 
-pi_coding_agent_harness = create_pi_coding_agent_harness(no_tools=True)
+pi_coding_agent_harness = create_pi_coding_agent_harness(no_tools="all")
 
 
 @describe_eval("Pi Coding Agent smoke", harness=pi_coding_agent_harness)

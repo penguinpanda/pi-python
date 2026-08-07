@@ -87,6 +87,10 @@ def _extension_authoring_judge(ctx: JudgeContext) -> dict[str, Any]:
                 failures.append("extension does not import the canonical pi_coding_agent package")
             if any(specifier.startswith("pi_evals") for specifier in imports):
                 failures.append("extension imports an eval-only package")
+            if any(specifier.startswith("pi_tests") for specifier in imports):
+                failures.append("extension imports a test-only package")
+            if any(specifier.startswith("tests.") for specifier in imports):
+                failures.append("extension imports a test package via tests. prefix")
         if output.get("extensionErrors"):
             failures.append("extension loader reported errors")
         loaded = output.get("loadedExtensions")

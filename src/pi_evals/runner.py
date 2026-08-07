@@ -12,15 +12,7 @@ from collections.abc import Mapping, MutableMapping
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .vitest_evals.harness_table import (
-    EVAL_HARNESS_ITERATION_ARTIFACT,
-    parse_eval_harness_iteration_artifact,
-)
-from .vitest_evals.summary import (
-    HarnessObservation,
-    format_harness_comparison_report,
-    summarize_harness_comparisons,
-)
+from .vitest_evals.reporter import collect_observations, generate_report
 from .vitest_evals.suite import CaseResult, get_registry, run_case
 
 
@@ -38,7 +30,6 @@ def _load_module(path: Path) -> None:
     if not resolved.exists():
         raise FileNotFoundError(f"Eval module not found: {resolved}")
     if resolved.parent.resolve() == _package_dir().resolve():
-        # 内置 eval 模块使用相对导入，须挂在 pi_evals 包命名空间下。
         module_name = f"pi_evals._eval_suite_{uuid.uuid4().hex[:12]}"
     else:
         module_name = f"pi_evals_suite_{uuid.uuid4().hex[:12]}"
@@ -93,98 +84,39 @@ def _resolve_artifact_dir(artifact_dir: str | None, environment: Mapping[str, st
     return path
 
 
-def _collect_observations(results: list[CaseResult]) -> list[HarnessObservation]:
-    observations: list[HarnessObservation] = []
-    for result in results:
-        run = result.run
-        if run is None:
-            continue
-        iteration = parse_eval_harness_iteration_artifact(
-            run.artifacts.get(EVAL_HARNESS_ITERATION_ARTIFACT)
-        )
-        if iteration is None:
-            continue
-        metadata = run.usage.get("metadata") or {}
-        if run.errors:
-            observations.append(
-                HarnessObservation(
-                    eval_set=iteration.eval_set,
-                    group_key=iteration.group_key,
-                    test_name=result.case.name,
-                    file=result.case.file,
-                    harness=iteration.harness,
-                    baseline=iteration.baseline,
-                    candidates=iteration.candidates,
-                    repetition=iteration.repetition,
-                    outcome="errored",
-                    total_tokens=run.usage.get("totalTokens"),
-                    total_ms=run.timings.get("totalMs"),
-                    estimated_cost_usd=metadata.get("estimatedCostUsd"),
-                )
-            )
-        elif result.avg_score is not None:
-            observations.append(
-                HarnessObservation(
-                    eval_set=iteration.eval_set,
-                    group_key=iteration.group_key,
-                    test_name=result.case.name,
-                    file=result.case.file,
-                    harness=iteration.harness,
-                    baseline=iteration.baseline,
-                    candidates=iteration.candidates,
-                    repetition=iteration.repetition,
-                    outcome="scored",
-                    score=result.avg_score,
-                    total_tokens=run.usage.get("totalTokens"),
-                    total_ms=run.timings.get("totalMs"),
-                    estimated_cost_usd=metadata.get("estimatedCostUsd"),
-                )
-            )
-        elif result.failed:
-            observations.append(
-                HarnessObservation(
-                    eval_set=iteration.eval_set,
-                    group_key=iteration.group_key,
-                    test_name=result.case.name,
-                    file=result.case.file,
-                    harness=iteration.harness,
-                    baseline=iteration.baseline,
-                    candidates=iteration.candidates,
-                    repetition=iteration.repetition,
-                    outcome="errored",
-                    total_tokens=run.usage.get("totalTokens"),
-                    total_ms=run.timings.get("totalMs"),
-                    estimated_cost_usd=metadata.get("estimatedCostUsd"),
-                )
-            )
-        else:
-            observations.append(
-                HarnessObservation(
-                    eval_set=iteration.eval_set,
-                    group_key=iteration.group_key,
-                    test_name=result.case.name,
-                    file=result.case.file,
-                    harness=iteration.harness,
-                    baseline=iteration.baseline,
-                    candidates=iteration.candidates,
-                    repetition=iteration.repetition,
-                    outcome="unscored",
-                    total_tokens=run.usage.get("totalTokens"),
-                    total_ms=run.timings.get("totalMs"),
-                    estimated_cost_usd=metadata.get("estimatedCostUsd"),
-                )
-            )
-    return observations
-
-
 async def _run_cases(
     registry,
     artifact_dir: Path,
 ) -> tuple[list[CaseResult], str]:
-    results = [await run_case(case, artifact_dir) for case in registry.cases]
-    observations = _collect_observations(results)
-    report = format_harness_comparison_report(summarize_harness_comparisons(observations))
-    return results, report
+    """并发执行所有注册的 case，然后收集观测并生成报告。
+
+    各 case 使用隔离的临时目录，不存在共享状态，可安全并发。
+    """
+    results = await asyncio.gather(
+        *[run_case(case, artifact_dir) for case in registry.cases],
+        return_exceptions=True,
+    )
+    # asyncio.gather 的 return_exceptions=True 会将异常包装在结果列表中；
+    # 这里将异常转为失败的 CaseResult。
+    safe_results: list[CaseResult] = []
+    for i, result in enumerate(results):
+        if isinstance(result, BaseException):
+            case = registry.cases[i]
+            safe_results.append(
+                CaseResult(
+                    case=case,
+                    run=getattr(result, "run", None),
+                    failed=True,
+                    failure=str(result),
+                )
+            )
+        else:
+            safe_results.append(result)
+
+    runs_pairs = [(r.case.file, r) for r in safe_results]
+    observations = collect_observations(runs_pairs)
+    report = generate_report(observations)
+    return safe_results, report
 
 
 def _format_status(results: list[CaseResult]) -> str:

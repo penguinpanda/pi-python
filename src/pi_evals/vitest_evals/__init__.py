@@ -1,4 +1,4 @@
-"""vitest-evals 的 Python 最小移植：harness / judge / 对比表 / artifacts / summary。"""
+"""vitest-evals 的 Python 最小移植：harness / judge / 对比表 / artifacts / summary / reporter。"""
 
 from __future__ import annotations
 
@@ -32,6 +32,12 @@ from .judge import (
     average_judge_scores,
     create_judge,
     normalize_tool_calls,
+)
+from .reporter import (
+    append_run_record,
+    collect_observations,
+    generate_report,
+    read_finite_number,
 )
 from .suite import (
     CaseFn,
@@ -81,8 +87,10 @@ __all__ = [
     "PI_SESSION_SNAPSHOT_ARTIFACT",
     "CaseFn",
     "CaseResult",
+    "append_run_record",
     "average_judge_scores",
     "canonicalize_json",
+    "collect_observations",
     "create_harness",
     "create_judge",
     "derive_eval_group_key",
@@ -90,10 +98,12 @@ __all__ = [
     "describe_eval",
     "eval_harness_table",
     "format_harness_comparison_report",
+    "generate_report",
     "get_registry",
     "normalize_tool_calls",
     "parse_eval_harness_iteration_artifact",
     "persist_eval_artifact_references",
+    "read_finite_number",
     "run_case",
     "summarize_harness_comparisons",
 ]

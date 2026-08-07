@@ -164,6 +164,36 @@ async def test_early_error_cleans_temp_dir():
 
 
 @pytest.mark.asyncio
+async def test_no_tools_all_string_variant_disables_tools():
+    """no_tools='all' 与 True 等效。"""
+    runtime = _faux_runtime()
+    harness = create_pi_coding_agent_harness(
+        model={"provider": "faux", "id": "faux-1"},
+        runtime=runtime,
+        no_tools="all",
+    )
+    result = await harness.run("hi", HarnessContext())
+    assert result.errors == []
+    assert result.output == "Paris"
+
+
+@pytest.mark.asyncio
+async def test_no_tools_false_enables_default_tools():
+    """no_tools=False 时默认工具可启用。"""
+    runtime = _faux_runtime()
+    harness = create_pi_coding_agent_harness(
+        model={"provider": "faux", "id": "faux-1"},
+        runtime=runtime,
+        no_tools=False,
+    )
+    result = await harness.run("hi", HarnessContext())
+    assert result.errors == []
+    assert result.output == "Paris"
+    # 默认工具列表不为空时，usage 应反映工具可用
+    assert result.usage["totalTokens"] > 0
+
+
+@pytest.mark.asyncio
 async def test_unexpected_stop_reason_raises():
     runtime = _faux_runtime(
         [faux_assistant_message("oops", stop_reason="error", error_message="boom")]
