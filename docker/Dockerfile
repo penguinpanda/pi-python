@@ -13,9 +13,9 @@ FROM ghcr.io/astral-sh/uv:0.12.0 AS uv-image
 
 FROM python:3.12-slim
 
-# 构建期 PyPI 镜像源（国内网络可换 TUNA；其它环境可用官方源覆盖：
-# docker compose build --build-arg PYPI_INDEX_URL=https://pypi.org/simple）
-ARG PYPI_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+# 构建期 PyPI 镜像源（默认官方源；需要镜像时用 --build-arg 覆盖：
+# docker compose build --build-arg PYPI_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple）
+ARG PYPI_INDEX_URL=https://pypi.org/simple
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \

@@ -12,6 +12,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      network: host
     image: pi-python-agent:dev
     init: true
     user: "1000:1000"
