@@ -5,6 +5,7 @@ pi-ai  统一管理不同模型的 API,返回一个一致的 AI 调用接口。
 """
 
 from .utils._event_stream import AssistantMessageEventStream, EventStream
+from .utils.cost import calculate_cost
 from .types import (
     AgentMessage,
     AnthropicMessagesCompat,
@@ -282,6 +283,7 @@ __all__ = [
     "ImagesFunction",
     # Events
     "AssistantMessageEvent",
+    "calculate_cost",
     "StartEvent",
     "TextStartEvent",
     "TextDeltaEvent",

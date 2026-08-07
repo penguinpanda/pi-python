@@ -86,3 +86,53 @@ def test_cache_stats_from_messages(tmp_path):
     stats = session.get_session_stats()
     assert stats["cacheStats"]["missCount"] == 1
     assert stats["cacheStats"]["missedTokens"] == 20000
+
+
+def test_cost_aggregated_from_usage(tmp_path):
+    """coding-agent 层应聚合 pi_ai 计算的逐请求 usage.cost。"""
+    session = _make_session(tmp_path)
+    session._agent.state.messages = [
+        {
+            "role": "assistant",
+            "provider": "faux",
+            "model": "faux-1",
+            "content": [{"type": "text", "text": "first"}],
+            "usage": {
+                "input": 1_000_000,
+                "output": 500_000,
+                "cache_read": 0,
+                "cache_write": 0,
+                "total_tokens": 1_500_000,
+                "cost": {
+                    "input": 0.14,
+                    "output": 0.14,
+                    "cache_read": 0.0,
+                    "cache_write": 0.0,
+                    "total": 0.28,
+                },
+            },
+        },
+        {
+            "role": "assistant",
+            "provider": "faux",
+            "model": "faux-1",
+            "content": [{"type": "text", "text": "second"}],
+            "usage": {
+                "input": 10,
+                "output": 10,
+                "cache_read": 0,
+                "cache_write": 0,
+                "total_tokens": 20,
+                "cost": {
+                    "input": 0.0,
+                    "output": 0.0,
+                    "cache_read": 0.0,
+                    "cache_write": 0.0,
+                    "total": 0.01,
+                },
+            },
+        },
+    ]
+    stats = session.get_session_stats()
+    assert stats["cost"] == pytest.approx(0.29)
+    assert stats["tokens"]["input"] == 1_000_010

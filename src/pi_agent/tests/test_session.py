@@ -152,6 +152,30 @@ class TestSessionDag:
         assert stats["messageCount"] == 1
 
     @pytest.mark.asyncio
+    async def test_session_stats_aggregates_cost(self):
+        storage = InMemorySessionStorage()
+        session = Session(storage)
+        message = _assistant_message("answer")
+        message["usage"] = {
+            "input": 1000,
+            "output": 500,
+            "cacheRead": 200,
+            "cacheWrite": 0,
+            "totalTokens": 1700,
+            "cost": {
+                "input": 0.1,
+                "output": 0.2,
+                "cacheRead": 0.01,
+                "cacheWrite": 0.0,
+                "total": 0.31,
+            },
+        }
+        await session.append_message(message)
+        stats = await session.get_session_stats()
+        assert stats["costTotal"] == pytest.approx(0.31)
+        assert stats["totalTokens"] == 1700
+
+    @pytest.mark.asyncio
     async def test_get_branch_from_id(self):
         session = await _session_with_messages("a", "b", "c")
         branch = await session.get_branch()

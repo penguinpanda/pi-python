@@ -63,6 +63,7 @@ import httpx
 from openai import AsyncOpenAI
 
 from ..utils._event_stream import AssistantMessageEventStream
+from ..utils.cost import calculate_cost
 from ..types import (
     AssistantMessage,
     ContentBlock,
@@ -903,6 +904,7 @@ async def responses_stream(
                                     "total": 0,
                                 },
                             )
+                            calculate_cost(model, usage)
 
             # 所有事件已处理完成，
             #
