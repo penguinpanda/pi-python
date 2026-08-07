@@ -47,6 +47,11 @@ RUN printf '#!/bin/sh\nexec /app/.venv/bin/python -m pi_coding_agent "$@"\n' \
         > /usr/local/bin/pi \
     && chmod +x /usr/local/bin/pi
 
+# pi-evals 评测入口（等价于宿主 `uv run pi-evals`）。
+RUN printf '#!/bin/sh\nexec /app/.venv/bin/python -m pi_evals "$@"\n' \
+        > /usr/local/bin/pi-evals \
+    && chmod +x /usr/local/bin/pi-evals
+
 USER pi
 WORKDIR /workspace
 ENTRYPOINT ["/app/.venv/bin/python", "-m", "pi_coding_agent"]

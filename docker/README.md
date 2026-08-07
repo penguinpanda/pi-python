@@ -53,6 +53,32 @@ echo '{"type":"get_state","id":"1"}' |
 
 # 离线验证 Faux provider
 docker compose -f docker/compose.yaml run --rm pi --provider faux --model faux-1 -p "hi"
+
+# 运行评测（pi-evals）
+# 容器根文件系统只读，评测产物必须写到可写目录（这里用 /workspace/.eval，
+# 对应宿主 work/temp/workspace/.eval）。
+.\docker\run-evals.ps1 --provider deepseek --model deepseek-v4-flash
+
+Linux/macOS：
+
+```bash
+./docker/run-evals.sh --provider deepseek --model deepseek-v4-flash
+```
+
+等价于直接写 compose 命令：
+
+```powershell
+docker compose -f docker/compose.yaml run --rm --entrypoint pi-evals pi `
+  --provider deepseek --model deepseek-v4-flash `
+  --artifact-dir /workspace/.eval
+```
+
+在 `pi-dev` 常驻容器里运行：
+
+```bash
+docker compose exec pi-dev python -m pi_evals --provider deepseek --model deepseek-v4-flash \
+  --artifact-dir /workspace/.eval
+```
 ```
 
 ## 进入容器内连续测试（可选）
