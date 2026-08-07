@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from dataclasses import dataclass, field
 
 from .harness import (
@@ -147,17 +148,31 @@ def _wrap_with_iteration_artifact(
     return create_harness(harness.name, run)
 
 
+def _default_repetitions() -> int:
+    """从 PI_EVAL_REPETITIONS 读取默认重复次数（缺省 1）。"""
+    raw = os.environ.get("PI_EVAL_REPETITIONS", "1")
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 0
+    if value < 1:
+        raise TypeError("repetitions must be a positive integer.")
+    return value
+
+
 def eval_harness_table(
     eval_set: str,
     *,
     baseline: Harness,
     candidate: Harness | None = None,
     candidates: list[Harness] | None = None,
-    repetitions: int = 1,
+    repetitions: int | None = None,
 ) -> list[EvalHarnessRow]:
     """生成 baseline + candidate(s) × repetitions 的 harness 行（对齐 TS evalHarnessTable）。"""
     if not eval_set.strip():
         raise TypeError("evalSet must not be empty.")
+    if repetitions is None:
+        repetitions = _default_repetitions()
     candidate_list = [candidate] if candidate is not None else list(candidates or [])
     if not candidate_list:
         raise TypeError("At least one candidate harness is required.")

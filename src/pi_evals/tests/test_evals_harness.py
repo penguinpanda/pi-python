@@ -211,7 +211,7 @@ HELLO_EXTENSION_SOURCE = """\
 from pi_coding_agent.extensions import ToolDefinition
 
 def _hello(tool_call_id, params, signal=None, on_update=None, context=None):
-    return {"content": [{"type": "text", "text": f"Hello, {params['name']}!"}]}
+    return f"Hello, {params['name']}!"
 
 def create_extension(api):
     api.register_tool(ToolDefinition(

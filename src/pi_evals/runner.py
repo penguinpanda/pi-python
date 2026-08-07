@@ -137,6 +137,16 @@ def _format_status(results: list[CaseResult]) -> str:
         lines.append("Failed runs:")
         for result in failed:
             lines.append(f"  - {result.case.name}: {result.failure}")
+    notes: list[str] = []
+    for result in results:
+        for judge_name, metadata in result.judge_metadata.items():
+            rationale = metadata.get("rationale")
+            if isinstance(rationale, str) and rationale:
+                notes.append(f"  - {result.case.name} [{judge_name}]: {rationale}")
+    if notes:
+        lines.append("")
+        lines.append("Judge notes:")
+        lines.extend(notes)
     return "\n".join(lines)
 
 
@@ -152,6 +162,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Artifact directory under src/pi_evals (default: .eval/<timestamp>_<uuid>).",
     )
     parser.add_argument(
+        "--repetitions",
+        type=int,
+        default=None,
+        help="Harness table repetitions (default: PI_EVAL_REPETITIONS or 1).",
+    )
+    parser.add_argument(
         "paths",
         nargs="*",
         help="Eval module .py paths (default: built-in smoke + extensions evals).",
@@ -163,6 +179,11 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
+    if args.repetitions is not None:
+        if args.repetitions < 1:
+            print("Error: --repetitions must be a positive integer.", file=sys.stderr)
+            return 2
+        os.environ["PI_EVAL_REPETITIONS"] = str(args.repetitions)
 
     registry = get_registry()
     registry.clear()

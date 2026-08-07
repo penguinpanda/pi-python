@@ -631,7 +631,11 @@ class AgentSession:
                         terminate=raw.get("terminate"),
                         usage=raw.get("usage"),
                     )
-                return raw
+                if raw is None:
+                    return AgentToolResult(content=[])
+                # 字符串/标量返回归一化为文本内容（对齐 TS），
+                # 否则 agent 循环的 _make_tool_result_message 会因缺 content 崩溃。
+                return AgentToolResult(content=[{"type": "text", "text": str(raw)}])
 
             extension_tools[definition.name] = AgentTool(
                 name=definition.name,

@@ -17,7 +17,7 @@ from .artifacts import (
 )
 from .harness import EvalInput, Harness, HarnessContext, HarnessRun, JsonValue
 from .harness_table import EVAL_HARNESS_ITERATION_ARTIFACT
-from .judge import Judge, JudgeContext, average_judge_scores, normalize_tool_calls
+from .judge import Judge, JudgeContext, normalize_tool_calls
 from .summary import HarnessObservation
 
 CaseFn: TypeAlias = Callable[["EvalCaseContext"], Awaitable[None] | None]
@@ -90,6 +90,7 @@ class CaseResult:
     failed: bool
     failure: str | None = None
     avg_score: float | None = None
+    judge_metadata: dict[str, dict[str, JsonValue]] = field(default_factory=dict)
     observation: HarnessObservation | None = None
 
 
@@ -174,6 +175,8 @@ def _persist_run(
     run: HarnessRun,
     artifact_dir: Path,
     failed: bool,
+    avg_score: float | None,
+    judge_metadata: dict[str, dict[str, JsonValue]],
 ) -> None:
     artifact_dir.mkdir(parents=True, exist_ok=True)
     run_id = _run_id(ctx)
@@ -203,6 +206,10 @@ def _persist_run(
         "usage": run.usage,
         "artifacts": references,
     }
+    if avg_score is not None:
+        record["score"] = avg_score
+    if judge_metadata:
+        record["judgeMetadata"] = judge_metadata
     if run.timings:
         record["timings"] = run.timings
     if run.errors:
@@ -273,12 +280,21 @@ async def run_case(case: EvalCase, artifact_dir: Path) -> CaseResult:
         if run.errors:
             failed = True
             failure = failure or "; ".join(run.errors)
-        judge_context = JudgeContext(
-            output=run.output,
-            events=run.events,
-            tool_calls=normalize_tool_calls(run.events),
-        )
-        avg_score = average_judge_scores(case.judges, judge_context)
+        judge_metadata: dict[str, dict[str, JsonValue]] = {}
+        if case.judges:
+            judge_context = JudgeContext(
+                output=run.output,
+                events=run.events,
+                tool_calls=normalize_tool_calls(run.events),
+            )
+            judge_results = [judge.evaluate(judge_context) for judge in case.judges]
+            avg_score = sum(result.score for result in judge_results) / len(judge_results)
+            judge_metadata = {
+                judge.name: {"score": result.score, **result.metadata}
+                for judge, result in zip(case.judges, judge_results, strict=True)
+            }
+        else:
+            avg_score = None
         if (
             case.judges
             and case.judge_threshold is not None
@@ -292,9 +308,11 @@ async def run_case(case: EvalCase, artifact_dir: Path) -> CaseResult:
     else:
         failed = True
         failure = failure or "eval case did not run the harness"
+        avg_score = None
+        judge_metadata = {}
 
     if run is not None:
-        _persist_run(case, ctx, run, artifact_dir, failed)
+        _persist_run(case, ctx, run, artifact_dir, failed, avg_score, judge_metadata)
     observation = _build_observation(case, ctx, run, avg_score, failed) if run is not None else None
     return CaseResult(
         case=case,
@@ -302,6 +320,7 @@ async def run_case(case: EvalCase, artifact_dir: Path) -> CaseResult:
         failed=failed,
         failure=failure,
         avg_score=avg_score,
+        judge_metadata=judge_metadata,
         observation=observation,
     )
 

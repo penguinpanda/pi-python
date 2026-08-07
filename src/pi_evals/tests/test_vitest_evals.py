@@ -123,6 +123,137 @@ def test_judge_coerces_results():
     assert result.metadata == {"reason": "x"}
 
 
+def test_extension_judge_accepts_dotted_canonical_import():
+    """from pi_coding_agent.extensions import ... 应视为 canonical 包导入。"""
+    from pi_evals.extensions_eval import _extension_authoring_judge
+
+    ctx = JudgeContext(
+        output={
+            "response": "Hello, Bob!",
+            "systemPromptHasGuidelines": True,
+            "systemPromptHasPiDocs": True,
+            "extensionErrors": [],
+            "loadedExtensions": [{"path": "hello.py", "tools": ["hello"]}],
+            "extensionSource": (
+                "from pi_coding_agent.extensions import ToolDefinition\n"
+                "def create_extension(api):\n"
+                "    pass\n"
+            ),
+        },
+        events=[],
+        tool_calls=[
+            {
+                "name": "hello",
+                "status": "ok",
+                "arguments": {"name": "Bob"},
+                "result": "Hello, Bob!",
+            }
+        ],
+    )
+    result = _extension_authoring_judge(ctx)
+    assert result["score"] == 1
+
+
+def test_extension_judge_accepts_extension_without_canonical_import():
+    """Python 扩展可直接用 api 对象，不 import pi_coding_agent 也应通过。"""
+    from pi_evals.extensions_eval import _extension_authoring_judge
+
+    ctx = JudgeContext(
+        output={
+            "response": "Hello, Bob!",
+            "systemPromptHasGuidelines": True,
+            "systemPromptHasPiDocs": True,
+            "extensionErrors": [],
+            "loadedExtensions": [{"path": "hello.py", "tools": ["hello"]}],
+            "extensionSource": ("def create_extension(api):\n    api.register_tool(...)\n"),
+        },
+        events=[],
+        tool_calls=[
+            {
+                "name": "hello",
+                "status": "ok",
+                "arguments": {"name": "Bob"},
+                "result": "Hello, Bob!",
+            }
+        ],
+    )
+    result = _extension_authoring_judge(ctx)
+    assert result["score"] == 1
+
+
+def test_extension_judge_rejects_legacy_imports():
+    """pi_evals / pi_tests / tests. 前缀导入仍应拒绝。"""
+    from pi_evals.extensions_eval import _extension_authoring_judge
+
+    ctx = JudgeContext(
+        output={
+            "response": "Hello, Bob!",
+            "systemPromptHasGuidelines": True,
+            "systemPromptHasPiDocs": True,
+            "extensionErrors": [],
+            "loadedExtensions": [{"path": "hello.py", "tools": ["hello"]}],
+            "extensionSource": (
+                "from pi_evals.harness import create_pi_coding_agent_harness\n"
+                "def create_extension(api):\n"
+                "    pass\n"
+            ),
+        },
+        events=[],
+        tool_calls=[
+            {
+                "name": "hello",
+                "status": "ok",
+                "arguments": {"name": "Bob"},
+                "result": "Hello, Bob!",
+            }
+        ],
+    )
+    result = _extension_authoring_judge(ctx)
+    assert result["score"] == 0
+    assert "eval-only package" in result["metadata"]["rationale"]
+
+
+def test_extension_authoring_output_falls_back_to_loaded_hello_extension(tmp_path):
+    from types import SimpleNamespace
+
+    from pi_evals.extensions_eval import _extension_authoring_output
+
+    ext_dir = tmp_path / "hello_extension"
+    ext_dir.mkdir()
+    source = "from pi_coding_agent.extensions import ToolDefinition\n"
+    (ext_dir / "pi_extension.py").write_text(source, encoding="utf-8")
+    extension = SimpleNamespace(path=str(ext_dir / "pi_extension.py"), tools={"hello": object()})
+    runner = SimpleNamespace(extensions=[extension])
+    session = SimpleNamespace(
+        cwd=str(tmp_path),
+        extension_runner=runner,
+        _agent=SimpleNamespace(state=SimpleNamespace(system_prompt="x")),
+    )
+    output = _extension_authoring_output("Hello, Bob!", session)
+    assert output["extensionSource"] == source
+    assert output["loadedExtensions"] == [
+        {"path": str(ext_dir / "pi_extension.py"), "tools": ["hello"]}
+    ]
+
+
+def test_extension_authoring_output_prefers_canonical_hello_py(tmp_path):
+    from types import SimpleNamespace
+
+    from pi_evals.extensions_eval import _extension_authoring_output
+
+    canonical = tmp_path / ".pi" / "extensions"
+    canonical.mkdir(parents=True)
+    canonical_source = "import pi_coding_agent\n"
+    (canonical / "hello.py").write_text(canonical_source, encoding="utf-8")
+    session = SimpleNamespace(
+        cwd=str(tmp_path),
+        extension_runner=SimpleNamespace(extensions=[]),
+        _agent=SimpleNamespace(state=SimpleNamespace(system_prompt="x")),
+    )
+    output = _extension_authoring_output("Hello, Bob!", session)
+    assert output["extensionSource"] == canonical_source
+
+
 def test_eval_harness_table_validation():
     baseline = _FakeHarness("baseline")
     candidate = _FakeHarness("candidate")
@@ -134,6 +265,26 @@ def test_eval_harness_table_validation():
         eval_harness_table("s", baseline=baseline, candidate=_FakeHarness("baseline"))
     with pytest.raises(TypeError, match="positive"):
         eval_harness_table("s", baseline=baseline, candidate=candidate, repetitions=0)
+
+
+def test_eval_harness_table_default_repetitions_from_env(monkeypatch):
+    monkeypatch.setenv("PI_EVAL_REPETITIONS", "2")
+    rows = eval_harness_table(
+        "s",
+        baseline=_FakeHarness("baseline"),
+        candidate=_FakeHarness("candidate"),
+    )
+    assert len(rows) == 4
+
+
+def test_eval_harness_table_rejects_invalid_env_repetitions(monkeypatch):
+    monkeypatch.setenv("PI_EVAL_REPETITIONS", "abc")
+    with pytest.raises(TypeError, match="positive integer"):
+        eval_harness_table(
+            "s",
+            baseline=_FakeHarness("baseline"),
+            candidate=_FakeHarness("candidate"),
+        )
 
 
 def test_eval_harness_table_rows_and_group_key():
@@ -295,6 +446,31 @@ async def test_run_case_judge_threshold(tmp_path):
     assert result.failed
     assert result.avg_score == 0.0
     assert "below threshold" in (result.failure or "")
+
+
+@pytest.mark.asyncio
+async def test_run_case_persists_judge_score_and_metadata(tmp_path):
+    registry = EvalRegistry()
+    judge = create_judge(
+        "extension",
+        lambda ctx: {"score": 0.0, "metadata": {"rationale": "final response mismatch"}},
+    )
+
+    async def case_fn(ctx):
+        await ctx.run("hi")
+
+    registry.describe(
+        "scored case",
+        harness=_FakeHarness(output="bad"),
+        judges=[judge],
+        judge_threshold=None,
+    )(case_fn)
+    result = await run_case(registry.cases[0], tmp_path)
+    assert result.avg_score == 0.0
+    assert result.judge_metadata["extension"]["rationale"] == "final response mismatch"
+    record = json.loads((tmp_path / "runs.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert record["score"] == 0.0
+    assert record["judgeMetadata"]["extension"]["rationale"] == "final response mismatch"
 
 
 @pytest.mark.asyncio

@@ -13,6 +13,15 @@ from .vitest_evals.suite import describe_eval
 
 EXTENSION_NAME = "hello.py"
 EXTENSION_CONTENT_TYPE = "text/x-python"
+CREATE_EXTENSION_PROMPT = (
+    "Create a Pi extension with a hello tool that takes a name and returns a greeting. "
+    "For example, passing Bob should return `Hello, Bob!`."
+)
+USE_HELLO_PROMPT = (
+    'You MUST actually invoke the hello tool with name "Bob" now, then respond with '
+    "exactly the tool's returned greeting and nothing else. Do not respond without "
+    "calling the tool."
+)
 
 
 def _extension_errors(session: Any) -> list[dict[str, str]]:
@@ -26,14 +35,57 @@ def _require_section(default_prompt: str, marker: str) -> str:
     return default_prompt[:index]
 
 
+def _require_last_section(default_prompt: str, marker: str) -> str:
+    index = default_prompt.rfind(marker)
+    if index == -1:
+        raise RuntimeError(f"Default Pi system prompt has no {marker.strip()} section.")
+    return default_prompt[:index]
+
+
 def exclude_guidelines_and_documentation(default_prompt: str) -> str:
     """baseline：去掉 Guidelines 与 Pi 文档段（对齐 TS excludeGuidelinesAndDocumentation）。"""
     return _require_section(default_prompt, "\nGuidelines:\n")
 
 
 def prepare_default_prompt_override(default_prompt: str) -> str:
-    """candidate：只去掉 cwd 段（对齐 TS prepareDefaultPromptOverride）。"""
-    return _require_section(default_prompt, "\nCurrent working directory: ")
+    """candidate：只去掉 cwd 段（对齐 TS prepareDefaultPromptOverride 的 lastIndexOf）。"""
+    return _require_last_section(default_prompt, "\nCurrent working directory: ")
+
+
+def _extension_authoring_output(response: str, session: Any) -> dict[str, Any]:
+    """聚合扩展编写 eval 的领域输出。
+
+    扩展源码优先取约定路径 `.pi/extensions/hello.py`；若模型按加载器支持的
+    子目录约定（如 `.pi/extensions/hello_extension/pi_extension.py`）编写，
+    则回退到已加载的 hello 工具扩展源码，避免固定路径误判。
+    """
+    extension_source: str | None = None
+    extension_path = Path(session.cwd) / ".pi" / "extensions" / EXTENSION_NAME
+    if extension_path.exists():
+        extension_source = extension_path.read_text(encoding="utf-8")
+    runner = session.extension_runner
+    loaded_extensions: list[dict[str, Any]] = []
+    if runner is not None:
+        loaded_extensions = [
+            {"path": extension.path, "tools": list(extension.tools)}
+            for extension in runner.extensions
+        ]
+        if extension_source is None:
+            for extension in runner.extensions:
+                if "hello" in extension.tools:
+                    source_path = Path(extension.path)
+                    if source_path.exists():
+                        extension_source = source_path.read_text(encoding="utf-8")
+                    break
+    system_prompt = session._agent.state.system_prompt
+    return {
+        "response": response,
+        "systemPromptHasGuidelines": "\nGuidelines:\n" in system_prompt,
+        "systemPromptHasPiDocs": "\nPi documentation (read only" in system_prompt,
+        "extensionErrors": _extension_errors(session),
+        "loadedExtensions": loaded_extensions,
+        "extensionSource": extension_source,
+    }
 
 
 def create_extension_authoring_harness(
@@ -43,27 +95,7 @@ def create_extension_authoring_harness(
     """创建扩展编写 harness（对齐 TS createExtensionAuthoringHarness）。"""
 
     def output(args: dict[str, Any]):
-        session = args["session"]
-        extension_path = Path(session.cwd) / ".pi" / "extensions" / EXTENSION_NAME
-        extension_source = (
-            extension_path.read_text(encoding="utf-8") if extension_path.exists() else None
-        )
-        runner = session.extension_runner
-        loaded_extensions: list[dict[str, Any]] = []
-        if runner is not None:
-            loaded_extensions = [
-                {"path": extension.path, "tools": list(extension.tools)}
-                for extension in runner.extensions
-            ]
-        system_prompt = session._agent.state.system_prompt
-        return {
-            "response": args["response"],
-            "systemPromptHasGuidelines": "\nGuidelines:\n" in system_prompt,
-            "systemPromptHasPiDocs": "\nPi documentation (read only" in system_prompt,
-            "extensionErrors": _extension_errors(session),
-            "loadedExtensions": loaded_extensions,
-            "extensionSource": extension_source,
-        }
+        return _extension_authoring_output(args["response"], args["session"])
 
     return create_pi_coding_agent_harness(
         name=name,
@@ -82,9 +114,9 @@ def _extension_authoring_judge(ctx: JudgeContext) -> dict[str, Any]:
         if extension_source is None:
             failures.append("generated extension source is unavailable")
         elif isinstance(extension_source, str):
-            imports = re.findall(r"(?:from|import)\s+([\w.]+)", extension_source)
-            if "pi_coding_agent" not in imports:
-                failures.append("extension does not import the canonical pi_coding_agent package")
+            # 捕获顶层包标识符：from pi_coding_agent.extensions import ...
+            # 与 import pi_coding_agent.extensions 都归入 pi_coding_agent。
+            imports = re.findall(r"(?:from|import)\s+([A-Za-z_]\w*)", extension_source)
             if any(specifier.startswith("pi_evals") for specifier in imports):
                 failures.append("extension imports an eval-only package")
             if any(specifier.startswith("pi_tests") for specifier in imports):
@@ -153,17 +185,12 @@ for _row in extension_harness_table:
             [
                 {
                     "type": "prompt",
-                    "content": (
-                        "Create a Pi extension with a hello tool that takes a name and "
-                        "returns a greeting. For example, passing Bob should return "
-                        "`Hello, Bob!`."
-                    ),
+                    "content": CREATE_EXTENSION_PROMPT,
                 },
                 {"type": "reload"},
                 {
                     "type": "prompt",
-                    "content": "Use the hello tool to greet Bob. Respond with exactly the "
-                    "tool's greeting and nothing else.",
+                    "content": USE_HELLO_PROMPT,
                 },
             ]
         )

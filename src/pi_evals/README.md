@@ -48,6 +48,9 @@ PI_PROVIDER=openai PI_MODEL=gpt-5 uv run pi-evals
 # 只跑指定 eval 模块；其余参数透传
 uv run pi-evals src/pi_evals/smoke_eval.py
 uv run pi-evals --artifact-dir out-evals src/pi_evals/extensions_eval.py
+
+# 对比重复次数（默认 1；等价环境变量 PI_EVAL_REPETITIONS=3）
+uv run pi-evals --repetitions 3 --provider deepseek --model deepseek-v4-flash
 ```
 
 产物写在 `src/pi_evals/.eval/<timestamp>_<uuid>/`（可用

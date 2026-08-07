@@ -57,6 +57,7 @@ docker compose -f docker/compose.yaml run --rm pi --provider faux --model faux-1
 # 运行评测（pi-evals）
 # 容器根文件系统只读，评测产物必须写到可写目录（这里用 /workspace/.eval，
 # 对应宿主 work/temp/workspace/.eval）。
+# run-evals 脚本每次运行前会自动重建镜像（src 改动直接生效），无需手动 build。
 .\docker\run-evals.ps1 --provider deepseek --model deepseek-v4-flash
 
 Linux/macOS：
