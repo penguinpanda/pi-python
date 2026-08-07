@@ -109,11 +109,12 @@ uv run python -m pi_coding_agent --no-tools -p "what is 2+2?"
 echo "read README.md" | uv run python -m pi_coding_agent -p
 ```
 
-### TUI Slash 命令（26 条）
+### TUI Slash 命令（30 条）
 
 `/model` `/thinking` `/oauth` `/extensions` `/name` `/compact` `/new` `/quit` `/help`
 `/hotkeys` `/session` `/reload` `/trust` `/changelog` `/copy` `/export` `/tree` `/fork` `/input`
 `/clone` `/settings` `/scoped-models` `/login` `/logout` `/share` `/import` `/resume`
+`/debug` `/arminsayshi` `/dementedelves`
 
 其中 `/settings`、`/trust`、`/thinking`、`/oauth`、`/scoped-models`、`/extensions` 在
 TUI 中打开对应选择器；`/reload` 会重建系统提示并纳入 context files（AGENTS.md/CLAUDE.md）。
@@ -321,13 +322,13 @@ prompt → 等 agent 完成 → 输出最后一条 assistant 纯文本；`stop_r
 ### RPC 模式（`--mode rpc`）
 
 stdin/stdout JSONL 无头协议，32 个命令（`prompt`/`abort`/`steer`/`follow_up`/`set_model`/
-`cycle_model`/`compact`/`navigate_tree`/`fork`/`list_sessions`/`get_state`/`get_messages`/
+`cycle_model`/`compact`/`get_tree`/`fork`/`switch_session`/`get_state`/`get_messages`/
 `get_entries`/`get_session_stats` 等），`pi_coding_agent.rpc.rpc_client` 提供客户端封装。
 
 ### TUI 模式（`--mode tui`）
 
 内置引擎交互界面：主题（dark/light + 自定义 JSON）、快捷键（settings 覆盖）、
-26 个 Slash 命令、模型/会话/设置/信任/思考/OAuth/作用域模型/扩展选择器、
+30 个 Slash 命令、模型/会话/设置/信任/思考/OAuth/作用域模型/扩展选择器、
 剪贴板图片、外部编辑器（Ctrl+G）、树导航与 fork。
 
 ---

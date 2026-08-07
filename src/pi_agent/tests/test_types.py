@@ -1,6 +1,6 @@
 """_types.py 模块测试。"""
 
-from pi_ai._types import Model, TextContent
+from pi_ai.types import Model, TextContent
 from pi_agent._types import (
     AfterToolCallResult,
     AgentContext,

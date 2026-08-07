@@ -1,0 +1,14 @@
+pi-python
+=========
+
+This project is a Python implementation (port) of the pi agent framework.
+
+Original project: pi-mono
+  https://github.com/earendil-works/pi-mono
+  Copyright (c) 2025 Mario Zechner
+  Licensed under the MIT License (see LICENSE).
+
+pi-python is an independent reimplementation of the original project's
+architecture and behavior in Python. Portions of the design, protocol
+schemas, and behavior are derived from pi-mono and retain the original
+copyright notice above in accordance with the MIT License.

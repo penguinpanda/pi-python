@@ -53,7 +53,7 @@ emit agent_end → 返回 messages
 
 **关键设计决策**：
 
-- **事件驱动**：通过 `emit(AgentEvent)` 回调发出 12 种事件，调用方自行归约
+- **事件驱动**：通过 `emit(AgentEvent)` 回调发出 13 种事件，调用方自行归约
 - **不可变性**：loop 内部复制 context，不修改调用方传入的值
 - **依赖注入**：`StreamFn` 是 Callable 协议，不直接依赖任何具体 provider SDK
 - **双消息队列**：`steer()` 在 turn 边界注入引导消息，`follow_up()` 在 Agent 即将停止时注入后续消息
@@ -244,12 +244,13 @@ class AgentToolResult:
 
 ## 事件系统
 
-12 种 `AgentEvent`（TypedDict 判别联合）：
+13 种 `AgentEvent`（TypedDict 判别联合）：
 
 | 事件 | 关键字段 | 含义 |
 |------|---------|------|
 | `agent_start` | — | Agent 循环开始 |
 | `agent_end` | `messages` | Agent 循环结束 |
+| `agent_settled` | — | 状态机进入 settled（一次 run/continue 完全结束） |
 | `turn_start` | — | 单轮开始 |
 | `turn_end` | `message`, `tool_results` | 单轮结束 |
 | `message_start` | `message` | 消息进入上下文 |

@@ -46,7 +46,9 @@
 
 `models/generated/providers/*.json` 由 [scripts/generate_models.py](scripts/generate_models.py) 生成，包含
 `openai`、`openai-codex`、`azure-openai-responses`、`deepseek`、`mistral`、`ant-ling`、`openrouter`、
-`vercel-ai-gateway` 的远程目录；`load_generated_models()` 可加载，供后续扩展接入（默认注册表未启用）。
+`vercel-ai-gateway` 的远程目录；`create_default_models()` 默认即加载并合并这些元数据
+（同 id 覆盖已注册 provider 的模型、新 id 追加；无 Python 实现的 provider 保持不可用），
+`load_generated_models()` 可单独调用以获取原始目录数据。
 
 ---
 

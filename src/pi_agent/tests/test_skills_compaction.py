@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 import pytest
-from pi_ai._types import Model, TextContent
+from pi_ai.types import Model, TextContent
 from pi_ai.providers.faux import faux_assistant_message, faux_provider
 
 from pi_agent import (

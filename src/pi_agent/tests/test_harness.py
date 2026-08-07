@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from pi_ai._types import Model, TextContent, UserMessage
+from pi_ai.types import Model, TextContent, UserMessage
 from pi_ai.providers.faux import FauxCore, faux_assistant_message, faux_provider, faux_tool_call
 
 from pi_agent._harness_types import (

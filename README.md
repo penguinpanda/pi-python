@@ -1,6 +1,9 @@
 # pi-python
 
-基于 [pi-mono](https://github.com/earendil-works/pi-mono) 的 Python 复刻，三层架构的 AI 编码代理工具链。
+Python implementation of the [pi agent framework](https://github.com/earendil-works/pi-mono).
+Based on the original pi project (MIT License, Copyright (c) 2025 Mario Zechner); see [NOTICE](NOTICE).
+
+pi-python 是基于 [pi-mono](https://github.com/earendil-works/pi-mono) 的 Python 复刻，三层架构的 AI 编码代理工具链。
 
 ---
 
@@ -24,9 +27,9 @@ pi-python/
 | `pi_agent` | [README](src/pi_agent/README.md) | 最小核心 Agent 循环。事件驱动、工具调用、循环钩子 | ✓ |
 | `pi_coding_agent` | [README](src/pi_coding_agent/README.md) | CLI 编码代理。7 个编码工具、DAG 会话持久化、双层配置、扩展/技能/信任/压缩 | ✓ |
 | `pi_tui` | [README](src/pi_tui/README.md) | 内置引擎 TUI：主题、快捷键、选择器、剪贴板图片 | ✓ |
-| `pi_protocol` | — | protocol v2：Command/Result/Snapshot/Progress/Error + JSONL framing | ✓ |
-| `pi_storage` | — | PostgreSQL SessionStore/SessionSearch（`docker compose up -d pg`） | ✓ |
-| `pi_server` | — | 常驻服务：`python -m pi_server`（stdio JSONL） | ✓ |
+| `pi_protocol` | [README](src/pi_protocol/README.md) | protocol v2：Command/Result/Snapshot/Progress/Error + JSONL framing | ✓ |
+| `pi_storage` | [README](src/pi_storage/README.md) | PostgreSQL SessionStore/SessionSearch（`docker compose up -d pg`） | ✓ |
+| `pi_server` | [README](src/pi_server/README.md) | 常驻服务：`python -m pi_server`（stdio JSONL） | ✓ |
 | `pi_evals` | [README](src/pi_evals/README.md) | TS `packages/evals` 完整移植：pi-coding-agent harness、judge/harness table/artifacts/summary、`pi-evals` CLI runner | ✓ |
 
 ### 架构
@@ -39,7 +42,7 @@ pi_coding_agent (CLI + Tools + Sessions)
 
 - **pi_ai** — 底层 LLM 调用：`Models` 注册表管理多个 Provider，`complete()` / `stream()` 统一非流式/流式调用，`EventStream` 生产者-消费者异步事件流
 - **pi_agent** — 中间层 Agent 循环：纯函数引擎 `run_agent_loop()` + 有状态 `Agent` 包装类，事件驱动、工具调用、取消机制、循环钩子
-- **pi_coding_agent** — 顶层 CLI：`pi -p "..."` 单次编码查询，7 个编码工具（read/write/edit/bash/grep/find/ls），JSONL 会话持久化，双层 settings.json 配置，26 个 Slash 命令，项目信任，系统提示构建器（AGENTS.md/CLAUDE.md），turn timings / cache stats
+- **pi_coding_agent** — 顶层 CLI：`pi -p "..."` 单次编码查询，7 个编码工具（read/write/edit/bash/grep/find/ls），JSONL 会话持久化，双层 settings.json 配置，30 个 Slash 命令，项目信任，系统提示构建器（AGENTS.md/CLAUDE.md），turn timings / cache stats
 - **pi_tui / pi_protocol / pi_storage / pi_server / pi_evals** — TUI 引擎层、protocol v2、PostgreSQL 存储、常驻服务与评测 harness（见下表）
 
 ---
@@ -166,7 +169,7 @@ uv run python -m pi_coding_agent --no-session -p "what is 2+2?"
 | Qwen | `qwen3-30b-a3b` | Completions | ✓ | ✓ | ✗ | 32,768 |
 | Qwen | `qwen3-vl-flash` / `qwen-vl-max` | Completions | ✗ | ✓ | ✓ | 8,192 |
 | Qwen | `qwen-vl-plus` | Completions | ✗ | ✓ | ✓ | 4,096 |
-| Ollama | `qwen3:30b` / `gpt-oss:20b` / `deepseek-r1:14b` 等 7 个静态模型 | Completions | 按模型 | ✓ | 按模型 | 本地 |
+| Ollama | `qwen3:30b` / `gpt-oss:20b` / `deepseek-r1:14b` 等 6 个静态模型 | Completions | 按模型 | ✓ | 按模型 | 本地 |
 
 > 更多模型来自 `src/pi_ai/models/generated/providers/`（OpenRouter 273、Vercel AI Gateway 196、OpenAI Codex 7 等），`--list-models` 可查看全部。
 

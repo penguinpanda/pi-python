@@ -14,13 +14,11 @@ from .vitest_evals.suite import describe_eval
 EXTENSION_NAME = "hello.py"
 EXTENSION_CONTENT_TYPE = "text/x-python"
 CREATE_EXTENSION_PROMPT = (
-    "Create a Pi extension with a hello tool that takes a name and returns a greeting. "
+    "Create a Pi extension with a hello tool that takes a name and returns a greeting."
     "For example, passing Bob should return `Hello, Bob!`."
 )
 USE_HELLO_PROMPT = (
-    'You MUST actually invoke the hello tool with name "Bob" now, then respond with '
-    "exactly the tool's returned greeting and nothing else. Do not respond without "
-    "calling the tool."
+    "Use the hello tool to greet Bob. Respond with exactly the tool's greeting and nothing else."
 )
 
 

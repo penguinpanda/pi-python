@@ -7,7 +7,7 @@ import json
 
 import httpx
 import pytest
-from pi_ai._types import Context, Model
+from pi_ai.types import Context, Model
 
 from pi_agent.proxy import process_proxy_event, stream_proxy
 

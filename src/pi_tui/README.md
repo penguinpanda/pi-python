@@ -29,7 +29,8 @@ pi_tui
 ```
 
 依赖：`rich`（文本样式 / markdown 解析）+ `pillow`（剪贴板图片处理）。
-`pi_tui` 不依赖 `pi_ai` / `pi_agent`，可独立复用。
+引擎本身不依赖 `pi_ai`；仅 `clipboard_image` 复用 `pi_agent.tools.image_pipeline`
+（见下文剪贴板图片一节），其余部分可独立复用。
 
 ---
 
@@ -145,6 +146,8 @@ header.base_style = Style(bgcolor=theme.colors["bgToolbar"], color=theme.colors[
 | `app.interrupt` | `escape` | `interrupt` | 取消 / 中止 |
 | `app.clear` | `ctrl+c` | `clear` | 清空编辑器 |
 | `app.exit` | `ctrl+d` | `exit` | 编辑器为空时退出 |
+| `tui.altScreen.previousPrompt` | `ctrl+shift+up` | `previous_prompt` | 跳到上一条语义 prompt |
+| `tui.altScreen.nextPrompt` | `ctrl+shift+down` | `next_prompt` | 跳到下一条语义 prompt |
 | `app.thinking.cycle` | `shift+tab` | `cycle_thinking` | 切换思考级别 |
 | `app.model.cycleForward` | `ctrl+p` | `cycle_model_forward` | 下一个模型 |
 | `app.model.cycleBackward` | `shift+ctrl+p` | `cycle_model_backward` | 上一个模型 |
@@ -153,7 +156,7 @@ header.base_style = Style(bgcolor=theme.colors["bgToolbar"], color=theme.colors[
 | `app.thinking.toggle` | `ctrl+t` | `toggle_thinking` | 切换思考块显示 |
 | `app.message.followUp` | `alt+enter` | `follow_up` | 排队后续消息 |
 | `app.message.dequeue` | `alt+up` | `dequeue` | 恢复已排队消息 |
-| `app.clipboard.pasteImage` | `alt+v` | `paste_image` | 粘贴剪贴板图片 |
+| `app.clipboard.pasteImage` | `alt+v`（Windows）/ `ctrl+v`（其它平台） | `paste_image` | 粘贴剪贴板图片 |
 | `app.session.new` | `ctrl+n` | `new_session` | 新建会话 |
 | `app.session.resume` | `ctrl+r` | `resume_session` | 恢复会话 |
 | `app.message.copy` | `ctrl+x` | `copy_last_message` | 复制最后一条 assistant 消息 |

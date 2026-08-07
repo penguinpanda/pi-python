@@ -31,7 +31,8 @@ models.json / models-store.json）；测试通过 `runtime` 注入 faux provider
   - `artifacts.py`：session / source artifact 落盘；
   - `summary.py`：pass-rate lift、token / latency / cost 配对差值报告；
   - `suite.py`：`describe_eval` case 注册与 `run_case` 执行。
-- `smoke_eval.py` — 基本 prompt 端到端（faux provider 脚本化响应）。
+- `smoke_eval.py` — 基本 prompt 端到端（走默认 harness runtime，断言 usage 的
+  provider/model 匹配 `PI_PROVIDER` / `PI_MODEL` 环境变量）。
 - `extensions_eval.py` — 扩展编写 + reload + 工具使用；系统提示词
   baseline/candidate 对比（judge 评分，不设阈值）。
 - `runner.py` / `__main__.py` — CLI runner（对齐 TS `run-evals.mjs`）。

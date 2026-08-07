@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from pi_ai._types import (
+from pi_ai.types import (
     AssistantMessage,
     Model,
 )

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from pi_ai._types import TextContent, UserMessage
+from pi_ai.types import TextContent, UserMessage
 
 from pi_agent.session import (
     InMemorySessionStorage,
