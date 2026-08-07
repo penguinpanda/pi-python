@@ -29,4 +29,5 @@ docs/nd_upload/
 src/pi_evals/.eval/
 src/hello_world.py
 .qodo/
+.reasonix/
 # examples/

@@ -1,16 +1,13 @@
 """Eval Reporter（对齐 TS vitest-evals/reporter.ts 的观测收集与持久化）。
 
-将观测收集、runs.jsonl 追加、报告生成抽离为独立模块，
+将观测收集、报告生成抽离为独立模块，
 便于替换报告格式（JSON / 终端 / CI）而不修改 runner。
 """
 
 from __future__ import annotations
 
-import json
 from collections.abc import Sequence
-from pathlib import Path
 
-from .artifacts import persist_eval_artifact_references
 from .harness_table import (
     EVAL_HARNESS_ITERATION_ARTIFACT,
     parse_eval_harness_iteration_artifact,
@@ -118,83 +115,10 @@ def collect_observations(
     return observations
 
 
-def append_run_record(
-    run: object,
-    harness_name: str,
-    test_status: str,
-    test_id: str,
-    test_name: str,
-    test_full_name: str,
-    test_file: str,
-    artifact_dir: Path,
-) -> None:
-    """将单次 harness run 的记录追加写入 runs.jsonl。
-
-    对齐 TS appendHarnessRunReport，字段结构保持一致。
-    """
-    run_dict: dict[str, object]
-    if isinstance(run, dict):
-        run_dict = run
-    else:
-        run_dict = getattr(run, "__dict__", {})
-    usage = run_dict.get("usage") or {}
-    timings = run_dict.get("timings") or {}
-    artifacts = run_dict.get("artifacts") or {}
-    errors = run_dict.get("errors") or []
-    artifact_run_id = artifacts.get("runId") if isinstance(artifacts, dict) else None
-    run_id = str(artifact_run_id) if isinstance(artifact_run_id, str) else _new_run_id()
-
-    metadata: dict[str, object] = {}
-    if isinstance(artifacts, dict):
-        for name, value in artifacts.items():
-            if name in ("runId", "piSessionJsonl"):
-                continue
-            if value is not None:
-                metadata[name] = value
-
-    record: dict[str, object] = {
-        "schemaVersion": 1,
-        "runId": run_id,
-        "test": {
-            "id": test_id,
-            "file": test_file,
-            "name": test_name,
-            "fullName": test_full_name,
-            "status": test_status,
-        },
-        "harness": harness_name,
-        "usage": usage,
-    }
-    if timings:
-        record["timings"] = timings
-    if errors:
-        record["errors"] = errors
-    record["artifacts"] = persist_eval_artifact_references(
-        artifacts if isinstance(artifacts, dict) else {}, run_id, artifact_dir
-    )
-    if metadata:
-        record["metadata"] = metadata
-
-    artifact_dir.mkdir(parents=True, exist_ok=True)
-    runs_path = artifact_dir / "runs.jsonl"
-    line = json.dumps(record, ensure_ascii=False) + "\n"
-    if runs_path.exists():
-        with runs_path.open("a", encoding="utf-8") as f:
-            f.write(line)
-    else:
-        runs_path.write_text(line, encoding="utf-8")
-
-
 def generate_report(observations: list[HarnessObservation]) -> str:
     """生成终端可读的对比报告。"""
     summary = summarize_harness_comparisons(observations)
     return format_harness_comparison_report(summary)
-
-
-def _new_run_id() -> str:
-    import uuid
-
-    return uuid.uuid4().hex
 
 
 # 为了类型检查，需要从 suite 导入 CaseResult

@@ -16,7 +16,8 @@ try {
     }
     docker compose -f docker/compose.yaml run --rm --entrypoint pi-evals pi `
         "--artifact-dir" "/workspace/.eval" @args
-    exit $LASTEXITCODE
+    $code = $LASTEXITCODE
+    exit $code
 }
 finally {
     Pop-Location

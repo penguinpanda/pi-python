@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from ..types.message import Cost, Usage
+from ..types.message import Usage
 from ..types.model import Model, ModelCostRates
 
 
-def calculate_cost(model: Model, usage: Usage) -> Cost:
+def calculate_cost(model: Model, usage: Usage) -> None:
     """按模型单价与本次请求 token 用量计算费用（$），原地更新 usage.cost。
 
     单价为 $/百万 token；分档按 input + cacheRead + cacheWrite 命中
@@ -31,7 +31,6 @@ def calculate_cost(model: Model, usage: Usage) -> Cost:
         rates.cache_write * short_write + rates.input * 2 * long_write
     ) / 1_000_000
     cost["total"] = cost["input"] + cost["output"] + cost["cache_read"] + cost["cache_write"]
-    return cost
 
 
 __all__ = ["calculate_cost"]

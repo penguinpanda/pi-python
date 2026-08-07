@@ -74,12 +74,19 @@ def _resolve_artifact_dir(artifact_dir: str | None, environment: Mapping[str, st
     base = _package_dir()
     env_value = environment.get("PI_EVAL_ARTIFACT_DIR", "").strip()
     if env_value:
-        path = base / env_value
+        path = (base / env_value).resolve()
     elif artifact_dir:
-        path = base / artifact_dir
+        raw = Path(artifact_dir)
+        # 绝对路径直接使用；相对路径解析并防御逃逸包目录。
+        if raw.is_absolute():
+            path = raw.resolve()
+        else:
+            path = (base / raw).resolve()
+            if not str(path).startswith(str(base.resolve())):
+                raise ValueError(f"artifact-dir must be under the package directory: {path}")
     else:
         timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds").replace(":", "-")
-        path = base / ".eval" / f"{timestamp}_{uuid.uuid4().hex}"
+        path = (base / ".eval" / f"{timestamp}_{uuid.uuid4().hex}").resolve()
     path.mkdir(parents=True, exist_ok=True)
     return path
 

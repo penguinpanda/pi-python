@@ -29,6 +29,7 @@ echo "backup: $CONF.bak.$timestamp"
 changed=0
 for domain in "${DOMAINS[@]}"; do
     if ! grep -q "$domain" "$CONF"; then
+        # GNU sed assumed (macOS/BSD sed requires a backup extension argument).
         sed -i "s/^\(Environment=\"NO_PROXY=[^\"]*\)\"/\1,$domain\"/" "$CONF"
         echo "added $domain to NO_PROXY"
         changed=1

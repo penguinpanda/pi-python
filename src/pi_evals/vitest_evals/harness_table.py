@@ -149,15 +149,14 @@ def _wrap_with_iteration_artifact(
 
 
 def _default_repetitions() -> int:
-    """从 PI_EVAL_REPETITIONS 读取默认重复次数（缺省 1）。"""
+    """从 PI_EVAL_REPETITIONS 读取默认重复次数（缺省 1）。
+    校验由调用方 eval_harness_table 统一执行。
+    """
     raw = os.environ.get("PI_EVAL_REPETITIONS", "1")
     try:
-        value = int(raw)
+        return int(raw)
     except ValueError:
-        value = 0
-    if value < 1:
-        raise TypeError("repetitions must be a positive integer.")
-    return value
+        return 0
 
 
 def eval_harness_table(

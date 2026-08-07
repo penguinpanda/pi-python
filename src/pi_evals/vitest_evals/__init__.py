@@ -34,7 +34,6 @@ from .judge import (
     normalize_tool_calls,
 )
 from .reporter import (
-    append_run_record,
     collect_observations,
     generate_report,
     read_finite_number,
@@ -87,7 +86,6 @@ __all__ = [
     "PI_SESSION_SNAPSHOT_ARTIFACT",
     "CaseFn",
     "CaseResult",
-    "append_run_record",
     "average_judge_scores",
     "canonicalize_json",
     "collect_observations",

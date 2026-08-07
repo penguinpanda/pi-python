@@ -41,7 +41,7 @@ def _as_previous_request(message: dict, reported_cache: bool) -> dict | None:
 def _paid_per_token(usage: dict) -> float:
     cost = usage.get("cost") or {}
     paid_tokens = _usage_field(usage, "input") + _usage_field(usage, "cache_write")
-    paid_cost = float(cost.get("input") or 0) + float(cost.get("cacheWrite") or 0)
+    paid_cost = float(cost.get("input") or 0) + float(cost.get("cache_write") or 0)
     return paid_cost / paid_tokens if paid_tokens > 0 else 0.0
 
 
@@ -50,7 +50,7 @@ def _read_per_token(message: dict, price_source) -> float:
     cost = usage.get("cost") or {}
     cache_read = _usage_field(usage, "cache_read")
     if cache_read > 0:
-        return float(cost.get("cacheRead") or 0) / cache_read
+        return float(cost.get("cache_read") or 0) / cache_read
     model = None
     if price_source is not None and hasattr(price_source, "get_model"):
         try:

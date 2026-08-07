@@ -37,7 +37,8 @@ def _model(cost: ModelCost) -> Model:
 def test_basic_rates():
     model = _model(ModelCost(input=0.14, output=0.28, cache_read=0.0028, cache_write=0.0))
     usage = _usage(input=1_000_000, output=500_000, cache_read=100_000)
-    cost = calculate_cost(model, usage)
+    calculate_cost(model, usage)
+    cost = usage["cost"]
     assert cost["input"] == pytest.approx(0.14)
     assert cost["output"] == pytest.approx(0.14)
     assert cost["cache_read"] == pytest.approx(0.00028)
@@ -70,21 +71,26 @@ def test_tier_selection_uses_highest_matching_threshold():
         )
     )
     base_rate = 0.1 / 1_000_000
-    assert calculate_cost(model, _usage(input=500))["input"] == pytest.approx(base_rate * 500)
+    u500 = _usage(input=500)
+    calculate_cost(model, u500)
+    assert u500["cost"]["input"] == pytest.approx(base_rate * 500)
     # TS 边界：inputTokens > inputTokensAbove 才命中，1000 不命中第一档。
-    assert calculate_cost(model, _usage(input=1_000))["input"] == pytest.approx(base_rate * 1_000)
-    assert calculate_cost(model, _usage(input=5_000))["input"] == pytest.approx(
-        0.05 / 1_000_000 * 5_000
-    )
-    assert calculate_cost(model, _usage(input=20_000))["input"] == pytest.approx(
-        0.02 / 1_000_000 * 20_000
-    )
+    u1000 = _usage(input=1_000)
+    calculate_cost(model, u1000)
+    assert u1000["cost"]["input"] == pytest.approx(base_rate * 1_000)
+    u5000 = _usage(input=5_000)
+    calculate_cost(model, u5000)
+    assert u5000["cost"]["input"] == pytest.approx(0.05 / 1_000_000 * 5_000)
+    u20000 = _usage(input=20_000)
+    calculate_cost(model, u20000)
+    assert u20000["cost"]["input"] == pytest.approx(0.02 / 1_000_000 * 20_000)
 
 
 def test_cache_write_1h_charged_at_double_input_rate():
     model = _model(ModelCost(input=1.0, output=0.0, cache_read=0.0, cache_write=0.1))
     usage = _usage(cache_write=1_000, cache_write_1h=1_000)
-    cost = calculate_cost(model, usage)
+    calculate_cost(model, usage)
+    cost = usage["cost"]
     assert cost["cache_write"] == pytest.approx(2.0 * 1_000 / 1_000_000)
     assert cost["total"] == pytest.approx(cost["cache_write"])
 
@@ -92,5 +98,6 @@ def test_cache_write_1h_charged_at_double_input_rate():
 def test_short_and_long_cache_write_split():
     model = _model(ModelCost(input=1.0, output=0.0, cache_read=0.0, cache_write=0.1))
     usage = _usage(cache_write=2_000, cache_write_1h=500)
-    cost = calculate_cost(model, usage)
+    calculate_cost(model, usage)
+    cost = usage["cost"]
     assert cost["cache_write"] == pytest.approx((0.1 * 1_500 + 1.0 * 2 * 500) / 1_000_000)
