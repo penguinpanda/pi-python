@@ -43,6 +43,8 @@ Provider 不需要关心 OpenAI SDK 的数据结构，
 统一消费 EventStream 即可。
 """
 
+from __future__ import annotations
+
 import asyncio
 from typing import Any, cast
 
@@ -84,6 +86,47 @@ from ..utils.prompt_cache import (
     clamp_openai_prompt_cache_key,
     resolve_cache_retention,
 )
+
+
+def _parse_chunk_usage(raw_usage: Any, model: Model) -> Usage:
+    """解析 OpenAI-compatible 流式 usage（对齐 TS parseChunkUsage）。
+
+    - cache_read 优先取 ``prompt_tokens_details.cached_tokens``；缺失时回退到
+      DeepSeek 返回的顶层 ``prompt_cache_hit_tokens``
+    - cache_write 取 ``prompt_tokens_details.cache_write_tokens``（OpenRouter）
+    - input = prompt_tokens - cache_read - cache_write，避免缓存命中 token
+      同时按输入价与缓存价双重计费
+    - total_tokens 重算为 input + output + cache_read + cache_write
+    """
+    prompt_tokens = int(getattr(raw_usage, "prompt_tokens", 0) or 0)
+    details = getattr(raw_usage, "prompt_tokens_details", None)
+    cached_tokens = getattr(details, "cached_tokens", None) if details is not None else None
+    cache_read = (
+        cached_tokens
+        if cached_tokens is not None
+        else int(getattr(raw_usage, "prompt_cache_hit_tokens", 0) or 0)
+    )
+    cache_write = int(getattr(details, "cache_write_tokens", 0) or 0) if details is not None else 0
+    input_tokens = max(0, prompt_tokens - cache_read - cache_write)
+    output_tokens = int(getattr(raw_usage, "completion_tokens", 0) or 0)
+    completion_details = getattr(raw_usage, "completion_tokens_details", None)
+    reasoning = (
+        int(getattr(completion_details, "reasoning_tokens", 0) or 0)
+        if completion_details is not None
+        else 0
+    )
+    usage = Usage(
+        input=input_tokens,
+        output=output_tokens,
+        cache_read=cache_read,
+        cache_write=cache_write,
+        total_tokens=input_tokens + output_tokens + cache_read + cache_write,
+        cost={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0},
+    )
+    if reasoning:
+        usage["reasoning"] = reasoning
+    calculate_cost(model, usage)
+    return usage
 
 
 def _create_client(
@@ -369,29 +412,7 @@ async def chat_completions_stream(
                 # 流式收尾 chunk 可能只带 usage、没有 choices（如 DashScope
                 # 兼容模式），必须在 choices 检查之前处理，否则 usage 会丢失。
                 if chunk.usage:
-                    cached_tokens = (
-                        getattr(
-                            getattr(chunk.usage, "prompt_tokens_details", None),
-                            "cached_tokens",
-                            0,
-                        )
-                        or 0
-                    )
-                    usage = Usage(
-                        input=chunk.usage.prompt_tokens or 0,
-                        output=chunk.usage.completion_tokens or 0,
-                        cache_read=cached_tokens,
-                        cache_write=0,
-                        total_tokens=chunk.usage.total_tokens or 0,
-                        cost={
-                            "input": 0,
-                            "output": 0,
-                            "cache_read": 0,
-                            "cache_write": 0,
-                            "total": 0,
-                        },
-                    )
-                    calculate_cost(model, usage)
+                    usage = _parse_chunk_usage(chunk.usage, model)
 
                 if not chunk.choices:
                     continue

@@ -137,6 +137,83 @@ async def test_transform_system_prompt_and_output_fn():
 
 
 @pytest.mark.asyncio
+async def test_thinking_level_flows_to_agent():
+    """thinking_level 选项透传到 Agent 状态（默认 off，可设 max）。"""
+    runtime = _faux_runtime()
+
+    def output(args):
+        return {
+            "level": args["session"].thinking_level,
+            "agent_level": args["session"]._agent.state.thinking_level,
+        }
+
+    harness = create_pi_coding_agent_harness(
+        model={"provider": "faux", "id": "faux-1"},
+        runtime=runtime,
+        no_tools=True,
+        thinking_level="max",
+        output=output,
+    )
+    result = await harness.run("hi", HarnessContext())
+    assert result.output == {"level": "max", "agent_level": "max"}
+    assert result.errors == []
+
+
+@pytest.mark.asyncio
+async def test_thinking_level_defaults_to_off(monkeypatch):
+    """未指定 thinking_level 且无 PI_REASONING_LEVEL 时保持 off（与 Agent 默认一致）。"""
+    monkeypatch.delenv("PI_REASONING_LEVEL", raising=False)
+    runtime = _faux_runtime()
+
+    def output(args):
+        return args["session"].thinking_level
+
+    harness = create_pi_coding_agent_harness(
+        model={"provider": "faux", "id": "faux-1"},
+        runtime=runtime,
+        no_tools=True,
+        output=output,
+    )
+    result = await harness.run("hi", HarnessContext())
+    assert result.output == "off"
+    assert result.errors == []
+
+
+@pytest.mark.asyncio
+async def test_thinking_level_env_fallback(monkeypatch):
+    """未显式指定时回退 PI_REASONING_LEVEL 环境变量。"""
+    monkeypatch.setenv("PI_REASONING_LEVEL", "high")
+    runtime = _faux_runtime()
+
+    def output(args):
+        return args["session"].thinking_level
+
+    harness = create_pi_coding_agent_harness(
+        model={"provider": "faux", "id": "faux-1"},
+        runtime=runtime,
+        no_tools=True,
+        output=output,
+    )
+    result = await harness.run("hi", HarnessContext())
+    assert result.output == "high"
+    assert result.errors == []
+
+
+@pytest.mark.asyncio
+async def test_thinking_level_invalid_value_raises(monkeypatch):
+    """非法 thinking level 值（显式或环境变量）直接报错。"""
+    monkeypatch.setenv("PI_REASONING_LEVEL", "turbo")
+    runtime = _faux_runtime()
+    harness = create_pi_coding_agent_harness(
+        model={"provider": "faux", "id": "faux-1"},
+        runtime=runtime,
+        no_tools=True,
+    )
+    with pytest.raises(ValueError, match="Invalid thinking level"):
+        await harness.run("hi", HarnessContext())
+
+
+@pytest.mark.asyncio
 async def test_transform_system_prompt_must_not_be_empty():
     runtime = _faux_runtime()
     harness = create_pi_coding_agent_harness(

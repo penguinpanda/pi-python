@@ -54,6 +54,30 @@ uv run pi-evals --artifact-dir out-evals src/pi_evals/extensions_eval.py
 uv run pi-evals --repetitions 3 --provider deepseek --model deepseek-v4-flash
 ```
 
+### 推理强度（max）
+
+用最大推理强度跑 eval：harness 选项 `thinking_level`（对齐 TS
+`createPiCodingAgentHarness` 的 `thinkingLevel`），或等价环境变量
+`PI_REASONING_LEVEL`（与 `pi_coding_agent` 的扩展环境变量同名）。显式选项
+优先于环境变量，两者都未设置时默认 `off`。
+
+```bash
+# CLI：环境变量方式开 max
+PI_REASONING_LEVEL=max uv run pi-evals --provider deepseek --model deepseek-v4-flash
+
+# 等价编程式（harness 选项）
+harness = create_pi_coding_agent_harness(
+    model={"provider": "deepseek", "id": "deepseek-v4-flash"},
+    thinking_level="max",
+)
+```
+
+合法级别：`off` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max`；
+非法值直接报 `ValueError`。注意实际生效级别会被模型支持范围 clamp——
+`max`/`xhigh` 必须模型显式映射（`thinking_level_map` 非 null）才可用，
+模型不支持时自动降到最高支持级别，`reasoning` 为 `false` 的模型则保持
+`off`。
+
 产物写在 `src/pi_evals/.eval/<timestamp>_<uuid>/`（可用
 `--artifact-dir` 或 `PI_EVAL_ARTIFACT_DIR` 覆盖）：`runs.jsonl` 索引每次
 harness run，`sessions/<sha256(runId)>/session.jsonl` 为会话快照，

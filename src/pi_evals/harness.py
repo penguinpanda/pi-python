@@ -18,9 +18,9 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeAlias, cast
+from typing import Any, TypeAlias, cast, get_args
 
-from pi_agent import Agent, AgentOptions
+from pi_agent import Agent, AgentOptions, ThinkingLevel
 from pi_ai import create_default_models
 from pi_ai.models.models_store import FileModelsStore
 from pi_ai.types.model import Model
@@ -52,6 +52,10 @@ class PiCodingAgentHarnessOptions:
 
     name: str = "pi-coding-agent"
     model: dict[str, str] | None = None
+    # 推理强度（对齐 TS createPiCodingAgentHarness 的 thinkingLevel）。
+    # None = 回退 PI_REASONING_LEVEL 环境变量，再默认 off；
+    # 实际生效级别会被模型支持范围 clamp（见 AgentSession.set_thinking_level）。
+    thinking_level: ThinkingLevel | None = None
     no_tools: bool | str = (
         False  # False / True / "all"（对齐 TS CreateAgentSessionOptions["noTools"]）
     )
@@ -272,6 +276,12 @@ async def run_pi_coding_agent(
     """运行 pi-coding-agent eval（对齐 TS runPiCodingAgent）。"""
     started = time.perf_counter()
     selection = resolve_model_selection(options.model)
+    thinking_level = options.thinking_level or os.environ.get("PI_REASONING_LEVEL") or "off"
+    if thinking_level not in get_args(ThinkingLevel):
+        raise ValueError(
+            f"Invalid thinking level {thinking_level!r}; "
+            f"expected one of {', '.join(get_args(ThinkingLevel))}."
+        )
     runtime = await _make_runtime(options)
     model = runtime.get_model(selection["provider"], selection["id"])
     if model is None:
@@ -352,6 +362,7 @@ async def run_pi_coding_agent(
             AgentOptions(
                 system_prompt=override_prompt or default_prompt,
                 model=model,
+                thinking_level=cast(ThinkingLevel, thinking_level),
                 stream_fn=runtime.stream,
                 session_id=session_manager.session_id,
             )
@@ -442,6 +453,7 @@ def create_pi_coding_agent_harness(
     *,
     name: str = "pi-coding-agent",
     model: dict[str, str] | None = None,
+    thinking_level: ThinkingLevel | None = None,
     no_tools: bool | str = False,
     transform_system_prompt: Callable[[str], str] | None = None,
     output: PiCodingAgentOutputFn | None = None,
@@ -453,6 +465,7 @@ def create_pi_coding_agent_harness(
     options = PiCodingAgentHarnessOptions(
         name=name,
         model=model,
+        thinking_level=thinking_level,
         no_tools=no_tools,
         transform_system_prompt=transform_system_prompt,
         output=output,

@@ -2,6 +2,8 @@
 Unit tests for completions.py — Chat Completions API helpers.
 """
 
+from __future__ import annotations
+
 import pytest
 from pi_ai.api.completions import _map_stop_reason
 
@@ -46,6 +48,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 
+from pi_ai import ModelCost
 from pi_ai._types import Context, Model, Tool
 from pi_ai.api.completions import _create_client, chat_completions_stream
 
@@ -218,7 +221,8 @@ class TestCompletionsStream:
 
         events, _ = await _collect_events(model, context, client)
         msg = events[-1]["message"]
-        assert msg["usage"]["input"] == 100
+        # 缓存命中 token 从 input 中扣除，避免双重计费。
+        assert msg["usage"]["input"] == 95
         assert msg["usage"]["output"] == 20
         assert msg["usage"]["total_tokens"] == 120
         assert msg["usage"]["cache_read"] == 5
@@ -391,13 +395,91 @@ class TestCompletionsStream:
         events, stream = await _collect_events(model, context, client)
         msg = await stream.result()
         assert msg["usage"] == {
-            "input": 10,
+            "input": 7,
             "output": 5,
             "cache_read": 3,
             "cache_write": 0,
             "total_tokens": 15,
             "cost": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0},
         }
+
+    @pytest.mark.asyncio
+    async def test_deepseek_prompt_cache_hit_tokens_usage(self):
+        """DeepSeek 顶层 prompt_cache_hit_tokens 计入 cache_read 且计费正确。"""
+        model = _make_model()
+        model.cost = ModelCost(input=0.14, output=0.28, cache_read=0.0028, cache_write=0.0)
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        usage = SimpleNamespace(
+            prompt_tokens=1000,
+            completion_tokens=100,
+            total_tokens=1100,
+            prompt_cache_hit_tokens=800,
+            prompt_cache_miss_tokens=150,
+        )
+        chunks = [_chunk(content="Hi", finish_reason="stop", usage=usage)]
+        client = _mock_client(chunks)
+
+        events, stream = await _collect_events(model, context, client)
+        msg = await stream.result()
+        parsed = msg["usage"]
+        # input 按 prompt_tokens - hit 计算（对齐 TS，不依赖 miss 字段）。
+        assert parsed["input"] == 200
+        assert parsed["output"] == 100
+        assert parsed["cache_read"] == 800
+        assert parsed["cache_write"] == 0
+        assert parsed["total_tokens"] == 1100
+        cost = parsed["cost"]
+        assert cost["input"] == pytest.approx(200 * 0.14 / 1_000_000)
+        assert cost["cache_read"] == pytest.approx(800 * 0.0028 / 1_000_000)
+        assert cost["output"] == pytest.approx(100 * 0.28 / 1_000_000)
+        assert cost["total"] == pytest.approx(cost["input"] + cost["cache_read"] + cost["output"])
+
+    @pytest.mark.asyncio
+    async def test_cache_write_tokens_split_from_reads(self):
+        """cache_write_tokens 单独计数，不混入 cache_read（对齐 TS）。"""
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        usage = SimpleNamespace(
+            prompt_tokens=100,
+            completion_tokens=5,
+            total_tokens=105,
+            prompt_tokens_details=SimpleNamespace(cached_tokens=50, cache_write_tokens=30),
+            completion_tokens_details=SimpleNamespace(reasoning_tokens=2),
+        )
+        chunks = [_chunk(content="Hi", finish_reason="stop", usage=usage)]
+        client = _mock_client(chunks)
+
+        events, stream = await _collect_events(model, context, client)
+        msg = await stream.result()
+        assert msg["usage"] == {
+            "input": 20,
+            "output": 5,
+            "cache_read": 50,
+            "cache_write": 30,
+            "total_tokens": 105,
+            "reasoning": 2,
+            "cost": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0},
+        }
+
+    @pytest.mark.asyncio
+    async def test_cached_tokens_zero_takes_precedence_over_hit_tokens(self):
+        """prompt_tokens_details.cached_tokens 存在（含 0）时优先于 DeepSeek 字段。"""
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        usage = SimpleNamespace(
+            prompt_tokens=10,
+            completion_tokens=5,
+            total_tokens=15,
+            prompt_tokens_details=SimpleNamespace(cached_tokens=0),
+            prompt_cache_hit_tokens=8,
+        )
+        chunks = [_chunk(content="Hi", finish_reason="stop", usage=usage)]
+        client = _mock_client(chunks)
+
+        events, stream = await _collect_events(model, context, client)
+        msg = await stream.result()
+        assert msg["usage"]["input"] == 10
+        assert msg["usage"]["cache_read"] == 0
 
     @pytest.mark.asyncio
     async def test_request_kwargs(self):

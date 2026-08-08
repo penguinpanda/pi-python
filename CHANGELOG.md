@@ -24,6 +24,9 @@
   （隔离工作区 / transform / output / session 快照）、vitest-evals 等价物
   （judge / harness table / artifacts / summary）、`pi-evals` CLI runner，
   附 smoke / extensions evals（默认 faux provider）
+- `pi-evals` harness 新增 `thinking_level` 选项（对齐 TS `thinkingLevel`，
+  显式值 > `PI_REASONING_LEVEL` 环境变量 > 默认 `off`），支持 `max` 等推理
+  强度；非法值报错，实际级别按模型支持范围 clamp
 - TUI tool-execution, skill-invocation, compaction/branch-summary message entries
 - TUI thinking/oauth/scoped-models selectors and extension selector (`/thinking`, `/oauth`, `/extensions`)
 - 内置 TUI 引擎 `src/pi_tui/engine/`：单元格渲染与行差分、终端输入解析
