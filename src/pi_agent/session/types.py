@@ -158,6 +158,7 @@ class SessionStats(TypedDict):
     uncachedTokens: int
     totalTokens: int
     costTotal: float
+    hitRate: NotRequired[float | None]  # cached / (cached + uncached)；分母为 0 时为 None
 
 
 class SessionMetadata(TypedDict):

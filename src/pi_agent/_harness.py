@@ -37,6 +37,7 @@ from .compaction import (
     compact as run_compaction,
     prepare_compaction,
 )
+from .compaction_utils import apply_cache_first_truncation, estimate_cache_state
 from .session.memory import InMemorySessionStorage
 from .session.session import Session
 from ._harness_types import (
@@ -520,6 +521,12 @@ class AgentHarness:
         self._assert_not_shut_down()
         context = await self._session.build_context()
         messages = list(context["messages"])
+        if self._compaction_settings.cache_first and estimate_cache_state(messages) != "cold":
+            messages = apply_cache_first_truncation(
+                messages,
+                context_window=self._model.context_window if self._model is not None else 0,
+                reserve_tokens=self._compaction_settings.reserve_tokens,
+            )
         resources = self._get_resources()
         tool_context = await self._resolve_tool_context()
         tools = list(self._tools.values())

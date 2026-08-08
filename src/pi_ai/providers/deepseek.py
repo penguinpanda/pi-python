@@ -135,6 +135,7 @@ DEEPSEEK_MODELS: list[Model] = [
         compat={
             "thinkingFormat": "deepseek",
             "requiresReasoningContentOnAssistantMessages": True,
+            "supportsLongCacheRetention": False,
             "supportsReasoningEffort": True,
         },
         # 价格（每百万 Token）。
@@ -160,6 +161,7 @@ DEEPSEEK_MODELS: list[Model] = [
         compat={
             "thinkingFormat": "deepseek",
             "requiresReasoningContentOnAssistantMessages": True,
+            "supportsLongCacheRetention": False,
             "supportsReasoningEffort": True,
         },
         cost=ModelCost(input=0.435, output=0.87, cache_read=0.003625, cache_write=0.0),

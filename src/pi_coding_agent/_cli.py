@@ -31,7 +31,7 @@ from .modes.interactive import run_tui_mode
 from ._session import AgentSession
 from ._session_manager import SessionManager
 from .auth_storage import AuthStorage
-from .compaction import compaction_settings_from_config
+from .compaction import compaction_settings_from_config, resolve_compaction_cache_first
 from .model_resolver import (
     ScopedModel,
     find_initial_model,
@@ -296,6 +296,8 @@ async def _async_main(args: list[str] | None = None) -> int:
                 session_id=sm.session_id,
             )
         )
+        compaction_settings = compaction_settings_from_config(settings)
+        compaction_settings.cache_first = resolve_compaction_cache_first(settings, session_model)
         session = AgentSession(
             agent=agent,
             session_manager=sm,
@@ -307,9 +309,10 @@ async def _async_main(args: list[str] | None = None) -> int:
             template_loader=template_loader,
             extension_runner=extension_runner,
             tools_override=tools_override,
-            compaction_settings=compaction_settings_from_config(settings),
+            compaction_settings=compaction_settings,
             system_prompt_builder=system_prompt_builder,
             restrict_untrusted_tools=bool(settings.get("restrictUntrustedTools")),
+            show_cache_miss_notices=lambda: bool(settings.get("showCacheMissNotices")),
         )
         session.extension_state = extension_state
         session.project_trusted = project_trusted

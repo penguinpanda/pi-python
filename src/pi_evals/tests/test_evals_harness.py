@@ -13,6 +13,7 @@ from pi_ai.providers.faux import (
     faux_tool_call,
 )
 from pi_coding_agent.auth_storage import AuthStorage
+from pi_coding_agent.compaction import CompactionSettings
 from pi_coding_agent.model_runtime import ModelRuntime
 
 from pi_evals.harness import (
@@ -337,3 +338,53 @@ async def test_extension_reload_end_to_end():
     assert tool_results
     assert tool_results[-1]["content"] == "Hello, Bob!"
     assert result.usage["toolCalls"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_cache_first_options_applied_to_session():
+    runtime = _faux_runtime()
+    sessions = []
+
+    def output(args):
+        sessions.append(args["session"])
+        return {"response": args["response"]}
+
+    harness = create_pi_coding_agent_harness(
+        model={"provider": "faux", "id": "faux-1"},
+        runtime=runtime,
+        no_tools=True,
+        cache_first=True,
+        show_cache_miss_notices=True,
+        output=output,
+    )
+    result = await harness.run("hi", HarnessContext())
+    assert result.errors == []
+    assert sessions
+    session = sessions[0]
+    assert session._compaction_settings.cache_first is True
+    assert session._show_cache_miss_notices() is True
+    stats = session.get_session_stats()
+    assert "hitRate" in stats
+    assert "hitTokens" in stats["cacheStats"]
+
+
+@pytest.mark.asyncio
+async def test_cache_first_explicit_option_overrides_compaction_settings():
+    runtime = _faux_runtime()
+    sessions = []
+
+    def output(args):
+        sessions.append(args["session"])
+        return {"response": args["response"]}
+
+    harness = create_pi_coding_agent_harness(
+        model={"provider": "faux", "id": "faux-1"},
+        runtime=runtime,
+        no_tools=True,
+        compaction_settings=CompactionSettings(cache_first=True),
+        cache_first=False,
+        output=output,
+    )
+    result = await harness.run("hi", HarnessContext())
+    assert result.errors == []
+    assert sessions[0]._compaction_settings.cache_first is False

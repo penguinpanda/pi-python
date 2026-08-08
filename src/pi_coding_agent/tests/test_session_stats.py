@@ -13,7 +13,7 @@ from pi_coding_agent.auth_storage import AuthStorage
 from pi_coding_agent.model_runtime import ModelRuntime
 
 
-def _make_session(tmp_path, responses=None):
+def _make_session(tmp_path, responses=None, **kwargs):
     store = AuthStorage.in_memory()
     models = Models(credentials=store)
     core = faux_provider()
@@ -36,6 +36,7 @@ def _make_session(tmp_path, responses=None):
         cwd=str(tmp_path),
         model=model,
         model_runtime=runtime,
+        **kwargs,
     )
 
 
@@ -56,6 +57,8 @@ async def test_turn_timings_recorded(tmp_path):
         "missedTokens": 0,
         "missedCost": 0.0,
         "missCount": 0,
+        "hitTokens": 0,
+        "hitRate": None,
     }
 
     await session.prompt("hi")
@@ -86,6 +89,9 @@ def test_cache_stats_from_messages(tmp_path):
     stats = session.get_session_stats()
     assert stats["cacheStats"]["missCount"] == 1
     assert stats["cacheStats"]["missedTokens"] == 20000
+    assert stats["hitRate"] == pytest.approx(10000 / 60000)
+    assert stats["cacheStats"]["hitTokens"] == 10000
+    assert stats["cacheStats"]["hitRate"] == pytest.approx(10000 / 60000)
 
 
 def test_cost_aggregated_from_usage(tmp_path):
@@ -136,3 +142,58 @@ def test_cost_aggregated_from_usage(tmp_path):
     stats = session.get_session_stats()
     assert stats["cost"] == pytest.approx(0.29)
     assert stats["tokens"]["input"] == 1_000_010
+
+
+def test_cache_miss_notice_emitted_when_enabled(tmp_path):
+    session = _make_session(tmp_path, show_cache_miss_notices=lambda: True)
+    events: list[dict] = []
+    session.subscribe(events.append)
+    session._agent.state.messages = [
+        {
+            "role": "assistant",
+            "provider": "faux",
+            "model": "faux-1",
+            "content": [],
+            "usage": {"input": 30000, "cache_read": 0, "cache_write": 0},
+        },
+        {
+            "role": "assistant",
+            "provider": "faux",
+            "model": "faux-1",
+            "content": [],
+            "usage": {"input": 20000, "cache_read": 0, "cache_write": 0},
+        },
+    ]
+    session._maybe_emit_cache_miss_notice()
+    assert any(event.get("type") == "cache_miss_notice" for event in events)
+    notice = next(event for event in events if event.get("type") == "cache_miss_notice")
+    assert notice.get("reasons") == []
+
+
+def test_cache_miss_notice_suppressed_when_disabled(tmp_path):
+    session = _make_session(tmp_path)
+    events: list[dict] = []
+    session.subscribe(events.append)
+    session._agent.state.messages = [
+        {
+            "role": "assistant",
+            "provider": "faux",
+            "model": "faux-1",
+            "content": [],
+            "usage": {"input": 30000, "cache_read": 0, "cache_write": 0},
+        },
+        {
+            "role": "assistant",
+            "provider": "faux",
+            "model": "faux-1",
+            "content": [],
+            "usage": {"input": 20000, "cache_read": 0, "cache_write": 0},
+        },
+    ]
+    session._maybe_emit_cache_miss_notice()
+    assert not any(event.get("type") == "cache_miss_notice" for event in events)
+
+
+def test_hit_rate_none_when_no_tokens(tmp_path):
+    session = _make_session(tmp_path)
+    assert session.get_session_stats()["hitRate"] is None

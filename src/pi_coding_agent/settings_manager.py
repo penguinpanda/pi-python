@@ -468,6 +468,7 @@ class SettingsManager:
             "enabled": compaction.get("enabled", True),
             "reserveTokens": compaction.get("reserveTokens", 16384),
             "keepRecentTokens": compaction.get("keepRecentTokens", 20000),
+            "cacheFirst": compaction.get("cacheFirst", False),
         }
 
     def get_compaction_enabled(self) -> bool:

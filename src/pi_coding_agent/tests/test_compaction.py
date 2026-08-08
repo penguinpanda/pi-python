@@ -6,6 +6,7 @@ from __future__ import annotations
 import pytest
 from pi_agent import set_default_stream_fn
 from pi_ai import Models
+from pi_ai.types import Model
 from pi_ai.providers.faux import faux_assistant_message, faux_provider
 from pi_ai.utils.estimate import ContextUsageEstimate
 
@@ -26,6 +27,7 @@ from pi_coding_agent.compaction import (
     is_cut_point_message,
     is_turn_start_message,
     prepare_compaction,
+    resolve_compaction_cache_first,
     serialize_conversation,
     should_compact,
 )
@@ -34,6 +36,7 @@ from pi_coding_agent.compaction import (
 def test_compaction_settings_from_config_defaults():
     assert compaction_settings_from_config({}) == DEFAULT_COMPACTION_SETTINGS
     assert compaction_settings_from_config({"other": 1}) == DEFAULT_COMPACTION_SETTINGS
+    assert DEFAULT_COMPACTION_SETTINGS.cache_first is False
 
 
 def test_compaction_settings_from_config_parses():
@@ -42,12 +45,14 @@ def test_compaction_settings_from_config_parses():
             "enabled": False,
             "reserveTokens": 128000,
             "keepRecentTokens": 5000,
+            "cacheFirst": True,
         }
     }
     result = compaction_settings_from_config(settings)
     assert result.enabled is False
     assert result.reserve_tokens == 128000
     assert result.keep_recent_tokens == 5000
+    assert result.cache_first is True
 
 
 def test_compaction_settings_from_config_invalid_falls_back():
@@ -56,9 +61,12 @@ def test_compaction_settings_from_config_invalid_falls_back():
             "enabled": "yes",
             "reserveTokens": -1,
             "keepRecentTokens": 0,
+            "cacheFirst": "yes",
         }
     }
-    assert compaction_settings_from_config(settings) == DEFAULT_COMPACTION_SETTINGS
+    result = compaction_settings_from_config(settings)
+    assert result == DEFAULT_COMPACTION_SETTINGS
+    assert result.cache_first is False
 
 
 @pytest.fixture
@@ -112,6 +120,25 @@ def _entry(msg: dict, entry_id: str = "e1", parent: str | None = None) -> dict:
         "timestamp": "2026-01-01T00:00:00+00:00",
         "message": msg,
     }
+
+
+def test_combine_usage_merges_deepseek_raw_fields():
+    """两个 _combine_usage 实现对 DeepSeek 原始字段按相同规则合并。"""
+    from pi_agent.compaction import _combine_usage as agent_combine
+
+    from pi_coding_agent.compaction import _combine_usage as coding_combine
+
+    first = _usage(11)
+    first["prompt_cache_hit_tokens"] = 10
+    first["prompt_cache_miss_tokens"] = 1
+    second = _usage(7)
+    second["prompt_cache_hit_tokens"] = 5
+
+    for combine in (agent_combine, coding_combine):
+        result = combine(first, second)
+        assert result["prompt_cache_hit_tokens"] == 15
+        assert result["prompt_cache_miss_tokens"] == 1
+        assert result["input"] == 18
 
 
 # ============================================================================
@@ -703,3 +730,28 @@ class TestGenerateSummary:
         # usage 合并
         assert result.usage is not None
         assert result.usage.get("input", 0) >= 0
+
+
+def test_resolve_compaction_cache_first_explicit_wins():
+    deepseek = Model(
+        id="deepseek-v4-flash",
+        provider="deepseek",
+        api="openai-completions",
+        base_url="https://api.deepseek.com",
+    )
+    openai = Model(id="gpt-5", provider="openai", api="openai-responses")
+    assert resolve_compaction_cache_first({"compaction": {"cacheFirst": False}}, deepseek) is False
+    assert resolve_compaction_cache_first({"compaction": {"cacheFirst": True}}, openai) is True
+
+
+def test_resolve_compaction_cache_first_auto_for_deepseek():
+    deepseek = Model(
+        id="deepseek-v4-flash",
+        provider="deepseek",
+        api="openai-completions",
+        base_url="https://api.deepseek.com",
+    )
+    openai = Model(id="gpt-5", provider="openai", api="openai-responses")
+    assert resolve_compaction_cache_first({}, deepseek) is True
+    assert resolve_compaction_cache_first({}, openai) is False
+    assert resolve_compaction_cache_first({}, None) is False

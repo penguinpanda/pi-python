@@ -24,10 +24,13 @@ from pi_agent import Agent, AgentOptions, ThinkingLevel
 from pi_ai import create_default_models
 from pi_ai.models.models_store import FileModelsStore
 from pi_ai.types.model import Model
+from dataclasses import replace
+
 from pi_coding_agent._session import AgentSession
 from pi_coding_agent._session_manager import SessionManager
 from pi_coding_agent._config import get_agent_dir
 from pi_coding_agent.extensions import ExtensionLoader, ExtensionRunner
+from pi_coding_agent.compaction import DEFAULT_COMPACTION_SETTINGS, CompactionSettings
 from pi_coding_agent.model_runtime import ModelRuntime
 from pi_coding_agent.prompt_templates import PromptTemplateLoader
 from pi_coding_agent.skills import SkillLoader
@@ -67,6 +70,11 @@ class PiCodingAgentHarnessOptions:
     workspace_setup: Callable[[Path], None] | None = None
     # 测试注入：每次 reload 前调用（模拟模型写入扩展后再加载）。
     reload_setup: Callable[[Path], None] | None = None
+    # 缓存策略：显式 compaction_settings；cache_first 非 None 时覆盖其 cache_first。
+    compaction_settings: CompactionSettings | None = None
+    cache_first: bool | None = None
+    # 缓存未命中提示（showCacheMissNotices），None = 关闭。
+    show_cache_miss_notices: bool | None = None
 
 
 def resolve_model_selection(
@@ -367,6 +375,17 @@ async def run_pi_coding_agent(
                 session_id=session_manager.session_id,
             )
         )
+        compaction_settings = options.compaction_settings
+        if options.cache_first is not None:
+            compaction_settings = replace(
+                compaction_settings or DEFAULT_COMPACTION_SETTINGS,
+                cache_first=options.cache_first,
+            )
+        show_cache_miss_notices = (
+            None
+            if options.show_cache_miss_notices is None
+            else (lambda: bool(options.show_cache_miss_notices))
+        )
         session = AgentSession(
             agent=agent,
             session_manager=session_manager,
@@ -378,6 +397,8 @@ async def run_pi_coding_agent(
             extension_runner=extension_runner,
             tools_override=[] if (options.no_tools == "all" or options.no_tools is True) else None,
             system_prompt_builder=system_prompt_builder,
+            compaction_settings=compaction_settings,
+            show_cache_miss_notices=show_cache_miss_notices,
         )
         session.project_trusted = True
         session._pi_eval_extension_errors = [  # type: ignore[attr-defined]
@@ -460,6 +481,9 @@ def create_pi_coding_agent_harness(
     runtime: ModelRuntime | None = None,
     workspace_setup: Callable[[Path], None] | None = None,
     reload_setup: Callable[[Path], None] | None = None,
+    compaction_settings: CompactionSettings | None = None,
+    cache_first: bool | None = None,
+    show_cache_miss_notices: bool | None = None,
 ) -> Harness:
     """创建 pi-coding-agent harness（对齐 TS createPiCodingAgentHarness）。"""
     options = PiCodingAgentHarnessOptions(
@@ -472,6 +496,9 @@ def create_pi_coding_agent_harness(
         runtime=runtime,
         workspace_setup=workspace_setup,
         reload_setup=reload_setup,
+        compaction_settings=compaction_settings,
+        cache_first=cache_first,
+        show_cache_miss_notices=show_cache_miss_notices,
     )
 
     async def run(input: Any, context: HarnessContext) -> HarnessRun:

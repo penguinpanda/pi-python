@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-# Prompt-cache TTL：超过该空闲时长的缓存未命中值得提示。
-CACHE_TTL_MS = 5 * 60 * 1000
+from pi_agent.compaction_utils import CACHE_TTL_MS, estimate_cache_state
+
 # 低于该 token 数的单轮未命中视为断点粒度噪声，不计数。
 NOISE_FLOOR_TOKENS = 1024
 
@@ -103,4 +103,56 @@ def compute_cache_waste(messages: list[dict], price_source: Any = None) -> dict:
     return totals
 
 
-__all__ = ["CACHE_TTL_MS", "NOISE_FLOOR_TOKENS", "compute_cache_waste"]
+def detect_recent_cache_miss(messages: list[dict], price_source: Any = None) -> dict | None:
+    """检测最近两轮请求间是否存在值得提示的单次缓存未命中。
+
+    对齐 TS interactive-mode：missedTokens >= 20_000 或 missedCost >= 0.1 时
+    返回 miss 详情，否则返回 None。低于 NOISE_FLOOR_TOKENS 的未命中忽略。
+    """
+    requests: list[dict] = []
+    for message in messages:
+        if message.get("role") != "assistant":
+            continue
+        usage = message.get("usage") or {}
+        prompt_tokens = (
+            _usage_field(usage, "input")
+            + _usage_field(usage, "cache_read")
+            + _usage_field(usage, "cache_write")
+        )
+        if prompt_tokens > 0:
+            requests.append(message)
+    if len(requests) < 2:
+        return None
+
+    prev, last = requests[-2], requests[-1]
+    prev_usage = prev.get("usage") or {}
+    last_usage = last.get("usage") or {}
+    prev_prompt = (
+        _usage_field(prev_usage, "input")
+        + _usage_field(prev_usage, "cache_read")
+        + _usage_field(prev_usage, "cache_write")
+    )
+    last_prompt = (
+        _usage_field(last_usage, "input")
+        + _usage_field(last_usage, "cache_read")
+        + _usage_field(last_usage, "cache_write")
+    )
+    missed_tokens = min(prev_prompt, last_prompt) - _usage_field(last_usage, "cache_read")
+    if missed_tokens <= NOISE_FLOOR_TOKENS:
+        return None
+    missed_cost = missed_tokens * max(
+        0.0,
+        _paid_per_token(last_usage) - _read_per_token(last, price_source),
+    )
+    if missed_tokens >= 20_000 or missed_cost >= 0.1:
+        return {"missedTokens": missed_tokens, "missedCost": missed_cost, "missCount": 1}
+    return None
+
+
+__all__ = [
+    "CACHE_TTL_MS",
+    "NOISE_FLOOR_TOKENS",
+    "compute_cache_waste",
+    "detect_recent_cache_miss",
+    "estimate_cache_state",
+]

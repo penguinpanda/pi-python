@@ -50,6 +50,7 @@ class CompactionSettings:
     enabled: bool = True
     reserve_tokens: int = 16384
     keep_recent_tokens: int = 20000
+    cache_first: bool = False  # cache-first：优先截断低价值工具输出，保持前缀稳定
 
 
 DEFAULT_COMPACTION_SETTINGS = CompactionSettings()
@@ -297,6 +298,9 @@ def _combine_usage(first: Usage, second: Usage) -> Usage:
         result["cache_write_1h"] = _g(first, "cache_write_1h") + _g(second, "cache_write_1h")
     if first.get("reasoning") is not None or second.get("reasoning") is not None:
         result["reasoning"] = _g(first, "reasoning") + _g(second, "reasoning")
+    for raw_key in ("prompt_cache_hit_tokens", "prompt_cache_miss_tokens"):
+        if first.get(raw_key) is not None or second.get(raw_key) is not None:
+            result[raw_key] = _g(first, raw_key) + _g(second, raw_key)
     return result
 
 

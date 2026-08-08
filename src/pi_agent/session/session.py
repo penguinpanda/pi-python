@@ -346,12 +346,16 @@ def _get_session_stats(entries: list[SessionTreeEntry]) -> SessionStats:
             + int(usage["cacheWrite"])
         )
         cost_total += float(cost)
+    hit_rate: float | None = None
+    if cached_tokens + uncached_tokens > 0:
+        hit_rate = cached_tokens / (cached_tokens + uncached_tokens)
     return {
         "messageCount": message_count,
         "cachedTokens": cached_tokens,
         "uncachedTokens": uncached_tokens,
         "totalTokens": total_tokens,
         "costTotal": cost_total,
+        "hitRate": hit_rate,
     }
 
 

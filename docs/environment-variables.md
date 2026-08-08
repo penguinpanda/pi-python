@@ -6,7 +6,7 @@ TS 的环境变量分三类：进程配置、bash 工具会话注入、进程标
 
 | 变量 | 作用 | 实现位置 |
 | --- | --- | --- |
-| `PI_CACHE_RETENTION` | 设为 `long` 时对支持的 provider 使用长提示缓存，否则默认 `short` | `src/pi_ai/utils/prompt_cache.py`（`resolve_cache_retention`） |
+| `PI_CACHE_RETENTION` | 设为 `long` 时对支持的 provider 使用长提示缓存，否则默认 `short`；DeepSeek 不支持长缓存参数（`supportsLongCacheRetention=false`），其前缀缓存自动生效、无需 `prompt_cache_key` | `src/pi_ai/utils/prompt_cache.py`（`resolve_cache_retention`） |
 | `PI_PACKAGE_DIR` | 覆盖 pi 包根目录（Nix/Guix store 路径等）；默认向上找 `pyproject.toml` 所在目录 | `src/pi_coding_agent/_config.py`（`get_package_dir`） |
 | `PI_PROVIDER` / `PI_MODEL` | 仅 `pi_evals` harness 用于选择真实模型（默认 faux provider），不是 CLI 通用配置 | `src/pi_evals/harness.py` |
 | `PI_CODING_AGENT` | CLI 入口设置 `true`，子进程可据此识别自己在 pi 内 | `src/pi_coding_agent/_cli.py`（`main`） |

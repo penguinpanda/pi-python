@@ -89,6 +89,8 @@ def _extension_authoring_output(response: str, session: Any) -> dict[str, Any]:
 def create_extension_authoring_harness(
     name: str,
     transform_system_prompt: Any = None,
+    *,
+    cache_first: bool | None = None,
 ):
     """创建扩展编写 harness（对齐 TS createExtensionAuthoringHarness）。"""
 
@@ -99,6 +101,7 @@ def create_extension_authoring_harness(
         name=name,
         transform_system_prompt=transform_system_prompt,
         output=output,
+        cache_first=cache_first,
     )
 
 
@@ -164,10 +167,17 @@ extension_harness_table = eval_harness_table(
         "system-prompt-without-docs",
         exclude_guidelines_and_documentation,
     ),
-    candidate=create_extension_authoring_harness(
-        "default-system-prompt",
-        prepare_default_prompt_override,
-    ),
+    candidates=[
+        create_extension_authoring_harness(
+            "default-system-prompt",
+            prepare_default_prompt_override,
+        ),
+        create_extension_authoring_harness(
+            "default-system-prompt-cache-first",
+            prepare_default_prompt_override,
+            cache_first=True,
+        ),
+    ],
 )
 
 for _row in extension_harness_table:
@@ -201,6 +211,9 @@ for _row in extension_harness_table:
                 EXTENSION_CONTENT_TYPE,
                 extension_source,
             )
-        expects_full_prompt = ctx.case.harness.name == "default-system-prompt"
+        expects_full_prompt = ctx.case.harness.name in (
+            "default-system-prompt",
+            "default-system-prompt-cache-first",
+        )
         assert output.get("systemPromptHasGuidelines") is expects_full_prompt
         assert output.get("systemPromptHasPiDocs") is expects_full_prompt

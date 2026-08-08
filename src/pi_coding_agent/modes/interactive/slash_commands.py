@@ -312,6 +312,11 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
                 f"({cache_stats.get('missedTokens', 0)} tokens, "
                 f"${cache_stats.get('missedCost', 0):.6f})"
             )
+        hit_rate = stats.get("hitRate")
+        cache_stats = stats.get("cacheStats") or {}
+        hit_tokens = cache_stats.get("hitTokens", 0)
+        if hit_rate is not None:
+            lines.append(f"Cache hits: {hit_tokens} tokens ({hit_rate * 100:.1f}%)")
         return "\n".join(lines)
 
     async def _reload(context: SlashContext, _args: str) -> str:

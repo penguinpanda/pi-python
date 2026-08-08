@@ -14,7 +14,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
+from pi_ai import create_default_models
 from pi_ai._types import Context, Model
+from pi_ai.api.compat_runtime import supports_long_cache_retention
+from pi_ai.providers.deepseek import DEEPSEEK_MODELS
 from pi_ai.utils.prompt_cache import (
     OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH,
     clamp_openai_prompt_cache_key,
@@ -78,6 +81,18 @@ class TestResolveCacheRetention:
     def test_provider_env_precedes_os_environ(self, monkeypatch):
         monkeypatch.setenv("PI_CACHE_RETENTION", "long")
         assert resolve_cache_retention(None, {"PI_CACHE_RETENTION": "short"}) == "short"
+
+
+def test_deepseek_static_models_disable_long_cache_retention():
+    for model in DEEPSEEK_MODELS:
+        assert model.compat.get("supportsLongCacheRetention") is False
+
+
+def test_deepseek_runtime_models_disable_long_cache_retention():
+    models = create_default_models()
+    for model_id in ("deepseek-v4-flash", "deepseek-v4-pro"):
+        model = models.get_model("deepseek", model_id)
+        assert supports_long_cache_retention(model) is False
 
 
 # ============================================================================
@@ -221,6 +236,25 @@ class TestCompletionsPromptCache:
             base_url="https://api.openai.com/v1",
         )
         assert kwargs["prompt_cache_key"] == "s-123"
+
+
+class TestDeepSeekBuiltinPromptCache:
+    """内置 DeepSeek 模型不发 prompt_cache_key / prompt_cache_retention。"""
+
+    def _run(self, options=None):
+        models = create_default_models()
+        model = models.get_model("deepseek", "deepseek-v4-flash")
+        client = MagicMock()
+        client.chat.completions.create = AsyncMock(
+            return_value=_async_iter([_completions_chunk("Hi", "stop")])
+        )
+        asyncio.run(_collect_completions(model, client, options, "https://api.deepseek.com"))
+        return client.chat.completions.create.call_args.kwargs
+
+    def test_long_no_key_or_retention(self):
+        kwargs = self._run(options={"session_id": "s-123", "cache_retention": "long"})
+        assert "prompt_cache_key" not in kwargs
+        assert "prompt_cache_retention" not in kwargs
 
 
 # ============================================================================

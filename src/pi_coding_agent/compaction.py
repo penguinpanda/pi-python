@@ -36,6 +36,16 @@ from pi_ai.utils.retry import RetryPolicy, retry_assistant_call
 from ._types import SessionEntry
 
 
+def resolve_compaction_cache_first(settings: dict, model: Model | None) -> bool:
+    """解析 cacheFirst：显式配置优先；否则 DeepSeek 模型自动开启。"""
+    raw = settings.get("compaction") if isinstance(settings, dict) else None
+    if isinstance(raw, dict) and isinstance(raw.get("cacheFirst"), bool):
+        return raw["cacheFirst"]
+    if model is None:
+        return False
+    return model.provider == "deepseek" or "deepseek.com" in (model.base_url or "")
+
+
 def compaction_settings_from_config(settings: dict) -> CompactionSettings:
     """从 settings.json 的 `compaction` 节解析压缩配置（对齐 TS CompactionSettings）。
 
@@ -65,10 +75,15 @@ def compaction_settings_from_config(settings: dict) -> CompactionSettings:
     if not isinstance(keep, int) or keep <= 0:
         keep = base.keep_recent_tokens
 
+    cache_first = raw.get("cacheFirst", base.cache_first)
+    if not isinstance(cache_first, bool):
+        cache_first = base.cache_first
+
     return CompactionSettings(
         enabled=enabled,
         reserve_tokens=reserve,
         keep_recent_tokens=keep,
+        cache_first=cache_first,
     )
 
 
@@ -595,6 +610,9 @@ def _combine_usage(first: Usage, second: Usage) -> Usage:
         result["cache_write_1h"] = _g(first, "cache_write_1h") + _g(second, "cache_write_1h")
     if first.get("reasoning") is not None or second.get("reasoning") is not None:
         result["reasoning"] = _g(first, "reasoning") + _g(second, "reasoning")
+    for raw_key in ("prompt_cache_hit_tokens", "prompt_cache_miss_tokens"):
+        if first.get(raw_key) is not None or second.get(raw_key) is not None:
+            result[raw_key] = _g(first, raw_key) + _g(second, raw_key)
     return result
 
 
@@ -899,6 +917,7 @@ __all__ = [
     "truncate_for_summary",
     "serialize_conversation",
     "prepare_compaction",
+    "resolve_compaction_cache_first",
     "complete_summarization",
     "generate_summary_with_usage",
     "compact",

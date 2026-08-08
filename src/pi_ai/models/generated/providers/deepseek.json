@@ -23,7 +23,8 @@
       "supportsStore": false,
       "supportsDeveloperRole": false,
       "requiresReasoningContentOnAssistantMessages": true,
-      "thinkingFormat": "deepseek"
+      "thinkingFormat": "deepseek",
+      "supportsLongCacheRetention": false
     },
     "thinking_level_map": {
       "minimal": null,
@@ -58,7 +59,8 @@
       "supportsStore": false,
       "supportsDeveloperRole": false,
       "requiresReasoningContentOnAssistantMessages": true,
-      "thinkingFormat": "deepseek"
+      "thinkingFormat": "deepseek",
+      "supportsLongCacheRetention": false
     },
     "thinking_level_map": {
       "minimal": null,

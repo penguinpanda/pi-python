@@ -34,6 +34,7 @@ from pi_agent import (
     PythonExecutionEnv,
 )
 from pi_agent._agent import _default_convert_to_llm as _agent_default_convert_to_llm
+from pi_agent.compaction_utils import apply_cache_first_truncation
 from pi_agent.shell_output import execute_shell_with_capture
 from pi_ai import AssistantMessage, Model, Usage, UserMessage, now_ms
 from pi_ai.api._shared import empty_usage
@@ -72,7 +73,12 @@ from .compaction import (
     prepare_compaction,
     should_compact,
 )
-from .cache_stats import compute_cache_waste
+from .cache_stats import (
+    compute_cache_waste,
+    detect_recent_cache_miss,
+    estimate_cache_state,
+)
+from .cache_fingerprint import classify_context_change, compute_context_fingerprint
 from .tools import create_all_tools
 
 
@@ -129,6 +135,8 @@ class AgentSession:
         system_prompt_builder: Callable[[], str] | None = None,
         # 未信任项目时拦截高风险工具（bash/write/edit；默认关闭，对齐 TS 不限制工具）。
         restrict_untrusted_tools: bool = False,
+        # 缓存未命中提示开关（读取 settings.showCacheMissNotices）。
+        show_cache_miss_notices: Callable[[], bool] | None = None,
     ):
         self._agent = agent
         # 编码代理使用完整消息转换器（bashExecution/compactionSummary/custom 等
@@ -147,6 +155,9 @@ class AgentSession:
         self._extension_tool_names: set[str] = set()
         self._system_prompt_builder = system_prompt_builder
         self._restrict_untrusted_tools = restrict_untrusted_tools
+        self._show_cache_miss_notices = show_cache_miss_notices or (lambda: False)
+        self._last_context_fingerprint: dict[str, str] | None = None
+        self._last_cache_change_reasons: list[str] | None = None
         if extension_runner is not None:
             extension_runner.bind_session(self)
         self._listeners: list[Callable[[dict[Any, Any]], None]] = []
@@ -182,7 +193,7 @@ class AgentSession:
         self._apply_extension_tools()
 
         # 恢复已有会话消息历史（打开已有会话时）
-        existing_messages = self._session_manager.build_context()
+        existing_messages = self._build_context_messages()
         if existing_messages:
             self._agent.state.messages = existing_messages
 
@@ -349,6 +360,46 @@ class AgentSession:
                 for result in reversed(results):
                     if isinstance(result, dict) and isinstance(result.get("stream_options"), dict):
                         stream_options.update(result["stream_options"])
+
+            if (
+                self._compaction_settings.cache_first
+                and estimate_cache_state(context.messages or []) != "cold"
+            ):
+                context.messages = apply_cache_first_truncation(
+                    context.messages or [],
+                    context_window=self._model.context_window if self._model else 0,
+                    reserve_tokens=self._compaction_settings.reserve_tokens,
+                )
+
+            current_fp = compute_context_fingerprint(
+                getattr(context, "system_prompt", None),
+                getattr(context, "messages", None) or [],
+                getattr(context, "tools", None) or [],
+            )
+            reasons: list[str] = []
+            if self._last_context_fingerprint is not None:
+                reasons = classify_context_change(
+                    self._last_context_fingerprint,
+                    current_fp,
+                    getattr(context, "messages", None) or [],
+                )
+                changed = [
+                    key
+                    for key in ("system", "messages", "tools")
+                    if self._last_context_fingerprint.get(key) != current_fp.get(key)
+                ]
+                if changed and reasons != ["append"]:
+                    self._emit(
+                        {
+                            "type": "cache_context_changed",
+                            "changed": changed,
+                            "reasons": reasons,
+                            "previous": self._last_context_fingerprint,
+                            "current": current_fp,
+                        }
+                    )
+            self._last_context_fingerprint = current_fp
+            self._last_cache_change_reasons = reasons
 
             result = base(model, context, stream_options)
             if inspect.isawaitable(result):
@@ -548,6 +599,36 @@ class AgentSession:
     def set_auto_compaction_enabled(self, enabled: bool) -> None:
         self._compaction_settings.enabled = enabled
 
+    def _build_context_messages(self) -> list[AgentMessage]:
+        """构建上下文；cache_first 开启时对工具输出做稳定截断。"""
+        messages = self._session_manager.build_context()
+        if self._compaction_settings.cache_first and estimate_cache_state(messages) != "cold":
+            messages = apply_cache_first_truncation(
+                messages,
+                context_window=self._model.context_window if self._model else 0,
+                reserve_tokens=self._compaction_settings.reserve_tokens,
+            )
+        return messages
+
+    def _maybe_emit_cache_miss_notice(self) -> None:
+        """showCacheMissNotices 开启且最近一轮大 miss 时发 cache_miss_notice。"""
+        if not self._show_cache_miss_notices():
+            return
+        miss = detect_recent_cache_miss(
+            [cast(dict[Any, Any], message) for message in self._agent.state.messages],
+            self._model_runtime,
+        )
+        if miss is not None:
+            self._emit(
+                {
+                    "type": "cache_miss_notice",
+                    "missedTokens": miss["missedTokens"],
+                    "missedCost": miss["missedCost"],
+                    "missCount": miss["missCount"],
+                    "reasons": list(self._last_cache_change_reasons or []),
+                }
+            )
+
     def set_auto_retry_enabled(self, enabled: bool) -> None:
         current = self._turn_retry_policy
         if current is None:
@@ -713,6 +794,11 @@ class AgentSession:
             [cast(dict[Any, Any], message) for message in messages],
             self._model_runtime,
         )
+        hit_read = tokens.get("cache_read", 0)
+        hit_denom = hit_read + tokens.get("input", 0) + tokens.get("cache_write", 0)
+        hit_rate = hit_read / hit_denom if hit_denom > 0 else None
+        cache_stats["hitTokens"] = hit_read
+        cache_stats["hitRate"] = hit_rate
         return {
             "sessionFile": self.session_file,
             "sessionId": self.session_id,
@@ -731,6 +817,7 @@ class AgentSession:
                 "lastMs": int(self._turn_timings[-1]["durationMs"]) if turn_count else 0,
             },
             "cacheStats": cache_stats,
+            "hitRate": hit_rate,
         }
 
     async def compact(self, custom_instructions: str | None = None) -> CompactionResult | None:
@@ -784,7 +871,7 @@ class AgentSession:
                 result.tokens_before,
                 result.details,
             )
-            self._agent.state.messages = self._session_manager.build_context()
+            self._agent.state.messages = self._build_context_messages()
             self._emit_extension_event(
                 "session_compact",
                 {
@@ -930,7 +1017,7 @@ class AgentSession:
                 }
 
         await manager.move_to(entry_id, summary)
-        self._agent.state.messages = manager.build_context()
+        self._agent.state.messages = self._build_context_messages()
         self._emit_extension_event(
             "session_tree",
             {
@@ -1491,7 +1578,7 @@ class AgentSession:
             result.details,
         )
         # 重建 agent 上下文（compactionSummary + 保留的近期消息）。
-        self._agent.state.messages = self._session_manager.build_context()
+        self._agent.state.messages = self._build_context_messages()
         self._emit_extension_event(
             "session_compact",
             {
@@ -1792,6 +1879,8 @@ class AgentSession:
         # agent_end / agent_settled → 刷入延迟的 bashExecution 消息。
         if event_type in ("agent_end", "agent_settled"):
             self._flush_pending_bash_messages()
+        if event_type == "agent_settled":
+            self._maybe_emit_cache_miss_notice()
 
         # 转发给所有外部监听器
         for listener in self._listeners:

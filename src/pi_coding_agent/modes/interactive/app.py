@@ -396,6 +396,14 @@ class PiTuiApp(App):
                 self._update_pending_messages(event)
             elif event_type == "session_info_changed":
                 self._update_terminal_title()
+            elif event_type == "cache_miss_notice":
+                reasons = event.get("reasons") or []
+                suffix = f" ({', '.join(reasons)})" if reasons else ""
+                self._slash_notify(
+                    "Cache miss: "
+                    f"{event.get('missedTokens', 0)} tokens re-billed "
+                    f"(${float(event.get('missedCost', 0.0)):.4f}){suffix}"
+                )
             elif event_type == "agent_start":
                 self._follow_up_queue.clear()
                 self.terminal.set_progress(self._show_terminal_progress)

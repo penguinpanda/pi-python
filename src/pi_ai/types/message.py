@@ -88,6 +88,8 @@ class Usage(TypedDict):
     # 可选字段
     cache_write_1h: NotRequired[int]  # 仅 Anthropic 拆分；cache_write 的子集
     reasoning: NotRequired[int]  # 推理 token（output 的子集）
+    prompt_cache_hit_tokens: NotRequired[int]  # DeepSeek 顶层命中 token 原始值
+    prompt_cache_miss_tokens: NotRequired[int]  # DeepSeek 顶层未命中 token 原始值
 
 
 class DiagnosticErrorInfo(TypedDict, total=False):

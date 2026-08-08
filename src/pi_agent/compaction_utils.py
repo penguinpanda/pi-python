@@ -98,6 +98,89 @@ def truncate_for_summary(text: str, max_chars: int) -> str:
     return f"{text[:max_chars]}\n\n[... {truncated_chars} more characters truncated]"
 
 
+CACHE_FIRST_TRUNCATED_MARKER = "[output truncated]"
+
+# DeepSeek 上下文硬盘缓存 TTL（与 pi_coding_agent.cache_stats 同源，5 分钟）。
+CACHE_TTL_MS = 5 * 60 * 1000
+
+
+def _truncate_message(message: AgentMessage) -> AgentMessage | None:
+    """返回截断后的消息副本；无可截断内容返回 None。"""
+    role = message.get("role")
+    if role == "toolResult":
+        content = message.get("content")
+        if isinstance(content, str):
+            if len(content) <= TOOL_RESULT_MAX_CHARS:
+                return None
+            new_message = dict(message)
+            new_message["content"] = CACHE_FIRST_TRUNCATED_MARKER
+            return cast(AgentMessage, new_message)
+        if isinstance(content, list) and len(_content_text(content, "")) > TOOL_RESULT_MAX_CHARS:
+            new_message = dict(message)
+            new_message["content"] = [{"type": "text", "text": CACHE_FIRST_TRUNCATED_MARKER}]
+            return cast(AgentMessage, new_message)
+        return None
+    if role == "bashExecution" and len(str(message.get("output", ""))) > TOOL_RESULT_MAX_CHARS:
+        new_message = dict(message)
+        new_message["output"] = CACHE_FIRST_TRUNCATED_MARKER
+        return cast(AgentMessage, new_message)
+    return None
+
+
+def _truncate_all_large_tool_outputs(messages: list[AgentMessage]) -> list[AgentMessage]:
+    result: list[AgentMessage] = []
+    for message in messages:
+        truncated = _truncate_message(message)
+        result.append(truncated if truncated is not None else message)
+    return result
+
+
+def apply_cache_first_truncation(
+    messages: list[AgentMessage],
+    *,
+    context_window: int = 0,
+    reserve_tokens: int = 0,
+) -> list[AgentMessage]:
+    """把超长 toolResult / bashExecution 输出替换为固定截断标记（幂等）。
+
+    提供 context_window / reserve_tokens 时按预算从尾部向前截断：
+    未超阈值不动，超阈值时优先截断最新的大工具输出，降到阈值内即停；
+    无预算信息时保留旧行为（截断所有超长输出）。
+    """
+    if context_window <= 0 or reserve_tokens < 0:
+        return _truncate_all_large_tool_outputs(messages)
+    threshold = context_window - reserve_tokens
+    if threshold <= 0 or estimate_context_tokens(messages).tokens <= threshold:
+        return messages
+    result = list(messages)
+    for index in range(len(result) - 1, -1, -1):
+        truncated = _truncate_message(result[index])
+        if truncated is None:
+            continue
+        result[index] = truncated
+        if estimate_context_tokens(result).tokens <= threshold:
+            break
+    return result
+
+
+def estimate_cache_state(messages: list[AgentMessage], now_ms: int | None = None) -> str:
+    """按最后一条有 usage 的 assistant 消息时间估算 warm/cold/unknown。"""
+    import time
+
+    now = int(time.time() * 1000) if now_ms is None else now_ms
+    for message in reversed(messages):
+        if message.get("role") != "assistant":
+            continue
+        usage = message.get("usage")
+        if not isinstance(usage, dict) or not usage:
+            continue
+        timestamp = message.get("timestamp")
+        if not isinstance(timestamp, int):
+            return "unknown"
+        return "warm" if now - timestamp <= CACHE_TTL_MS else "cold"
+    return "unknown"
+
+
 def serialize_conversation(messages: list[AgentMessage]) -> str:
     """把 LLM 消息序列化为纯文本（防止模型继续对话）。"""
     parts: list[str] = []

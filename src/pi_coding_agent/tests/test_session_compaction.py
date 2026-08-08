@@ -429,3 +429,104 @@ class TestThresholdCompaction:
         # 只消耗了错误响应，无摘要、无压缩条目
         assert core.call_count == 1
         assert not any(e["type"] == "compaction" for e in mgr.get_entries())
+
+
+@pytest.mark.asyncio
+async def test_cache_first_build_context_truncates_large_tool_result(faux_env, tmp_path):
+    """cache_first 开启时 _build_context_messages 截断大工具输出。"""
+    models, _core = faux_env
+    mgr = SessionManager.in_memory(cwd=str(tmp_path))
+    await mgr.append_message({"role": "user", "content": "hi", "timestamp": 1})
+    await mgr.append_message(
+        {
+            "role": "toolResult",
+            "tool_call_id": "call-1",
+            "tool_name": "bash",
+            "content": [{"type": "text", "text": "x" * 5000}],
+            "is_error": False,
+            "timestamp": 2,
+        }
+    )
+    session = _make_session(
+        models,
+        mgr,
+        str(tmp_path),
+        compaction_settings=CompactionSettings(cache_first=True),
+    )
+    try:
+        messages = session._build_context_messages()
+    finally:
+        await session.dispose()
+    tool_result = messages[-1]
+    assert tool_result["role"] == "toolResult"
+    assert tool_result["content"][0]["text"] == "[output truncated]"
+    assert tool_result["tool_call_id"] == "call-1"
+
+
+@pytest.mark.asyncio
+async def test_cache_first_disabled_keeps_full_tool_result(faux_env, tmp_path):
+    """cache_first 关闭时上下文保留完整工具输出。"""
+    models, _core = faux_env
+    mgr = SessionManager.in_memory(cwd=str(tmp_path))
+    await mgr.append_message({"role": "user", "content": "hi", "timestamp": 1})
+    await mgr.append_message(
+        {
+            "role": "toolResult",
+            "tool_call_id": "call-1",
+            "tool_name": "bash",
+            "content": [{"type": "text", "text": "x" * 5000}],
+            "is_error": False,
+            "timestamp": 2,
+        }
+    )
+    session = _make_session(models, mgr, str(tmp_path))
+    try:
+        messages = session._build_context_messages()
+    finally:
+        await session.dispose()
+    assert messages[-1]["content"][0]["text"] == "x" * 5000
+
+
+@pytest.mark.asyncio
+async def test_cache_first_turn_prefix_stable_effect(faux_env, tmp_path):
+    """effect 级：cache_first 下第二轮请求的前缀与第一轮字节一致。"""
+    models, core = faux_env
+    core.set_responses([_asst("r1"), _asst("r2")])
+    mgr = SessionManager.in_memory(cwd=str(tmp_path))
+    await mgr.append_message({"role": "user", "content": "init", "timestamp": 1})
+    await mgr.append_message(
+        {
+            "role": "toolResult",
+            "tool_call_id": "call-1",
+            "tool_name": "bash",
+            "content": [{"type": "text", "text": "x" * 5000}],
+            "is_error": False,
+            "timestamp": 2,
+        }
+    )
+    model = _realistic_model(context_window=1000)
+    session = _make_session(
+        models,
+        mgr,
+        str(tmp_path),
+        model=model,
+        compaction_settings=CompactionSettings(cache_first=True, reserve_tokens=0),
+    )
+    seen: list[list[dict]] = []
+    original = models.stream
+
+    async def capturing(model, context, options=None):
+        seen.append(list(context.messages))
+        return await original(model, context, options)
+
+    session._agent.stream_function = capturing
+    try:
+        await session.prompt("first")
+        await session.prompt("second")
+    finally:
+        await session.dispose()
+    assert len(seen) == 2
+    assert seen[1][:-2] == seen[0]
+    tool_result = seen[0][1]
+    assert tool_result["role"] == "toolResult"
+    assert tool_result["content"][0]["text"] == "[output truncated]"

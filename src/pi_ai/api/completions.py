@@ -118,7 +118,11 @@ def _parse_chunk_usage(raw_usage: Any, model: Model) -> Usage:
         else int(getattr(raw_usage, "prompt_cache_hit_tokens", 0) or 0)
     )
     cache_write = int(getattr(details, "cache_write_tokens", 0) or 0) if details is not None else 0
-    input_tokens = max(0, prompt_tokens - cache_read - cache_write)
+    raw_miss_tokens = getattr(raw_usage, "prompt_cache_miss_tokens", None)
+    if raw_miss_tokens is not None:
+        input_tokens = int(raw_miss_tokens or 0)
+    else:
+        input_tokens = max(0, prompt_tokens - cache_read - cache_write)
     output_tokens = int(getattr(raw_usage, "completion_tokens", 0) or 0)
     completion_details = getattr(raw_usage, "completion_tokens_details", None)
     reasoning = (
@@ -136,6 +140,11 @@ def _parse_chunk_usage(raw_usage: Any, model: Model) -> Usage:
     )
     if reasoning:
         usage["reasoning"] = reasoning
+    raw_hit_tokens = getattr(raw_usage, "prompt_cache_hit_tokens", None)
+    if raw_hit_tokens is not None:
+        usage["prompt_cache_hit_tokens"] = int(raw_hit_tokens or 0)
+    if raw_miss_tokens is not None:
+        usage["prompt_cache_miss_tokens"] = int(raw_miss_tokens or 0)
     calculate_cost(model, usage)
     return usage
 

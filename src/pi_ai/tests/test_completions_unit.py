@@ -43,6 +43,7 @@ class TestMapStopReason:
 # ===========================================================================
 
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -437,7 +438,7 @@ class TestCompletionsStream:
 
     @pytest.mark.asyncio
     async def test_deepseek_prompt_cache_hit_tokens_usage(self):
-        """DeepSeek 顶层 prompt_cache_hit_tokens 计入 cache_read 且计费正确。"""
+        """DeepSeek hit/miss 顶层字段计入 cache_read/input 且计费正确。"""
         model = _make_model()
         model.cost = ModelCost(input=0.14, output=0.28, cache_read=0.0028, cache_write=0.0)
         context = Context(messages=[{"role": "user", "content": "Hi"}])
@@ -454,17 +455,41 @@ class TestCompletionsStream:
         events, stream = await _collect_events(model, context, client)
         msg = await stream.result()
         parsed = msg["usage"]
-        # input 按 prompt_tokens - hit 计算（对齐 TS，不依赖 miss 字段）。
-        assert parsed["input"] == 200
+        # 严格语义：存在 prompt_cache_miss_tokens 时直接作为 input。
+        assert parsed["input"] == 150
         assert parsed["output"] == 100
         assert parsed["cache_read"] == 800
         assert parsed["cache_write"] == 0
-        assert parsed["total_tokens"] == 1100
+        assert parsed["total_tokens"] == 1050
+        assert parsed["prompt_cache_hit_tokens"] == 800
+        assert parsed["prompt_cache_miss_tokens"] == 150
         cost = parsed["cost"]
-        assert cost["input"] == pytest.approx(200 * 0.14 / 1_000_000)
+        assert cost["input"] == pytest.approx(150 * 0.14 / 1_000_000)
         assert cost["cache_read"] == pytest.approx(800 * 0.0028 / 1_000_000)
         assert cost["output"] == pytest.approx(100 * 0.28 / 1_000_000)
         assert cost["total"] == pytest.approx(cost["input"] + cost["cache_read"] + cost["output"])
+
+    @pytest.mark.asyncio
+    async def test_deepseek_miss_missing_falls_back_to_prompt_tokens_minus_hit(self):
+        """无 prompt_cache_miss_tokens 时回退 prompt_tokens - hit - write。"""
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        usage = SimpleNamespace(
+            prompt_tokens=1000,
+            completion_tokens=10,
+            total_tokens=1010,
+            prompt_cache_hit_tokens=800,
+        )
+        chunks = [_chunk(content="Hi", finish_reason="stop", usage=usage)]
+        client = _mock_client(chunks)
+
+        events, stream = await _collect_events(model, context, client)
+        msg = await stream.result()
+        parsed = msg["usage"]
+        assert parsed["input"] == 200
+        assert parsed["cache_read"] == 800
+        assert parsed["prompt_cache_hit_tokens"] == 800
+        assert "prompt_cache_miss_tokens" not in parsed
 
     @pytest.mark.asyncio
     async def test_cache_write_tokens_split_from_reads(self):
@@ -735,3 +760,29 @@ class TestOpenaiMessagesReasoningContent:
         result = to_openai_messages(messages, model)  # type: ignore[arg-type]
         assert "reasoning_content" not in result[0]
         assert result[0]["content"] == "answer"
+
+
+def test_deepseek_reasoning_replay_deterministic():
+    """DeepSeek reasoning_content 回放两次序列化一致。"""
+    model = _make_deepseek_v4_model()
+    messages = [
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "thinking", "thinking": "reasoning text"},
+                {"type": "text", "text": "answer"},
+            ],
+        }
+    ]
+    first = json.dumps(
+        to_openai_messages(messages, model),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    second = json.dumps(
+        to_openai_messages(messages, model),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    assert first == second
+    assert '"reasoning_content":"reasoning text"' in first
