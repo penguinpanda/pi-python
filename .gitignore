@@ -11,6 +11,11 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
+# parity tests
+src/pi_agent/tests/parity/python_out/
+src/pi_agent/tests/parity/golden/
+
+
 # uv
 .venv/
 
