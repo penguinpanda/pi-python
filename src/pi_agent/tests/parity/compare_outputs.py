@@ -1,15 +1,15 @@
-"""一键比较：TS dump → Python dump → 逐字符比较。
+"""一键比较：Python dump → 与 golden 逐字符比较。
 
 运行（仓库根）:
 
     python src/pi_agent/tests/parity/compare_outputs.py
 
-流程：先运行 TS 侧 dump（dump-system-prompt.ts，刷新 golden/），再运行
-Python 侧 dump（dump_system_prompt.py，刷新 python_out/），最后逐字符比较
-两侧输出。修改提示词（TS 或 Python）后运行本脚本即可立刻看到差异；
-有差异时退出码为 1。
+流程：先运行 Python 侧 dump（dump_system_prompt.py，刷新 python_out/），
+再与已入库的 golden/ 逐字符比较。golden 需在 pi TS mono-repo 中生成后拷入
+（见 README.md）。修改 Python 提示词后运行本脚本即可立刻看到与 TS golden
+的差异；有差异时退出码为 1。
 
-PI_PACKAGE_DIR 固定为 C:/pi-pkg（可用环境变量覆盖）；两侧 dump 均使用
+PI_PACKAGE_DIR 固定为 C:/pi-pkg（可用环境变量覆盖）；dump 与测试均使用
 同一个值，保证 "Pi documentation" 段的路径一致。
 """
 
@@ -53,15 +53,12 @@ def _run_dump(cmd: list[str], label: str) -> None:
 
 
 def _compare() -> bool:
-    """比较 golden/（TS）与 python_out/（PY），返回是否全部一致。"""
-    if not GOLDEN_DIR.is_dir():
-        print("[warn] golden/ 不存在，跳过比较（先运行 TS dump）", file=sys.stderr)
-        return True
+    """比较 python_out/（PY）与 golden/（TS），返回是否全部一致。"""
     all_ok = True
-    for golden in sorted(GOLDEN_DIR.glob("*.txt")):
-        out = OUT_DIR / golden.name
-        if not out.exists():
-            print(f"[missing] {golden.name}: python_out 缺输出")
+    for out in sorted(OUT_DIR.glob("*.txt")):
+        golden = GOLDEN_DIR / out.name
+        if not golden.exists():
+            print(f"[missing] {out.name}: golden 缺失", file=sys.stderr)
             all_ok = False
             continue
         ts = golden.read_text(encoding="utf-8")
@@ -83,9 +80,6 @@ def _compare() -> bool:
 
 
 def main() -> None:
-    _run_dump(
-        ["node", "--experimental-strip-types", str(HERE / "dump-system-prompt.ts")], "TS dump"
-    )
     _run_dump([sys.executable, str(HERE / "dump_system_prompt.py")], "Python dump")
     if not _compare():
         raise SystemExit(1)

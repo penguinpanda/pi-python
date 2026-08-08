@@ -57,8 +57,8 @@ def get_prompts_dir(agent_dir: Path | None = None) -> Path:
 def get_themes_dir(agent_dir: Path | None = None) -> Path:
     """用户自定义主题目录: ~/.pi/agent/themes/
 
-    占位：路径约定已定义（对齐 TS getCustomThemesDir），当前 Python 主题
-    仍以内置 dark/light + ThemeLoader(theme_dir) 加载，尚未消费该目录。
+    对齐 TS getCustomThemesDir；由 resource_loader 消费（内置 dark/light
+    打底，目录内 *.json 主题按名加载）。
     """
     return (agent_dir or get_agent_dir()) / "themes"
 
@@ -115,7 +115,9 @@ def get_package_dir() -> Path:
     """
     env_dir = os.environ.get("PI_PACKAGE_DIR")
     if env_dir:
-        return Path(env_dir).resolve()
+        # 不做 resolve()：Windows 形式（如 C:/pi-pkg）在 POSIX 上会被当作
+        # 相对路径拼上 cwd，导致输出路径不一致（对齐 TS 直接使用环境变量值）。
+        return Path(env_dir)
     current = Path(__file__).resolve().parent
     while True:
         if (current / "pyproject.toml").is_file():
@@ -169,7 +171,7 @@ def _load_json(path: Path) -> dict:
 def load_settings(cwd: str | Path) -> dict:
     """双层合并加载配置: 项目覆盖全局。
 
-    最小核心关注的设置项:
+    关注的设置项:
         - defaultProvider / defaultModel
         - tools.exclude
         - sessionDir

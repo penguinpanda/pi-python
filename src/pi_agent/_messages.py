@@ -4,7 +4,7 @@
 `packages/coding-agent/src/core/messages.ts` 的 convertToLlm：
 
 - user / assistant / toolResult 直接透传
-- bashExecution 包装为 user 消息（excludeFromContext 时跳过，!! 前缀）
+- bashExecution 包装为 user 消息（excludeFromContext 时跳过）
 - compactionSummary / branchSummary 包装为 user 消息
 - custom 包装为 user 消息
 - 其余 role（含 system）过滤

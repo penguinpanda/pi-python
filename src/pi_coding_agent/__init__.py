@@ -1,5 +1,5 @@
 """
-pi-coding-agent  最小核心 CLI 编码代理
+pi-coding-agent  CLI 编码代理
 
 依赖 pi_agent + pi_ai，提供 print 模式的编码代理 CLI。
 

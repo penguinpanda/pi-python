@@ -22,7 +22,8 @@ complete_simple 自动按 model.api 分发。
     pi-messages        → api/pi_messages_lazy.py
 
 其中 completions / responses 的 streamSimple 暂复用 stream
-（simple-options 推理参数收敛尚未独立移植，见 api/simple_options.py）。
+（simple_options 仅移植了 max_tokens 上下文收敛 clamp_max_tokens_to_context，
+其余 base options 字段仍由各 API 文件内联构建，见 api/simple_options.py）。
 """
 
 import inspect

@@ -1,11 +1,11 @@
 """Compaction / branch-summarization 模板常量 parity 测试。
 
 断言 Python 侧运行时常量（pi_coding_agent.compaction / pi_agent.branch_summarization）
-与 TS 侧同名常量逐字符一致（golden/compaction_*.txt，由 dump-compaction-prompts.ts
-从 TS 源码原样提取生成）。
+与 TS 侧同名常量逐字符一致（golden/compaction_*.txt，在 pi TS mono-repo
+中从 TS 源码原样提取生成后拷入）。
 
-golden 缺失时测试跳过（不是失败）——需要先在装有 pi mono-repo 的机器上运行
-TS dump 脚本生成（见 README.md）。
+golden 缺失时测试跳过（不是失败）——需要先在装有 pi mono-repo 的机器上
+生成 golden 并拷入 golden/（见 README.md）。
 """
 
 from __future__ import annotations
@@ -30,9 +30,7 @@ CASES: list[tuple[str, str]] = [
     ("BRANCH_SUMMARY_PREAMBLE", "pi_agent.branch_summarization"),
 ]
 
-_TS_DUMP_COMMAND = (
-    "node --experimental-strip-types src/pi_agent/tests/parity/dump-compaction-prompts.ts"
-)
+_TS_GOLDEN_HINT = "TS golden 缺失：需在 pi TS mono-repo 中生成后拷入 golden/（见 README.md）"
 
 
 def _normalize_newlines(text: str) -> str:
@@ -56,7 +54,7 @@ def _diff(expected: str, actual: str) -> str:
 def test_compaction_prompt_matches_ts_golden(name: str, module: str) -> None:
     golden = GOLDEN_DIR / f"compaction_{name}.txt"
     if not golden.exists():
-        pytest.skip(f"TS golden 缺失，请先运行: {_TS_DUMP_COMMAND}")
+        pytest.skip(_TS_GOLDEN_HINT)
 
     actual = _normalize_newlines(getattr(importlib.import_module(module), name))
     expected = _normalize_newlines(golden.read_text(encoding="utf-8"))

@@ -250,6 +250,11 @@ def build_system_prompt(options: BuildSystemPromptOptions) -> str:
 
     guidelines = "\n".join(f"- {g}" for g in guidelines_list)
 
+    # Python 3.10 的 f-string 表达式内不允许反斜杠转义，先算好再插值。
+    readme_path = str(get_readme_path()).replace("\\", "/")
+    docs_path = str(get_docs_path()).replace("\\", "/")
+    examples_path = str(get_examples_path()).replace("\\", "/")
+
     prompt = f"""\
 You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.
 
@@ -262,9 +267,9 @@ Guidelines:
 {guidelines}
 
 Pi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):
-- Main documentation: {get_readme_path()}
-- Additional docs: {get_docs_path()}
-- Examples: {get_examples_path()} (extensions, custom tools, SDK)
+- Main documentation: {readme_path}
+- Additional docs: {docs_path}
+- Examples: {examples_path} (extensions, custom tools, SDK)
 - When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory
 - When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md), environment variables (docs/environment-variables.md)
 - When working on pi topics, read the docs and examples, and follow .md cross-references before implementing

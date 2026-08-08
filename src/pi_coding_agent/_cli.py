@@ -526,10 +526,10 @@ async def _auth_logout(provider_id: str | None) -> int:
 
 
 def _create_parser() -> argparse.ArgumentParser:
-    """创建 argparse 解析器（最小核心参数）。"""
+    """创建 argparse 解析器。"""
     p = argparse.ArgumentParser(
         prog="pi",
-        description="Pi Coding Agent — AI-powered coding assistant (minimal core)",
+        description="Pi Coding Agent — AI-powered coding assistant",
     )
 
     # 运行模式

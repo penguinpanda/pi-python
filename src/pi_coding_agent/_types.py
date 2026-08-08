@@ -34,7 +34,7 @@ class SessionHeader(TypedDict):
 
 
 class SessionMessageEntry(TypedDict):
-    """JSONL 消息条目 —— 唯一需要的条目类型（最小核心）。"""
+    """JSONL 消息条目 —— 普通对话消息。"""
 
     type: Literal["message"]
     id: str
@@ -155,7 +155,7 @@ class ActiveToolsChangeEntry(TypedDict):
     activeToolNames: list[str]
 
 
-# 会话条目联合（消息 + 压缩 + 模型/思考级别变更）。
+# 会话条目联合（消息 + 压缩 + 模型/思考级别变更 + 分支摘要/标签/自定义等）。
 SessionEntry = (
     SessionMessageEntry
     | CompactionEntry

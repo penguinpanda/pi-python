@@ -71,9 +71,12 @@ class TestBuildSystemPrompt:
             )
         )
         assert "Pi documentation" in prompt
-        assert f"Main documentation: {tmp_path / 'README.md'}" in prompt
-        assert f"Additional docs: {tmp_path / 'docs'}" in prompt
-        assert f"Examples: {tmp_path / 'examples'} (extensions, custom tools, SDK)" in prompt
+        readme = str(tmp_path / "README.md").replace("\\", "/")
+        docs = str(tmp_path / "docs").replace("\\", "/")
+        examples = str(tmp_path / "examples").replace("\\", "/")
+        assert f"Main documentation: {readme}" in prompt
+        assert f"Additional docs: {docs}" in prompt
+        assert f"Examples: {examples} (extensions, custom tools, SDK)" in prompt
         assert "extensions (docs/extensions.md, examples/extensions/)" in prompt
         assert "Always read pi .md files completely" in prompt
 
@@ -93,7 +96,8 @@ class TestBuildSystemPrompt:
                 tool_snippets=_snippets(),
             )
         )
-        assert f"Main documentation: {pkg_dir / 'README.md'}" in prompt
+        readme = str(pkg_dir / "README.md").replace("\\", "/")
+        assert f"Main documentation: {readme}" in prompt
         assert "# unrelated project" not in prompt
 
     def test_custom_prompt_omits_docs_section(self, tmp_path, monkeypatch):

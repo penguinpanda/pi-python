@@ -1,8 +1,8 @@
 """
-JSONL 会话持久化（最小核心版）
+JSONL 会话持久化
 
 格式: 每行一个 JSON 对象，首行为 SessionHeader，后续为 SessionMessageEntry。
-parentId 形成单链表。最小核心仅支持单链（无分支/树/压缩）。
+parentId 形成会话树（支持分支、树查看、压缩与分支摘要）。
 
 用法:
     mgr = SessionManager.create(cwd="/path/to/project")
@@ -70,9 +70,10 @@ class SessionInfo:
 
 
 class SessionManager:
-    """JSONL 会话持久化管理器（最小核心版）。
+    """JSONL 会话持久化管理器。
 
-    设计: append-only，每条消息一行 JSON。parentId 形成单链。
+    设计: append-only，每条消息一行 JSON。parentId 形成会话树
+    （fork / move_to / 树查看 / 压缩 / 分支摘要）。
     """
 
     def __init__(

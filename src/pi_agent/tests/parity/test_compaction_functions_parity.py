@@ -4,7 +4,7 @@
 format_file_operations / serialize_conversation 的输出与 TS 侧真实函数
 （formatFileOperations / serializeConversation）的输出逐字符一致
 （golden/compaction_formatFileOperations_<i>.txt、compaction_serializeConversation_<i>.txt，
-由 dump-compaction-functions.ts 运行真实 TS 代码生成）。
+在 pi TS mono-repo 中运行真实 TS 代码生成后拷入）。
 
 golden 缺失时测试跳过（不是失败）。
 """
@@ -31,9 +31,7 @@ FUNCTIONS: dict[str, str] = {
     "serializeConversation": "compaction_serializeConversation",
 }
 
-_TS_DUMP_COMMAND = (
-    "node --experimental-strip-types src/pi_agent/tests/parity/dump-compaction-functions.ts"
-)
+_TS_GOLDEN_HINT = "TS golden 缺失：需在 pi TS mono-repo 中生成后拷入 golden/（见 README.md）"
 
 
 def _cases() -> list[tuple[str, int]]:
@@ -56,7 +54,7 @@ def _diff(expected: str, actual: str) -> str:
 def test_compaction_function_matches_ts_golden(func: str, index: int) -> None:
     golden = GOLDEN_DIR / f"{FUNCTIONS[func]}_{index}.txt"
     if not golden.exists():
-        pytest.skip(f"TS golden 缺失，请先运行: {_TS_DUMP_COMMAND}")
+        pytest.skip(_TS_GOLDEN_HINT)
 
     case = FIXTURE[func][index]
     if func == "formatFileOperations":

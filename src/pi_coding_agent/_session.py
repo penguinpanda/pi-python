@@ -99,7 +99,8 @@ class BashResult:
 class AgentSession:
     """中枢会话对象 — 连接 Agent、工具、持久化、事件转发。
 
-    最小核心版: 无扩展/压缩/分支摘要。支持重试（agent 内部 + turn 级）。
+    支持扩展运行器（session 事件）、自动/手动压缩、分支摘要，
+    以及重试（agent 内部 + turn 级）。
     """
 
     def __init__(

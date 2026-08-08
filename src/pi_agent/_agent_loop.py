@@ -16,10 +16,11 @@
 
 所有状态都通过参数传入：
 
-    context
-    config
-    emit
-    signal
+    context      当前 Agent 快照（system_prompt / messages / tools）
+    config       AgentLoopConfig（model / hooks / converter / callbacks）
+    emit         事件输出函数（Agent 不知道外部是谁）
+    signal       取消信号（asyncio.Event，例如用户点击停止按钮）
+    stream_fn    LLM streaming 调用函数
 
 因此：
 
@@ -27,112 +28,209 @@
 =
 相同的 Agent 行为
 
+唯一的例外：prepare_next_turn 可替换模型。为让替换在后续 LLM 调用中
+生效，config.model 会被就地更新（_run_loop 内），这是有意为之的副作用；
+除此之外不修改任何外部对象（context 一律复制）。
 
 ====================================================
-Agent Loop 工作流程
+工作流程总览
 ====================================================
 
+两个入口函数，按消息来源区分：
 
-用户输入:
+    run_agent_loop(prompts, ...)
+        新会话：把 prompts 追加到 context.messages 后进入循环。
 
-    UserMessage
-          |
-          v
+    run_agent_loop_continue(context, ...)
+        从已有 messages 继续，不追加新提示。
+        常用于 retry / resume / interrupted recovery。
 
-run_agent_loop()
+两者都：
 
-          |
-          v
+    1. 复制 context（纯函数：绝不修改外部引用）
+    2. 发射 agent_start / turn_start（由入口函数发射，先于 prompts 注入；
+       run_agent_loop 额外为每条 prompt 发射 message_start / message_end）
+    3. 进入 _run_loop 双重嵌套循环
 
-    agent_start
-          |
-          v
+    +------------------------------+
+    | 外层：Follow-up 驱动          |
+    |                              |
+    | 内层退出后检查 follow-up 队列，|
+    | 非空则带着新消息重新进入内层   |
+    +------------------------------+
+                 |
+                 v
+    +------------------------------+
+    | 内层：Tool + Steering        |
+    |                              |
+    | 注入 pending 消息            |
+    | 流式 LLM 推理                |
+    | 执行工具调用（并行 / 顺序）   |
+    | 轮询 steering 队列           |
+    +------------------------------+
 
-    +----------------+
-    |   Turn Loop    |
-    +----------------+
+    直到停止条件满足，发射 agent_end 并返回最终完整 messages。
 
-          |
-          |
-          v
+停止条件（对齐 TS agent-loop.ts runLoop）：
 
-  stream_assistant_response()
-
-          |
-          |
-          +----------------+
-          |                |
-          v                v
-
-     普通回答          Tool Call
-
-
-                          |
-                          v
-
-                 execute_tool_calls()
-
-                          |
-                          v
-
-                 ToolResultMessage
-
-                          |
-                          v
-
-                 下一轮 LLM
-
-
-直到：
-
-1. 模型没有 toolCall
-2. stop_reason == error
-3. stop_reason == aborted
-4. should_stop_after_turn 返回 True
-
-
-          |
-          v
-
-      agent_end
-
-
+    1. stop_reason == "error" / "aborted"
+    2. should_stop_after_turn 返回 True
+    3. 无更多工具调用（含工具结果 terminate）
+       且 steering / follow-up 队列均为空
 
 ====================================================
 核心函数
 ====================================================
 
-run_agent_loop()
+run_agent_loop(prompts, context, config, emit, signal, stream_fn)
 
-    新用户消息进入 Agent。
+    启动一次新的 Agent 会话：prompts 追加到 context.messages，
+    然后进入循环。返回最终完整 messages（含历史与新增）。
 
     例如：
 
-    用户:
-        "帮我搜索天气"
+    开始:  [UserMessage("天气?")]
+    结束:  [UserMessage("天气?"),
+            AssistantMessage(tool_call="weather"),
+            ToolResultMessage(result="晴天"),
+            AssistantMessage("今天晴天")]
 
+run_agent_loop_continue(context, config, emit, signal, stream_fn)
 
-    会:
+    从已有上下文继续（重试 / 恢复场景），不追加新提示，
+    直接从现有 context 进入循环。
 
-    context.messages
-          +
-    UserMessage
+agent_loop(prompts, ...) / agent_loop_continue(context, ...)
 
-    然后启动循环。
+    EventStream 包装（对齐 TS agentLoop / agentLoopContinue）。
+    返回 EventStream 而非 emit 回调；agent_end 事件即流结束事件，
+    await stream.result() 得到 agent_end 携带的完整 messages。
 
+    agent_loop_continue 额外校验：
+    - context.messages 非空
+    - 最后一条消息 role 不是 assistant
 
+====================================================
+双重嵌套循环（_run_loop）
+====================================================
 
-run_agent_loop_continue()
+外层（Follow-up 驱动）：
 
-    从已有 messages 继续。
+    内层循环结束后（无更多工具调用、无 steering 消息），
+    检查 follow-up 队列；有后续消息则重新进入内层循环，
+    直到队列为空。
 
-    常用于：
+内层（Tool + Steering）：
 
-    - retry
-    - resume
-    - interrupted recovery
+    每一轮：
 
+    1. 注入待处理消息（steering / follow-up），发射 message_start / message_end
+    2. 流式获取助手回复（_stream_assistant_response）
+    3. 提取 assistant 消息中的 toolCall 内容
+    4. 执行工具调用（_execute_tool_calls），得到 ToolResultMessage 列表
+    5. 追加工具结果消息到轨迹，发射 message_start / message_end
+    6. 发射 turn_end（携带 assistant 消息与工具结果）
+    7. prepare_next_turn（可选：替换 context / model）
+    8. should_stop_after_turn（可选：提前停止）
+    9. 轮询 steering 队列（趁 Agent 还在工作时注入引导消息）
 
+    特殊处理：
+
+    - stop_reason == "error" / "aborted"：
+      立即发射 turn_end（空工具结果）与 agent_end 后返回
+    - stop_reason == "length"：工具调用参数可能被截断，
+      所有工具标记为错误且不执行（_fail_tool_calls_from_truncated）
+    - 工具结果 terminate 为 True：本轮后不再继续工具调用
+    - 首轮 turn_start 已由入口函数发射，内层不重复发射
+    - 取消（signal 被设置）：_check_signal 抛出 CancelledError，
+      入口捕获后补发 agent_end 再向上传播
+
+====================================================
+流式助手回复（_stream_assistant_response）
+====================================================
+
+一次 LLM 推理的固定管线：
+
+    transform_context（可选）  转换 agent messages（仅本次调用）
+    convert_to_llm（必须）     转换为 LLM messages
+    get_api_key（可选）        按 provider 取 API key
+    构建 LLM context           （messages / tools / system_prompt）
+    stream_fn 调用             带应用层重试 retry_assistant_call
+
+事件协议（12 事件模型）：
+
+    每个增量事件（text / thinking / toolcall 的 start / delta / end）
+    都携带 partial 快照，因此不做本地拼接；message_start 在开始时
+    发射，message_update 随增量发射。
+
+    message_end 只对最终结果发射一次：重试的失败尝试不会提交到状态。
+    中止（CancelledError）补发 aborted 的 message_end 后向上传播，
+    且永不重试；意外异常补发 error 的 message_end 后向上传播（可重试）。
+
+重试（config.retry_policy，默认 enabled=True / max_retries=3）：
+
+    发射 auto_retry_start / auto_retry_end 事件；
+    显式传入 RetryPolicy(enabled=False) 可关闭。
+
+====================================================
+工具执行管道（四阶段）
+====================================================
+
+    +------------------+   +------------------+   +------------------+
+    | 准备             |   | 执行             |   | finalize         |
+    | _prepare_tool    |-> | _execute_tool    |-> | _finalize_tool   |
+    | _call            |   | _call            |   | _call            |
+    +------------------+   +------------------+   +------------------+
+                                                      |
+                                                      v
+                                              tool_execution_end
+                                              + ToolResultMessage
+
+准备 _prepare_tool_call：
+
+    查找工具 -> 参数校验（validate_arguments，按 input_schema）-> beforeToolCall -> 中止检查
+
+    立即失败（工具未找到 / 参数校验失败 / beforeToolCall block）返回
+    _ImmediateToolOutcome，不发 tool_execution_start；错误 ToolResult
+    交给 LLM 自纠。中止检查抛 CancelledError 向上传播。
+
+执行 _execute_tool_call：
+
+    before_execute（可选，可替换参数）
+    -> tool_execution_start
+    -> execute（流式更新经 tool_execution_update 发出，且保证先于
+       tool_execution_end）
+    -> after_execute（可选，可替换结果）
+
+    execute 抛异常时返回 error 的 outcome（details 含 exception_type）。
+
+finalize _finalize_tool_call：
+
+    afterToolCall 字段级覆盖：
+    content / details / usage / is_error / terminate
+
+调度 _execute_tool_calls：
+
+    - config.tool_execution == "sequential"，或
+      批次内任一工具 execution_mode == "sequential"
+      -> 整批顺序执行（每个工具完成全部阶段才轮到下一个）
+    - 其余情况 -> 并行：顺序准备 + 并发执行 +
+      按 assistant 原始顺序输出 ToolResultMessage
+      （立即失败项在准备循环中当场发 tool_execution_end）
+
+工具生命周期事件：
+
+    tool_execution_start -> tool_execution_update（可多次）-> tool_execution_end
+
+====================================================
+事件清单
+====================================================
+
+    agent_start / agent_end
+    turn_start / turn_end
+    message_start / message_update / message_end
+    tool_execution_start / tool_execution_update / tool_execution_end
+    auto_retry_start / auto_retry_end
 
 ====================================================
 核心设计思想
@@ -140,81 +238,28 @@ run_agent_loop_continue()
 
 1. Message 是唯一状态
 
-Agent 的状态：
+    Agent 的状态不是 class、不是对象属性，而是：
 
-不是 class
+        messages: list[AgentMessage]
 
-不是对象属性
-
-而是:
-
-    messages: list[AgentMessage]
-
-
-每轮:
-
-messages
-    |
-    + assistant message
-    |
-    + tool result
-
-
-形成完整轨迹。
-
-
+    每轮追加 assistant message 与 tool result，形成完整轨迹。
 
 2. Event 驱动
 
-
-Agent 不直接操作 UI。
-
-而是:
-
-emit(event)
-
-
-例如:
-
-{
-    "type": "message_update",
-    "message": ...
-}
-
-
-外部可以:
-
-- CLI 显示
-- WebSocket 推送
-- 日志记录
-- 数据库存储
-
+    Agent 不直接操作 UI，而是 emit(event)。外部可以：
+    CLI 显示 / WebSocket 推送 / 日志记录 / 数据库存储。
 
 3. Tool 是副作用边界
 
+    LLM 纯推理，Tool 执行真实世界操作（例如 HTTP 请求），
+    因此 Tool 执行被单独隔离。
 
-LLM:
+4. 钩子对齐 TS
 
-纯推理
-
-
-Tool:
-
-真实世界操作
-
-
-例如:
-
-    LLM:
-        "我要调用 search"
-
-    Tool:
-        HTTP 请求
-
-
-因此 Tool 执行被单独隔离。
-
-
+    beforeToolCall / afterToolCall / before_execute / after_execute /
+    prepare_next_turn / should_stop_after_turn / transform_context /
+    convert_to_llm / get_api_key / get_steering_messages /
+    get_follow_up_messages
 """
 
 from __future__ import annotations
@@ -441,7 +486,7 @@ def agent_loop(
     """agentLoop() EventStream 包装（对齐 TS agent-loop.ts agentLoop()）。
 
     返回 EventStream 而非 emit 回调；agent_end 事件即流结束事件，
-    await stream.result() 得到本次运行新增的 messages。
+    await stream.result() 得到 agent_end 携带的完整 messages（含历史）。
     """
     stream = _create_agent_stream()
 
@@ -1130,13 +1175,14 @@ async def _prepare_tool_call(
 ) -> _PreparedToolCall | _ImmediateToolOutcome:
     """准备阶段：查找工具 → 校验参数 → beforeToolCall（对齐 TS prepareToolCall）。
 
-    立即失败（工具未找到 / 参数校验失败 / beforeToolCall block / 中止）时返回
+    立即失败（工具未找到 / 参数校验失败 / beforeToolCall block）时返回
     _ImmediateToolOutcome；不发 tool_execution_start（保持 Python 现状）。
+    中止（signal 已设置）由 _check_signal 抛 CancelledError 向上传播。
     """
     tc_id: str = tc["id"]
     tc_name: str = tc["name"]
     # 参数已由事件协议解析为对象（ToolCall.arguments）；
-    # 方案 B：arguments 可能为 None（尚未解析）——按空参数处理。
+    # 但可能为 None（解析失败/尚未解析）——按空参数处理。
     args: dict = tc["arguments"] if tc["arguments"] is not None else {}
     tools = context.tools or []
 

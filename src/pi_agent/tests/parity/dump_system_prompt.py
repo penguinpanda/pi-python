@@ -59,6 +59,9 @@ def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     for path in sorted(FIXTURES_DIR.glob("*.json")):
         fixture = json.loads(path.read_text(encoding="utf-8"))
+        # 仅 system prompt fixtures 有 cwd；compaction/prompt_templates 输入不含。
+        if "cwd" not in fixture:
+            continue
         prompt = build_system_prompt(build_options(fixture))
         out = OUT_DIR / f"{path.stem}.txt"
         out.write_text(prompt, encoding="utf-8", newline="\n")

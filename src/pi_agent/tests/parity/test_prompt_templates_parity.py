@@ -32,9 +32,7 @@ GOLDEN_DIR = HERE / "golden"
 
 FIXTURE = json.loads((FIXTURES_DIR / "prompt_templates.json").read_text(encoding="utf-8"))
 
-_TS_DUMP_COMMAND = (
-    "node --experimental-strip-types src/pi_agent/tests/parity/dump-prompt-templates.ts"
-)
+_TS_GOLDEN_HINT = "TS golden 缺失：需在 pi TS mono-repo 中生成后拷入 golden/（见 README.md）"
 
 
 def _cases(func: str) -> list[tuple[str, int]]:
@@ -57,7 +55,7 @@ def _diff(expected: str, actual: str) -> str:
 def test_substitute_args_matches_ts_golden(func: str, index: int) -> None:
     golden = GOLDEN_DIR / f"prompttemplates_substituteArgs_{index}.txt"
     if not golden.exists():
-        pytest.skip(f"TS golden 缺失，请先运行: {_TS_DUMP_COMMAND}")
+        pytest.skip(_TS_GOLDEN_HINT)
 
     case = FIXTURE[func][index]
     actual = substitute_args(case["content"], case["args"])
@@ -69,7 +67,7 @@ def test_substitute_args_matches_ts_golden(func: str, index: int) -> None:
 def test_parse_command_args_matches_ts_golden(func: str, index: int) -> None:
     golden = GOLDEN_DIR / f"prompttemplates_parseCommandArgs_{index}.txt"
     if not golden.exists():
-        pytest.skip(f"TS golden 缺失，请先运行: {_TS_DUMP_COMMAND}")
+        pytest.skip(_TS_GOLDEN_HINT)
 
     case = FIXTURE[func][index]
     # 与 TS dump 相同的序列化方式（紧凑分隔符）比较数组。
@@ -82,7 +80,7 @@ def test_parse_command_args_matches_ts_golden(func: str, index: int) -> None:
 def test_expand_prompt_template_matches_ts_golden(func: str, index: int, tmp_path: Path) -> None:
     golden = GOLDEN_DIR / f"prompttemplates_expandPromptTemplate_{index}.txt"
     if not golden.exists():
-        pytest.skip(f"TS golden 缺失，请先运行: {_TS_DUMP_COMMAND}")
+        pytest.skip(_TS_GOLDEN_HINT)
 
     case = FIXTURE[func][index]
     loader = PromptTemplateLoader(global_dir=tmp_path)

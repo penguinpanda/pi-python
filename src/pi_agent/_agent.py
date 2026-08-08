@@ -100,7 +100,7 @@ class PendingMessageQueue:
 
 
 class AgentOptions:
-    """Agent 构造选项（最小核心版）。
+    """Agent 构造选项。
 
     所有字段可选；stream_fn 可通过 set_default_stream_fn 全局注册。
     """

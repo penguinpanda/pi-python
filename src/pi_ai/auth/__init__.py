@@ -107,15 +107,9 @@ class ApiKeyCredential:
             key="sk-xxxx"
         )
 
-    当前仅支持 API Key.
-
-    以后如果支持：
-
-    - OAuth
-    - Azure AD
-    - IAM Token
-
-    可以新增其它 Credential 类型,而无需修改其它代码.
+    凭证体系已支持 OAuth（见 auth/oauth/ 与 auth/types.OAuthCredential）；
+    后续新增 Azure AD / IAM Token 等类型时，扩展 Credential 联合即可，
+    无需修改其它代码.
     """
 
     type: str = "api_key"

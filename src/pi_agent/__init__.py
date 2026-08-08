@@ -1,5 +1,5 @@
 """
-pi-agent-core  最小核心 LLM Agent 循环
+pi-agent-core  LLM Agent 循环
 
 纯函数 Agent 循环 + 有状态 Agent 包装类。
 
