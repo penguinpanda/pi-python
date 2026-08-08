@@ -1,0 +1,23 @@
+{
+  "cwd": "C:\\coding\\test-project",
+  "customPrompt": "You are custom assistant",
+  "selectedTools": null,
+  "toolSnippets": null,
+  "promptGuidelines": null,
+  "appendSystemPrompt": "Appended custom note",
+  "contextFiles": [
+    {
+      "path": "C:\\coding\\test-project\\AGENTS.md",
+      "content": "Repo rules"
+    }
+  ],
+  "skills": [
+    {
+      "name": "alpha",
+      "description": "Alpha <skill> & more",
+      "filePath": "C:\\skills\\alpha\\SKILL.md",
+      "baseDir": "C:\\skills\\alpha",
+      "source": "project"
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "cwd": "C:\\coding\\test-project",
+  "customPrompt": null,
+  "selectedTools": ["read", "bash", "edit", "write"],
+  "toolSnippets": {
+    "read": "Read files",
+    "bash": "Execute shell commands",
+    "edit": "Edit files",
+    "write": "Write files"
+  },
+  "promptGuidelines": [],
+  "appendSystemPrompt": null,
+  "contextFiles": [],
+  "skills": [
+    {
+      "name": "hidden",
+      "description": "Model invocation disabled",
+      "filePath": "C:\\skills\\hidden\\SKILL.md",
+      "baseDir": "C:\\skills\\hidden",
+      "source": "user",
+      "disableModelInvocation": true
+    },
+    {
+      "name": "visible",
+      "description": "Visible skill",
+      "filePath": "C:\\skills\\visible\\SKILL.md",
+      "baseDir": "C:\\skills\\visible",
+      "source": "path"
+    }
+  ]
+}

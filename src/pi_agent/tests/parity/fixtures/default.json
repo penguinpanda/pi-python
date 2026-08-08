@@ -1,0 +1,28 @@
+{
+  "cwd": "C:\\coding\\test-project",
+  "customPrompt": null,
+  "selectedTools": ["read", "bash", "edit", "write"],
+  "toolSnippets": {
+    "read": "Read files",
+    "bash": "Execute shell commands",
+    "edit": "Edit files",
+    "write": "Write files"
+  },
+  "promptGuidelines": ["Use absolute paths", "  Do not modify generated files  "],
+  "appendSystemPrompt": "Extra system instruction",
+  "contextFiles": [
+    {
+      "path": "C:\\coding\\test-project\\AGENTS.md",
+      "content": "Project rules\nFollow them."
+    }
+  ],
+  "skills": [
+    {
+      "name": "python",
+      "description": "Python skill",
+      "filePath": "C:\\skills\\python\\SKILL.md",
+      "baseDir": "C:\\skills\\python",
+      "source": "user"
+    }
+  ]
+}

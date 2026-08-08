@@ -1,0 +1,20 @@
+{
+  "cwd": "C:\\coding\\test-project",
+  "customPrompt": null,
+  "selectedTools": ["bash"],
+  "toolSnippets": {
+    "bash": "Run shell commands"
+  },
+  "promptGuidelines": [],
+  "appendSystemPrompt": null,
+  "contextFiles": [],
+  "skills": [
+    {
+      "name": "alpha",
+      "description": "Alpha skill",
+      "filePath": "C:\\skills\\alpha\\SKILL.md",
+      "baseDir": "C:\\skills\\alpha",
+      "source": "user"
+    }
+  ]
+}

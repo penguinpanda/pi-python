@@ -189,6 +189,7 @@ def build_system_prompt(options: BuildSystemPromptOptions) -> str:
     context_files = options.context_files or []
     skills = options.skills or []
     prompt_cwd = str(Path(options.cwd)).replace("\\", "/")
+    # prompt_cwd = str(path)
 
     if custom_prompt:
         prompt = custom_prompt
@@ -249,35 +250,25 @@ def build_system_prompt(options: BuildSystemPromptOptions) -> str:
 
     guidelines = "\n".join(f"- {g}" for g in guidelines_list)
 
-    prompt = (
-        "You are an expert coding assistant operating inside pi, a coding agent "
-        "harness. You help users by reading files, executing commands, editing "
-        "code, and writing new files.\n\n"
-        f"Available tools:\n{tools_list}\n\n"
-        "In addition to the tools above, you may have access to other custom "
-        "tools depending on the project.\n\n"
-        f"Guidelines:\n{guidelines}\n"
-    )
+    prompt = f"""\
+You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.
 
-    # Pi 文档段：固定指向 pi 包自身 README/docs/examples（对齐 TS buildSystemPrompt），
-    # 与 cwd 是哪个项目无关；PI_PACKAGE_DIR 可覆盖包目录。
-    prompt += (
-        "\nPi documentation (read only when the user asks about pi itself, its SDK, "
-        "extensions, themes, skills, or TUI):"
-        f"\n- Main documentation: {get_readme_path()}"
-        f"\n- Additional docs: {get_docs_path()}"
-        f"\n- Examples: {get_examples_path()} (extensions, custom tools, SDK)"
-        "\n- When asked about: extensions (docs/extensions.md, examples/extensions/), "
-        "themes (docs/themes.md), skills (docs/skills.md), prompt templates "
-        "(docs/prompt-templates.md), TUI components (docs/tui.md), keybindings "
-        "(docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers "
-        "(docs/custom-provider.md), adding models (docs/models.md), pi packages "
-        "(docs/packages.md), environment variables (docs/environment-variables.md)"
-        "\n- When working on pi topics, read the docs and examples, and follow .md "
-        "cross-references before implementing"
-        "\n- Always read pi .md files completely and follow links to related docs "
-        "(e.g., tui.md for TUI API details)"
-    )
+Available tools:
+{tools_list}
+
+In addition to the tools above, you may have access to other custom tools depending on the project.
+
+Guidelines:
+{guidelines}
+
+Pi documentation (read only when the user asks about pi itself, its SDK, extensions, themes, skills, or TUI):
+- Main documentation: {get_readme_path()}
+- Additional docs: {get_docs_path()}
+- Examples: {get_examples_path()} (extensions, custom tools, SDK)
+- When reading pi docs or examples, resolve docs/... under Additional docs and examples/... under Examples, not the current working directory
+- When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), adding models (docs/models.md), pi packages (docs/packages.md), environment variables (docs/environment-variables.md)
+- When working on pi topics, read the docs and examples, and follow .md cross-references before implementing
+- Always read pi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)"""
 
     if append_section:
         prompt += append_section

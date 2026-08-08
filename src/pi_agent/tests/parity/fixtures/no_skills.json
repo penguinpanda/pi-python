@@ -1,0 +1,15 @@
+{
+  "cwd": "C:\\coding\\test-project",
+  "customPrompt": null,
+  "selectedTools": ["read", "bash", "edit", "write"],
+  "toolSnippets": {
+    "read": "Read files",
+    "bash": "Execute shell commands",
+    "edit": "Edit files",
+    "write": "Write files"
+  },
+  "promptGuidelines": [],
+  "appendSystemPrompt": null,
+  "contextFiles": [],
+  "skills": []
+}

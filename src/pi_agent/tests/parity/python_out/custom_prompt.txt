@@ -1,0 +1,27 @@
+You are custom assistant
+
+Appended custom note
+
+<project_context>
+
+Project-specific instructions and guidelines:
+
+<project_instructions path="C:\coding\test-project\AGENTS.md">
+Repo rules
+</project_instructions>
+
+</project_context>
+
+
+The following skills provide specialized instructions for specific tasks.
+Use the read tool to load a skill's file when the task matches its description.
+When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.
+
+<available_skills>
+  <skill>
+    <name>alpha</name>
+    <description>Alpha &lt;skill&gt; &amp; more</description>
+    <location>C:\skills\alpha\SKILL.md</location>
+  </skill>
+</available_skills>
+Current working directory: C:/coding/test-project
