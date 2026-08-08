@@ -22,7 +22,11 @@ def _package_dir() -> Path:
 
 def _default_eval_paths() -> list[Path]:
     package_dir = _package_dir()
-    return [package_dir / "smoke_eval.py", package_dir / "extensions_eval.py"]
+    return [
+        package_dir / "smoke_eval.py",
+        package_dir / "extensions_eval.py",
+        package_dir / "long_session_cache_eval.py",
+    ]
 
 
 def _load_module(path: Path) -> None:

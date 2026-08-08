@@ -170,10 +170,12 @@ def test_builtin_eval_modules_register_cases():
     package_dir = Path(runner.__file__).resolve().parent
     runner._load_module(package_dir / "smoke_eval.py")
     runner._load_module(package_dir / "extensions_eval.py")
+    runner._load_module(package_dir / "long_session_cache_eval.py")
     names = [case.name for case in registry.cases]
     assert "Pi Coding Agent smoke" in names
     assert any(name.startswith("system-prompt-without-docs repetition 1") for name in names)
     assert any(name.startswith("default-system-prompt repetition 1") for name in names)
+    assert any(name.startswith("default-system-prompt-cache-first repetition 1") for name in names)
     registry.clear()
 
 

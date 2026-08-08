@@ -150,7 +150,13 @@ def apply_cache_first_truncation(
     if context_window <= 0 or reserve_tokens < 0:
         return _truncate_all_large_tool_outputs(messages)
     threshold = context_window - reserve_tokens
-    if threshold <= 0 or estimate_context_tokens(messages).tokens <= threshold:
+
+    def _estimate(messages: list[AgentMessage]) -> int:
+        # 全量字符估算：剪枝只改视图，usage 反映的是上次已剪枝的请求，
+        # 用它做预算会漏掉 state 里仍完整的旧工具输出，导致时剪时不剪。
+        return sum(estimate_tokens(message) for message in messages)
+
+    if threshold <= 0 or _estimate(messages) <= threshold:
         return messages
     result = list(messages)
     for index in range(len(result) - 1, -1, -1):
@@ -158,7 +164,7 @@ def apply_cache_first_truncation(
         if truncated is None:
             continue
         result[index] = truncated
-        if estimate_context_tokens(result).tokens <= threshold:
+        if _estimate(result) <= threshold:
             break
     return result
 

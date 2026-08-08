@@ -101,3 +101,24 @@ def test_budget_exhausted_truncates_all():
     result = apply_cache_first_truncation([old, new], context_window=500, reserve_tokens=0)
     assert result[0]["content"][0]["text"] == CACHE_FIRST_TRUNCATED_MARKER
     assert result[1]["content"][0]["text"] == CACHE_FIRST_TRUNCATED_MARKER
+
+
+def test_budget_counts_full_state_not_last_usage():
+    """预算必须按完整 state 估算：前面的大工具输出不能被最后一条 usage 掩盖。"""
+    large = _tool_result("x" * 20000, tool_call_id="large")
+    assistant = {
+        "role": "assistant",
+        "content": [{"type": "text", "text": "ok"}],
+        "usage": {
+            "input": 900,
+            "output": 100,
+            "cache_read": 0,
+            "cache_write": 0,
+            "total_tokens": 1000,
+        },
+        "timestamp": 3,
+    }
+    messages = [large, assistant]
+    result = apply_cache_first_truncation(messages, context_window=3000, reserve_tokens=0)
+    assert result[0]["content"][0]["text"] == CACHE_FIRST_TRUNCATED_MARKER
+    assert result[1] == assistant

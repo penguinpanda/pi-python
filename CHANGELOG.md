@@ -8,6 +8,7 @@
 - cache-first 增强：预算驱动尾部剪枝（未超阈值不截）、warm/cold 缓存状态策略（冷缓存跳过剪枝）、DeepSeek 模型自动开启 `compaction.cacheFirst`（显式配置优先）、指纹归因（compaction/system/tools/append）并入 miss 提示、`cacheStats` 增加 `hitTokens`/`hitRate`
 - pi-evals harness 选项支持 `compaction_settings` / `cache_first` / `show_cache_miss_notices`，使 eval 测试可走真实缓存路径
 - extensions_eval 增加 `default-system-prompt-cache-first` 对照（`cache_first=True`），量化缓存策略收益
+- 新增 `long_session_cache_eval.py`：单会话 5 轮长会话 eval（大文件读入触发剪枝阈值），对比 cache-first 开关的 tokens / latency / cost
 - 新增 `scripts/check.py` 与 pre-commit 配置，本地一键复现 CI 的 ruff/mypy/pytest 检查
 - 交互模式支持 `!cmd` / `!!cmd` 本地 shell 命令（对齐 TS）：`!` 执行并进入 LLM 上下文，`!!` 执行但不进上下文，输出流式渲染
 - 引入 ruff（lint + format）与 mypy 配置及依赖
