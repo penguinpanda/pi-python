@@ -61,7 +61,7 @@ def main() -> None:
         fixture = json.loads(path.read_text(encoding="utf-8"))
         prompt = build_system_prompt(build_options(fixture))
         out = OUT_DIR / f"{path.stem}.txt"
-        out.write_text(prompt, encoding="utf-8")
+        out.write_text(prompt, encoding="utf-8", newline="\n")
         print(f"wrote {out.relative_to(HERE)} ({len(prompt)} chars)")
 
 

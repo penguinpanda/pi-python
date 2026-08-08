@@ -165,7 +165,7 @@ __all__ = [
     "create_in_memory_session_repo",
     "create_jsonl_session_store",
     "create_jsonl_session_repo",
-    # Phase 4: 环境抽象
+    # 环境抽象
     "PythonExecutionEnv",
     "FileError",
     "ExecutionError",
@@ -180,7 +180,7 @@ __all__ = [
     "format_size",
     "truncate_head",
     "truncate_tail",
-    # Phase 4: 内置工具
+    # 内置工具
     "create_read_tool",
     "create_write_tool",
     "create_edit_tool",
@@ -188,7 +188,7 @@ __all__ = [
     "ExecutionToolContext",
     "ReadToolOptions",
     "BashToolOptions",
-    # Phase 4: Skills / Templates
+    # Skills / Templates
     "load_skills",
     "load_sourced_skills",
     "format_skill_invocation",
@@ -196,7 +196,7 @@ __all__ = [
     "load_sourced_prompt_templates",
     "substitute_args",
     "format_prompt_template_invocation",
-    # Phase 4: Compaction / 分支摘要
+    # Compaction / 分支摘要
     "CompactionSettings",
     "DEFAULT_COMPACTION_SETTINGS",
     "CompactionError",
@@ -207,7 +207,7 @@ __all__ = [
     "BranchSummaryError",
     "collect_entries_for_branch_summary",
     "generate_branch_summary",
-    # Phase 5: Proxy
+    # Proxy
     "stream_proxy",
     "ProxyMessageEventStream",
     "build_proxy_request_options",

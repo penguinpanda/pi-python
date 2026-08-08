@@ -324,7 +324,9 @@ def serialize_conversation(messages: list[AgentMessage]) -> str:
                 elif btype == "toolCall":
                     args = block_dict.get("arguments") or {}
                     args_str = ", ".join(
-                        f"{k}={json.dumps(v, ensure_ascii=False)}" for k, v in args.items()
+                        # separators 对齐 TS JSON.stringify 的无空格格式（{"x":1}）。
+                        f"{k}={json.dumps(v, ensure_ascii=False, separators=(',', ':'))}"
+                        for k, v in args.items()
                     )
                     tool_calls.append(f"{block_dict.get('name', '')}({args_str})")
 

@@ -8,18 +8,20 @@ pi-agent-core 类型定义（Core Types）
 1. TypedDict
 --------------
 用于"运行时数据"（携带数据的事件、配置片段）:
-- AgentEvent（10 种判别联合类型）
-- BeforeToolCallResult / AfterToolCallResult / AgentLoopTurnUpdate
+- AgentEvent（13 种判别联合事件）
+- StreamOptions（pi_ai 复用，配置片段）
 
 2. dataclass
 --------------
 用于"Python 内部对象":
 - AgentTool / AgentToolResult / AgentContext / AgentState / AgentLoopConfig
+- BeforeToolCallResult / AfterToolCallResult / AgentLoopTurnUpdate
+- BeforeToolCallContext / AfterToolCallContext / PrepareNextTurnContext
 
 3. 类型别名 / Protocol
 --------------
 用于依赖注入抽象:
-- StreamFn / StreamOptions / AgentEventSink
+- StreamFn / AgentEventSink
 """
 
 from __future__ import annotations
@@ -55,8 +57,7 @@ from pi_ai import RetryPolicy
 # ---------------------------------------------------------------------------
 # AgentMessage
 # ---------------------------------------------------------------------------
-# Agent 层的"消息"即 pi_ai.Message 联合类型（含系统/用户/助手/工具结果，
-# 以及 pi_ai 的 AgentMessage 通用扩展 role）。
+# Agent 层的"消息"即 pi_ai.Message 联合类型（含系统/用户/助手/工具结果，以及 pi_ai 的 AgentMessage 通用扩展 role）。
 # TypeScript 版通过 Declaration Merging 扩展 CustomAgentMessages，
 # Python 不支持声明合并，用 pi_ai.types.AgentMessage 承载通用 Agent role。
 AgentMessage = Message
@@ -76,13 +77,13 @@ StreamFn = Callable[
 # AgentTool
 # ---------------------------------------------------------------------------
 
-# 工具执行模式（对齐 TS ToolExecutionMode）：
+# 工具执行模式（ToolExecutionMode）：
 # - "sequential": 每个工具调用先准备、再执行、再完成，然后才轮到下一个
 # - "parallel": 所有工具顺序准备，允许的工具并发执行；tool_execution_end 按完成
 #   顺序发出，ToolResultMessage 消息随后按 assistant 原始顺序发出
 ToolExecutionMode = Literal["sequential", "parallel"]
 
-# 消息队列消费策略（对齐 TS QueueMode）：
+# 消息队列消费策略（QueueMode）：
 # - "all": 一次 drain 全部注入
 # - "one-at-a-time": 每次 drain 只消费最早一条，剩余留待后续 drain 点
 QueueMode = Literal["all", "one-at-a-time"]
@@ -122,10 +123,10 @@ class AgentTool:
     input_schema: dict[str, Any]
     label: str
     execute: Callable[..., Awaitable[AgentToolResult]]
-    # 单工具执行模式（对齐 TS executionMode，省略时按默认并行）。
+    # 单工具执行模式（executionMode，省略时按默认并行）。
     # 批次内任一工具声明 "sequential" → 整批回退为顺序执行。
     execution_mode: ToolExecutionMode = "parallel"
-    # 工具在 "Available tools" 段的单行说明（对齐 TS promptSnippet）；
+    # 工具在 "Available tools" 段的单行说明（promptSnippet）；
     # 缺省时由 tool_snippets_for 回退到 description 第一行 / 工具名。
     prompt_snippet: str | None = None
 
@@ -149,7 +150,7 @@ ThinkingLevel = Literal["off", "minimal", "low", "medium", "high", "xhigh", "max
 
 @dataclass
 class AgentState:
-    """可观察的 Agent 运行时只读状态。
+    """可观察的 Agent 运行时状态。
 
     tools 和 messages 赋值时自动防御性复制。
     """
@@ -192,7 +193,7 @@ class AgentState:
 
 @dataclass(slots=True)
 class AgentContext:
-    """传入 agent loop 的不可变上下文快照。"""
+    """传入 agent loop 的上下文快照（循环内视为不可变）。"""
 
     system_prompt: str
     messages: list[AgentMessage]
@@ -269,7 +270,7 @@ class ToolExecutionEndEvent(TypedDict):
 
 
 class AutoRetryStartEvent(TypedDict):
-    """重试已计划：退避等待开始前发射（对齐 TS auto_retry_start）。"""
+    """重试已计划：退避等待开始前发射（auto_retry_start）。"""
 
     type: Literal["auto_retry_start"]
     attempt: int  # 本次重试序号（从 1 起）
@@ -279,7 +280,7 @@ class AutoRetryStartEvent(TypedDict):
 
 
 class AutoRetryEndEvent(TypedDict):
-    """重试循环结束（成功 / 放弃）发射（对齐 TS auto_retry_end）。"""
+    """重试循环结束（成功 / 放弃）发射（auto_retry_end）。"""
 
     type: Literal["auto_retry_end"]
     success: bool  # 是否最终成功
@@ -333,7 +334,7 @@ class AfterToolCallResult:
 
 @dataclass(slots=True)
 class BeforeToolCallContext:
-    """beforeToolCall 专用 context（对齐 TS BeforeToolCallContext）。"""
+    """beforeToolCall 专用 context（BeforeToolCallContext）。"""
 
     assistant_message: AssistantMessage  # 触发工具调用的 assistant 消息
     tool_call: ToolCall  # 原始 toolCall 块
@@ -343,7 +344,7 @@ class BeforeToolCallContext:
 
 @dataclass(slots=True)
 class AfterToolCallContext:
-    """afterToolCall 专用 context（对齐 TS AfterToolCallContext）。"""
+    """afterToolCall 专用 context（AfterToolCallContext）。"""
 
     assistant_message: AssistantMessage  # 触发工具调用的 assistant 消息
     tool_call: ToolCall  # 原始 toolCall 块
@@ -364,7 +365,7 @@ class AgentLoopTurnUpdate:
 
 @dataclass(slots=True)
 class PrepareNextTurnContext:
-    """prepareNextTurnWithContext 上下文（对齐 TS PrepareNextTurnContext）。
+    """prepareNextTurnWithContext 上下文（PrepareNextTurnContext）。
 
     TS 中 PrepareNextTurnContext extends ShouldStopAfterTurnContext，
     因此同时携带本轮 assistant 消息、工具结果与运行中的上下文。
@@ -395,8 +396,10 @@ class AgentLoopConfig:
         after_tool_call: 工具执行后拦截
 
     配置:
-        tool_execution: 工具执行模式（最小核心仅 "sequential"）
+        tool_execution: 工具执行模式（默认 "parallel"）
+        session_id / cache_retention: 提示缓存与会话标识（透传给 StreamOptions）
         thinking_budgets / transport: 透传给 StreamOptions
+        retry_policy: LLM 调用重试策略（None 使用默认策略）
     """
 
     model: Model
@@ -434,7 +437,7 @@ class AgentLoopConfig:
     get_follow_up_messages: Callable[[], Awaitable[list[AgentMessage]]] | None = None
 
     # 配置
-    # 默认并行（对齐 TS Agent.toolExecution 默认值）。
+    # 默认并行（Agent.toolExecution 默认值）。
     tool_execution: ToolExecutionMode = "parallel"
 
     # 提示缓存与会话标识（透传给 StreamOptions）

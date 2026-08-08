@@ -1,0 +1,140 @@
+{
+  "substituteArgs": [
+    {
+      "content": "Review $1 with $ARGUMENTS",
+      "args": [
+        "a.ts",
+        "care"
+      ]
+    },
+    {
+      "content": "read $1",
+      "args": [
+        "测试文件.txt"
+      ]
+    },
+    {
+      "content": "Use ${@:2}",
+      "args": [
+        "a",
+        "b",
+        "c"
+      ]
+    },
+    {
+      "content": "Use ${@:1:2}",
+      "args": [
+        "a",
+        "b",
+        "c",
+        "d"
+      ]
+    },
+    {
+      "content": "$1 $2 $3",
+      "args": [
+        "x"
+      ]
+    },
+    {
+      "content": "$10",
+      "args": [
+        "a",
+        "b",
+        "c",
+        "d",
+        "e",
+        "f",
+        "g",
+        "h",
+        "i",
+        "j"
+      ]
+    },
+    {
+      "content": "all: $@",
+      "args": [
+        "a b",
+        "c"
+      ]
+    },
+    {
+      "content": "${1:-fallback} tail",
+      "args": []
+    },
+    {
+      "content": "${1:-fallback} tail",
+      "args": [
+        "given"
+      ]
+    },
+    {
+      "content": "${@:-nothing} $ARGUMENTS",
+      "args": []
+    },
+    {
+      "content": "${@:-nothing} $ARGUMENTS",
+      "args": [
+        "x"
+      ]
+    },
+    {
+      "content": "$0",
+      "args": [
+        "x",
+        "y"
+      ]
+    },
+    {
+      "content": "plain text",
+      "args": []
+    }
+  ],
+  "parseCommandArgs": [
+    "a b c",
+    "\"a b\" c",
+    "'x y' z",
+    "",
+    "  spaced  out  ",
+    "\"unterminated",
+    "a 'b \"c\"' d"
+  ],
+  "expandPromptTemplate": [
+    {
+      "text": "/review src/main.ts carefully",
+      "templates": [
+        {
+          "name": "review",
+          "content": "Review $1 with $ARGUMENTS"
+        }
+      ]
+    },
+    {
+      "text": "/missing foo",
+      "templates": [
+        {
+          "name": "review",
+          "content": "x"
+        }
+      ]
+    },
+    {
+      "text": "not a template",
+      "templates": [
+        {
+          "name": "review",
+          "content": "x"
+        }
+      ]
+    },
+    {
+      "text": "/review",
+      "templates": [
+        {
+          "name": "review",
+          "content": "empty: $1|$@"
+        }
+      ]
+    }
+  ]
+}

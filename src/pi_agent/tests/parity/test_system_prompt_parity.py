@@ -60,7 +60,13 @@ def _build_options(fixture: dict) -> BuildSystemPromptOptions:
 
 
 def _fixture_names() -> list[str]:
-    return sorted(path.stem for path in FIXTURES_DIR.glob("*.json"))
+    return sorted(
+        path.stem
+        for path in FIXTURES_DIR.glob("*.json")
+        # system prompt fixtures 必有 cwd 字段；compaction/prompt_templates
+        # 等其它 parity 输入不含，避免误收集。
+        if "cwd" in json.loads(path.read_text(encoding="utf-8"))
+    )
 
 
 def _diff(expected: str, actual: str) -> str:
