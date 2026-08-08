@@ -51,6 +51,7 @@ import httpx
 from pi_ai import ModelCost
 from pi_ai._types import Context, Model, Tool
 from pi_ai.api.completions import _create_client, chat_completions_stream
+from pi_ai.api._shared import to_openai_messages
 
 
 def _make_model(
@@ -78,17 +79,48 @@ def _async_iter(items):
     return gen()
 
 
-def _chunk(content=None, tool_calls=None, finish_reason=None, usage=None):
+def _chunk(content=None, tool_calls=None, finish_reason=None, usage=None, reasoning_content=None):
     """构造一个假的 OpenAI Streaming Chunk。"""
     return SimpleNamespace(
         choices=[
             SimpleNamespace(
                 index=0,
-                delta=SimpleNamespace(content=content, tool_calls=tool_calls),
+                delta=SimpleNamespace(
+                    content=content,
+                    tool_calls=tool_calls,
+                    reasoning_content=reasoning_content,
+                ),
                 finish_reason=finish_reason,
             )
         ],
         usage=usage,
+    )
+
+
+def _make_deepseek_v4_model() -> Model:
+    """deepseek-v4-flash 元数据（含 thinking_level_map 与 DeepSeek compat）。"""
+    return Model(
+        id="deepseek-v4-flash",
+        provider="deepseek",
+        api="openai-completions",
+        name="DeepSeek V4 Flash",
+        input=["text"],
+        output=["text"],
+        reasoning=True,
+        thinking_level_map={
+            "off": "disabled",
+            "minimal": "low",
+            "low": "low",
+            "medium": "high",
+            "high": "high",
+            "xhigh": "high",
+            "max": "max",
+        },
+        compat={
+            "thinkingFormat": "deepseek",
+            "requiresReasoningContentOnAssistantMessages": True,
+            "supportsReasoningEffort": True,
+        },
     )
 
 
@@ -482,6 +514,82 @@ class TestCompletionsStream:
         assert msg["usage"]["cache_read"] == 0
 
     @pytest.mark.asyncio
+    async def test_deepseek_reasoning_effort_forwarded(self):
+        """DeepSeek V4：reasoning 选项翻译为 thinking + reasoning_effort。"""
+        model = _make_deepseek_v4_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        client = _mock_client([_chunk(content="ok", finish_reason="stop")])
+
+        _, _ = await _collect_events(model, context, client, options={"reasoning": "high"})
+        kwargs = client.chat.completions.create.call_args.kwargs
+        assert kwargs["thinking"] == {"type": "enabled"}
+        assert kwargs["reasoning_effort"] == "high"
+
+    @pytest.mark.asyncio
+    async def test_deepseek_thinking_disabled_for_off(self):
+        """DeepSeek V4：off 翻译为 thinking.type=disabled，不带 reasoning_effort。"""
+        model = _make_deepseek_v4_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        client = _mock_client([_chunk(content="ok", finish_reason="stop")])
+
+        _, _ = await _collect_events(model, context, client, options={"reasoning": "off"})
+        kwargs = client.chat.completions.create.call_args.kwargs
+        assert kwargs["thinking"] == {"type": "disabled"}
+        assert "reasoning_effort" not in kwargs
+
+    @pytest.mark.parametrize(
+        "level,expected",
+        [
+            ("minimal", "low"),
+            ("low", "low"),
+            ("medium", "high"),
+            ("high", "high"),
+            ("xhigh", "high"),
+            ("max", "max"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_deepseek_level_map_applied(self, level, expected):
+        """DeepSeek V4 Flash 官方 effort 映射：minimal/low->low，xhigh->high，max->max。"""
+        model = _make_deepseek_v4_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        client = _mock_client([_chunk(content="ok", finish_reason="stop")])
+
+        _, _ = await _collect_events(model, context, client, options={"reasoning": level})
+        kwargs = client.chat.completions.create.call_args.kwargs
+        assert kwargs["reasoning_effort"] == expected
+
+    @pytest.mark.asyncio
+    async def test_reasoning_content_parsed_to_thinking_blocks(self):
+        """DeepSeek delta.reasoning_content 解析为 thinking 块，且顺序在 text 之前。"""
+        model = _make_deepseek_v4_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        chunks = [
+            _chunk(reasoning_content="Let me think", finish_reason=None),
+            _chunk(reasoning_content=" deeply", finish_reason=None),
+            _chunk(content="Answer.", finish_reason="stop"),
+        ]
+        client = _mock_client(chunks)
+
+        events, stream = await _collect_events(model, context, client)
+        assert [e["type"] for e in events] == [
+            "start",
+            "thinking_start",
+            "thinking_delta",
+            "thinking_delta",
+            "thinking_end",
+            "text_start",
+            "text_delta",
+            "text_end",
+            "done",
+        ]
+        msg = await stream.result()
+        assert msg["content"] == [
+            {"type": "thinking", "thinking": "Let me think deeply"},
+            {"type": "text", "text": "Answer."},
+        ]
+
+    @pytest.mark.asyncio
     async def test_request_kwargs(self):
         model = _make_model()
         tool = Tool(
@@ -600,3 +708,30 @@ class TestCompletionsStream:
             await asyncio.sleep(0.01)
             with pytest.raises(asyncio.CancelledError):
                 await stream.result()
+
+
+class TestOpenaiMessagesReasoningContent:
+    """to_openai_messages 对 DeepSeek reasoning_content 的回传。"""
+
+    def _assistant(self) -> dict:
+        return {
+            "role": "assistant",
+            "content": [
+                {"type": "thinking", "thinking": "reasoning text"},
+                {"type": "text", "text": "answer"},
+            ],
+        }
+
+    def test_deepseek_roundtrips_reasoning_content(self):
+        model = _make_deepseek_v4_model()
+        messages = [self._assistant()]
+        result = to_openai_messages(messages, model)  # type: ignore[arg-type]
+        assert result[0]["reasoning_content"] == "reasoning text"
+        assert result[0]["content"] == "answer"
+
+    def test_other_models_skip_thinking_blocks(self):
+        model = _make_model()
+        messages = [self._assistant()]
+        result = to_openai_messages(messages, model)  # type: ignore[arg-type]
+        assert "reasoning_content" not in result[0]
+        assert result[0]["content"] == "answer"

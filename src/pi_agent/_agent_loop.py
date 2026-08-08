@@ -71,7 +71,7 @@
 
     直到停止条件满足，发射 agent_end 并返回最终完整 messages。
 
-停止条件（对齐 TS agent-loop.ts runLoop）：
+停止条件（agent-loop.ts runLoop）：
 
     1. stop_reason == "error" / "aborted"
     2. should_stop_after_turn 返回 True
@@ -102,7 +102,7 @@ run_agent_loop_continue(context, config, emit, signal, stream_fn)
 
 agent_loop(prompts, ...) / agent_loop_continue(context, ...)
 
-    EventStream 包装（对齐 TS agentLoop / agentLoopContinue）。
+    EventStream 包装（agentLoop / agentLoopContinue）。
     返回 EventStream 而非 emit 回调；agent_end 事件即流结束事件，
     await stream.result() 得到 agent_end 携带的完整 messages。
 
@@ -254,8 +254,7 @@ finalize _finalize_tool_call：
     LLM 纯推理，Tool 执行真实世界操作（例如 HTTP 请求），
     因此 Tool 执行被单独隔离。
 
-4. 钩子对齐 TS
-
+4. 钩子
     beforeToolCall / afterToolCall / before_execute / after_execute /
     prepare_next_turn / should_stop_after_turn / transform_context /
     convert_to_llm / get_api_key / get_steering_messages /
@@ -397,7 +396,7 @@ async def run_agent_loop(
 
     """
 
-    # 不可变：复制上下文并注入新提示（对齐 TS runAgentLoop）
+    # 不可变：复制上下文并注入新提示（runAgentLoop）
     messages: list[AgentMessage] = list(context.messages)
     tools = list(context.tools) if context.tools else []
     new_messages: list[AgentMessage] = list(prompts)
@@ -411,7 +410,7 @@ async def run_agent_loop(
         tools=tools,
     )
 
-    # 对齐 TS：agent_start / turn_start 由外层发射，且先于 prompts 注入。
+    # agent_start / turn_start 由外层发射，且先于 prompts 注入。
     await emit({"type": "agent_start"})
     await emit({"type": "turn_start"})
     for p in prompts:
@@ -455,7 +454,7 @@ async def run_agent_loop_continue(
         tools=tools,
     )
 
-    # 对齐 TS：agent_start / turn_start 由外层发射。
+    # agent_start / turn_start 由外层发射。
     await emit({"type": "agent_start"})
     await emit({"type": "turn_start"})
 
@@ -483,7 +482,7 @@ def agent_loop(
     signal: asyncio.Event | None,
     stream_fn: StreamFn,
 ) -> EventStream[AgentEvent, list[AgentMessage]]:
-    """agentLoop() EventStream 包装（对齐 TS agent-loop.ts agentLoop()）。
+    """agentLoop() EventStream 包装（agent-loop.ts agentLoop()）。
 
     返回 EventStream 而非 emit 回调；agent_end 事件即流结束事件，
     await stream.result() 得到 agent_end 携带的完整 messages（含历史）。
@@ -518,7 +517,7 @@ def agent_loop_continue(
     signal: asyncio.Event | None,
     stream_fn: StreamFn,
 ) -> EventStream[AgentEvent, list[AgentMessage]]:
-    """agentLoopContinue() EventStream 包装（对齐 TS agentLoopContinue()）。"""
+    """agentLoopContinue() EventStream 包装（agentLoopContinue()）。"""
     if len(context.messages) == 0:
         raise ValueError("Cannot continue: no messages in context")
     if context.messages[-1].get("role") == "assistant":
@@ -570,7 +569,7 @@ async def _run_loop(
     new_messages: list[AgentMessage] | None = None,
     first_turn: bool = True,
 ) -> list[AgentMessage]:
-    """双重嵌套循环（对齐 TS agent-loop.ts runLoop）。
+    """双重嵌套循环（agent-loop.ts runLoop）。
 
     外层 (Follow-up): 内层循环结束后（无更多工具调用、无 steering 消息），
     检查 follow-up 队列；有后续消息则重新进入内层循环，直到队列为空。
@@ -578,7 +577,7 @@ async def _run_loop(
     内层 (Tool + Steering): 工具调用 + steering 注入循环。
     每一轮：注入待处理消息 → LLM 推理 → 执行工具 → 轮询 steering 队列。
 
-    停止条件（对齐 TS）：
+    停止条件（：
     1. stop_reason == error/aborted
     2. should_stop_after_turn 返回 True
     3. 无更多工具调用且 steering / follow-up 队列均为空
@@ -829,7 +828,7 @@ async def _stream_assistant_response(
     if config.cache_retention is not None:
         options["cache_retention"] = config.cache_retention
 
-    # 推理预算与传输协议（对齐 TS AgentLoopConfig extends SimpleStreamOptions）。
+    # 推理预算与传输协议（AgentLoopConfig extends SimpleStreamOptions）。
     if config.thinking_budgets is not None:
         options["thinking_budgets"] = config.thinking_budgets
     if config.transport is not None:
@@ -1015,7 +1014,7 @@ async def _execute_tool_calls(
 ) -> dict:
     """执行 LLM 返回的所有工具调用（1.4：支持并行）。
 
-    对齐 TS executeToolCalls()：
+    executeToolCalls()：
 
     - config.tool_execution == "sequential" → 整批顺序执行
     - 批次内任一工具的 execution_mode == "sequential" → 整批回退顺序执行
@@ -1106,7 +1105,7 @@ async def _execute_tool_calls_parallel(
 ) -> dict:
     """并行执行：顺序准备 → 并发执行 → 按原始顺序输出消息。
 
-    对齐 TS executeToolCallsParallel()：
+    executeToolCallsParallel()：
     - 立即结果（未找到/校验失败/block）在准备循环中当场发 tool_execution_end
     - 已通过的工具并发执行，每个完成后立即发 tool_execution_end（完成顺序）
     - ToolResultMessage 消息在所有工具结束后按 assistant 原始顺序发出
@@ -1173,7 +1172,7 @@ async def _prepare_tool_call(
     config: AgentLoopConfig,
     signal: asyncio.Event | None,
 ) -> _PreparedToolCall | _ImmediateToolOutcome:
-    """准备阶段：查找工具 → 校验参数 → beforeToolCall（对齐 TS prepareToolCall）。
+    """准备阶段：查找工具 → 校验参数 → beforeToolCall（prepareToolCall）。
 
     立即失败（工具未找到 / 参数校验失败 / beforeToolCall block）时返回
     _ImmediateToolOutcome；不发 tool_execution_start（保持 Python 现状）。
@@ -1196,7 +1195,7 @@ async def _prepare_tool_call(
         return _ImmediateToolOutcome(tc, args, error_result, is_error=True)
 
     # 参数校验：按 input_schema 校验并返回转换后的参数
-    # （对齐 TS validateToolCall：失败返回错误 ToolResult 让 LLM 自纠）。
+    # （validateToolCall：失败返回错误 ToolResult 让 LLM 自纠）。
     try:
         args = validate_arguments(tc_name, tool_def.input_schema, args)
     except ValidationError as exc:
@@ -1232,7 +1231,7 @@ async def _prepare_tool_call(
             )
             return _ImmediateToolOutcome(tc, args, blocked_result, is_error=True)
 
-    # 对齐 TS：beforeToolCall 之后检查中止
+    # beforeToolCall 之后检查中止
     _check_signal(signal)
 
     return _PreparedToolCall(tc, tool_def, args, assistant_msg, context)
@@ -1347,7 +1346,7 @@ async def _finalize_tool_call(
     executed: _ExecutedToolOutcome,
     config: AgentLoopConfig,
 ) -> _FinalizedToolOutcome:
-    """完成阶段：afterToolCall 字段级覆盖（对齐 TS finalizeExecutedToolCall）。"""
+    """完成阶段：afterToolCall 字段级覆盖（finalizeExecutedToolCall）。"""
     result = executed.result
     is_error = executed.is_error
 

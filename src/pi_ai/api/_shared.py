@@ -64,6 +64,7 @@ from ..types import (
     now_ms,
 )
 from ..utils.diagnostics import create_assistant_message_diagnostic
+from .compat_runtime import requires_reasoning_content_on_assistant_messages
 from .constrained_sampling import resolve_json_schema_strict_sampling
 
 
@@ -213,6 +214,7 @@ def to_openai_messages(
             oai_msg: dict[str, Any] = {"role": "assistant", "content": None}
             tool_calls: list[dict[str, Any]] = []
             text_parts: list[str] = []
+            thinking_parts: list[str] = []
 
             for asst_block in asst_msg["content"]:
                 if asst_block["type"] == "text":
@@ -234,8 +236,9 @@ def to_openai_messages(
                         }
                     )
                 elif asst_block["type"] == "thinking":
-                    # Skip assistant thinking blocks — replayed as text
-                    pass
+                    # DeepSeek 等要求把 reasoning_content 原样回传；
+                    # 其余 provider 跳过 thinking 块。
+                    thinking_parts.append(str(asst_block.get("thinking", "")))
 
             # OpenAI Tool Calling
             #
@@ -244,6 +247,8 @@ def to_openai_messages(
                 oai_msg["tool_calls"] = tool_calls
             if text_parts:
                 oai_msg["content"] = "\n".join(text_parts)
+            if requires_reasoning_content_on_assistant_messages(model) and thinking_parts:
+                oai_msg["reasoning_content"] = "\n".join(thinking_parts)
 
             result.append(oai_msg)
 

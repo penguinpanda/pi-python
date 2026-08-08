@@ -119,6 +119,24 @@ DEEPSEEK_MODELS: list[Model] = [
         max_tokens=384000,  # 最大输出 Token 数
         context_window=1000000,
         reasoning=True,  # 支持推理
+        # DeepSeek V4 thinking 模式：thinking.type 开关 + reasoning_effort。
+        # 官方 effort 映射（deepseek-v4-flash）：
+        #   minimal/low -> low，medium/high/xhigh -> high，max -> max；
+        # "disabled" 由适配器翻译为 thinking.type=disabled。
+        thinking_level_map={
+            "off": "disabled",
+            "minimal": "low",
+            "low": "low",
+            "medium": "high",
+            "high": "high",
+            "xhigh": "high",
+            "max": "max",
+        },
+        compat={
+            "thinkingFormat": "deepseek",
+            "requiresReasoningContentOnAssistantMessages": True,
+            "supportsReasoningEffort": True,
+        },
         # 价格（每百万 Token）。
         cost=ModelCost(input=0.14, output=0.28, cache_read=0.0028, cache_write=0.0),
     ),
@@ -139,6 +157,11 @@ DEEPSEEK_MODELS: list[Model] = [
         max_tokens=384000,  # 最大输出 Token 数
         context_window=1000000,
         reasoning=True,  # 支持推理
+        compat={
+            "thinkingFormat": "deepseek",
+            "requiresReasoningContentOnAssistantMessages": True,
+            "supportsReasoningEffort": True,
+        },
         cost=ModelCost(input=0.435, output=0.87, cache_read=0.003625, cache_write=0.0),
     ),
 ]

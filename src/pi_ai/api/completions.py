@@ -65,6 +65,10 @@ from ..types import (
     TextDeltaEvent,
     TextEndEvent,
     TextStartEvent,
+    ThinkingContent,
+    ThinkingDeltaEvent,
+    ThinkingEndEvent,
+    ThinkingStartEvent,
     ToolCall,
     ToolCallDeltaEvent,
     ToolCallEndEvent,
@@ -72,6 +76,7 @@ from ..types import (
     Usage,
     now_ms,
 )
+from ..types.common import ModelThinkingLevel
 from ._shared import (
     build_error_message,
     empty_usage,
@@ -81,7 +86,13 @@ from ._shared import (
 )
 from .simple_options import clamp_max_tokens_to_context
 from .transform_messages import normalize_tool_call_id, transform_messages
-from .compat_runtime import max_tokens_field, supports_long_cache_retention, supports_strict_mode
+from .compat_runtime import (
+    max_tokens_field,
+    supports_long_cache_retention,
+    supports_reasoning_effort,
+    supports_strict_mode,
+    thinking_format,
+)
 from ..utils.prompt_cache import (
     clamp_openai_prompt_cache_key,
     resolve_cache_retention,
@@ -331,6 +342,23 @@ async def chat_completions_stream(
             if cache_retention == "long" and supports_long:
                 kwargs["prompt_cache_retention"] = "24h"
 
+            # 推理级别转发（模型显式声明 thinking_level_map 时才生效）。
+            #
+            # DeepSeek V4：thinking.type 控制开关，reasoning_effort 控制强度；
+            # map 值 "disabled" 翻译为 thinking.type=disabled。
+            reasoning_level = cast(ModelThinkingLevel | None, opts.get("reasoning"))
+            thinking_map = model.thinking_level_map or {}
+            if reasoning_level is not None and reasoning_level in thinking_map:
+                mapped_effort = thinking_map[reasoning_level]
+                if mapped_effort == "disabled":
+                    if thinking_format(model) == "deepseek":
+                        kwargs["thinking"] = {"type": "disabled"}
+                elif mapped_effort is not None:
+                    if supports_reasoning_effort(model):
+                        kwargs["reasoning_effort"] = mapped_effort
+                    if thinking_format(model) == "deepseek":
+                        kwargs["thinking"] = {"type": "enabled"}
+
             # 发起流式请求。
             #
             # 返回的是异步可迭代对象。
@@ -370,12 +398,22 @@ async def chat_completions_stream(
                 """结束当前累积块并发射对应的 *_end 事件。"""
                 nonlocal current_kind, current_index, current_tool_id
                 if current_kind == "text" and current_index is not None:
-                    block = cast(TextContent, content_blocks[current_index])
+                    text_block = cast(TextContent, content_blocks[current_index])
                     stream.push(
                         TextEndEvent(
                             type="text_end",
                             content_index=current_index,
-                            content=block["text"],
+                            content=text_block["text"],
+                            partial=_partial(),
+                        )
+                    )
+                elif current_kind == "thinking" and current_index is not None:
+                    thinking_block = cast(ThinkingContent, content_blocks[current_index])
+                    stream.push(
+                        ThinkingEndEvent(
+                            type="thinking_end",
+                            content_index=current_index,
+                            content=thinking_block["thinking"],
                             partial=_partial(),
                         )
                     )
@@ -423,6 +461,36 @@ async def chat_completions_stream(
                 if delta is None:
                     continue
 
+                # 推理内容增量（DeepSeek reasoning_content）。
+                #
+                # 与 text 块类似，但独立成 thinking 块；DeepSeek 通常先输出
+                # reasoning_content 再输出 content。
+                reasoning_delta = getattr(delta, "reasoning_content", None)
+                if reasoning_delta:
+                    if current_kind != "thinking":
+                        _end_current_block()
+                        current_kind = "thinking"
+                        content_blocks.append(ThinkingContent(type="thinking", thinking=""))
+                        current_index = len(content_blocks) - 1
+                        stream.push(
+                            ThinkingStartEvent(
+                                type="thinking_start",
+                                content_index=current_index,
+                                partial=_partial(),
+                            )
+                        )
+                    idx = cast(int, current_index)
+                    thinking_block = cast(ThinkingContent, content_blocks[idx])
+                    thinking_block["thinking"] += reasoning_delta
+                    stream.push(
+                        ThinkingDeltaEvent(
+                            type="thinking_delta",
+                            content_index=idx,
+                            delta=reasoning_delta,
+                            partial=_partial(),
+                        )
+                    )
+
                 # 文本增量。
                 #
                 # 块切换：当前块不是文本时先结束上一个块。
@@ -440,8 +508,8 @@ async def chat_completions_stream(
                             )
                         )
                     idx = cast(int, current_index)
-                    block = cast(TextContent, content_blocks[idx])
-                    block["text"] += delta.content
+                    text_block = cast(TextContent, content_blocks[idx])
+                    text_block["text"] += delta.content
                     stream.push(
                         TextDeltaEvent(
                             type="text_delta",
