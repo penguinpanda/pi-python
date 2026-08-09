@@ -211,7 +211,19 @@ async def _prompt_agent(
             await session.prompt(text)
         finally:
             unsub()
-        assistant = captured[-1] if captured else None
+
+        def _assistant_text(message: dict[str, Any]) -> str:
+            return "".join(
+                block.get("text", "")
+                for block in message.get("content") or []
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
+
+        # 优先取最后一条带文本的 assistant（压缩可能只留下 toolCall 消息）。
+        assistant = next(
+            (message for message in reversed(captured) if _assistant_text(message).strip()),
+            captured[-1] if captured else None,
+        )
         if assistant is None:
             raise RuntimeError("Agent run completed without an assistant message.")
         stop_reason = assistant.get("stop_reason")
@@ -222,7 +234,7 @@ async def _prompt_agent(
                     or f"Agent run ended with unexpected stop reason: {stop_reason}."
                 )
             )
-        output = session.get_last_assistant_text()
+        output = _assistant_text(assistant)
         if not output:
             raise RuntimeError("Agent run produced no assistant text.")
         return output
