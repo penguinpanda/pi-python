@@ -6,8 +6,10 @@ token 估算（AgentMessage 级）。
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
+from pathlib import Path
 from typing import Any, cast
 
 from pi_ai.types import Usage
@@ -100,37 +102,100 @@ def truncate_for_summary(text: str, max_chars: int) -> str:
 
 CACHE_FIRST_TRUNCATED_MARKER = "[output truncated]"
 
-# DeepSeek 上下文硬盘缓存 TTL（与 pi_coding_agent.cache_stats 同源，5 分钟）。
-CACHE_TTL_MS = 5 * 60 * 1000
+# DeepSeek 上下文硬盘缓存 TTL（与 pi_coding_agent.cache_stats 同源；
+# 实测 idle 6 分钟后缓存仍命中，5 分钟过于保守）。
+CACHE_TTL_MS = 10 * 60 * 1000
+
+# 保护尾预算：最近这些 token 内的工具结果不剪（对齐 Reasonix recentKeep）。
+CACHE_FIRST_PROTECT_RECENT_TOKENS = 16_000
+
+# 只读工具输出信息集中在前部，保留长头短尾；副作用工具头尾均衡。
+_CACHE_FIRST_READ_ONLY_TOOLS = frozenset({"read", "grep", "rg", "find", "ls", "cat", "view"})
+_CACHE_FIRST_HEAD_TAIL = {"read_only": (8000, 2000), "side_effect": (4000, 4000)}
 
 
-def _truncate_message(message: AgentMessage) -> AgentMessage | None:
-    """返回截断后的消息副本；无可截断内容返回 None。"""
+def _snip_strategy_for(tool_name: str) -> tuple[int, int]:
+    if tool_name in _CACHE_FIRST_READ_ONLY_TOOLS:
+        return _CACHE_FIRST_HEAD_TAIL["read_only"]
+    return _CACHE_FIRST_HEAD_TAIL["side_effect"]
+
+
+def _snip_text(
+    text: str,
+    tool_name: str,
+    archive_dir: Path | None = None,
+) -> str:
+    """head+tail 截断：保留头部与尾部，中间用稳定标记省略。"""
+    head_chars, tail_chars = _snip_strategy_for(tool_name)
+    if len(text) > head_chars + tail_chars:
+        head = text[:head_chars]
+        tail = text[-tail_chars:] if tail_chars else ""
+    else:
+        head_chars = len(text) // 2
+        tail_chars = max(0, len(text) - head_chars - 1)
+        head = text[:head_chars]
+        tail = text[-tail_chars:] if tail_chars else ""
+    omitted = len(text) - len(head) - len(tail)
+    if omitted <= 0:
+        return text
+    archive_note = ""
+    if archive_dir is not None:
+        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        archive_path = archive_dir / f"{digest}.txt"
+        if not archive_path.exists():
+            archive_path.write_text(text, encoding="utf-8")
+        archive_note = f" archived={archive_path.name}"
+    return (
+        f"{CACHE_FIRST_TRUNCATED_MARKER}{archive_note}\n\n"
+        f"{head}\n\n[... {omitted} chars omitted ...]\n\n{tail}"
+    )
+
+
+def _truncate_message(
+    message: AgentMessage,
+    archive_dir: Path | None = None,
+) -> AgentMessage | None:
+    """返回 head+tail 截断后的消息副本；已截断或无可截断内容返回 None。"""
     role = message.get("role")
     if role == "toolResult":
         content = message.get("content")
+        tool_name = str(message.get("tool_name", ""))
         if isinstance(content, str):
-            if len(content) <= TOOL_RESULT_MAX_CHARS:
+            if len(content) <= TOOL_RESULT_MAX_CHARS or content.startswith(
+                CACHE_FIRST_TRUNCATED_MARKER
+            ):
                 return None
             new_message = dict(message)
-            new_message["content"] = CACHE_FIRST_TRUNCATED_MARKER
+            new_message["content"] = _snip_text(content, tool_name, archive_dir)
             return cast(AgentMessage, new_message)
-        if isinstance(content, list) and len(_content_text(content, "")) > TOOL_RESULT_MAX_CHARS:
+        if isinstance(content, list):
+            text = _content_text(content, "")
+            if len(text) <= TOOL_RESULT_MAX_CHARS or text.startswith(CACHE_FIRST_TRUNCATED_MARKER):
+                return None
             new_message = dict(message)
-            new_message["content"] = [{"type": "text", "text": CACHE_FIRST_TRUNCATED_MARKER}]
+            new_message["content"] = [
+                {"type": "text", "text": _snip_text(text, tool_name, archive_dir)}
+            ]
             return cast(AgentMessage, new_message)
         return None
-    if role == "bashExecution" and len(str(message.get("output", ""))) > TOOL_RESULT_MAX_CHARS:
+    if role == "bashExecution":
+        output = str(message.get("output", ""))
+        if len(output) <= TOOL_RESULT_MAX_CHARS or output.startswith(CACHE_FIRST_TRUNCATED_MARKER):
+            return None
         new_message = dict(message)
-        new_message["output"] = CACHE_FIRST_TRUNCATED_MARKER
+        new_message["output"] = _snip_text(output, "bash", archive_dir)
         return cast(AgentMessage, new_message)
     return None
 
 
-def _truncate_all_large_tool_outputs(messages: list[AgentMessage]) -> list[AgentMessage]:
+def _truncate_all_large_tool_outputs(
+    messages: list[AgentMessage],
+    archive_dir: Path | None = None,
+) -> list[AgentMessage]:
     result: list[AgentMessage] = []
     for message in messages:
-        truncated = _truncate_message(message)
+        truncated = _truncate_message(message, archive_dir)
         result.append(truncated if truncated is not None else message)
     return result
 
@@ -140,15 +205,19 @@ def apply_cache_first_truncation(
     *,
     context_window: int = 0,
     reserve_tokens: int = 0,
+    protect_recent_tokens: int = CACHE_FIRST_PROTECT_RECENT_TOKENS,
+    archive_dir: str | Path | None = None,
 ) -> list[AgentMessage]:
-    """把超长 toolResult / bashExecution 输出替换为固定截断标记（幂等）。
+    """对超长工具输出做 head+tail 截断（幂等、预算驱动、保护尾优先）。
 
-    提供 context_window / reserve_tokens 时按预算从尾部向前截断：
-    未超阈值不动，超阈值时优先截断最新的大工具输出，降到阈值内即停；
-    无预算信息时保留旧行为（截断所有超长输出）。
+    提供 context_window / reserve_tokens 时按预算处理：未超阈值不动；
+    超阈值时优先截断保护尾之外的最新大输出，降到阈值内即停。
+    保护尾（默认最近 16K token）内的结果保持完整，避免模型刚看到的内容被抹掉。
+    archive_dir 非空时截断前把原始内容归档到该目录。
     """
+    resolved_archive = Path(archive_dir) if archive_dir is not None else None
     if context_window <= 0 or reserve_tokens < 0:
-        return _truncate_all_large_tool_outputs(messages)
+        return _truncate_all_large_tool_outputs(messages, resolved_archive)
     threshold = context_window - reserve_tokens
 
     def _estimate(messages: list[AgentMessage]) -> int:
@@ -159,8 +228,19 @@ def apply_cache_first_truncation(
     if threshold <= 0 or _estimate(messages) <= threshold:
         return messages
     result = list(messages)
-    for index in range(len(result) - 1, -1, -1):
-        truncated = _truncate_message(result[index])
+    if protect_recent_tokens <= 0:
+        prunable_indices = range(len(result) - 1, -1, -1)
+    else:
+        protect_start = 0
+        accumulated = 0
+        for index in range(len(result) - 1, -1, -1):
+            accumulated += estimate_tokens(result[index])
+            if accumulated >= protect_recent_tokens:
+                protect_start = index
+                break
+        prunable_indices = range(protect_start - 1, -1, -1)
+    for index in prunable_indices:
+        truncated = _truncate_message(result[index], resolved_archive)
         if truncated is None:
             continue
         result[index] = truncated

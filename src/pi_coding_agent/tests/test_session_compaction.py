@@ -451,7 +451,7 @@ async def test_cache_first_build_context_truncates_large_tool_result(faux_env, t
         models,
         mgr,
         str(tmp_path),
-        compaction_settings=CompactionSettings(cache_first=True),
+        compaction_settings=CompactionSettings(cache_first=True, protect_recent_tokens=0),
     )
     try:
         messages = session._build_context_messages()
@@ -459,7 +459,7 @@ async def test_cache_first_build_context_truncates_large_tool_result(faux_env, t
         await session.dispose()
     tool_result = messages[-1]
     assert tool_result["role"] == "toolResult"
-    assert tool_result["content"][0]["text"] == "[output truncated]"
+    assert tool_result["content"][0]["text"].startswith("[output truncated]")
     assert tool_result["tool_call_id"] == "call-1"
 
 
@@ -510,7 +510,9 @@ async def test_cache_first_turn_prefix_stable_effect(faux_env, tmp_path):
         mgr,
         str(tmp_path),
         model=model,
-        compaction_settings=CompactionSettings(cache_first=True, reserve_tokens=0),
+        compaction_settings=CompactionSettings(
+            cache_first=True, reserve_tokens=0, protect_recent_tokens=0
+        ),
     )
     seen: list[list[dict]] = []
     original = models.stream
@@ -529,4 +531,4 @@ async def test_cache_first_turn_prefix_stable_effect(faux_env, tmp_path):
     assert seen[1][:-2] == seen[0]
     tool_result = seen[0][1]
     assert tool_result["role"] == "toolResult"
-    assert tool_result["content"][0]["text"] == "[output truncated]"
+    assert tool_result["content"][0]["text"].startswith("[output truncated]")

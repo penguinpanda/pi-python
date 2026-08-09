@@ -79,11 +79,16 @@ def compaction_settings_from_config(settings: dict) -> CompactionSettings:
     if not isinstance(cache_first, bool):
         cache_first = base.cache_first
 
+    protect = raw.get("protectRecentTokens", base.protect_recent_tokens)
+    if not isinstance(protect, int) or protect < 0:
+        protect = base.protect_recent_tokens
+
     return CompactionSettings(
         enabled=enabled,
         reserve_tokens=reserve,
         keep_recent_tokens=keep,
         cache_first=cache_first,
+        protect_recent_tokens=protect,
     )
 
 

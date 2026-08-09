@@ -47,6 +47,7 @@ from pi_ai.utils.retry import (
     is_retryable_error,
 )
 
+from ._config import get_agent_dir
 from ._session_manager import SessionManager
 from .frontmatter import strip_frontmatter
 from .messages import convert_to_llm
@@ -369,6 +370,8 @@ class AgentSession:
                     context.messages or [],
                     context_window=self._model.context_window if self._model else 0,
                     reserve_tokens=self._compaction_settings.reserve_tokens,
+                    protect_recent_tokens=self._compaction_settings.protect_recent_tokens,
+                    archive_dir=Path(get_agent_dir()) / "cache-first-archive",
                 )
 
             current_fp = compute_context_fingerprint(
@@ -607,6 +610,8 @@ class AgentSession:
                 messages,
                 context_window=self._model.context_window if self._model else 0,
                 reserve_tokens=self._compaction_settings.reserve_tokens,
+                protect_recent_tokens=self._compaction_settings.protect_recent_tokens,
+                archive_dir=Path(get_agent_dir()) / "cache-first-archive",
             )
         return messages
 

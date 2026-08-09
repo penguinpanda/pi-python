@@ -16,6 +16,7 @@ from pi_ai.utils.retry import RetryPolicy, retry_assistant_call
 
 from ._types import AgentMessage
 from .compaction_utils import (
+    CACHE_FIRST_PROTECT_RECENT_TOKENS,
     compute_file_lists,
     create_file_ops,
     estimate_context_tokens,
@@ -51,6 +52,7 @@ class CompactionSettings:
     reserve_tokens: int = 16384
     keep_recent_tokens: int = 20000
     cache_first: bool = False  # cache-first：优先截断低价值工具输出，保持前缀稳定
+    protect_recent_tokens: int = CACHE_FIRST_PROTECT_RECENT_TOKENS  # 保护尾预算
 
 
 DEFAULT_COMPACTION_SETTINGS = CompactionSettings()
