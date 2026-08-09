@@ -50,9 +50,6 @@ models = ["deepseek-v4-flash"]
 default = "deepseek-v4-flash"
 api_key_env = "DEEPSEEK_API_KEY"
 context_window = 1000000
-
-[sandbox]
-bash = "off"
 """
 
 
