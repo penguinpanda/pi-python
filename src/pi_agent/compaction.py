@@ -53,6 +53,8 @@ class CompactionSettings:
     keep_recent_tokens: int = 20000
     cache_first: bool = False  # cache-first：优先截断低价值工具输出，保持前缀稳定
     protect_recent_tokens: int = CACHE_FIRST_PROTECT_RECENT_TOKENS  # 保护尾预算
+    # 剪枝独立预算：None = 复用 reserve_tokens（即剪枝与压缩同阈值）。
+    prune_reserve_tokens: int | None = None
 
 
 DEFAULT_COMPACTION_SETTINGS = CompactionSettings()

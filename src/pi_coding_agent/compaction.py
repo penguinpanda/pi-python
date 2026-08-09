@@ -83,12 +83,17 @@ def compaction_settings_from_config(settings: dict) -> CompactionSettings:
     if not isinstance(protect, int) or protect < 0:
         protect = base.protect_recent_tokens
 
+    prune_reserve = raw.get("pruneReserveTokens", base.prune_reserve_tokens)
+    if prune_reserve is not None and (not isinstance(prune_reserve, int) or prune_reserve < 0):
+        prune_reserve = base.prune_reserve_tokens
+
     return CompactionSettings(
         enabled=enabled,
         reserve_tokens=reserve,
         keep_recent_tokens=keep,
         cache_first=cache_first,
         protect_recent_tokens=protect,
+        prune_reserve_tokens=prune_reserve,
     )
 
 

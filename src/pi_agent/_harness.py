@@ -525,7 +525,11 @@ class AgentHarness:
             messages = apply_cache_first_truncation(
                 messages,
                 context_window=self._model.context_window if self._model is not None else 0,
-                reserve_tokens=self._compaction_settings.reserve_tokens,
+                reserve_tokens=(
+                    self._compaction_settings.prune_reserve_tokens
+                    if self._compaction_settings.prune_reserve_tokens is not None
+                    else self._compaction_settings.reserve_tokens
+                ),
                 protect_recent_tokens=self._compaction_settings.protect_recent_tokens,
             )
         resources = self._get_resources()
