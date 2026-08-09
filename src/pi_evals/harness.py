@@ -196,13 +196,44 @@ async def _prompt_agent(
     if signal is not None:
         watcher = asyncio.create_task(_abort_watcher(signal, session))
     try:
-        previous_count = len(session.get_messages())
+        # 自动压缩会把旧历史折叠成 compactionSummary，消息总数可能不增反减，
+        # 因此不能用前后数量差判断“本轮新增”；改用最后一条 assistant 时间戳。
+        before_count = len(session.get_messages())
+        before_ts = max(
+            (int(message.get("timestamp", 0) or 0) for message in session.get_messages()),
+            default=0,
+        )
         await session.prompt(text)
-        new_messages = session.get_messages()[previous_count:]
+        messages = session.get_messages()
         assistant = next(
-            (message for message in reversed(new_messages) if message.get("role") == "assistant"),
+            (
+                message
+                for message in reversed(messages)
+                if message.get("role") == "assistant"
+                and int(message.get("timestamp", 0) or 0) > before_ts
+            ),
             None,
         )
+        if assistant is None:
+            # 回退：消息数增加时按新增段找；压缩导致减少时取最后一条 assistant。
+            if len(messages) > before_count:
+                assistant = next(
+                    (
+                        message
+                        for message in reversed(messages[before_count:])
+                        if message.get("role") == "assistant"
+                    ),
+                    None,
+                )
+            else:
+                assistant = next(
+                    (
+                        message
+                        for message in reversed(messages)
+                        if message.get("role") == "assistant"
+                    ),
+                    None,
+                )
         if assistant is None:
             raise RuntimeError("Agent run completed without an assistant message.")
         stop_reason = assistant.get("stop_reason")

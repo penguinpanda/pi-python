@@ -388,3 +388,41 @@ async def test_cache_first_explicit_option_overrides_compaction_settings():
     result = await harness.run("hi", HarnessContext())
     assert result.errors == []
     assert sessions[0]._compaction_settings.cache_first is False
+
+
+class _CompactingFakeSession:
+    """模拟 prompt 期间自动压缩导致消息总数减少的会话。"""
+
+    def __init__(self) -> None:
+        self.messages = [
+            {"role": "user", "content": "old", "timestamp": 1},
+            {"role": "assistant", "content": [], "timestamp": 100},
+            {"role": "toolResult", "content": [], "timestamp": 101},
+            {"role": "user", "content": "old2", "timestamp": 102},
+            {"role": "assistant", "content": [], "timestamp": 103},
+        ]
+
+    def get_messages(self):
+        return list(self.messages)
+
+    def get_last_assistant_text(self) -> str:
+        return "new answer"
+
+    async def prompt(self, text: str) -> None:
+        # 压缩：历史被 compactionSummary 替代，消息数从 5 缩到 2，再追加新 assistant。
+        self.messages = [
+            {"role": "compactionSummary", "summary": "s", "timestamp": 200},
+            {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "new answer"}],
+                "timestamp": 300,
+            },
+        ]
+
+
+@pytest.mark.asyncio
+async def test_prompt_agent_finds_assistant_after_compaction_shrinks_messages():
+    from pi_evals.harness import _prompt_agent
+
+    response = await _prompt_agent(_CompactingFakeSession(), "next", None)
+    assert response == "new answer"
