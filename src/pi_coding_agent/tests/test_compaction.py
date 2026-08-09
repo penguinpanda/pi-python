@@ -37,6 +37,7 @@ def test_compaction_settings_from_config_defaults():
     assert compaction_settings_from_config({}) == DEFAULT_COMPACTION_SETTINGS
     assert compaction_settings_from_config({"other": 1}) == DEFAULT_COMPACTION_SETTINGS
     assert DEFAULT_COMPACTION_SETTINGS.cache_first is False
+    assert DEFAULT_COMPACTION_SETTINGS.prune_reserve_tokens is None
 
 
 def test_compaction_settings_from_config_parses():
@@ -46,6 +47,7 @@ def test_compaction_settings_from_config_parses():
             "reserveTokens": 128000,
             "keepRecentTokens": 5000,
             "cacheFirst": True,
+            "pruneReserveTokens": 990000,
         }
     }
     result = compaction_settings_from_config(settings)
@@ -53,6 +55,7 @@ def test_compaction_settings_from_config_parses():
     assert result.reserve_tokens == 128000
     assert result.keep_recent_tokens == 5000
     assert result.cache_first is True
+    assert result.prune_reserve_tokens == 990000
 
 
 def test_compaction_settings_from_config_invalid_falls_back():

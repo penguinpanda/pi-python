@@ -112,7 +112,13 @@ def create_long_session_harness(name: str, *, cache_first: bool = False):
         workspace_setup=_setup_workspace,
         output=output,
         compaction_settings=(
-            CompactionSettings(cache_first=True, reserve_tokens=CACHE_FIRST_RESERVE_TOKENS)
+            # reserve_tokens=0：压缩阈值放到窗口上限，避免每轮自动压缩折叠 transcript；
+            # pruneReserveTokens 单独压低剪枝阈值（10k），保证剪枝真正触发。
+            CompactionSettings(
+                cache_first=True,
+                reserve_tokens=0,
+                prune_reserve_tokens=CACHE_FIRST_RESERVE_TOKENS,
+            )
             if cache_first
             else None
         ),
