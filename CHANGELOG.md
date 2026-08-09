@@ -83,7 +83,7 @@
   转 ANSI；1000 条消息的逐帧渲染从数百毫秒降至 ~10-20ms，输入/退出不再被渲染阻塞
 
 ### Fixed
-- pi-evals 自动压缩后误报 `Agent run completed without an assistant message.`：改用最后一条 assistant 时间戳判断本轮新消息，不再依赖前后消息数差
+- pi-evals 自动压缩后误报 `Agent run completed without an assistant message.`：改为运行期间订阅事件捕获本轮 assistant 消息，不再依赖压缩后不可靠的消息列表
 
 - TUI 布局对齐 TS：容器分配保持挂载顺序，聊天区固定在编辑器上方（1fr），
   编辑器/状态栏/页脚固定在底部，提交消息后输入框不再被挤出可视区；

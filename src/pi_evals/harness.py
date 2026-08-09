@@ -196,44 +196,22 @@ async def _prompt_agent(
     if signal is not None:
         watcher = asyncio.create_task(_abort_watcher(signal, session))
     try:
-        # 自动压缩会把旧历史折叠成 compactionSummary，消息总数可能不增反减，
-        # 因此不能用前后数量差判断“本轮新增”；改用最后一条 assistant 时间戳。
-        before_count = len(session.get_messages())
-        before_ts = max(
-            (int(message.get("timestamp", 0) or 0) for message in session.get_messages()),
-            default=0,
-        )
-        await session.prompt(text)
-        messages = session.get_messages()
-        assistant = next(
-            (
-                message
-                for message in reversed(messages)
-                if message.get("role") == "assistant"
-                and int(message.get("timestamp", 0) or 0) > before_ts
-            ),
-            None,
-        )
-        if assistant is None:
-            # 回退：消息数增加时按新增段找；压缩导致减少时取最后一条 assistant。
-            if len(messages) > before_count:
-                assistant = next(
-                    (
-                        message
-                        for message in reversed(messages[before_count:])
-                        if message.get("role") == "assistant"
-                    ),
-                    None,
-                )
-            else:
-                assistant = next(
-                    (
-                        message
-                        for message in reversed(messages)
-                        if message.get("role") == "assistant"
-                    ),
-                    None,
-                )
+        # 自动压缩会在回合结束后把刚产生的 assistant 折叠进 compactionSummary，
+        # 事后从消息列表无法可靠取到；改为运行期间订阅事件直接捕获。
+        captured: list[dict[str, Any]] = []
+
+        def _capture(event: Any) -> None:
+            if event.get("type") == "message_end":
+                message = event.get("message")
+                if isinstance(message, dict) and message.get("role") == "assistant":
+                    captured.append(message)
+
+        unsub = session.subscribe(_capture)
+        try:
+            await session.prompt(text)
+        finally:
+            unsub()
+        assistant = captured[-1] if captured else None
         if assistant is None:
             raise RuntimeError("Agent run completed without an assistant message.")
         stop_reason = assistant.get("stop_reason")

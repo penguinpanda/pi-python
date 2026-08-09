@@ -401,12 +401,17 @@ class _CompactingFakeSession:
             {"role": "user", "content": "old2", "timestamp": 102},
             {"role": "assistant", "content": [], "timestamp": 103},
         ]
+        self._listener = None
 
     def get_messages(self):
         return list(self.messages)
 
     def get_last_assistant_text(self) -> str:
         return "new answer"
+
+    def subscribe(self, listener):
+        self._listener = listener
+        return lambda: None
 
     async def prompt(self, text: str) -> None:
         # 压缩：历史被 compactionSummary 替代，消息数从 5 缩到 2，再追加新 assistant。
@@ -418,6 +423,17 @@ class _CompactingFakeSession:
                 "timestamp": 300,
             },
         ]
+        if self._listener is not None:
+            self._listener(
+                {
+                    "type": "message_end",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "new answer"}],
+                        "timestamp": 300,
+                    },
+                }
+            )
 
 
 @pytest.mark.asyncio
