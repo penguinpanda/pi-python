@@ -1,0 +1,225 @@
+"""compare_reasonix_eval / reasonix_compare 单元测试（不发真实请求）。"""
+
+from __future__ import annotations
+
+import json
+import stat
+
+from pi_evals.reasonix_compare import (
+    LONG_SESSION_PROMPTS,
+    _extract_response,
+    execute_reasonix,
+    load_pi_runs,
+    parse_run_metrics,
+    reasonix_run_command,
+    render_report,
+    require_api_key,
+    run_extension_rep,
+    run_long_rep,
+    unified_cost_usd,
+    write_reasonix_home,
+)
+
+
+def _fake_bin(tmp_path) -> object:
+    """伪造 reasonix 二进制：写 metrics、按提示词回显。"""
+    script = tmp_path / "fake-reasonix"
+    body = """#!/usr/bin/env python3
+import json, sys
+args = sys.argv[1:]
+metrics = None
+if "--metrics" in args:
+    metrics = args[args.index("--metrics") + 1]
+prompt = args[-1]
+if metrics:
+    json.dump(
+        {"prompt_tokens": 10, "completion_tokens": 2, "cache_hit_tokens": 5,
+         "cache_miss_tokens": 5, "cost": 1e-5, "steps": 1},
+        open(metrics, "w"),
+    )
+if "Use the hello tool" in prompt:
+    print("Hello, Bob!")
+elif "first 3 lines" in prompt:
+    print("line-0001: xxxxxxxxxx")
+else:
+    print("ok")
+"""
+    script.write_text(body, encoding="utf-8")
+    script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    return script
+
+
+def test_unified_cost_usd():
+    assert unified_cost_usd(miss=1_000_000, hit=0, output=0) == 0.14
+    assert unified_cost_usd(miss=0, hit=1_000_000, output=0) == 0.0028
+    assert unified_cost_usd(miss=0, hit=0, output=1_000_000) == 0.28
+
+
+def test_parse_run_metrics(tmp_path):
+    path = tmp_path / "m.json"
+    path.write_text(
+        json.dumps(
+            {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "cache_hit_tokens": 60,
+                "cache_miss_tokens": 40,
+                "cost": 0.001,
+                "steps": 3,
+                "prefix_change_reason_counts": {"snip": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+    metrics = parse_run_metrics(path)
+    assert metrics.prompt_tokens == 100
+    assert metrics.cache_miss_tokens == 40
+    assert metrics.unified_cost == unified_cost_usd(miss=40, hit=60, output=20)
+
+
+def test_load_pi_runs(tmp_path):
+    runs = [
+        {
+            "test": {
+                "name": "default-system-prompt repetition 1",
+                "file": "src/pi_evals/extensions_eval.py",
+                "status": "passed",
+            },
+            "score": 1.0,
+            "timings": {"totalMs": 1000},
+            "usage": {
+                "provider": "deepseek",
+                "model": "deepseek-v4-flash",
+                "inputTokens": 100,
+                "outputTokens": 20,
+                "totalTokens": 130,
+                "metadata": {
+                    "cacheReadTokens": 10,
+                    "cacheWriteTokens": 0,
+                    "estimatedCostUsd": 0.0001,
+                },
+            },
+        },
+        {
+            "test": {
+                "name": "default-system-prompt-cache-first repetition 2",
+                "file": "src/pi_evals/long_session_cache_eval.py",
+                "status": "failed",
+            },
+            "score": 0.0,
+            "timings": {"totalMs": 2000},
+            "usage": {
+                "provider": "deepseek",
+                "model": "deepseek-v4-flash",
+                "inputTokens": 200,
+                "outputTokens": 10,
+                "totalTokens": 220,
+                "metadata": {
+                    "cacheReadTokens": 100,
+                    "cacheWriteTokens": 0,
+                    "estimatedCostUsd": 0.0002,
+                },
+            },
+        },
+    ]
+    path = tmp_path / "runs.jsonl"
+    path.write_text(
+        "\n".join(json.dumps(run) for run in runs),
+        encoding="utf-8",
+    )
+    parsed = load_pi_runs(path)
+    assert len(parsed) == 2
+    assert parsed[0].scenario == "extension" and parsed[0].variant == "default"
+    assert parsed[1].scenario == "long" and parsed[1].variant == "cache-first"
+    assert parsed[0].score == 1.0 and parsed[0].elapsed_ms == 1000
+    assert parsed[1].score == 0.0 and parsed[1].elapsed_ms == 2000
+    assert parsed[1].unified_cost == unified_cost_usd(miss=200, hit=100, output=10)
+
+
+def test_reasonix_run_command():
+    cmd = reasonix_run_command(
+        "reasonix",
+        ws="/tmp/ws",
+        metrics="/tmp/m.json",
+        prompt="hi",
+    )
+    assert cmd[:4] == ["reasonix", "run", "--dir", "/tmp/ws"]
+    assert "--continue" not in cmd
+    cmd = reasonix_run_command(
+        "reasonix",
+        ws="/tmp/ws",
+        metrics="/tmp/m.json",
+        prompt="hi",
+        continue_session=True,
+    )
+    assert "--continue" in cmd
+
+
+def test_extract_response_json():
+    assert _extract_response('{"response":"Hello, Bob!"}') == "Hello, Bob!"
+    assert _extract_response("plain text") == "plain text"
+
+
+def test_run_extension_rep_with_fake_bin(tmp_path):
+    bin_path = _fake_bin(tmp_path)
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "hello.py").write_text("# generated by fake", encoding="utf-8")
+    metrics_dir = tmp_path / "metrics"
+    metrics_dir.mkdir()
+    result = run_extension_rep(bin_path, ws, metrics_dir, rep=1)
+    assert result.passed, result.failures
+    assert result.outputs[-1] == "Hello, Bob!"
+    assert result.total_tokens == 20
+    assert result.steps == 2
+
+
+def test_run_long_rep_with_fake_bin(tmp_path):
+    bin_path = _fake_bin(tmp_path)
+    ws = tmp_path / "ws-long"
+    metrics_dir = tmp_path / "metrics-long"
+    metrics_dir.mkdir()
+    result = run_long_rep(bin_path, ws, metrics_dir, rep=1)
+    assert result.passed, result.failures
+    assert len(result.outputs) == len(LONG_SESSION_PROMPTS)
+    assert result.steps == 5
+
+
+def test_render_report_includes_sections():
+    report = render_report([], [], None)
+    assert "口径说明" in report
+    assert "Reasonix 官方 benchmark" in report
+    assert "尚未运行" in report
+
+
+def test_require_api_key(monkeypatch):
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    import pytest
+
+    with pytest.raises(SystemExit, match="DEEPSEEK_API_KEY"):
+        require_api_key()
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+    require_api_key()
+
+
+def test_write_reasonix_home(monkeypatch, tmp_path):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-fake")
+    home = tmp_path / "reasonix-home"
+    result = write_reasonix_home(home)
+    assert result == home
+    env_path = home / ".env"
+    assert env_path.read_text(encoding="utf-8") == "DEEPSEEK_API_KEY=sk-fake\n"
+    assert (env_path.stat().st_mode & 0o777) == 0o600
+
+
+def test_execute_reasonix_env_overrides(tmp_path):
+    script = tmp_path / "printenv"
+    script.write_text('#!/bin/sh\necho "$REASONIX_HOME"\n', encoding="utf-8")
+    script.chmod(script.stat().st_mode | 0o700)
+    outcome = execute_reasonix(
+        [str(script)],
+        cwd=tmp_path,
+        env_overrides={"REASONIX_HOME": "/tmp/fake-home"},
+    )
+    assert outcome.ok
+    assert outcome.stdout.strip() == "/tmp/fake-home"
