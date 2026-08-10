@@ -113,6 +113,18 @@ class AssistantMessageDiagnostic(TypedDict, total=False):
     details: dict[str, Any]  # 附加信息
 
 
+class DeferredHandle(TypedDict, total=False):
+    """挂起响应句柄（对齐 TS DeferredHandle）。"""
+
+    provider: str
+    model_id: str
+    api: str
+    id: str
+    expires_at: int
+    poll_after_ms: int
+    data: Any
+
+
 class AssistantMessage(BaseMessage):
     """
     Assistant 回复消息
@@ -134,6 +146,7 @@ class AssistantMessage(BaseMessage):
     error_message: NotRequired[str | None]  # 错误信息
     raw_stop_reason: NotRequired[str]  # 上游原始 finish_reason
     responses_items: NotRequired[list[dict[str, Any]]]  # Responses 原始 item（如 web_search_call）
+    deferred: NotRequired[DeferredHandle]  # 挂起响应句柄（stop_reason="deferred" 时）
 
 
 class ToolDetails(TypedDict, total=False):

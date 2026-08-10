@@ -35,7 +35,7 @@ from pi_agent import (
 )
 from pi_agent._agent import _default_convert_to_llm as _agent_default_convert_to_llm
 from pi_agent.shell_output import execute_shell_with_capture
-from pi_ai import AssistantMessage, Model, Usage, UserMessage, now_ms
+from pi_ai import AssistantMessage, DeferredHandle, Model, Usage, UserMessage, now_ms
 from pi_ai.api._shared import empty_usage
 from pi_ai.types.common import ModelThinkingLevel, ThinkingLevel
 from pi_ai.utils.estimate import calculate_context_tokens
@@ -105,6 +105,27 @@ async def _finish_recorded_operation(
         return
     try:
         await finish(run_id, outcome=outcome, error=error)
+    except Exception:
+        pass
+
+
+async def _record_usage_for_message(
+    manager: SessionManagerLike,
+    message: AgentMessage,
+    entry_id: str,
+) -> None:
+    """把 assistant 消息的 usage 写入 usage record（v3 管理器跳过）。"""
+    record = getattr(manager, "record_usage", None)
+    usage = message.get("usage")
+    if record is None or not isinstance(usage, dict):
+        return
+    try:
+        await record(
+            cause="assistant",
+            usage=usage,
+            entry_id=entry_id,
+            stop_reason=message.get("stopReason"),
+        )
     except Exception:
         pass
 
@@ -830,6 +851,17 @@ class AgentSession:
                 )
             else:
                 result = ext_result
+            if isinstance(getattr(result, "usage", None), dict):
+                record = getattr(self._session_manager, "record_usage", None)
+                if record is not None:
+                    try:
+                        await record(
+                            cause="compaction",
+                            usage=cast(dict, result.usage),
+                            run_id=run_id,
+                        )
+                    except Exception:
+                        pass
             entry_id = await self._session_manager.append_compaction(
                 result.summary,
                 result.first_kept_entry_id,
@@ -1017,6 +1049,16 @@ class AgentSession:
                     "details": result,
                     "fromHook": True,
                 }
+                if isinstance(result.get("usage"), dict):
+                    record = getattr(manager, "record_usage", None)
+                    if record is not None:
+                        try:
+                            await record(
+                                cause="branch_summary",
+                                usage=cast(dict, result["usage"]),
+                            )
+                        except Exception:
+                            pass
 
         await manager.move_to(entry_id, summary)
         self._agent.state.messages = manager.build_context()
@@ -1734,6 +1776,58 @@ class AgentSession:
         await self.prompt(text)
         return True
 
+    async def fetch_deferred(self) -> bool:
+        """抓取最后一条 deferred assistant 消息的结果并追加到会话。
+
+        返回 True 表示已抓取；随后可调用 continue_() 继续。
+        """
+        message = self._last_deferred_message()
+        handle = message.get("deferred") if message is not None else None
+        if (
+            not handle
+            or self._model is None
+            or self._model_runtime is None
+            or not isinstance(handle, dict)
+        ):
+            return False
+        result = await self._model_runtime.fetch_deferred(self._model, cast(DeferredHandle, handle))
+        self._agent.state._append_message(result)
+        self._persist_message(result)
+        record = getattr(self._session_manager, "record_write_deferred", None)
+        if record is not None:
+            try:
+                await record(
+                    {
+                        "type": "message",
+                        "id": handle.get("id", ""),
+                        "message": message,
+                    }
+                )
+            except Exception:
+                pass
+        return True
+
+    async def cancel_deferred(self) -> bool:
+        """取消最后一条 deferred assistant 消息（若支持）。"""
+        message = self._last_deferred_message()
+        handle = message.get("deferred") if message is not None else None
+        if (
+            not handle
+            or self._model is None
+            or self._model_runtime is None
+            or not isinstance(handle, dict)
+        ):
+            return False
+        await self._model_runtime.cancel_deferred(self._model, cast(DeferredHandle, handle))
+        return True
+
+    def _last_deferred_message(self) -> AgentMessage | None:
+        """返回最近一条带 deferred 句柄的 assistant 消息。"""
+        for message in reversed(self._agent.state.messages):
+            if message.get("role") == "assistant" and isinstance(message.get("deferred"), dict):
+                return message
+        return None
+
     @property
     def is_bash_running(self) -> bool:
         """是否有交互 bash 命令正在运行（一次仅允许一条）。"""
@@ -1891,6 +1985,18 @@ class AgentSession:
         task = asyncio.create_task(self._session_manager.append_message(message))
         self._pending_writes.add(task)
         task.add_done_callback(self._pending_writes.discard)
+        if message.get("role") == "assistant" and isinstance(message.get("usage"), dict):
+
+            async def _record_usage() -> None:
+                try:
+                    entry_id = await task
+                except Exception:
+                    return
+                await _record_usage_for_message(self._session_manager, message, entry_id)
+
+            usage_task = asyncio.create_task(_record_usage())
+            self._pending_writes.add(usage_task)
+            usage_task.add_done_callback(self._pending_writes.discard)
 
     async def wait_for_idle(self) -> None:
         """等待当前运行结束（含所有事件监听器完成）。"""

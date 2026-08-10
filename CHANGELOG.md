@@ -112,6 +112,15 @@
   `resume_suspended_operation`：重放挂起 run 的原始 prompt）；v3
   `SessionManager` 标记为 legacy，默认会话统一走 v4（`PI_SESSION_FORMAT=v3`
   仅作调试回退）
+- `AgentSession` 把 assistant / compaction / branch_summary 的真实 usage 写入
+  v4 usage records，`get_session_stats`（v4）反映实际 token 与成本
+- `V4SessionManager` 写入改为增量缓存更新（不再每次全量重读会话），
+  大会话下避免 O(n²) 开销
+- 新增 v4 持久化会话搜索索引（`PersistentSessionSearchIndex` + 全量重建），
+  检索语义与扫描式一致但无需重读会话文件
+- deferred responses 基础层：`DeferredHandle` 类型、`split_deferred_tools`、
+  Provider/Models 的 `fetch_deferred` / `cancel_deferred`（faux 参考实现）、
+  `AgentSession.fetch_deferred` / `cancel_deferred` 与 `write_deferred` 记录
 
 ### Fixed
 

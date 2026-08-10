@@ -49,6 +49,7 @@ from ..types import (
     AssistantMessage,
     ContentBlock,
     Context,
+    DeferredHandle,
     DoneEvent,
     ErrorEvent,
     Message,
@@ -296,6 +297,8 @@ class FauxCore:
     ) -> None:
         # 脚本化响应队列。
         self._responses: list[FauxResponseStep] = []
+        self._deferred_responses: dict[str, AssistantMessage] = {}
+        self._cancelled_deferred: set[str] = set()
 
         # 下一个待消费响应的下标。
         self._response_index = 0
@@ -339,6 +342,34 @@ class FauxCore:
     def append_responses(self, responses: list[FauxResponseStep]) -> None:
         """追加响应到序列末尾。"""
         self._responses.extend(responses)
+
+    def set_deferred_response(self, handle_id: str, message: AssistantMessage) -> None:
+        """登记一个可被 fetch_deferred 抓取的挂起响应。"""
+        self._deferred_responses[handle_id] = message
+
+    async def fetch_deferred(
+        self,
+        model: Model,
+        handle: DeferredHandle,
+        options: dict[str, Any] | None = None,
+    ) -> AssistantMessage:
+        """抓取挂起响应（faux 参考实现）。"""
+        del model, options
+        message = self._deferred_responses.pop(handle["id"], None)
+        if message is None:
+            raise RuntimeError(f"Deferred response not found: {handle['id']}")
+        return message
+
+    async def cancel_deferred(
+        self,
+        model: Model,
+        handle: DeferredHandle,
+        options: dict[str, Any] | None = None,
+    ) -> None:
+        """取消挂起响应（faux 参考实现）。"""
+        del model, options
+        self._deferred_responses.pop(handle["id"], None)
+        self._cancelled_deferred.add(handle["id"])
 
     def get_pending_response_count(self) -> int:
         """获取剩余待消费的响应数。"""
@@ -651,5 +682,7 @@ def faux_provider(
         auth=None,
         models=core.models,
         stream_fn=core.stream,
+        deferred_fn=core.fetch_deferred,
+        cancel_deferred_fn=core.cancel_deferred,
     )
     return core

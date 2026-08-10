@@ -19,6 +19,7 @@ from pi_ai import (
     AssistantMessage,
     AssistantMessageEventStream,
     Context,
+    DeferredHandle,
     Model,
     ModelCompat,
     Models,
@@ -1192,6 +1193,28 @@ class ModelRuntime:
         options: StreamOptions | None = None,
     ) -> AssistantMessage:
         return await self._models.complete(model, context, options)
+
+    def supports_deferred(self, model: Model) -> bool:
+        """模型所属 Provider 是否支持挂起响应。"""
+        return self._models.supports_deferred(model)
+
+    async def fetch_deferred(
+        self,
+        model: Model,
+        handle: DeferredHandle,
+        options: dict[str, Any] | None = None,
+    ) -> AssistantMessage:
+        """抓取挂起响应（委托 Models）。"""
+        return await self._models.fetch_deferred(model, handle, options)
+
+    async def cancel_deferred(
+        self,
+        model: Model,
+        handle: DeferredHandle,
+        options: dict[str, Any] | None = None,
+    ) -> None:
+        """取消挂起响应（委托 Models）。"""
+        await self._models.cancel_deferred(model, handle, options)
 
     # ------------------------------------------------------------------
     # 内部

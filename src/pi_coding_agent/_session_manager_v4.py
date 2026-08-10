@@ -386,7 +386,7 @@ class V4SessionManager:
 
     async def append_message(self, message: AgentMessage) -> str:
         entry_id = await self._session.append_message(message)
-        await self._refresh()
+        await self._cache_entry(entry_id)
         return entry_id
 
     async def append_compaction(
@@ -402,22 +402,22 @@ class V4SessionManager:
             tokens_before=tokens_before,
             details=details,
         )
-        await self._refresh()
+        await self._cache_entry(entry_id)
         return entry_id
 
     async def append_model_change(self, provider: str, model_id: str) -> str:
         entry_id = await self._session.append_model_change(provider, model_id)
-        await self._refresh()
+        await self._cache_entry(entry_id)
         return entry_id
 
     async def append_thinking_level_change(self, thinking_level: str) -> str:
         entry_id = await self._session.append_thinking_level_change(thinking_level)
-        await self._refresh()
+        await self._cache_entry(entry_id)
         return entry_id
 
     async def append_custom_entry(self, custom_type: str, data: Any = None) -> str:
         entry_id = await self._session.append_custom_entry(custom_type, data)
-        await self._refresh()
+        await self._cache_entry(entry_id)
         return entry_id
 
     async def append_custom_message_entry(
@@ -431,7 +431,7 @@ class V4SessionManager:
         entry_id = await self._session.append_custom_message_entry(
             custom_type, content, display=display, details=details
         )
-        await self._refresh()
+        await self._cache_entry(entry_id)
         return entry_id
 
     async def append_session_info(self, name: str | None) -> str:
@@ -439,7 +439,7 @@ class V4SessionManager:
             await self._session.set_name(name)
         else:
             self._name = None
-        await self._refresh()
+        self._name = await self._session.get_name()
         return ""
 
     def set_session_name(self, name: str) -> None:
@@ -449,7 +449,7 @@ class V4SessionManager:
 
     async def append_label(self, target_id: str, label: str | None) -> str:
         await self._session.set_label(target_id, label)
-        await self._refresh()
+        self._labels[target_id] = label
         return target_id
 
     def set_label(self, target_id: str, label: str | None) -> None:
@@ -461,7 +461,10 @@ class V4SessionManager:
         self, entry_id: str | None, summary: dict[str, Any] | None = None
     ) -> str | None:
         result = await self._session.move_to(entry_id, summary)
-        await self._refresh()
+        if result is not None:
+            await self._cache_entry(result)
+        else:
+            self._leaf_id = entry_id
         return result
 
     async def fork(
@@ -588,6 +591,18 @@ class V4SessionManager:
             record["details"] = details
         await self._session.append_record(record)
 
+    async def record_write_deferred(self, target: dict[str, Any]) -> None:
+        """写入 write_deferred 记录（延迟写入审计）。"""
+        await self._session.append_record(
+            {
+                "type": "write_deferred",
+                "id": uuidv7(),
+                "lane": "main",
+                "runId": "",
+                "target": target,
+            }
+        )
+
     async def find_records(self, query: dict[str, Any] | None = None) -> list[dict]:
         return [
             cast(dict[str, Any], record)
@@ -657,7 +672,7 @@ class V4SessionManager:
         )
         new_id = await self._session.append_message(new_message)
         await self._session.move_lane("main", new_id)
-        await self._refresh()
+        await self._cache_entry(new_id)
         return merged
 
     @staticmethod
@@ -708,6 +723,16 @@ class V4SessionManager:
             self._labels[entry["id"]] = await self._session.get_label(entry["id"])
         metadata = await self._session.get_metadata()
         self._session_id = metadata["id"]
+
+    async def _cache_entry(self, entry_id: str) -> None:
+        """写入后增量更新缓存（避免大会话每次全量刷新）。"""
+        entry = await self._session.get_entry(entry_id)
+        if entry is not None:
+            self._entries.append(entry)
+            self._by_id[entry["id"]] = entry
+            self._labels[entry["id"]] = await self._session.get_label(entry["id"])
+        self._leaf_id = await self._session.get_leaf_id()
+        self._name = await self._session.get_name()
 
 
 __all__ = [

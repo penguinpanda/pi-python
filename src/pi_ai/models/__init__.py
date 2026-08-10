@@ -67,9 +67,17 @@ Models 相当于整个 SDK 的调度中心，
 import asyncio
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from ..utils._event_stream import AssistantMessageEventStream
-from ..types import AssistantMessage, Context, Model, SimpleStreamOptions, StreamOptions
+from ..types import (
+    AssistantMessage,
+    Context,
+    DeferredHandle,
+    Model,
+    SimpleStreamOptions,
+    StreamOptions,
+)
 from ..auth import InMemoryCredentialStore
 from ..provider import Provider, RefreshModelsContext
 from .models_store import (
@@ -417,6 +425,31 @@ class Models:
         """completeSimple：等待整个流结束，返回最终 AssistantMessage。"""
         stream = await self.stream_simple(model, context, options)
         return await stream.result()
+
+    def supports_deferred(self, model: Model) -> bool:
+        """模型所属 Provider 是否支持挂起响应。"""
+        provider = self.get_provider(model.provider)
+        return provider is not None and provider._deferred_fn is not None
+
+    async def fetch_deferred(
+        self,
+        model: Model,
+        handle: DeferredHandle,
+        options: dict[str, Any] | None = None,
+    ) -> AssistantMessage:
+        """抓取挂起响应（对齐 TS Models.fetchDeferred）。"""
+        provider = self._require_provider(model.provider)
+        return await provider.fetch_deferred(model, handle, options)
+
+    async def cancel_deferred(
+        self,
+        model: Model,
+        handle: DeferredHandle,
+        options: dict[str, Any] | None = None,
+    ) -> None:
+        """取消挂起响应（对齐 TS Models.cancelDeferred）。"""
+        provider = self._require_provider(model.provider)
+        await provider.cancel_deferred(model, handle, options)
 
     # 凭证管理
 

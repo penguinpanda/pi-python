@@ -56,6 +56,7 @@ from .message import (
     AssistantMessageDiagnostic,
     BaseMessage,
     Cost,
+    DeferredHandle,
     Message,
     SystemMessage,
     ToolDetails,
@@ -166,6 +167,7 @@ __all__ = [
     "Cost",
     "Usage",
     "AssistantMessageDiagnostic",
+    "DeferredHandle",
     "ToolDetails",
     # tool
     "Tool",

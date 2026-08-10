@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+from typing import Any
+
 import pytest
 
 from pi_agent import Agent, AgentOptions
 from pi_ai import Model, Models
-from pi_ai.providers.faux import faux_provider
+from pi_ai.providers.faux import faux_assistant_message, faux_provider
 from pi_coding_agent._session import AgentSession
 from pi_coding_agent._session_manager_v4 import V4SessionManager
 from pi_coding_agent.auth_storage import AuthStorage
@@ -14,7 +17,7 @@ from pi_coding_agent.compaction import CompactionSettings
 from pi_coding_agent.model_runtime import ModelRuntime
 
 
-def _make_runtime(model_count: int = 3) -> ModelRuntime:
+def _make_runtime(model_count: int = 3) -> tuple[ModelRuntime, Any]:
     store = AuthStorage.in_memory()
     models = Models(credentials=store)
     models_list = [
@@ -29,15 +32,22 @@ def _make_runtime(model_count: int = 3) -> ModelRuntime:
     ]
     core = faux_provider(models=models_list)
     models.add_provider(core.provider)
-    return ModelRuntime(models, store)
+    return ModelRuntime(models, store), core
 
 
 def _plain_user_message(text: str) -> dict:
     return {"role": "user", "content": text, "timestamp": 1}
 
 
-async def _make_v4_session(tmp_path, compaction_settings=None):
-    runtime = _make_runtime()
+async def _drain(session) -> None:
+    for _ in range(100):
+        if not session._pending_writes:
+            return
+        await asyncio.sleep(0.01)
+
+
+async def _make_v4_session_with_core(tmp_path, compaction_settings=None):
+    runtime, core = _make_runtime()
     manager = await V4SessionManager.in_memory(str(tmp_path))
     model = runtime.get_model("faux", "faux-1")
     assert model is not None
@@ -56,6 +66,11 @@ async def _make_v4_session(tmp_path, compaction_settings=None):
         model_runtime=runtime,
         compaction_settings=compaction_settings,
     )
+    return session, manager, core
+
+
+async def _make_v4_session(tmp_path, compaction_settings=None):
+    session, manager, _core = await _make_v4_session_with_core(tmp_path, compaction_settings)
     return session, manager
 
 
@@ -65,12 +80,17 @@ class TestAgentSessionOperationRecords:
         session, manager = await _make_v4_session(tmp_path)
 
         await session.prompt("hi")
+        await _drain(session)
 
         started = await manager.find_records({"type": "operation_started", "operationKind": "run"})
         finished = await manager.find_records({"type": "operation_finished"})
+        usage_records = await manager.find_records({"type": "usage"})
         assert len(started) == 1
         assert len(finished) == 1
         assert finished[0]["outcome"] == "completed"
+        assert len(usage_records) == 1
+        assert usage_records[0]["cause"] == "assistant"
+        assert usage_records[0]["entryId"] is not None
         assert await manager.recovery_state() == "idle"
 
     @pytest.mark.asyncio
@@ -135,3 +155,35 @@ class TestAgentSessionOperationRecords:
 
         assert await session.recovery_state() == "suspended"
         assert await session.resume_suspended_operation() is False
+
+    @pytest.mark.asyncio
+    async def test_fetch_and_cancel_deferred(self, tmp_path):
+        session, manager, core = await _make_v4_session_with_core(tmp_path)
+        handle = {
+            "provider": "faux",
+            "model_id": "faux-1",
+            "api": "openai-completions",
+            "id": "d1",
+        }
+        core.set_deferred_response("d1", faux_assistant_message("done"))
+        core.set_responses(
+            [
+                {
+                    **faux_assistant_message("pending"),
+                    "stop_reason": "deferred",
+                    "deferred": handle,
+                }
+            ]
+        )
+
+        await session.prompt("hi")
+        await _drain(session)
+        last = session._last_assistant_message()
+        assert last is not None
+        assert last["stop_reason"] == "deferred"
+
+        assert await session.fetch_deferred() is True
+        await _drain(session)
+        records = await manager.find_records({"type": "write_deferred"})
+        assert len(records) == 1
+        assert await session.cancel_deferred() is True

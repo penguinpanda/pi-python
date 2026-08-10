@@ -73,6 +73,7 @@ from .types import (
     AssistantMessage,
     AsyncHTTPClient,
     Context,
+    DeferredHandle,
     Model,
     SimpleStreamOptions,
     StreamFunction,
@@ -222,6 +223,17 @@ class Provider:
     #
     # 主要用于测试（例如 Faux Provider）。
     _stream_fn: StreamFunction | None = None
+
+    # 挂起响应（deferred）抓取/取消实现（可选）。
+    #
+    # 设置后，Models.fetch_deferred / cancel_deferred 会调用它们；
+    # 未设置时抛出"不支持 deferred responses"。
+    _deferred_fn: (
+        Callable[[Model, DeferredHandle, dict[str, Any]], Awaitable[AssistantMessage]] | None
+    ) = None
+    _cancel_deferred_fn: (
+        Callable[[Model, DeferredHandle, dict[str, Any]], Awaitable[None]] | None
+    ) = None
 
     # 运行时动态发现的模型（fetch_models 抓取结果，覆盖同 id 的静态模型）。
     _dynamic_models: list[Model] = field(default_factory=list, repr=False, compare=False)
@@ -435,6 +447,28 @@ class Provider:
         stream = await self.stream_simple(model, context, options)
         return await stream.result()
 
+    async def fetch_deferred(
+        self,
+        model: Model,
+        handle: DeferredHandle,
+        options: dict[str, Any] | None = None,
+    ) -> AssistantMessage:
+        """抓取挂起响应的最终结果（对齐 TS Provider.fetchDeferred）。"""
+        if self._deferred_fn is None:
+            raise RuntimeError(f"Provider {self.id} does not support deferred responses")
+        return await self._deferred_fn(model, handle, options or {})
+
+    async def cancel_deferred(
+        self,
+        model: Model,
+        handle: DeferredHandle,
+        options: dict[str, Any] | None = None,
+    ) -> None:
+        """取消挂起响应（对齐 TS Provider.cancelDeferred）。"""
+        if self._cancel_deferred_fn is None:
+            raise RuntimeError(f"Provider {self.id} does not support deferred responses")
+        await self._cancel_deferred_fn(model, handle, options or {})
+
 
 def create_provider(
     id: str,
@@ -445,6 +479,10 @@ def create_provider(
     base_url: str | None = None,
     stream_fn: StreamFunction | None = None,
     fetch_models: (Callable[[RefreshModelsContext], Awaitable[list[Model]]] | None) = None,
+    deferred_fn: Callable[[Model, DeferredHandle, dict[str, Any]], Awaitable[AssistantMessage]]
+    | None = None,
+    cancel_deferred_fn: Callable[[Model, DeferredHandle, dict[str, Any]], Awaitable[None]]
+    | None = None,
 ) -> Provider:
     """
     创建 Provider。
@@ -483,6 +521,8 @@ def create_provider(
         _api_kind=api_kind,
         base_url=base_url,
         _stream_fn=stream_fn,
+        _deferred_fn=deferred_fn,
+        _cancel_deferred_fn=cancel_deferred_fn,
     )
 
     if fetch_models is not None:
