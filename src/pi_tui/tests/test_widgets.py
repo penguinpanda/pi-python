@@ -56,6 +56,16 @@ def test_cjk_lines_never_exceed_terminal_width() -> None:
     assert cell_len(normalized[0].text()) == 10
 
 
+def test_message_markdown_renders_with_absolute_path() -> None:
+    """正文含绝对路径时仍走 markdown 渲染，而不是退化为纯文本。"""
+    entry = MessageEntry("Assistant", "# Title\n\n正文 **bold**\n\n/workspace/foo.py")
+    lines = entry.render(60, 12)
+    texts = [line.text() for line in lines]
+    assert not any("# Title" in text for text in texts)
+    assert any("Title" in text for text in texts)
+    assert any("**bold**" in text for text in texts) is False
+
+
 def test_editor_cursor_highlight_uses_character_cell_for_cjk() -> None:
     """回归：CJK 光标高亮应落在字符格而不是可见列，避免每次输入一个
     宽字符就多空一列。"""

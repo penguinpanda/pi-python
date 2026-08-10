@@ -132,6 +132,8 @@
   重复追加的问题：回放时 function_call 与 function_call_output 之间会插入
   多余 message item，DeepSeek 报 `No tool output found for tool call` 并导致
   后续所有轮次卡死；`transform_messages` 同时对旧会话中重复的 text 块去重
+- 修复 TUI 消息正文含绝对路径时整体退化为纯文本的问题：现在始终走 markdown
+  渲染，路径仍通过 `linkify_lines` 生成 OSC 8 链接
 
 ## [0.1.0]
 

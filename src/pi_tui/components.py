@@ -19,7 +19,7 @@ from pi_tui.engine.widgets import (
 )
 
 from .keybindings import KeybindingsManager
-from .links import has_abs_paths, linkify_lines, linkify_paths, normalize_path_slashes
+from .links import linkify_lines, linkify_paths, normalize_path_slashes
 from .markdown import label_icon
 from .terminal_image import (
     detect_capabilities,
@@ -236,7 +236,7 @@ def _render_labeled_markdown(
     suffix = " Speaking…" if speaking else ""
     label_line = line_from_text(f"{label_icon(label)} {label}{suffix}", width, Style(bold=True))
     body = normalize_path_slashes(text)
-    if "[/" not in body and not has_abs_paths(body):
+    if "[/" not in body:
         body_lines = render_markdown(body, max(0, width - 2), theme_colors=theme_colors)
     else:
         body_lines = []
