@@ -47,6 +47,9 @@
 - 工具 `promptGuidelines` 支持：内置 read/edit/write/bash 携带与 TS v0.84.0 一致的
   指南，扩展 `ToolDefinition` 支持 `prompt_guidelines` / `source_info`，
   `get_all_tools` 返回新字段
+- 扩展 API 补齐：`ctx.ui.custom`（自定义交互组件）、`ToolDefinition.execution_mode`
+  与 `render_call`/`render_result`、CLI 扩展 flags 两段解析、
+  `before_agent_start` message 注入、`send_message` 的 `deliverAs`/`triggerTurn`
 
 ### Changed
 
@@ -82,6 +85,9 @@
 - 扩展 UI API 补齐 `setWorkingVisible` / `setWorkingIndicator` / `pasteToEditor` /
   `getEditorText` / `editor`（抽象接口 + Noop + TuiUIContext 实现）
 - 文档统一移除“自研”表述
+- `question.py` / `questionnaire.py` / `plan_mode.py` 示例完整对齐 TS：
+  编号选项与描述、自定义输入 Esc 返回、tab bar 问卷、bash 白名单、
+  Plan 提取与 `[DONE:n]` 进度、会话恢复
 - `turn_start` 改为由 `run_agent_loop` / `run_agent_loop_continue` 外层发射（先于 prompts 注入， agent-loop.ts），`_run_loop` 首轮不再重复发射
 - `pi_agent` 默认 `convert_to_llm` 改为最小过滤（只透传 user/assistant/toolResult， `defaultConvertToLlm`）；压缩/分支摘要等丰富转换移至应用层转换器，`AgentHarness` 与 `AgentSession` 已接线
 - TUI 大内容量渲染优化：`MessageEntry` 跨帧缓存（natural_size / render 按内容版本失效）、

@@ -42,7 +42,7 @@
 | `auto-commit-on-exit.ts` | `auto_commit_on_exit.py` | 退出自动提交 |
 | `git-checkpoint.ts` | `git_checkpoint.py` | stash 检查点 |
 | `summarize.ts` | `summarize.py` | 对话摘要 |
-| `question.ts` | `question.py` | 用户提问工具 |
+| `question.ts` | `question.py` | 用户提问工具（完整对齐） |
 | `commands.ts` | `commands.py` | 列出命令 |
 | `inline-bash.ts` | `inline_bash.py` | 内联 bash 展开 |
 | `input-transform-streaming.ts` | `input_transform_streaming.py` | streaming 感知输入门 |
@@ -51,7 +51,7 @@
 | `kimi-deferred-tools.ts` | `kimi_deferred_tools.py` | 延迟工具加载 |
 | `file-trigger.ts` | `file_trigger.py` | 触发文件注入 |
 | `tool-override.ts` | `tool_override.py` | 覆盖内置 read |
-| `questionnaire.ts` | `questionnaire.py` | 多问题问卷 |
+| `questionnaire.ts` | `questionnaire.py` | 多问题问卷（完整对齐） |
 | `working-indicator.ts` | `working_indicator.py` | 流式指示器 |
 | `titlebar-spinner.ts` | `titlebar_spinner.py` | 标题动画 |
 | `modal-editor.ts` | `modal_editor.py` | vim 模式编辑器 |
@@ -74,7 +74,7 @@
 | `with-deps/` | `with_deps.py` + `with_deps_lib/` | 本地依赖解析 |
 | `tic-tac-toe.ts` | `tic_tac_toe.py` | 井字棋工具 |
 | `subagent/` | `subagent.py` | 独立子代理（简化） |
-| `plan-mode/` | `plan_mode.py` | 只读规划模式（简化） |
+| `plan-mode/` | `plan_mode.py` + `plan_mode_utils.py` | 只读规划模式（完整对齐） |
 | `github-issue-autocomplete.ts` | `github_issue_autocomplete.py` | Tab 自动补全 |
 | `snake.ts` | `snake.py` | 覆盖层贪吃蛇（简化） |
 | `space-invaders.ts` | `space_invaders.py` | 覆盖层太空侵略者（简化） |
