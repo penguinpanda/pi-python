@@ -155,6 +155,7 @@ class AgentHarnessTool(Protocol[TContextIn]):
     label: str
     execution_mode: ToolExecutionMode
     prompt_snippet: str | None
+    prompt_guidelines: list[str] | None
     before_execute: Callable[[dict[str, Any], Any], Awaitable[Any]] | None
     after_execute: Callable[[Any], Awaitable[Any]] | None
 

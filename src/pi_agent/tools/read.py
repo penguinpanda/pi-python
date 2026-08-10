@@ -170,6 +170,7 @@ def create_read_tool(options: ReadToolOptions | None = None) -> AgentTool:
         name="read",
         label="read",
         prompt_snippet="Read file contents",
+        prompt_guidelines=["Use read to examine files instead of cat or sed."],
         description=(
             f"Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). "
             f"Images are sent as attachments. For text files, output is truncated to {DEFAULT_MAX_LINES} lines "

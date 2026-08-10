@@ -40,6 +40,9 @@
 - 新增 `pi_agent._messages.convert_to_llm` / `pi_coding_agent.messages`：应用层完整消息转换（bashExecution / compactionSummary / branchSummary / custom 包装为 user 消息）
 - CLI / `pi_server` 默认用 `~/.pi/agent/models-store.json` 持久化动态模型目录缓存
   （`FileModelsStore`：models + etag / lastModified / checkedAt，跨进程复用条件刷新）
+- 工具 `promptGuidelines` 支持：内置 read/edit/write/bash 携带与 TS v0.84.0 一致的
+  指南，扩展 `ToolDefinition` 支持 `prompt_guidelines` / `source_info`，
+  `get_all_tools` 返回新字段
 
 ### Changed
 
@@ -80,6 +83,13 @@
 - TUI 大内容量渲染优化：`MessageEntry` 跨帧缓存（natural_size / render 按内容版本失效）、
   布局合成整行复用 + 共享行写时复制、regular 模式按行对象同一性增量 diff 且只对变化行
   转 ANSI；1000 条消息的逐帧渲染从数百毫秒降至 ~10-20ms，输入/退出不再被渲染阻塞
+- DeepSeek 模型元数据统一从 `models/generated` 生成目录加载（移除手写
+  `DEEPSEEK_MODELS`）；`openai-completions` 的 DeepSeek thinking 参数对齐 TS：
+  未指定 effort 时显式发送 `thinking.type=disabled`，map 缺失或为 `null` 的级别
+  按原值透传 `reasoning_effort`
+- bash 子进程环境对齐 TS：先删除 PI_SESSION_ID / PI_SESSION_FILE / PI_PROVIDER /
+  PI_MODEL / PI_REASONING_LEVEL 再按需注入，并把 pi bin 目录前置到 PATH；
+  激活工具变化（扩展注册 / `set_active_tools`）会重建系统提示
 
 ### Fixed
 

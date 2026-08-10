@@ -176,8 +176,10 @@ class ToolDefinition:
     name: str
     description: str = ""
     prompt_snippet: str = ""
+    prompt_guidelines: list[str] | None = None
     parameters: dict | None = None
     label: str = ""
+    source_info: dict | None = None
     execute: Callable | None = None
 
 
@@ -309,6 +311,11 @@ class ExtensionAPI:
 
     def register_tool(self, tool: ToolDefinition | dict) -> None:
         definition = tool if isinstance(tool, ToolDefinition) else ToolDefinition(**tool)
+        if definition.source_info is None:
+            definition.source_info = {
+                "source": self._extension.source,
+                "path": self._extension.path,
+            }
         self._extension.tools[definition.name] = definition
 
     def register_command(self, name: str, options: dict | None = None) -> None:

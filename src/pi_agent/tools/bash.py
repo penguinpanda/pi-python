@@ -13,6 +13,14 @@ from ..truncate import DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, format_size
 
 _MAX_TIMEOUT_SECONDS = 2_147_483_647 / 1000
 _BASH_UPDATE_THROTTLE_MS = 100
+# 会话环境变量键（对齐 TS bash resolveSpawnContext：先删除再按需注入）。
+_SESSION_ENV_KEYS = (
+    "PI_SESSION_ID",
+    "PI_SESSION_FILE",
+    "PI_PROVIDER",
+    "PI_MODEL",
+    "PI_REASONING_LEVEL",
+)
 
 
 class BashToolOptions:
@@ -58,6 +66,7 @@ def create_bash_tool(options: BashToolOptions | None = None) -> AgentTool:
             "cwd": env.cwd,
             "env": {},
             "inheritEnv": True,
+            "unsetEnv": list(_SESSION_ENV_KEYS),
         }
         if options.expose_session_environment and options.session_env_provider is not None:
             session_env = options.session_env_provider()
@@ -77,6 +86,7 @@ def create_bash_tool(options: BashToolOptions | None = None) -> AgentTool:
                     "cwd": execution["cwd"],
                     "env": execution["env"],
                     "inheritEnv": execution["inheritEnv"],
+                    "unsetEnv": execution["unsetEnv"],
                     "timeout": timeout,
                     "abortSignal": signal,
                     "returnExecutionErrors": True,
@@ -132,6 +142,11 @@ def create_bash_tool(options: BashToolOptions | None = None) -> AgentTool:
         name="bash",
         label="bash",
         prompt_snippet="Execute bash commands (ls, grep, find, etc.)",
+        prompt_guidelines=(
+            ["Inspect PI_* environment variables for current model and session details."]
+            if options.expose_session_environment
+            else None
+        ),
         description=(
             f"Execute a bash command in the current working directory. Returns stdout and stderr. "
             f"Output is truncated to last {DEFAULT_MAX_LINES} lines or {DEFAULT_MAX_BYTES // 1024}KB "

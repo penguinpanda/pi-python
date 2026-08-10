@@ -8,6 +8,7 @@ import os
 import pytest
 
 from pi_agent import (
+    BashToolOptions,
     ExecutionError,
     FileError,
     PythonExecutionEnv,
@@ -286,3 +287,77 @@ class TestFileMutationQueue:
             with_file_mutation_queue(env, "same.txt", _second),
         )
         assert order == ["first-start", "first-end", "second-start", "second-end"]
+
+
+class TestPromptGuidelines:
+    def test_read_write_edit_guidelines(self):
+        assert create_read_tool().prompt_guidelines == [
+            "Use read to examine files instead of cat or sed."
+        ]
+        assert create_write_tool().prompt_guidelines == [
+            "Use write only for new files or complete rewrites."
+        ]
+        assert create_edit_tool().prompt_guidelines == [
+            "Use edit for precise changes (edits[].oldText must match exactly)",
+            "When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls",
+            "Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.",
+            "Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.",
+        ]
+
+    def test_bash_guideline_conditional(self):
+        assert create_bash_tool().prompt_guidelines == [
+            "Inspect PI_* environment variables for current model and session details."
+        ]
+        assert (
+            create_bash_tool(BashToolOptions(expose_session_environment=False)).prompt_guidelines
+            is None
+        )
+
+
+class TestSessionEnvInjection:
+    @pytest.mark.asyncio
+    async def test_exec_unset_env(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PI_SESSION_ID", "stale")
+        env = PythonExecutionEnv(str(tmp_path))
+        if not await _shell_available(env):
+            pytest.skip("No bash shell available")
+        result = await env.exec(
+            "python -c \"import os;print(os.environ.get('PI_SESSION_ID',''))\"",
+            ShellExecOptions(unset_env=["PI_SESSION_ID"]),
+        )
+        assert result[0] is True
+        assert result[1].stdout.strip() == ""
+
+    @pytest.mark.asyncio
+    async def test_bash_tool_deletes_stale_session_env(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PI_SESSION_ID", "stale")
+        monkeypatch.setenv("PI_PROVIDER", "stale-provider")
+        env = PythonExecutionEnv(str(tmp_path))
+        if not await _shell_available(env):
+            pytest.skip("No bash shell available")
+        command = (
+            "python -c \"import os;print(os.environ.get('PI_SESSION_ID','')"
+            "+'|'+os.environ.get('PI_PROVIDER',''))\""
+        )
+        tool = create_bash_tool(BashToolOptions(expose_session_environment=False))
+        result = await tool.execute("t1", {"command": command}, None, None, _tool_context(env))
+        assert result.content[0]["text"].strip() == "|"
+
+    @pytest.mark.asyncio
+    async def test_bash_tool_reinjects_session_env_after_delete(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PI_SESSION_ID", "stale")
+        monkeypatch.setenv("PI_PROVIDER", "stale-provider")
+        env = PythonExecutionEnv(str(tmp_path))
+        if not await _shell_available(env):
+            pytest.skip("No bash shell available")
+        command = (
+            "python -c \"import os;print(os.environ.get('PI_SESSION_ID','')"
+            "+'|'+os.environ.get('PI_PROVIDER',''))\""
+        )
+        tool = create_bash_tool(
+            BashToolOptions(
+                session_env_provider=lambda: {"PI_SESSION_ID": "fresh"},
+            )
+        )
+        result = await tool.execute("t1", {"command": command}, None, None, _tool_context(env))
+        assert result.content[0]["text"].strip() == "fresh|"

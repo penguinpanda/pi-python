@@ -40,6 +40,7 @@ def create_write_tool() -> AgentTool:
         name="write",
         label="write",
         prompt_snippet="Create or overwrite files",
+        prompt_guidelines=["Use write only for new files or complete rewrites."],
         description=(
             "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. "
             "Automatically creates parent directories."

@@ -46,6 +46,7 @@ from .system_prompt import (
     BuildSystemPromptOptions,
     build_system_prompt,
     load_project_context_files,
+    tool_prompt_guidelines_for,
     tool_snippets_for,
 )
 from .trust import (
@@ -197,7 +198,6 @@ async def _async_main(args: list[str] | None = None) -> int:
     # 系统提示构建器：默认结构化提示（工具说明 + 指南 + 上下文文件 + 技能），
     # /reload 时重新调用（上下文文件与技能会变化）。
     default_tools = create_all_tools(cwd)
-    tool_snippets = tool_snippets_for(default_tools)
     tools_include = (
         [part.strip() for part in parsed.tools.split(",") if part.strip()] if parsed.tools else None
     )
@@ -222,7 +222,10 @@ async def _async_main(args: list[str] | None = None) -> int:
     else:
         selected_tools = [tool.name for tool in default_tools]
 
-    extension_state: dict = {"runner": None}
+    extension_state: dict = {
+        "runner": None,
+        "active_tools": [tool for tool in default_tools if tool.name in selected_tools],
+    }
 
     def system_prompt_builder() -> str:
         custom_prompt = parsed.system_prompt or settings_manager.get_system_prompt()
@@ -235,12 +238,14 @@ async def _async_main(args: list[str] | None = None) -> int:
         runner = extension_state["runner"]
         if runner is not None:
             skills.extend(runner.get_discovered_skills())
+        active_tools = extension_state.get("active_tools") or []
         return build_system_prompt(
             BuildSystemPromptOptions(
                 cwd=cwd,
                 custom_prompt=custom_prompt,
                 selected_tools=selected_tools,
-                tool_snippets=tool_snippets,
+                tool_snippets=tool_snippets_for(active_tools),
+                prompt_guidelines=tool_prompt_guidelines_for(active_tools),
                 append_system_prompt="\n".join(append_parts) if append_parts else None,
                 context_files=(
                     []
@@ -309,9 +314,9 @@ async def _async_main(args: list[str] | None = None) -> int:
             tools_override=tools_override,
             compaction_settings=compaction_settings_from_config(settings),
             system_prompt_builder=system_prompt_builder,
+            extension_state=extension_state,
             restrict_untrusted_tools=bool(settings.get("restrictUntrustedTools")),
         )
-        session.extension_state = extension_state
         session.project_trusted = project_trusted
         return session
 

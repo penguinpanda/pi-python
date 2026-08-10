@@ -166,6 +166,7 @@ async def execute_shell_with_capture(
         cwd=options.get("cwd"),
         env=options.get("env"),
         inherit_env=options.get("inheritEnv", True),
+        unset_env=options.get("unsetEnv"),
         timeout=options.get("timeout"),
         abort_signal=options.get("abortSignal"),
         on_stdout=on_chunk_internal,

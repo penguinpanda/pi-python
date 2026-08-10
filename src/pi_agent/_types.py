@@ -129,6 +129,8 @@ class AgentTool:
     # 工具在 "Available tools" 段的单行说明（promptSnippet）；
     # 缺省时由 tool_snippets_for 回退到 description 第一行 / 工具名。
     prompt_snippet: str | None = None
+    # 工具激活时追加到默认系统提示 Guidelines 段的指南（promptGuidelines）。
+    prompt_guidelines: list[str] | None = None
 
     # ---- 生命周期钩子（可选，默认 None 不改变现有行为）----
 

@@ -648,19 +648,29 @@ class ExtensionRunner:
             return
         current = session._agent.state.tools
         by_name = {tool.name: tool for tool in current}
-        session._agent.state.tools = [by_name[name] for name in tool_names if name in by_name]
+        tools = [by_name[name] for name in tool_names if name in by_name]
+        session._agent.state.tools = tools
+        if session.extension_state is not None:
+            session.extension_state["active_tools"] = list(tools)
+        session.rebuild_system_prompt()
 
     def _get_all_tools(self, session) -> list[dict]:
         if session is None:
             return []
-        return [
-            {
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.input_schema,
-            }
-            for tool in session._agent.state.tools
-        ]
+        result: list[dict] = []
+        for tool in session._agent.state.tools:
+            definition = self.get_tool_definition(tool.name)
+            result.append(
+                {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.input_schema,
+                    "prompt_guidelines": tool.prompt_guidelines,
+                    "source_info": (definition.source_info if definition is not None else None)
+                    or {},
+                }
+            )
+        return result
 
     async def _action_set_model(self, model) -> bool:
         if self.session is None:

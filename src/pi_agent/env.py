@@ -147,6 +147,7 @@ class ShellExecOptions:
         cwd: str | None = None,
         env: dict[str, str] | None = None,
         inherit_env: bool = True,
+        unset_env: list[str] | None = None,
         timeout: float | None = None,
         abort_signal: asyncio.Event | None = None,
         on_stdout: Callable[[str], None] | None = None,
@@ -155,6 +156,7 @@ class ShellExecOptions:
         self.cwd = cwd
         self.env = env
         self.inherit_env = inherit_env
+        self.unset_env = unset_env
         self.timeout = timeout
         self.abort_signal = abort_signal
         self.on_stdout = on_stdout
@@ -584,6 +586,8 @@ class PythonExecutionEnv:
         env = dict(os.environ) if options.inherit_env else {}
         if self._shell_env:
             env.update(self._shell_env)
+        for key in options.unset_env or []:
+            env.pop(key, None)
         if options.env:
             env.update(options.env)
 

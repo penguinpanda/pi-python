@@ -33,6 +33,9 @@ def _make_session(
     tmp_path: Path,
     runner: ExtensionRunner | None,
     store_holder: dict,
+    *,
+    extension_state: dict | None = None,
+    system_prompt_builder=None,
 ) -> AgentSession:
     models = Models(credentials=AuthStorage.in_memory())
     core = faux_provider()
@@ -58,6 +61,8 @@ def _make_session(
         cwd=str(tmp_path),
         model=model,
         extension_runner=runner,
+        extension_state=extension_state,
+        system_prompt_builder=system_prompt_builder,
     )
 
 
@@ -1042,6 +1047,122 @@ async def test_extension_tools_merged_and_normalized(tmp_path):
         assert result.content[0]["text"] == "hi x"
         assert result.details == {"ok": True}
         assert result.terminate is True
+    finally:
+        await session.dispose()
+
+
+@pytest.mark.asyncio
+async def test_extension_tool_prompt_metadata_preserved(tmp_path):
+    from pi_coding_agent.extensions.types import ToolDefinition
+
+    extension = Extension(path="<inline>", resolved_path="<inline>")
+    runner = ExtensionRunner([extension], cwd=str(tmp_path))
+    api = ExtensionAPI(extension, runner.runtime, cwd=str(tmp_path))
+    api.register_tool(
+        ToolDefinition(
+            name="custom",
+            label="Custom",
+            description="Custom tool",
+            prompt_snippet="Custom snippet",
+            prompt_guidelines=["Use custom for custom things."],
+            parameters={"type": "object", "properties": {}},
+            execute=lambda *a, **k: {"content": [{"type": "text", "text": "ok"}]},
+        )
+    )
+    holder: dict = {}
+    extension_state: dict = {"runner": runner, "active_tools": []}
+    session = _make_session(tmp_path, runner, holder, extension_state=extension_state)
+    try:
+        tool = next(tool for tool in session._agent.state.tools if tool.name == "custom")
+        assert tool.prompt_snippet == "Custom snippet"
+        assert tool.prompt_guidelines == ["Use custom for custom things."]
+        assert session.extension_state["active_tools"] == session._agent.state.tools
+    finally:
+        await session.dispose()
+
+
+@pytest.mark.asyncio
+async def test_set_active_tools_rebuilds_system_prompt(tmp_path):
+    from pi_coding_agent.system_prompt import (
+        BuildSystemPromptOptions,
+        build_system_prompt,
+        tool_prompt_guidelines_for,
+        tool_snippets_for,
+    )
+
+    extension = Extension(path="<inline>", resolved_path="<inline>")
+    runner = ExtensionRunner([extension], cwd=str(tmp_path))
+    api = ExtensionAPI(extension, runner.runtime, cwd=str(tmp_path))
+    api.register_tool(
+        {
+            "name": "custom",
+            "label": "Custom",
+            "description": "Custom tool",
+            "prompt_snippet": "Custom snippet",
+            "prompt_guidelines": ["Use custom for custom things."],
+            "parameters": {"type": "object", "properties": {}},
+            "execute": lambda *a, **k: {"content": [{"type": "text", "text": "ok"}]},
+        }
+    )
+    holder: dict = {}
+    extension_state: dict = {"runner": runner, "active_tools": []}
+
+    def builder() -> str:
+        active_tools = extension_state.get("active_tools") or []
+        return build_system_prompt(
+            BuildSystemPromptOptions(
+                cwd=str(tmp_path),
+                selected_tools=[tool.name for tool in active_tools],
+                tool_snippets=tool_snippets_for(active_tools),
+                prompt_guidelines=tool_prompt_guidelines_for(active_tools),
+            )
+        )
+
+    session = _make_session(
+        tmp_path,
+        runner,
+        holder,
+        extension_state=extension_state,
+        system_prompt_builder=builder,
+    )
+    try:
+        assert "Use custom for custom things." in session._agent.state.system_prompt
+        runner.runtime.get_action("set_active_tools")(["read"])
+        assert (
+            "Use read to examine files instead of cat or sed." in session._agent.state.system_prompt
+        )
+        assert "Use custom for custom things." not in session._agent.state.system_prompt
+        assert [tool.name for tool in session.extension_state["active_tools"]] == ["read"]
+    finally:
+        await session.dispose()
+
+
+@pytest.mark.asyncio
+async def test_get_all_tools_returns_prompt_guidelines_and_source_info(tmp_path):
+    extension = Extension(path="<inline>", resolved_path="<inline>")
+    runner = ExtensionRunner([extension], cwd=str(tmp_path))
+    api = ExtensionAPI(extension, runner.runtime, cwd=str(tmp_path))
+    api.register_tool(
+        {
+            "name": "custom",
+            "label": "Custom",
+            "description": "Custom tool",
+            "prompt_guidelines": ["Use custom for custom things."],
+            "parameters": {"type": "object", "properties": {}},
+            "execute": lambda *a, **k: {"content": [{"type": "text", "text": "ok"}]},
+        }
+    )
+    holder: dict = {}
+    session = _make_session(tmp_path, runner, holder)
+    try:
+        tools = {tool["name"]: tool for tool in runner.runtime.get_action("get_all_tools")()}
+        assert tools["custom"]["prompt_guidelines"] == ["Use custom for custom things."]
+        assert tools["custom"]["source_info"] == {
+            "source": extension.source,
+            "path": extension.path,
+        }
+        assert "prompt_guidelines" in tools["read"]
+        assert tools["read"]["source_info"] == {}
     finally:
         await session.dispose()
 

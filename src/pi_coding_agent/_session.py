@@ -127,6 +127,8 @@ class AgentSession:
         extension_runner=None,
         # 系统提示构建器（/reload 重建用）。
         system_prompt_builder: Callable[[], str] | None = None,
+        # CLI/TUI 共享的扩展状态（system_prompt_builder 读取 active_tools）。
+        extension_state: dict | None = None,
         # 未信任项目时拦截高风险工具（bash/write/edit；默认关闭，对齐 TS 不限制工具）。
         restrict_untrusted_tools: bool = False,
     ):
@@ -151,7 +153,7 @@ class AgentSession:
             extension_runner.bind_session(self)
         self._listeners: list[Callable[[dict[Any, Any]], None]] = []
         # CLI/TUI 共享的扩展状态（system_prompt_builder 用它读当前 runner）。
-        self.extension_state: dict | None = None
+        self.extension_state: dict | None = extension_state
         # 项目信任状态（CLI/TUI 在启动解析后设置；None=未知）。
         self.project_trusted: bool | None = None
         self._after_response_tasks: set[asyncio.Task] = set()
@@ -604,6 +606,10 @@ class AgentSession:
         if not definitions:
             self._agent.state.tools = current
             self._extension_tool_names = set()
+            if self.extension_state is not None:
+                self.extension_state["active_tools"] = list(current)
+            if self._system_prompt_builder is not None:
+                self.rebuild_system_prompt()
             return
 
         from pi_agent import AgentToolResult
@@ -643,6 +649,8 @@ class AgentSession:
                 label=definition.label or definition.name,
                 description=definition.description,
                 input_schema=definition.parameters or {"type": "object", "properties": {}},
+                prompt_snippet=definition.prompt_snippet or None,
+                prompt_guidelines=definition.prompt_guidelines,
                 execute=execute,
             )
 
@@ -650,6 +658,10 @@ class AgentSession:
         merged.extend(extension_tools.values())
         self._agent.state.tools = merged
         self._extension_tool_names = set(extension_tools)
+        if self.extension_state is not None:
+            self.extension_state["active_tools"] = list(merged)
+        if self._system_prompt_builder is not None:
+            self.rebuild_system_prompt()
 
     def rebuild_system_prompt(self) -> str | None:
         """重建系统提示（上下文文件 / 技能变化后调用，/reload 用）。"""

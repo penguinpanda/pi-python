@@ -56,6 +56,15 @@ def tool_snippets_for(tools: list) -> dict[str, str]:
     return snippets
 
 
+def tool_prompt_guidelines_for(tools: list) -> list[str]:
+    """按工具顺序收集激活工具的 Guidelines 指南（对齐 TS _toolPromptGuidelines）。"""
+    guidelines: list[str] = []
+    for tool in tools:
+        tool_guidelines = getattr(tool, "prompt_guidelines", None) or []
+        guidelines.extend(tool_guidelines)
+    return guidelines
+
+
 def _load_context_file_from_dir(directory: Path) -> dict | None:
     for filename in _CONTEXT_FILE_NAMES:
         candidate = directory / filename
@@ -298,4 +307,5 @@ __all__ = [
     "build_system_prompt",
     "load_project_context_files",
     "tool_snippets_for",
+    "tool_prompt_guidelines_for",
 ]

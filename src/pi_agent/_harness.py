@@ -462,6 +462,8 @@ class AgentHarness(Generic[TContext]):
             label=tool.label,
             execute=_execute,
             execution_mode=tool.execution_mode,
+            prompt_snippet=tool.prompt_snippet,
+            prompt_guidelines=tool.prompt_guidelines,
         )
         bound.before_execute = tool.before_execute
         bound.after_execute = tool.after_execute

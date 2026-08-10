@@ -12,15 +12,23 @@ from pi_coding_agent.system_prompt import (
     find_git_paths,
     find_shadowed_context_file,
     load_project_context_files,
+    tool_prompt_guidelines_for,
     tool_snippets_for,
 )
 
 
 class _FakeTool:
-    def __init__(self, name: str, description: str = "", prompt_snippet: str | None = None) -> None:
+    def __init__(
+        self,
+        name: str,
+        description: str = "",
+        prompt_snippet: str | None = None,
+        prompt_guidelines: list[str] | None = None,
+    ) -> None:
         self.name = name
         self.description = description
         self.prompt_snippet = prompt_snippet
+        self.prompt_guidelines = prompt_guidelines
 
 
 def _snippets():
@@ -46,6 +54,31 @@ class TestBuildSystemPrompt:
     def test_tool_snippet_multiline_normalized(self):
         snippets = tool_snippets_for([_FakeTool("a", prompt_snippet="multi\nline   text")])
         assert snippets == {"a": "multi line text"}
+
+    def test_tool_prompt_guidelines_for_preserves_order(self):
+        guidelines = tool_prompt_guidelines_for(
+            [
+                _FakeTool("read", prompt_guidelines=["g1"]),
+                _FakeTool("bash", prompt_guidelines=None),
+                _FakeTool("edit", prompt_guidelines=["g2", "g3"]),
+            ]
+        )
+        assert guidelines == ["g1", "g2", "g3"]
+
+    def test_default_prompt_renders_bash_guideline(self, tmp_path):
+        prompt = build_system_prompt(
+            BuildSystemPromptOptions(
+                cwd=str(tmp_path),
+                tool_snippets=_snippets(),
+                prompt_guidelines=[
+                    "Inspect PI_* environment variables for current model and session details."
+                ],
+            )
+        )
+        assert (
+            "- Inspect PI_* environment variables for current model and session details." in prompt
+        )
+        assert prompt.index("- Inspect PI_*") < prompt.index("- Be concise in your responses")
 
     def test_default_prompt_contains_cwd_and_tools(self, tmp_path):
         prompt = build_system_prompt(

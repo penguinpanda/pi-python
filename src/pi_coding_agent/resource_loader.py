@@ -51,6 +51,7 @@ class DefaultResourceLoader:
         settings_manager: SettingsManager | None = None,
         selected_tools: list[str] | None = None,
         tool_snippets: dict[str, str] | None = None,
+        prompt_guidelines: list[str] | None = None,
         no_context_files: bool = False,
     ) -> None:
         self._cwd = str(Path(cwd).expanduser().resolve())
@@ -61,6 +62,7 @@ class DefaultResourceLoader:
         )
         self._selected_tools = selected_tools
         self._tool_snippets = tool_snippets
+        self._prompt_guidelines = prompt_guidelines
         self._no_context_files = no_context_files
 
         self._skill_loader = SkillLoader(
@@ -135,6 +137,7 @@ class DefaultResourceLoader:
             custom_prompt=self._settings_manager.get_system_prompt(),
             selected_tools=self._selected_tools,
             tool_snippets=self._tool_snippets,
+            prompt_guidelines=self._prompt_guidelines or [],
             append_system_prompt="\n".join(append_parts) if append_parts else None,
             context_files=self._result.context_files,
             skills=skills,

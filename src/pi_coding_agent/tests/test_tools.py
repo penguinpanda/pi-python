@@ -5,6 +5,7 @@ grep / find / ls 为 coding-agent 特有实现。
 """
 
 import asyncio
+import os
 import tempfile
 from pathlib import Path
 
@@ -227,3 +228,18 @@ class TestFilterTools:
         tools = create_all_tools(str(tmp_path))
         filtered = filter_tools_by_names(tools, exclude=["bash"])
         assert all(tool.name != "bash" for tool in filtered)
+
+
+@pytest.mark.asyncio
+async def test_bash_prepends_bin_dir_to_path(tmp_path, monkeypatch):
+    from pi_coding_agent import tools as coding_tools
+
+    bin_dir = tmp_path / "agent" / "bin"
+    monkeypatch.setattr(coding_tools, "get_bin_dir", lambda: bin_dir)
+    tool = coding_tools.create_bash_tool(str(tmp_path))
+    result = await tool.execute(
+        "tc1",
+        {"command": "python -c \"import os;print(os.environ.get('PATH',''))\""},
+    )
+    text = result.content[0]["text"].strip()
+    assert text.split(os.pathsep)[0] == str(bin_dir)

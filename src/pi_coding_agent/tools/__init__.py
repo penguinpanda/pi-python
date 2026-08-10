@@ -13,6 +13,7 @@ create_readonly_tools, filter_tools_by_names
 from __future__ import annotations
 
 import inspect
+import os
 
 from pi_agent import AgentTool
 from pi_agent.tools import BashToolOptions
@@ -24,6 +25,7 @@ from pi_agent.tools import (
     create_write_tool as _create_pi_write_tool,
 )
 
+from .._config import get_bin_dir
 from ._find import create_find_tool
 from ._grep import create_grep_tool
 from ._ls import create_ls_tool
@@ -57,6 +59,7 @@ def _bind_env(tool: AgentTool, env: PythonExecutionEnv) -> AgentTool:
         input_schema=tool.input_schema,
         label=tool.label,
         prompt_snippet=tool.prompt_snippet,
+        prompt_guidelines=tool.prompt_guidelines,
         execute=execute,
     )
 
@@ -89,7 +92,20 @@ def create_bash_tool(
     spawn_hook(ctx) 返回额外环境变量（对齐 TS createBashTool 的 spawnHook）。
     """
 
+    def _prepend_bin_dir_to_path(env: dict[str, str]) -> None:
+        """把 pi bin 目录前置到 PATH（对齐 TS getShellEnv，PATH 键大小写不敏感）。"""
+        bin_dir = str(get_bin_dir())
+        env_path_key = next((key for key in env if key.lower() == "path"), None)
+        if env_path_key is not None:
+            current = env[env_path_key]
+            env[env_path_key] = bin_dir + (os.pathsep + current if current else "")
+            return
+        base_key = next((key for key in os.environ if key.lower() == "path"), "PATH")
+        current = os.environ.get(base_key, "")
+        env[base_key] = bin_dir + (os.pathsep + current if current else "")
+
     async def _prepare(execution, context, signal) -> None:
+        _prepend_bin_dir_to_path(execution["env"])
         if spawn_hook is not None:
             extra = spawn_hook(context)
             if inspect.isawaitable(extra):
