@@ -109,6 +109,59 @@ class TestBasicCommands:
         assert response["success"] is False
 
 
+class TestMiscCommands:
+    async def test_compact_nothing(self, tmp_path):
+        runtime = _make_runtime()
+        handler = _make_handler(runtime, tmp_path)
+        response = await handler.handle_command({"id": "1", "type": "compact"})
+        assert response["success"] is False
+        assert "Nothing to compact" in response["error"]
+
+    async def test_set_auto_compaction_and_retry(self, tmp_path):
+        runtime = _make_runtime()
+        handler = _make_handler(runtime, tmp_path)
+        ok = await handler.handle_command(
+            {"id": "1", "type": "set_auto_compaction", "enabled": False}
+        )
+        assert ok["success"] is True
+        bad = await handler.handle_command(
+            {"id": "1", "type": "set_auto_compaction", "enabled": "yes"}
+        )
+        assert bad["success"] is False
+        bad_retry = await handler.handle_command(
+            {"id": "1", "type": "set_auto_retry", "enabled": 1}
+        )
+        assert bad_retry["success"] is False
+        abort = await handler.handle_command({"id": "1", "type": "abort_retry"})
+        assert abort["success"] is True
+
+    async def test_get_tree_and_last_assistant_text(self, tmp_path):
+        runtime = _make_runtime()
+        handler = _make_handler(runtime, tmp_path)
+        tree = await handler.handle_command({"id": "1", "type": "get_tree"})
+        assert tree["success"] is True
+        assert "tree" in tree["data"] and "leafId" in tree["data"]
+        last = await handler.handle_command({"id": "1", "type": "get_last_assistant_text"})
+        assert last["success"] is True
+        assert last["data"]["text"] is None
+
+    async def test_set_session_name_and_export_html(self, tmp_path):
+        runtime = _make_runtime()
+        handler = _make_handler(runtime, tmp_path)
+        ok = await handler.handle_command(
+            {"id": "1", "type": "set_session_name", "name": "  my session  "}
+        )
+        assert ok["success"] is True
+        bad = await handler.handle_command({"id": "1", "type": "set_session_name", "name": ""})
+        assert bad["success"] is False
+        output = tmp_path / "session.html"
+        exported = await handler.handle_command(
+            {"id": "1", "type": "export_html", "outputPath": str(output)}
+        )
+        assert exported["success"] is True
+        assert output.exists()
+
+
 class TestModelCommands:
     async def test_set_model(self, tmp_path):
         runtime = _make_runtime()

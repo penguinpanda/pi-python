@@ -7,6 +7,9 @@ import pytest
 
 from pi_ai.api.pi_messages import (
     PiMessagesResponseError,
+    _create_response_error,
+    _parse_pi_message_event,
+    _resolve_cache_retention,
     read_pi_messages_events,
     stream,
 )
@@ -210,3 +213,35 @@ def test_response_error_holds_code():
     err = PiMessagesResponseError("500 Internal Server Error: boom", "E_500", {"x": 1})
     assert err.code == "E_500"
     assert err.diagnostic_details == {"x": 1}
+
+
+def test_parse_pi_message_event_variants():
+    assert _parse_pi_message_event("") is None
+    assert _parse_pi_message_event("data: [DONE]\n\n") is None
+    assert _parse_pi_message_event('event: x\ndata: {"a": 1}\n\n') == {"a": 1}
+
+
+@pytest.mark.asyncio
+async def test_read_events_trailing_event_without_blank_line():
+    raw = b'data: {"type": "start"}\n\ndata: {"type": "done", "reason": "stop"}'
+    collected = [event async for event in read_pi_messages_events(_byte_chunks(raw, 5))]
+    assert [event["type"] for event in collected] == ["start", "done"]
+
+
+def test_resolve_cache_retention(monkeypatch):
+    assert _resolve_cache_retention("short", {}) == "short"
+    monkeypatch.setenv("PI_CACHE_RETENTION", "long")
+    assert _resolve_cache_retention(None, None) == "long"
+    assert _resolve_cache_retention(None, {"PI_CACHE_RETENTION": "short"}) is None
+
+
+def test_create_response_error_variants():
+    model = _model()
+    response = httpx.Response(500, request=httpx.Request("POST", "http://x"))
+    assert _create_response_error(model, response, "not json").code is None
+
+    error = _create_response_error(model, response, '{"error": {"message": "boom", "code": "E1"}}')
+    assert error.code == "E1"
+    assert "boom" in str(error)
+
+    assert _create_response_error(model, response, '{"error": "string"}').code is None

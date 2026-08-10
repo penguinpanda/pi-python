@@ -100,6 +100,45 @@ async def test_load_sourced_skills_map_skill(tmp_path):
     assert result["skills"][0]["skill"]["source"] == "USER"
 
 
+@pytest.mark.asyncio
+async def test_load_sourced_skills_diagnostics_carry_source(tmp_path):
+    bad_dir = tmp_path / "skills" / "bad"
+    bad_dir.mkdir(parents=True)
+    (bad_dir / "SKILL.md").write_text("---\ndescription: [unclosed\n---\n\nBody", encoding="utf-8")
+    env = PythonExecutionEnv(str(tmp_path))
+    result = await load_sourced_skills(
+        env, [{"path": str(tmp_path / "skills"), "source": "project"}]
+    )
+    assert result["skills"] == []
+    assert result["diagnostics"] and result["diagnostics"][0]["source"] == "project"
+    assert result["diagnostics"][0]["code"] == "parse_failed"
+
+
+@pytest.mark.asyncio
+async def test_nested_gitignore_prefix_applied(tmp_path):
+    root = tmp_path / "skills"
+    _write_skill(root / "keep", "SKILL.md", "keep")
+    _write_skill(root / "sub" / "skip" / "nested", "SKILL.md", "nested")
+    (root / "sub" / ".gitignore").write_text("skip/\n", encoding="utf-8")
+    env = PythonExecutionEnv(str(tmp_path))
+    result = await load_skills(env, str(root))
+    assert [skill["name"] for skill in result["skills"]] == ["keep"]
+
+
+@pytest.mark.asyncio
+async def test_symlinked_root_directory(tmp_path):
+    target = tmp_path / "target"
+    _write_skill(target / "s", "SKILL.md", "S", "name: s\ndescription: S")
+    try:
+        link = tmp_path / "skills-link"
+        link.symlink_to(target, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink not supported")
+    env = PythonExecutionEnv(str(tmp_path))
+    result = await load_skills(env, str(link))
+    assert [skill["name"] for skill in result["skills"]] == ["s"]
+
+
 def test_dirname_env_path():
     assert _dirname_env_path("C:/pi/pkg/SKILL.md") == "C:/pi/pkg"
     assert _dirname_env_path("C:/SKILL.md") == "C:/"
@@ -116,3 +155,8 @@ def test_relative_env_path():
 def test_format_skill_invocation_directory():
     block = format_skill_invocation("n", "d", "body", "C:/skills/n/SKILL.md")
     assert "References are relative to C:/skills/n." in block
+
+
+def test_format_skill_invocation_additional_instructions():
+    block = format_skill_invocation("n", "d", "body", "/skills/n/SKILL.md", "extra line")
+    assert block.endswith("</skill>\n\nextra line")

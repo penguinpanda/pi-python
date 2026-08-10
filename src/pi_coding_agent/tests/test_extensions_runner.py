@@ -261,3 +261,69 @@ class TestRegistrations:
 
         assert slash_registry.get("greet") is not None
         assert keybindings.resolve("ctrl+k") is not None
+
+    def test_registry_passthrough(self, tmp_path):
+        extension = _make_extension()
+        extension.commands["cmd"] = type(
+            "C",
+            (),
+            {
+                "name": "cmd",
+                "description": "Cmd",
+                "argument_hint": "<x>",
+                "handler": lambda ctx, args: "x",
+                "source_info": None,
+            },
+        )()
+        extension.shortcuts["ctrl+j"] = type(
+            "S",
+            (),
+            {"shortcut": "ctrl+j", "description": "s", "handler": None, "extension_path": "x"},
+        )()
+        extension.flags["flag"] = type(
+            "F",
+            (),
+            {"name": "flag", "description": "f", "type": "boolean", "default": False},
+        )()
+        extension.providers.append(("acme", {"api_key": "sk"}))
+        runner = ExtensionRunner([extension], cwd=str(tmp_path))
+        registry = ExtensionRegistry(runner)
+        assert [c.name for c in registry.get_commands()] == ["cmd"]
+        assert [s.shortcut for s in registry.get_shortcuts()] == ["ctrl+j"]
+        assert [f.name for f in registry.get_flags()] == ["flag"]
+        assert registry.get_providers() == [("acme", {"api_key": "sk"})]
+        assert registry.get_tools() == []
+
+
+class TestExtensionApiRegistration:
+    def test_register_shortcut_flag_provider_renderers(self, tmp_path):
+        from pi_coding_agent.extensions.types import ExtensionAPI
+
+        extension = Extension(path="<inline>", resolved_path="<inline>")
+        runner = ExtensionRunner([extension], cwd=str(tmp_path))
+        api = ExtensionAPI(extension, runner.runtime, cwd=str(tmp_path))
+
+        api.register_shortcut("ctrl+l", {"description": "Clear"})
+        api.register_flag("verbose", {"description": "Verbose", "type": "boolean"})
+        api.register_provider("acme", {"apiKey": "$ACME_KEY", "baseUrl": "https://acme"})
+        api.register_message_renderer("note", lambda *a: None)
+        api.register_tool_renderer("bash", lambda *a: None)
+
+        assert extension.shortcuts["ctrl+l"].description == "Clear"
+        assert extension.flags["verbose"].description == "Verbose"
+        assert extension.providers == [("acme", {"apiKey": "$ACME_KEY", "baseUrl": "https://acme"})]
+        assert "note" in extension.message_renderers
+        assert "bash" in extension.tool_renderers
+
+
+class TestRunnerErrors:
+    def test_emit_error_dispatches_and_unsubscribe(self):
+        runner = ExtensionRunner([], cwd="/tmp")
+        errors: list[ExtensionError] = []
+        unsubscribe = runner.on_error(errors.append)
+        runner.emit_error(ExtensionError("a.py", "agent_start", "boom", None))
+        assert len(errors) == 1
+        assert errors[0].event == "agent_start"
+        unsubscribe()
+        runner.emit_error(ExtensionError("a.py", "agent_end", "boom2", None))
+        assert len(errors) == 1

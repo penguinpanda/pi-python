@@ -2,6 +2,7 @@
 
 import pytest
 
+import pi_ai.images as images_api
 from pi_ai.images_api_registry import (
     clear_images_api_providers,
     get_images_api_provider,
@@ -161,3 +162,24 @@ async def test_images_models_stores_oauth_refresh_path():
     assert result is not None
     assert result.source == "OAuth"
     assert result.auth["api_key"] == "rotated"
+
+
+@pytest.mark.asyncio
+async def test_generate_images_unregistered_api_raises():
+    clear_images_api_providers()
+    model = ImagesModel(id="x", api="missing", provider="p")
+    with pytest.raises(ValueError, match="No API provider registered"):
+        await images_api.generate_images(model, _context())
+
+
+def test_register_builtin_images_api_providers_idempotent():
+    from pi_ai.providers import images as images_module
+
+    clear_images_api_providers()
+    images_module._registered = False
+
+    images_module.register_builtin_images_api_providers()
+    images_module.register_builtin_images_api_providers()
+    assert get_images_api_provider("openrouter-images") is not None
+    unregister_images_api_providers("builtin")
+    assert get_images_api_provider("openrouter-images") is None

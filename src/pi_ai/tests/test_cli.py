@@ -76,3 +76,48 @@ class TestLogin:
 def test_unknown_command(fake_providers, capsys):
     assert cli.main(["bogus"]) == 1
     assert "Unknown command: bogus" in capsys.readouterr().err
+
+
+def _run(coro):
+    import asyncio
+
+    return asyncio.run(coro)
+
+
+class TestCliAuthInteraction:
+    def test_prompt_select_invalid_then_valid(self, capsys, monkeypatch):
+        answers = iter(["99", "1"])
+        monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+        interaction = cli._CliAuthInteraction()
+        result = _run(
+            interaction.prompt(
+                {
+                    "type": "select",
+                    "message": "Pick",
+                    "options": [{"id": "a", "label": "A"}],
+                }
+            )
+        )
+        assert result == "a"
+        assert "Invalid selection." in capsys.readouterr().out
+
+    def test_prompt_input_with_placeholder(self, capsys, monkeypatch):
+        prompts: list[str] = []
+        monkeypatch.setattr("builtins.input", lambda prompt: prompts.append(prompt) or "typed")
+        interaction = cli._CliAuthInteraction()
+        result = _run(interaction.prompt({"message": "Name", "placeholder": "hint"}))
+        assert result == "typed"
+        assert prompts == ["Name (hint): "]
+
+    def test_notify_events(self, capsys):
+        interaction = cli._CliAuthInteraction()
+        interaction.notify({"type": "auth_url", "url": "https://x", "instructions": "Open it"})
+        interaction.notify(
+            {"type": "device_code", "verification_uri": "https://y", "user_code": "ABC"}
+        )
+        interaction.notify({"type": "info", "message": "working"})
+        interaction.notify({"type": "progress", "message": "still working"})
+        out = capsys.readouterr().out
+        assert "https://x" in out and "Open it" in out
+        assert "https://y" in out and "Enter code: ABC" in out
+        assert "working" in out and "still working" in out

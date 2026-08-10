@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from pi_ai import Context, Models, UserMessage
 from pi_ai.auth import ApiKeyCredential
 from pi_ai.providers.faux import FAUX_MODEL, faux_assistant_message, faux_provider
@@ -273,6 +275,73 @@ class TestModelRegistry:
         result = await registry.get_api_key_and_headers(model)
         assert result["ok"] is True
         assert result["api_key"] == "sk-stored"
+
+    async def test_find_by_id_and_display_name(self):
+        provider = faux_provider().provider
+        runtime = await _make_runtime(providers=[provider])
+        registry = ModelRegistry(runtime)
+        assert registry.find_by_id("faux-1") is not None
+        assert registry.find_by_id("missing") is None
+        assert registry.get_provider_display_name("faux") == provider.name
+        assert registry.get_provider_display_name("unknown") == "unknown"
+
+    def test_register_by_name_requires_config(self):
+        runtime = None  # 仅验证参数校验，不触碰 runtime
+        registry = ModelRegistry(runtime)  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="config is required"):
+            registry.register_provider("openai")
+
+    async def test_api_key_and_headers_with_faux_resolution_none(self):
+        runtime = await _make_runtime(providers=[faux_provider().provider])
+        registry = ModelRegistry(runtime)
+        model = runtime.get_model("faux", "faux-1")
+        assert model is not None
+        result = await registry.get_api_key_and_headers(model)
+        assert result["ok"] is True
+        assert result["api_key"] is None
+
+
+class TestModelRegistryAuthBranches:
+    def _model(self):
+        from pi_ai import Model
+
+        return Model(id="m", provider="p", api="a")
+
+    async def test_resolution_headers_filter_none(self):
+        class _Runtime:
+            async def get_auth(self, model):
+                return type(
+                    "Resolution",
+                    (),
+                    {"auth": {"api_key": "k", "headers": {"X": "v", "Y": None}}, "env": None},
+                )()
+
+            def get_compatibility_request_config(self, model):
+                return {}
+
+        result = await ModelRegistry(_Runtime()).get_api_key_and_headers(self._model())  # type: ignore[arg-type]
+        assert result["ok"] is True
+        assert result["api_key"] == "k"
+        assert result["headers"] == {"X": "v"}
+
+    async def test_resolution_none_with_auth_header_errors(self):
+        class _Runtime:
+            async def get_auth(self, model):
+                return None
+
+            def get_compatibility_request_config(self, model):
+                return {"auth_header": "Authorization"}
+
+        result = await ModelRegistry(_Runtime()).get_api_key_and_headers(self._model())  # type: ignore[arg-type]
+        assert result["ok"] is False
+        assert "No API key found" in result["error"]
+
+    async def test_api_key_for_provider_swallows_errors(self):
+        class _Runtime:
+            async def get_auth(self, provider):
+                raise RuntimeError("boom")
+
+        assert await ModelRegistry(_Runtime()).get_api_key_for_provider("p") is None  # type: ignore[arg-type]
 
 
 class TestRuntimeStream:

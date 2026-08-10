@@ -71,6 +71,62 @@ class TestInMemory:
         with pytest.raises(ValueError):
             manager.set_default_project_trust("bogus")
 
+    def test_typed_roundtrip_extended(self):
+        manager = SettingsManager.in_memory()
+        manager.set_default_thinking_level("high")
+        assert manager.get_default_thinking_level() == "high"
+        manager.set_transport("stdio")
+        assert manager.get_transport() == "stdio"
+        manager.set_steering_mode("one-at-a-time")
+        assert manager.get_steering_mode() == "one-at-a-time"
+        manager.set_follow_up_mode("manual")
+        assert manager.get_follow_up_mode() == "manual"
+        manager.set_theme("dark")
+        assert manager.get_theme() == "dark"
+        manager.set_hide_thinking_block(True)
+        assert manager.get_hide_thinking_block() is True
+        manager.set_shell_path("/bin/bash")
+        assert manager.get_shell_path() == "/bin/bash"
+        manager.set_shell_command_prefix("set -e")
+        assert manager.get_shell_command_prefix() == "set -e"
+        manager.set_quiet_startup(True)
+        assert manager.get_quiet_startup() is True
+        manager.set_ui_mode("regular")
+        assert manager.get_ui_mode() == "regular"
+        manager.set_show_images(False)
+        assert manager.get_show_images() is False
+        manager.set_image_width_cells(120)
+        assert manager.get_image_width_cells() == 120
+        manager.set_image_auto_resize(False)
+        assert manager.get_image_auto_resize() is False
+        manager.set_block_images(True)
+        assert manager.get_block_images() is True
+        manager.set_enabled_models(["openai/*"])
+        assert manager.get_enabled_models() == ["openai/*"]
+        manager.set_double_escape_action("abort")
+        assert manager.get_double_escape_action() == "abort"
+        manager.set_tree_filter_mode("all")
+        assert manager.get_tree_filter_mode() == "all"
+        manager.set_editor_padding_x(2)
+        assert manager.get_editor_padding_x() == 2
+        manager.set_output_pad(1)
+        assert manager.get_output_pad() == 1
+        manager.set_autocomplete_max_visible(10)
+        assert manager.get_autocomplete_max_visible() == 10
+        manager.set_system_prompt("custom")
+        assert manager.get_system_prompt() == "custom"
+        manager.set_append_system_prompt(["extra"])
+        assert manager.get_append_system_prompt() == ["extra"]
+        manager.set_warnings({"duplicateKey": True})
+        assert manager.get_warnings() == {"duplicateKey": True}
+
+    def test_invalid_values_clamped(self):
+        manager = SettingsManager.in_memory()
+        manager.set_ui_mode("bogus")
+        assert manager.get_ui_mode() == "regular"
+        manager.set_tree_filter_mode("bogus")
+        assert manager.get_tree_filter_mode() == "default"
+
 
 class TestFileStorage:
     def test_global_and_project_merge(self, tmp_path):

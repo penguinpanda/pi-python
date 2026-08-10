@@ -8,6 +8,7 @@ from pi_ai.auth import env_api_key_auth
 from pi_ai.auth.credential_store import InMemoryCredentialStore
 from pi_ai.auth.resolve import (
     ModelsError,
+    read_credential,
     resolve_provider_auth,
     resolve_stored_oauth,
 )
@@ -50,6 +51,17 @@ class _FakeOAuth:
 
     async def to_auth(self, credential):
         return {"api_key": credential["access"]}
+
+
+class _FailingStore:
+    async def read(self, provider_id: str):
+        raise RuntimeError("disk read failed")
+
+    async def write(self, provider_id: str, credential):
+        raise RuntimeError("disk write failed")
+
+    async def modify(self, provider_id: str, fn):
+        raise RuntimeError("disk modify failed")
 
 
 @pytest.mark.asyncio
@@ -138,4 +150,127 @@ async def test_resolve_provider_auth_oauth_path():
     await store.write("p", _oauth_credential(now_ms() + 3600_000))
     result = await resolve_provider_auth(_OAuthProvider(), store, _FakeAuthContext())
     assert result.source == "OAuth"
+    assert result.auth["api_key"] == "a"
+
+
+@pytest.mark.asyncio
+async def test_resolve_provider_auth_explicit_key_without_resolve_returns_none():
+    class _NoResolveAuth:
+        oauth = None
+
+    provider = _FakeProvider("p", _NoResolveAuth())
+    result = await resolve_provider_auth(
+        provider, InMemoryCredentialStore(), _FakeAuthContext(), {"api_key": "sk-x"}
+    )
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_provider_auth_stored_oauth_without_oauth_auth_returns_none():
+    class _PlainAuth:
+        pass
+
+    store = InMemoryCredentialStore()
+    await store.write("p", _oauth_credential(now_ms() + 3600_000))
+    result = await resolve_provider_auth(
+        _FakeProvider("p", _PlainAuth()), store, _FakeAuthContext()
+    )
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_provider_auth_unknown_credential_type_returns_none():
+    store = InMemoryCredentialStore()
+    await store.write("p", {"type": "weird", "key": "x"})
+    result = await resolve_provider_auth(
+        _FakeProvider("p", env_api_key_auth("Test", ["TEST_KEY"])),
+        store,
+        _FakeAuthContext({"TEST_KEY": "sk-env"}),
+    )
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_read_credential_store_failure_raises_auth_error():
+    with pytest.raises(ModelsError) as excinfo:
+        await read_credential(_FailingStore(), "p")
+    assert excinfo.value.code == "auth"
+    assert "disk read failed" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_resolve_stored_oauth_logout_during_refresh_returns_none():
+    class _LogoutOAuth:
+        async def refresh(self, credential, signal=None):
+            return None
+
+        async def to_auth(self, credential):
+            return {"api_key": "a"}
+
+    store = InMemoryCredentialStore()
+    expired = _oauth_credential(now_ms() - 1000)
+    result = await resolve_stored_oauth(store, "p", _LogoutOAuth(), expired)
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_stored_oauth_refresh_error_raises_oauth_error():
+    class _BrokenOAuth:
+        async def refresh(self, credential, signal=None):
+            raise RuntimeError("refresh exploded")
+
+    store = InMemoryCredentialStore()
+    await store.write("p", _oauth_credential(now_ms() - 1000))
+    with pytest.raises(ModelsError) as excinfo:
+        await resolve_stored_oauth(store, "p", _BrokenOAuth(), _oauth_credential(now_ms() - 1000))
+    assert excinfo.value.code == "oauth"
+    assert "refresh exploded" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_resolve_stored_oauth_store_modify_error_raises_auth_error():
+    class _RefreshOAuth:
+        async def refresh(self, credential, signal=None):
+            return _oauth_credential(now_ms() + 3600_000)
+
+    store = _FailingStore()
+    with pytest.raises(ModelsError) as excinfo:
+        await resolve_stored_oauth(store, "p", _RefreshOAuth(), _oauth_credential(now_ms() - 1000))
+    assert excinfo.value.code == "auth"
+
+
+@pytest.mark.asyncio
+async def test_resolve_stored_oauth_to_auth_error_raises_oauth_error():
+    class _BadToAuth:
+        async def refresh(self, credential, signal=None):
+            return _oauth_credential(now_ms() - 1000)
+
+        async def to_auth(self, credential):
+            raise RuntimeError("derive failed")
+
+    store = InMemoryCredentialStore()
+    await store.write("p", _oauth_credential(now_ms() - 1000))
+    with pytest.raises(ModelsError) as excinfo:
+        await resolve_stored_oauth(store, "p", _BadToAuth(), _oauth_credential(now_ms() - 1000))
+    assert excinfo.value.code == "oauth"
+
+
+@pytest.mark.asyncio
+async def test_resolve_stored_oauth_non_int_expires_does_not_refresh():
+    class _CountingOAuth:
+        def __init__(self):
+            self.refresh_calls = 0
+
+        async def refresh(self, credential, signal=None):
+            self.refresh_calls += 1
+            return _oauth_credential(now_ms() + 3600_000)
+
+        async def to_auth(self, credential):
+            return {"api_key": credential["access"]}
+
+    oauth = _CountingOAuth()
+    store = InMemoryCredentialStore()
+    credential = {"type": "oauth", "access": "a", "refresh": "r", "expires": "never"}
+    result = await resolve_stored_oauth(store, "p", oauth, credential)
+    assert oauth.refresh_calls == 0
     assert result.auth["api_key"] == "a"

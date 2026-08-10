@@ -340,8 +340,6 @@ async def load_skills(
             if info[1].code != "not_found":
                 diagnostics.append(SkillDiagnostic("file_info_failed", str(info[1]), directory))
             continue
-        if info[1].kind != "directory":
-            continue
         root_kind = await _resolve_kind(env, info[1], diagnostics)
         if root_kind != "directory":
             continue

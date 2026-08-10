@@ -192,6 +192,11 @@ class TestFindTool:
             assert "c.py" in result.content[0]["text"]
             assert "b.txt" not in result.content[0]["text"]
 
+    def test_find_missing_path(self, tmp_path):
+        tool = create_find_tool(str(tmp_path))
+        result = asyncio.run(tool.execute("tc1", {"pattern": "*", "path": "nope"}))
+        assert "Path not found" in result.content[0]["text"]
+
 
 class TestLsTool:
     """测试 ls 工具。"""
@@ -216,6 +221,14 @@ class TestLsTool:
             tool = create_ls_tool(tmpdir)
             result = asyncio.run(tool.execute("tc1", {"path": "."}))
             assert "empty" in result.content[0]["text"].lower()
+
+    def test_ls_missing_path_and_single_file(self, tmp_path):
+        tool = create_ls_tool(str(tmp_path))
+        missing = asyncio.run(tool.execute("tc1", {"path": "nope"}))
+        assert "Path not found" in missing.content[0]["text"]
+        (tmp_path / "f.txt").write_text("x")
+        single = asyncio.run(tool.execute("tc1", {"path": "f.txt"}))
+        assert single.details["is_file"] is True
 
 
 class TestFilterTools:

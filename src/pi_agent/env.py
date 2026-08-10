@@ -597,7 +597,6 @@ class PythonExecutionEnv:
         callback_error: ExecutionError | None = None
 
         def _on_stdout(chunk: str) -> None:
-            stdout_chunks.append(chunk)
             try:
                 if options.on_stdout:
                     options.on_stdout(chunk)
@@ -686,7 +685,7 @@ class PythonExecutionEnv:
                 if callback is not None:
                     callback(text)
 
-        stdout_task = asyncio.create_task(_reader(process.stdout, stdout_chunks, options.on_stdout))
+        stdout_task = asyncio.create_task(_reader(process.stdout, stdout_chunks, _on_stdout))
         stderr_task = asyncio.create_task(_reader(process.stderr, stderr_chunks, options.on_stderr))
 
         try:

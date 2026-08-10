@@ -104,6 +104,117 @@ class TestExecutionEnv:
         info = get_or_throw(await env.file_info("newdir"))
         assert info.kind == "directory"
 
+    @pytest.mark.asyncio
+    async def test_absolute_and_join_and_canonical(self, tmp_path, monkeypatch):
+        env = PythonExecutionEnv(str(tmp_path))
+        assert get_or_throw(await env.absolute_path("a/b")) == str(tmp_path / "a" / "b")
+        assert get_or_throw(await env.join_path(["a", "b", "c"])) == os.path.join("a", "b", "c")
+        target = tmp_path / "real.txt"
+        target.write_text("x", encoding="utf-8")
+        link = tmp_path / "link.txt"
+        try:
+            link.symlink_to(target)
+        except OSError:
+            pytest.skip("symlink not supported")
+        assert get_or_throw(await env.canonical_path(str(link))) == str(target.resolve())
+        assert (await env.canonical_path(str(tmp_path / "missing")))[0] is True
+
+    @pytest.mark.asyncio
+    async def test_abort_signal_short_circuits(self, tmp_path):
+        env = PythonExecutionEnv(str(tmp_path))
+        signal = asyncio.Event()
+        signal.set()
+        ok, err = await env.read_text_file("x.txt", signal)
+        assert ok is False
+        assert err.code == "aborted"
+        assert (await env.create_temp_dir(signal=signal))[1].code == "aborted"
+
+    @pytest.mark.asyncio
+    async def test_read_text_lines_max_lines_and_crlf(self, tmp_path):
+        path = tmp_path / "lines.txt"
+        path.write_bytes(b"a\r\nb\r\nc\r\n")
+        env = PythonExecutionEnv(str(tmp_path))
+        lines = get_or_throw(await env.read_text_lines(str(path)))
+        assert lines == ["a", "b", "c"]
+        assert get_or_throw(await env.read_text_lines(str(path), {"maxLines": 2})) == ["a", "b"]
+        assert get_or_throw(await env.read_text_lines(str(path), {"maxLines": 0})) == []
+        raw = get_or_throw(await env.read_text_file(str(path)))
+        assert raw == "a\r\nb\r\nc\r\n"
+
+    @pytest.mark.asyncio
+    async def test_append_and_binary_write(self, tmp_path):
+        env = PythonExecutionEnv(str(tmp_path))
+        await env.append_file("a.txt", "one\n")
+        await env.append_file("a.txt", "two\n")
+        assert get_or_throw(await env.read_text_file("a.txt")) == "one\ntwo\n"
+        await env.write_file("b.bin", b"\x00\x01")
+        assert (tmp_path / "b.bin").read_bytes() == b"\x00\x01"
+
+    @pytest.mark.asyncio
+    async def test_file_info_symlink(self, tmp_path):
+        target = tmp_path / "t.txt"
+        target.write_text("x", encoding="utf-8")
+        link = tmp_path / "l.txt"
+        try:
+            link.symlink_to(target)
+        except OSError:
+            pytest.skip("symlink not supported")
+        env = PythonExecutionEnv(str(tmp_path))
+        info = get_or_throw(await env.file_info(str(link)))
+        assert info.kind == "symlink"
+
+    @pytest.mark.asyncio
+    async def test_create_temp_and_remove_force(self, tmp_path):
+        env = PythonExecutionEnv(str(tmp_path))
+        temp_dir = get_or_throw(await env.create_temp_dir(prefix="pi-t-"))
+        assert os.path.isdir(temp_dir)
+        temp_file = get_or_throw(await env.create_temp_file({"prefix": "pi-f-", "suffix": ".log"}))
+        assert temp_file.endswith(".log")
+        await env.remove(temp_file, {"force": True})
+        assert os.path.exists(temp_file) is False
+        assert (await env.remove(str(tmp_path / "missing"), {"force": True}))[0] is True
+
+    @pytest.mark.asyncio
+    async def test_custom_shell_resolution(self, tmp_path):
+        env = PythonExecutionEnv(str(tmp_path), shell_path="/nonexistent/shell")
+        ok, err = await env._resolve_shell()
+        assert ok is False
+        assert err.code == "shell_unavailable"
+
+    @pytest.mark.asyncio
+    async def test_exec_missing_cwd(self, tmp_path):
+        env = PythonExecutionEnv(str(tmp_path))
+        ok, err = await env.exec("echo hi", ShellExecOptions(cwd=str(tmp_path / "nope")))
+        assert ok is False
+        assert err.code == "spawn_error"
+
+    @pytest.mark.asyncio
+    async def test_exec_callback_error_returned(self, tmp_path):
+        env = PythonExecutionEnv(str(tmp_path))
+        if not await _shell_available(env):
+            pytest.skip("No bash shell available")
+
+        def bad_callback(_chunk: str) -> None:
+            raise RuntimeError("callback exploded")
+
+        ok, err = await env.exec("echo hi", ShellExecOptions(on_stdout=bad_callback))
+        assert ok is False
+        assert isinstance(err, ExecutionError)
+        assert "callback exploded" in str(err)
+
+    @pytest.mark.asyncio
+    async def test_exec_abort_kills_process(self, tmp_path):
+        env = PythonExecutionEnv(str(tmp_path))
+        if not await _shell_available(env):
+            pytest.skip("No bash shell available")
+        signal = asyncio.Event()
+        task = asyncio.create_task(env.exec("sleep 30", ShellExecOptions(abort_signal=signal)))
+        await asyncio.sleep(0.2)
+        signal.set()
+        ok, err = await asyncio.wait_for(task, timeout=10)
+        assert ok is False
+        assert err.code == "aborted"
+
 
 class TestReadTool:
     @pytest.mark.asyncio
@@ -150,6 +261,16 @@ class TestReadTool:
         tool = create_read_tool()
         assert "current working directory" in tool.description
         assert "do not search the whole disk" in tool.description
+
+    @pytest.mark.asyncio
+    async def test_read_offset_beyond_end_raises(self, tmp_path):
+        (tmp_path / "f.txt").write_text("a\nb\n", encoding="utf-8")
+        env = PythonExecutionEnv(str(tmp_path))
+        tool = create_read_tool()
+        with pytest.raises(ValueError, match="beyond end of file"):
+            await tool.execute(
+                "t1", {"path": "f.txt", "offset": 99}, None, None, _tool_context(env)
+            )
 
 
 class TestWriteTool:
@@ -227,6 +348,26 @@ class TestEditTool:
                 _tool_context(env),
             )
 
+    @pytest.mark.asyncio
+    async def test_edit_overlapping_edits_raise(self, tmp_path):
+        (tmp_path / "o.txt").write_text("abcdef", encoding="utf-8")
+        env = PythonExecutionEnv(str(tmp_path))
+        tool = create_edit_tool()
+        with pytest.raises(ValueError, match="overlap"):
+            await tool.execute(
+                "t1",
+                {
+                    "path": "o.txt",
+                    "edits": [
+                        {"oldText": "abc", "newText": "ABC"},
+                        {"oldText": "bcd", "newText": "BCD"},
+                    ],
+                },
+                None,
+                None,
+                _tool_context(env),
+            )
+
 
 class TestBashTool:
     def test_bash_description_scoped_to_working_directory(self):
@@ -263,6 +404,25 @@ class TestBashTool:
             await tool.execute(
                 "t1", {"command": command, "timeout": 0.2}, None, None, _tool_context(env)
             )
+
+    @pytest.mark.asyncio
+    async def test_bash_abort_raises(self, tmp_path):
+        env = PythonExecutionEnv(str(tmp_path))
+        if not await _shell_available(env):
+            pytest.skip("No bash shell available")
+        tool = create_bash_tool()
+        signal = asyncio.Event()
+
+        async def _abort() -> None:
+            await asyncio.sleep(0.2)
+            signal.set()
+
+        task = asyncio.create_task(
+            tool.execute("t1", {"command": "sleep 30"}, signal, None, _tool_context(env))
+        )
+        await asyncio.create_task(_abort())
+        with pytest.raises(ValueError, match="aborted"):
+            await asyncio.wait_for(task, timeout=10)
 
 
 class TestFileMutationQueue:
