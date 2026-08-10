@@ -50,7 +50,7 @@ async def test_unknown_provider_returns_friendly_error(monkeypatch, capsys):
 
 
 async def test_bare_pi_defaults_to_tui(tmp_path, monkeypatch):
-    """回归：裸 `pi`（TTY、无消息）默认进入 TUI，而非报缺消息。"""
+    """回归：裸 `pi-python`（TTY、无消息）默认进入 TUI，而非报缺消息。"""
     import io
 
     monkeypatch.setattr(_cli, "ensure_agent_dirs", lambda: None)

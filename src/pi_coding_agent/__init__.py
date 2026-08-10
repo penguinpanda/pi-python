@@ -11,7 +11,7 @@ pi-coding-agent  CLI 编码代理
     await run_print_mode(session, "read README.md")
 
     # CLI 方式
-    # $ pi -p "read README.md"
+    # $ pi-python -p "read README.md"
 """
 
 from ._session import AgentSession

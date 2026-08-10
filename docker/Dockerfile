@@ -13,9 +13,10 @@ FROM ghcr.io/astral-sh/uv:0.12.0 AS uv-image
 
 FROM python:3.12-slim
 
-# 构建期 PyPI 镜像源（默认官方源；需要镜像时用 --build-arg 覆盖：
-# docker compose build --build-arg PYPI_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple）
-ARG PYPI_INDEX_URL=https://pypi.org/simple
+# 构建期 PyPI 镜像源。默认 TUNA 与 uv.lock 保持一致（当前锁文件由 TUNA 生成）；
+# 如需官方源，先用 `UV_INDEX_URL=https://pypi.org/simple uv lock --refresh` 重新生成锁文件，
+# 或用 --build-arg 覆盖并接受 uv 按新索引重新解析。
+ARG PYPI_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \
@@ -42,10 +43,10 @@ COPY src ./src
 RUN uv sync --no-dev --no-install-project \
     && rm -rf /root/.cache /tmp/*
 
-# 容器内提供与 TS 一致的 `pi` 命令（项目未安装时也生效）。
+# 容器内提供 `pi-python` 命令（项目未安装时也生效）。
 RUN printf '#!/bin/sh\nexec /app/.venv/bin/python -m pi_coding_agent "$@"\n' \
-        > /usr/local/bin/pi \
-    && chmod +x /usr/local/bin/pi
+        > /usr/local/bin/pi-python \
+    && chmod +x /usr/local/bin/pi-python
 
 # pi-evals 评测入口（等价于宿主 `uv run pi-evals`）。
 RUN printf '#!/bin/sh\nexec /app/.venv/bin/python -m pi_evals "$@"\n' \
@@ -54,4 +55,4 @@ RUN printf '#!/bin/sh\nexec /app/.venv/bin/python -m pi_evals "$@"\n' \
 
 USER pi
 WORKDIR /workspace
-ENTRYPOINT ["/app/.venv/bin/python", "-m", "pi_coding_agent"]
+ENTRYPOINT ["/usr/local/bin/pi-python"]

@@ -33,7 +33,7 @@ async def run_first_time_setup(auth_store) -> int:
 
     await auth_store.modify(provider_id, _set)
     print(f"\nCredentials saved to {auth_store.path}")
-    print("You can now run: pi -p 'hello'")
+    print("You can now run: pi-python -p 'hello'")
     return 0
 
 

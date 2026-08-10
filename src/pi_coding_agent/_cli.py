@@ -2,8 +2,8 @@
 CLI 入口 — argparse 解析 + 分发到 print_mode。
 
 用法:
-    pi -p "read README.md"
-    pi --model deepseek-chat -p "what does this code do?"
+    pi-python -p "read README.md"
+    pi-python --model deepseek-chat -p "what does this code do?"
 """
 
 from __future__ import annotations
@@ -78,7 +78,7 @@ def main(args: list[str] | None = None) -> int:
 
 async def _async_main(args: list[str] | None = None) -> int:
     """CLI 异步主入口。"""
-    # OAuth 子命令：pi login / logout / list（在 argparse 之前拦截，
+    # OAuth 子命令：pi-python login / logout / list（在 argparse 之前拦截，
     # 避免 "login" 被当作位置参数 message 解析）。
     effective_args = args if args is not None else sys.argv[1:]
     if effective_args and effective_args[0] in ("login", "logout", "list"):
@@ -405,7 +405,7 @@ async def _async_main(args: list[str] | None = None) -> int:
 
 
 # ---------------------------------------------------------------------------
-# OAuth 子命令（pi login / logout / list）
+# OAuth 子命令（pi-python login / logout / list）
 # ---------------------------------------------------------------------------
 
 
@@ -522,7 +522,7 @@ async def _auth_login(provider_id: str | None) -> int:
 
 async def _auth_logout(provider_id: str | None) -> int:
     if provider_id is None:
-        print("Usage: pi logout <provider>", file=sys.stderr)
+        print("Usage: pi-python logout <provider>", file=sys.stderr)
         return 1
     store = _auth_store()
     await store.delete(provider_id)
@@ -533,7 +533,7 @@ async def _auth_logout(provider_id: str | None) -> int:
 def _create_parser() -> argparse.ArgumentParser:
     """创建 argparse 解析器。"""
     p = argparse.ArgumentParser(
-        prog="pi",
+        prog="pi-python",
         description="Pi Coding Agent — AI-powered coding assistant",
     )
 
@@ -633,7 +633,7 @@ def _create_parser() -> argparse.ArgumentParser:
     )
 
     # 版本
-    p.add_argument("--version", action="version", version="pi 0.1.0 (minimal core)")
+    p.add_argument("--version", action="version", version="pi-python 0.1.0 (minimal core)")
 
     # 位置参数：用户消息
     p.add_argument("message", nargs="?", type=str, help="User message (optional, can use stdin)")

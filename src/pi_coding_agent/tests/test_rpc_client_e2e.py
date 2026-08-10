@@ -1,4 +1,4 @@
-"""RpcClient 端到端测试：spawn `pi --mode rpc` 子进程，走真实 JSONL 管道。"""
+"""RpcClient 端到端测试：spawn `pi-python --mode rpc` 子进程，走真实 JSONL 管道。"""
 
 from __future__ import annotations
 

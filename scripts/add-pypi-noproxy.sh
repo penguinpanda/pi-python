@@ -10,7 +10,7 @@
 set -euo pipefail
 
 CONF=${1:-/etc/systemd/system/docker.service.d/http-proxy.conf}
-DOMAINS=(pypi.tuna.tsinghua.edu.cn pypi.org)
+DOMAINS=(pypi.tuna.tsinghua.edu.cn pypi.org files.pythonhosted.org)
 
 if [[ ! -f $CONF ]]; then
     echo "error: $CONF not found" >&2

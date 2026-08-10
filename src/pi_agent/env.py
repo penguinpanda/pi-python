@@ -1,6 +1,6 @@
-"""ExecutionEnv 环境抽象（Phase 4.6）。
+"""ExecutionEnv 环境抽象。
 
-对齐 TS `harness/env/nodejs.ts` + `types.ts` 的 FileSystem/Shell 契约：
+`harness/env/nodejs.ts` + `types.ts` 的 FileSystem/Shell 契约：
 
 - FileSystem 方法一律返回 `Result[T, FileError]`（不抛异常）
 - Shell.exec 返回 `Result[{stdout, stderr, exitCode}, ExecutionError]`
@@ -33,7 +33,7 @@ def err(error: "FileError") -> Tuple[Literal[False], "FileError"]:
 
 
 def get_or_throw(result: Result) -> Any:
-    """返回成功值或抛出错误（对齐 TS getOrThrow）。"""
+    """返回成功值或抛出错误（getOrThrow）。"""
     ok_flag, value = result
     if ok_flag:
         return value

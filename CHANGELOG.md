@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- CLI 命令 `pi` 更名为 `pi-python`（`pi-ai` / `pi-evals` 保持不变）
+
 ### Added
 
 - 新增 `scripts/check.py` 与 pre-commit 配置，本地一键复现 CI 的 ruff/mypy/pytest 检查

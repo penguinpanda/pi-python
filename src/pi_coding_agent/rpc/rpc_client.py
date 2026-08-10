@@ -1,6 +1,6 @@
 """RPC 客户端（对齐 TS modes/rpc/rpc-client.ts）。
 
-启动 `pi --mode rpc` 子进程，通过 stdin/stdout JSONL 通信。
+启动 `pi-python --mode rpc` 子进程，通过 stdin/stdout JSONL 通信。
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ class RpcClientOptions(TypedDict, total=False):
 
     # 完整的子进程命令（优先级最高；默认 `python -m pi_coding_agent --mode rpc`）。
     command: list[str]
-    # CLI 入口（默认 "pi"；仅在未指定 command 时与 provider/model/args 组合）。
+    # CLI 入口（默认 "pi-python"；仅在未指定 command 时与 provider/model/args 组合）。
     pi_path: str
     # 子进程工作目录。
     cwd: str
@@ -135,8 +135,8 @@ class RpcClient:
         command = options.get("command")
         if command:
             return list(command)
-        pi_path = options.get("pi_path", "pi")
-        if pi_path == "pi":
+        pi_path = options.get("pi_path", "pi-python")
+        if pi_path == "pi-python":
             # 默认使用当前解释器运行本包（开发/测试环境无需安装 CLI）。
             return [
                 sys.executable,

@@ -42,7 +42,7 @@ pi_coding_agent (CLI + Tools + Sessions)
 
 - **pi_ai** — 底层 LLM 调用：`Models` 注册表管理多个 Provider，`complete()` / `stream()` 统一非流式/流式调用，`EventStream` 生产者-消费者异步事件流
 - **pi_agent** — 中间层 Agent 循环：纯函数引擎 `run_agent_loop()` + 有状态 `Agent` 包装类，事件驱动、工具调用、取消机制、循环钩子
-- **pi_coding_agent** — 顶层 CLI：`pi -p "..."` 单次编码查询，7 个编码工具（read/write/edit/bash/grep/find/ls），JSONL 会话持久化，双层 settings.json 配置，30 个 Slash 命令，项目信任，系统提示构建器（AGENTS.md/CLAUDE.md），turn timings / cache stats
+- **pi_coding_agent** — 顶层 CLI：`pi-python -p "..."` 单次编码查询，7 个编码工具（read/write/edit/bash/grep/find/ls），JSONL 会话持久化，双层 settings.json 配置，30 个 Slash 命令，项目信任，系统提示构建器（AGENTS.md/CLAUDE.md），turn timings / cache stats
 - **pi_tui / pi_protocol / pi_storage / pi_server / pi_evals** — TUI 引擎层、protocol v2、PostgreSQL 存储、常驻服务与评测 harness（见下表）
 
 ---
