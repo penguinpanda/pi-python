@@ -367,6 +367,28 @@ class TestTextBlocks:
             {"type": "text", "text": "hello", "text_signature": "msg_123"},
         ]
 
+    def test_duplicate_identical_text_blocks_deduplicated(self):
+        """旧会话中 toolCall 前后重复的 text 块应去重，避免拆散工具调用配对。"""
+        model = _make_model()
+        messages: list[Message] = [
+            {"role": "user", "content": "q", "timestamp": 1},
+            _asst(
+                [
+                    {"type": "text", "text": "same"},
+                    _tool_call("call_1"),
+                    {"type": "text", "text": "same"},
+                ],
+                provider=model.provider,
+                api=model.api,
+                model=model.id,
+            ),
+        ]
+        result = transform_messages(messages, model)
+        assert result[1]["content"] == [
+            {"type": "text", "text": "same"},
+            _tool_call("call_1"),
+        ]
+
 
 # ---------------------------------------------------------------------------
 # Tool Call ID 规范化 + thought_signature
@@ -697,3 +719,32 @@ class TestResponsesIntegration:
         fco = next(i for i in items if i.get("type") == "function_call_output")
         assert fco["call_id"] == "call_9"
         assert fco["output"] == "No result provided"
+
+    def test_duplicate_text_does_not_split_tool_call_output(self):
+        model = _make_model(model_id="gpt-5", provider="openai", api="openai-responses")
+        messages: list[Message] = [
+            {"role": "user", "content": "run", "timestamp": 1},
+            _asst(
+                [
+                    {"type": "text", "text": "checking"},
+                    _tool_call("call_1", "bash", {"command": "ls"}),
+                    {"type": "text", "text": "checking"},
+                ],
+                provider="openai",
+                api="openai-responses",
+                model="gpt-5",
+            ),
+            {
+                "role": "toolResult",
+                "tool_call_id": "call_1",
+                "tool_name": "bash",
+                "content": [{"type": "text", "text": "out"}],
+                "is_error": False,
+                "timestamp": 1,
+            },
+        ]
+        transformed = transform_messages(messages, model)
+        items = _to_responses_input(transformed, model)
+        types = [item.get("type") for item in items]
+        fc_index = types.index("function_call")
+        assert types[fc_index + 1] == "function_call_output"

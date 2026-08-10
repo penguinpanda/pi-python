@@ -128,6 +128,10 @@
   header / status / footer，导致 shell 提示符上方堆满 TUI 内容）
 - 修复 TUI 编辑器软件光标（反色块）在 CJK/emoji 下按可见列索引单元格导致
   每输入一个宽字符光标多空一列的问题，改为按字符格定位；硬件光标位置不变
+- 修复 Responses 流在 `response.completed` 时把 `output_text` 在 toolCall 后
+  重复追加的问题：回放时 function_call 与 function_call_output 之间会插入
+  多余 message item，DeepSeek 报 `No tool output found for tool call` 并导致
+  后续所有轮次卡死；`transform_messages` 同时对旧会话中重复的 text 块去重
 
 ## [0.1.0]
 

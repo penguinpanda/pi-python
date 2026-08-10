@@ -388,6 +388,7 @@ def transform_messages(
             same_model = _is_same_model(asst)
 
             transformed_content: list[ContentBlock] = []
+            seen_texts: set[str] = set()
             for content_block in asst["content"]:
                 block_type = content_block["type"]
 
@@ -427,6 +428,13 @@ def transform_messages(
                 # 跨模型重建 {type:text, text}（剥掉 text_signature）。
                 if block_type == "text":
                     text_block = cast(TextContent, content_block)
+                    text = text_block.get("text", "")
+                    if text in seen_texts:
+                        # responses_stream 曾把 output_text 在 toolCall 后重复追加，
+                        # 旧会话里可能残留相同文本块；去重避免回放时拆散
+                        # function_call 与 function_call_output 的配对。
+                        continue
+                    seen_texts.add(text)
                     if same_model:
                         transformed_content.append(text_block)
                     else:

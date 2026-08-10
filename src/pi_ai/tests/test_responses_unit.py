@@ -1144,6 +1144,39 @@ class TestResponsesStreamReasoningCapture:
         msg = collected[-1]["message"]
         assert msg["content"][0]["id"] == "call_1"
 
+    @pytest.mark.asyncio
+    async def test_text_before_tool_call_not_duplicated_on_completed(self):
+        """toolCall 后的 response.completed 不应把 output_text 再追加一次。"""
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        events = [
+            _event("response.output_text.delta", delta="Let me check"),
+            _event(
+                "response.output_item.added",
+                item=SimpleNamespace(
+                    type="function_call",
+                    call_id="call_1",
+                    id="fc_abc",
+                    name="bash",
+                ),
+            ),
+            _event("response.function_call_arguments.delta", delta="{}"),
+            _event("response.function_call_arguments.done"),
+            _event(
+                "response.completed",
+                response=SimpleNamespace(
+                    output_text="Let me check",
+                    usage=None,
+                ),
+            ),
+        ]
+        client = _mock_client(events)
+
+        collected, _ = await _collect_events(model, context, client)
+        msg = collected[-1]["message"]
+        assert [b.get("type") for b in msg["content"]] == ["text", "toolCall"]
+        assert len([b for b in msg["content"] if b.get("type") == "text"]) == 1
+
 
 class TestResponsesWebSearch:
     """DeepSeek Responses 服务端 web_search 捕获与 stateless 回放。"""

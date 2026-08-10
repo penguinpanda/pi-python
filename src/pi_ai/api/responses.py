@@ -1026,10 +1026,17 @@ async def responses_stream(
                         # 若尚未有 text 块（如仅 completed 事件），则新建。
                         output_text = getattr(resp, "output_text", "")
                         if output_text:
-                            if current_kind == "text" and current_index is not None:
-                                cast(TextContent, content_blocks[current_index])["text"] = (
-                                    output_text
-                                )
+                            existing_text = next(
+                                (block for block in content_blocks if block.get("type") == "text"),
+                                None,
+                            )
+                            if existing_text is not None:
+                                # output_text 是整段文本的权威值；已有 text 块时
+                                # 直接覆盖，避免 toolCall 结束后再次追加，导致回放时
+                                # function_call 与 function_call_output 之间插入
+                                # 多余 message item（DeepSeek 会报
+                                # "No tool output found for tool call ..."）。
+                                cast(TextContent, existing_text)["text"] = output_text
                             else:
                                 _end_current_block()
                                 current_kind = "text"
