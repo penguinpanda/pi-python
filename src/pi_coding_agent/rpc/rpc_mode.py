@@ -217,7 +217,7 @@ class RpcUiContext:
             }
         )
 
-    def set_widget(self, key: str, lines: list[str], options: dict | None = None) -> None:
+    def set_widget(self, key: str, lines: list[str] | None, options: dict | None = None) -> None:
         options = options or {}
         self._emit(
             {
@@ -225,7 +225,7 @@ class RpcUiContext:
                 "id": self._new_id(),
                 "method": "setWidget",
                 "key": key,
-                "lines": list(lines),
+                "lines": list(lines or []),
                 "placement": options.get("placement", "aboveEditor"),
             }
         )
@@ -308,6 +308,10 @@ class RpcUiContext:
                 "theme": theme,
             }
         )
+
+    async def custom(self, factory, *, overlay_options=None, on_handle=None):
+        """RPC 模式不支持自定义交互 UI（对齐 TS rpc-mode custom()）。"""
+        return None
 
     def resolve_response(self, response: dict[str, Any]) -> None:
         """处理客户端返回的 extension_ui_response。"""

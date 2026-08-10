@@ -470,12 +470,27 @@ class PiTuiApp(App):
             if not isinstance(block, dict) or block.get("type") != "toolCall":
                 continue
             call_id = str(block.get("id") or block.get("index") or len(self._tool_entries))
+            tool_name = str(block.get("name", "tool"))
+            render_call = None
+            render_result = None
+            runner = self._session.extension_runner
+            if runner is not None:
+                definition = runner.get_tool_definition(tool_name)
+                if definition is not None:
+                    render_call = definition.render_call
+                    render_result = definition.render_result
+            from .ui_context import ThemeFacade
+
+            render_theme = ThemeFacade(self._theme)
             entry = self._tool_entries.get(call_id)
             if entry is None:
                 entry = ToolExecutionEntry(
-                    str(block.get("name", "tool")),
+                    tool_name,
                     call_id,
                     block.get("arguments", {}),
+                    render_call=render_call,
+                    render_result=render_result,
+                    render_theme=render_theme,
                 )
                 self._tool_entries[call_id] = entry
                 self._chat.mount(entry)
@@ -488,6 +503,7 @@ class PiTuiApp(App):
                 entry.set_result(
                     output,
                     is_error=bool(result.get("isError") or result.get("is_error")),
+                    result=result,
                 )
         if created:
             self._chat.scroll_end()

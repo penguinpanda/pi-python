@@ -279,6 +279,13 @@ async def _async_main(args: list[str] | None = None) -> int:
         model_runtime=runtime,
     )
     extension_state["runner"] = extension_runner
+    # 扩展 flags：加载后补注册为 CLI 参数并重新解析（两段解析）。
+    extension_flags = extension_runner.get_flags()
+    if extension_flags:
+        _register_extension_flags(parser, extension_runner)
+        parsed = parser.parse_args(args)
+        for flag in extension_flags:
+            extension_runner.set_flag_value(flag.name, getattr(parsed, flag.name, None))
     await extension_runner.discover_resources()
     system_prompt = system_prompt_builder()
 
@@ -645,6 +652,23 @@ def _create_parser() -> argparse.ArgumentParser:
     p.add_argument("message", nargs="?", type=str, help="User message (optional, can use stdin)")
 
     return p
+
+
+def _register_extension_flags(parser: argparse.ArgumentParser, runner) -> None:
+    """把扩展注册的 flags 补注册为 CLI 参数（两段解析用）。"""
+    for flag in runner.get_flags():
+        option = f"--{flag.name}"
+        if option in parser._option_string_actions:
+            continue
+        if flag.type == "boolean":
+            parser.add_argument(
+                option,
+                action="store_true",
+                default=bool(flag.default),
+                help=flag.description or "",
+            )
+        else:
+            parser.add_argument(option, default=flag.default, help=flag.description or "")
 
 
 def _resolve_preset(parsed, settings: dict) -> dict | None:

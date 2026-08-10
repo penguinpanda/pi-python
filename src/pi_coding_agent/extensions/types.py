@@ -69,7 +69,9 @@ class UIContext(Protocol):
 
     def set_editor_component(self, component) -> None: ...
 
-    def set_widget(self, key: str, lines: list[str], options: dict | None = None) -> None: ...
+    def set_widget(
+        self, key: str, lines: list[str] | None, options: dict | None = None
+    ) -> None: ...
 
     def set_overlay(self, key: str, lines: list[str], options: dict | None = None) -> None: ...
 
@@ -92,6 +94,14 @@ class UIContext(Protocol):
     async def editor(self, title: str, prefill: str = "") -> str | None: ...
 
     def set_theme(self, theme: str | None = None) -> None: ...
+
+    async def custom(
+        self,
+        factory,
+        *,
+        overlay_options: dict | None = None,
+        on_handle=None,
+    ) -> Any: ...
 
 
 class NoopUIContext:
@@ -163,6 +173,9 @@ class NoopUIContext:
     def set_theme(self, theme=None):
         pass
 
+    async def custom(self, factory, *, overlay_options=None, on_handle=None):
+        return None
+
 
 # ---------------------------------------------------------------------------
 # 注册项
@@ -181,6 +194,9 @@ class ToolDefinition:
     label: str = ""
     source_info: dict | None = None
     execute: Callable | None = None
+    execution_mode: str = "parallel"
+    render_call: Callable | None = None
+    render_result: Callable | None = None
 
 
 @dataclass(slots=True)
@@ -261,7 +277,7 @@ class ExtensionRuntime:
     """共享运行时：flag 值与动作实现（注册期为存根，绑定后替换）。"""
 
     def __init__(self) -> None:
-        self.flag_values: dict[str, bool | str] = {}
+        self.flag_values: dict[str, bool | str | None] = {}
         self._actions: dict[str, Callable] = {}
 
     def set_action(self, name: str, fn: Callable) -> None:
@@ -343,6 +359,12 @@ class ExtensionAPI:
         if name not in self._extension.flags:
             return None
         return self._runtime.flag_values.get(name)
+
+    def set_flag_value(self, name: str, value: bool | str | None) -> None:
+        """写入扩展 flag 的运行时值（CLI 解析后调用）。"""
+        if name not in self._extension.flags:
+            return
+        self._runtime.flag_values[name] = value
 
     def register_message_renderer(self, custom_type: str, renderer: Callable) -> None:
         self._extension.message_renderers[custom_type] = renderer

@@ -327,6 +327,22 @@ class ExtensionRunner:
             display=bool(options.get("display", True)),
             details=options.get("details"),
         )
+        deliver = options.get("deliverAs")
+        if deliver not in ("followUp", "steer"):
+            return
+        if isinstance(content, dict) and isinstance(content.get("content"), str):
+            text = content["content"]
+        elif isinstance(content, str):
+            text = content
+        else:
+            text = str(content)
+        await self._deliver_with_input(session, text, deliver)
+        if deliver == "followUp" and options.get("triggerTurn"):
+            try:
+                if not session.is_streaming:
+                    await session.continue_()
+            except Exception:
+                pass
 
     def _action_append_entry(self, session, custom_type: str, data) -> None:
         self._schedule(session._session_manager.append_custom_entry(custom_type, data))
@@ -577,6 +593,10 @@ class ExtensionRunner:
             for name, flag in extension.flags.items():
                 flags_by_name.setdefault(name, flag)
         return list(flags_by_name.values())
+
+    def set_flag_value(self, name: str, value: bool | str | None) -> None:
+        """写入扩展 flag 的运行时值（CLI 两段解析后调用）。"""
+        self.runtime.flag_values[name] = value
 
     def get_shortcuts(self) -> list[ExtensionShortcut]:
         shortcuts: list[ExtensionShortcut] = []

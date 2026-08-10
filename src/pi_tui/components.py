@@ -397,12 +397,20 @@ class ToolExecutionEntry(Widget):
         tool_name: str,
         tool_call_id: str,
         arguments: Any = None,
+        *,
+        render_call=None,
+        render_result=None,
+        render_theme=None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.tool_name = tool_name
         self.tool_call_id = tool_call_id
         self.arguments = arguments
+        self.render_call = render_call
+        self.render_result = render_result
+        self.render_theme = render_theme
+        self.result_payload: Any = None
         self.output = ""
         self.status = "running"  # running / success / error
         self.expanded = False
@@ -411,8 +419,9 @@ class ToolExecutionEntry(Widget):
         self.arguments = arguments
         self.refresh()
 
-    def set_result(self, output: str, is_error: bool = False) -> None:
+    def set_result(self, output: str, is_error: bool = False, result: Any = None) -> None:
         self.output = output
+        self.result_payload = result
         self.status = "error" if is_error else "success"
         self.refresh()
 
@@ -432,6 +441,27 @@ class ToolExecutionEntry(Widget):
             return ", ".join(f"{key}={value}" for key, value in self.arguments.items())
         return str(self.arguments or "")
 
+    def _render_call_text(self) -> str:
+        if self.render_call is None:
+            return self._format_arguments()
+        rendered = self.render_call(self.arguments, self.render_theme, None)
+        if isinstance(rendered, list):
+            return "\n".join(str(line) for line in rendered)
+        return str(rendered)
+
+    def _render_result_text(self) -> str:
+        if self.render_result is None or self.result_payload is None:
+            return self.output
+        rendered = self.render_result(
+            self.result_payload,
+            {"is_error": self.status == "error"},
+            self.render_theme,
+            None,
+        )
+        if isinstance(rendered, list):
+            return "\n".join(str(line) for line in rendered)
+        return str(rendered)
+
     def content_size(self) -> tuple[int, int]:
         lines = 1
         if self.expanded and self.output:
@@ -441,9 +471,10 @@ class ToolExecutionEntry(Widget):
     def render(self, width: int, height: int) -> list[Line]:
         status = {"running": "...", "success": "ok", "error": "error"}[self.status]
         label = f"Tool: {self.tool_name} ({status})"
-        lines = [line_from_text(f"{label}  {self._format_arguments()}", width, self.base_style)]
-        if self.expanded and self.output:
-            for raw in str(self.output).splitlines():
+        lines = [line_from_text(f"{label}  {self._render_call_text()}", width, self.base_style)]
+        result_text = self._render_result_text()
+        if self.expanded and result_text:
+            for raw in str(result_text).splitlines():
                 body = blank_line(width)
                 body.patch(2, line_from_text(raw, max(0, width - 2), self.base_style))
                 lines.append(body)

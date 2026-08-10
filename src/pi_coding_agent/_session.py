@@ -705,6 +705,7 @@ class AgentSession:
                 input_schema=definition.parameters or {"type": "object", "properties": {}},
                 prompt_snippet=definition.prompt_snippet or None,
                 prompt_guidelines=definition.prompt_guidelines,
+                execution_mode=definition.execution_mode,
                 execute=execute,
             )
 
@@ -1356,6 +1357,7 @@ class AgentSession:
                     },
                 )
                 original_system_prompt = self._agent.state.system_prompt
+                injected_messages: list[dict] = []
                 try:
                     for result in reversed(results):
                         if not isinstance(result, dict):
@@ -1364,9 +1366,30 @@ class AgentSession:
                             self._agent.state.system_prompt = result["system_prompt"]
                         if isinstance(result.get("prompt"), str):
                             expanded = result["prompt"]
+                        message = result.get("message")
+                        if isinstance(message, dict) and isinstance(message.get("content"), str):
+                            injected_messages.append(
+                                {
+                                    "role": "user",
+                                    "content": message["content"],
+                                    "customType": message.get("customType", "extension"),
+                                    "display": message.get("display", False),
+                                    "timestamp": now_ms(),
+                                }
+                            )
                         if result:
                             break
-                    await self._agent.prompt(expanded, images)
+                    if injected_messages:
+                        prompts = cast(
+                            list[AgentMessage],
+                            [
+                                *injected_messages,
+                                {"role": "user", "content": expanded, "timestamp": now_ms()},
+                            ],
+                        )
+                        await self._agent.prompt(prompts, images)
+                    else:
+                        await self._agent.prompt(expanded, images)
                 finally:
                     self._agent.state.system_prompt = original_system_prompt
             else:

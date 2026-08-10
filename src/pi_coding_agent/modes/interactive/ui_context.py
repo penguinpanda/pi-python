@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any, Callable
 
 from pi_tui.selectors import ChoiceSelector, TextInputDialog
 
@@ -39,6 +40,62 @@ class ThemeFacade:
             return text
         r, g, b = _hex_to_rgb(color)
         return f"\x1b[48;2;{r};{g};{b}m{text}\x1b[0m" if text else f"\x1b[48;2;{r};{g};{b}m"
+
+    def strikethrough(self, text: str = "") -> str:
+        return f"\x1b[9m{text}\x1b[0m" if text else "\x1b[9m"
+
+
+class CustomDialog:
+    """把扩展 factory 返回的普通 Widget 包装成可关闭的 overlay 对话框。"""
+
+    def __init__(self, inner: Any, resolve: Callable[[Any], None]) -> None:
+        self._inner = inner
+        self._resolve = resolve
+        self._closed = False
+
+    @property
+    def app(self) -> Any:
+        return self._inner.app
+
+    @app.setter
+    def app(self, value: Any) -> None:
+        self._inner.app = value
+
+    def handle_key(self, key) -> bool:
+        handler = getattr(self._inner, "handle_key", None)
+        if handler is None:
+            return False
+        return bool(handler(key))
+
+    def render(self, width: int, height: int):
+        renderer = getattr(self._inner, "render", None)
+        if renderer is None:
+            from pi_tui.engine.cells import blank_line
+
+            return [blank_line(width) for _ in range(max(0, height))]
+        return renderer(width, height)
+
+    def content_size(self):
+        method = getattr(self._inner, "content_size", None)
+        if method is None:
+            return (0, 0)
+        return method()
+
+    def natural_size(self, width: int):
+        method = getattr(self._inner, "natural_size", None)
+        if method is None:
+            return self.content_size()
+        return method(width)
+
+    def dismiss(self, value: Any = None) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        app = self._inner.app
+        if app is not None and hasattr(app, "_close_overlay_dialog"):
+            app._close_overlay_dialog(self, value)
+        else:
+            self._resolve(value)
 
 
 class TuiUIContext:
@@ -134,9 +191,9 @@ class TuiUIContext:
         """用自定义编辑器组件替换 PiEditor。"""
         self._app._replace_editor(component)
 
-    def set_widget(self, key: str, lines: list[str], options: dict | None = None) -> None:
+    def set_widget(self, key: str, lines: list[str] | None, options: dict | None = None) -> None:
         """在编辑器上方（默认）或下方显示多行组件。"""
-        self._app._set_widget(key, list(lines), options or {})
+        self._app._set_widget(key, list(lines or []), options or {})
 
     def set_overlay(self, key: str, lines: list[str], options: dict | None = None) -> None:
         """显示浮层（锚点 + margin）。"""
@@ -175,3 +232,45 @@ class TuiUIContext:
     def set_theme(self, theme: str | None = None) -> None:
         """切换主题（None 恢复当前配置主题）。"""
         self._app._set_theme(theme)
+
+    async def custom(
+        self,
+        factory,
+        *,
+        overlay_options: dict | None = None,
+        on_handle=None,
+    ) -> Any:
+        """显示扩展自定义交互组件（对齐 TS ctx.ui.custom）。
+
+        factory(tui, theme, keybindings, done) 返回一个 Widget；
+        组件通过调用 done(result) 提交结果并关闭。
+        """
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future = loop.create_future()
+        holder: dict[str, Any] = {}
+
+        def resolve(value: Any) -> None:
+            if not future.done():
+                future.set_result(value)
+
+        def done(value: Any) -> None:
+            dialog = holder.get("dialog")
+            if dialog is not None:
+                dialog.dismiss(value)
+            else:
+                resolve(value)
+
+        inner = factory(self._app, self.theme, self._app._keybindings, done)
+        inner.app = self._app
+        dialog = CustomDialog(inner, resolve)
+        holder["dialog"] = dialog
+        # push_screen 使用默认 overlay 布局；overlay_options 预留给后续
+        # push_screen 支持自定义布局时使用。
+        self._app.push_screen(dialog, callback=done)
+        if on_handle is not None:
+            on_handle(self._app._overlay_manager.entry_for_widget(dialog))
+        try:
+            return await future
+        finally:
+            if not future.done():
+                future.cancel()
