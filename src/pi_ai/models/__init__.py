@@ -69,7 +69,7 @@ import asyncio
 from dataclasses import dataclass, field
 
 from ..utils._event_stream import AssistantMessageEventStream
-from ..types import AssistantMessage, Context, Model, StreamOptions
+from ..types import AssistantMessage, Context, Model, SimpleStreamOptions, StreamOptions
 from ..auth import InMemoryCredentialStore
 from ..provider import Provider, RefreshModelsContext
 from .models_store import (
@@ -390,6 +390,32 @@ class Models:
         """
 
         stream = await self.stream(model, context, options)
+        return await stream.result()
+
+    async def stream_simple(
+        self,
+        model: Model,
+        context: Context,
+        options: SimpleStreamOptions | None = None,
+    ) -> AssistantMessageEventStream:
+        """发起 streamSimple 请求（对齐 TS Models.streamSimple）。"""
+
+        from ..api.lazy import lazy_stream
+
+        async def _setup():
+            provider = self._require_provider(model.provider)
+            return await provider.stream_simple(model, context, options)
+
+        return lazy_stream(model, _setup)
+
+    async def complete_simple(
+        self,
+        model: Model,
+        context: Context,
+        options: SimpleStreamOptions | None = None,
+    ) -> AssistantMessage:
+        """completeSimple：等待整个流结束，返回最终 AssistantMessage。"""
+        stream = await self.stream_simple(model, context, options)
         return await stream.result()
 
     # 凭证管理

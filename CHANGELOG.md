@@ -43,6 +43,11 @@
 
 ### Changed
 
+- `AgentHarness` 公开 API 对齐 TS legacy（0.84.0 之前）：`models: Models` + `session: Session`
+  必填并移除 `stream_fn`；新增 `request_shutdown()` / `wait_for_shutdown()`、
+  compaction/branch-summary `retry` 与 retry 事件、`before_provider_payload` /
+  `after_provider_response` hooks、`NavigateOptions` 完整导航选项、泛型工具/资源类型与
+  `Result` 辅助；`shutdown()` 保留为兼容别名
 - **TUI 彻底移除 Textual**：`PiTuiApp` 与全部组件/选择器改到内置引擎之上，
   依赖改为显式 `rich>=13.0`；`uv.lock` 移除 textual 及其传递依赖
 - mypy 全仓清零（原 664 个错误）：TypedDict 判别字段基类重构（NotRequired/Literal 收窄）、`NotRequired` 改用 `typing_extensions`、运行时凭证/事件/配置对象的类型收窄；CI 中 mypy 由非阻塞报告改为阻塞检查
@@ -78,6 +83,10 @@
 
 ### Fixed
 
+- `Agent._run_prompt` / `_run_continue` 将 context 快照构造移入 try/finally，
+  构造异常时也能复位运行状态并置位 `_settled`（对齐 TS `runWithLifecycle`）；
+  运行中 `prompt()` / `continue_()` 的 `RuntimeError` 消息补充
+  `steer()` / `follow_up()` / 等待完成提示（对齐 TS）
 - TUI 布局对齐 TS：容器分配保持挂载顺序，聊天区固定在编辑器上方（1fr），
   编辑器/状态栏/页脚固定在底部，提交消息后输入框不再被挤出可视区；
   启动资源提示随聊天区显示在输入框上方

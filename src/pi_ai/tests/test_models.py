@@ -297,6 +297,50 @@ class TestModelsComplete:
         assert result["stop_reason"] == "stop"
 
 
+class TestModelsStreamSimple:
+    """Models.stream_simple() / complete_simple() — facade 层分发。"""
+
+    @pytest.mark.asyncio
+    async def test_stream_simple_and_complete_simple(self):
+        from unittest.mock import AsyncMock, patch
+
+        from pi_ai._types import AssistantMessage
+        from pi_ai.utils._event_stream import AssistantMessageEventStream
+
+        models = create_default_models()
+        model = models.get_model("deepseek", "deepseek-v4-flash")
+        assert model is not None
+
+        expected_msg = AssistantMessage(
+            role="assistant",
+            content=[{"type": "text", "text": "ok"}],
+            api=model.api,
+            provider=model.provider,
+            model=model.id,
+            usage={"input": 1, "output": 1, "cache_read": 0, "cache_write": 0, "total_tokens": 2},
+            stop_reason="stop",
+            error_message=None,
+            timestamp=0,
+        )
+        fake_stream = AssistantMessageEventStream()
+        fake_stream.push({"type": "done", "reason": "stop", "message": expected_msg})
+
+        provider = models.get_provider("deepseek")
+        with patch.object(
+            type(provider),
+            "stream_simple",
+            new=AsyncMock(return_value=fake_stream),
+        ):
+            ctx = Context(messages=[{"role": "user", "content": "hi"}])
+            stream = await models.stream_simple(model, ctx)
+            events = [event async for event in stream]
+            assert events[-1]["type"] == "done"
+
+            result = await models.complete_simple(model, ctx)
+        assert result["role"] == "assistant"
+        assert result["stop_reason"] == "stop"
+
+
 def asyncio_sync(coro):
     """Helper to run async code in sync tests."""
     import asyncio

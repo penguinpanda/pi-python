@@ -389,9 +389,17 @@ context = await session.build_context()
 - 双事件系统：`subscribe()` 通配符订阅 + `on(event_type, handler)` 类型化 hook（顺序归约器）；
 - Save-point 安全模型：运行期间的配置变更记录为 pending mutation，在安全点 flush；
 - 显式调用：`prompt()` / `skill(name, args)` / `prompt_from_template(name, args)` /
-  `steer()` / `follow_up()` / `next_turn()` / `compact()` / `navigate_tree()` / `abort()` / `shutdown()`；
+  `steer()` / `follow_up()` / `next_turn()` / `compact()` / `navigate_tree()` / `abort()` /
+  `request_shutdown()` / `wait_for_shutdown()`（`shutdown()` 为兼容别名）；
 - 运行时配置：`get/set_model`、`get/set_thinking_level`、`get/set_tools`、`get/set_active_tools`、
   `get/set_resources`（skills / prompt_templates）、`get/set_stream_options`。
+- 构造选项（对齐 TS legacy）：`session: Session` 与 `models: Models` 必填，`stream_fn` 已移除；
+  所有模型请求经 `models.stream_simple()`，认证由 provider 自己解析；
+- `retry: RetryPolicy | None`：作用于 compaction / branch_summary 摘要生成，重试过程发
+  `retry_scheduled` / `retry_attempt_start` / `retry_finished` 事件；
+- Provider hooks：`before_provider_request` / `before_provider_payload` / `after_provider_response`；
+- `navigate_tree(target_id, NavigateOptions)` 支持 `summarize` / `custom_instructions` /
+  `replace_instructions` / `label`。
 
 ---
 

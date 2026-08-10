@@ -3,20 +3,26 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import pytest
+from pi_ai import Models, RetryPolicy
+from pi_ai.provider import create_provider
 from pi_ai.types import Model, TextContent, UserMessage
 from pi_ai.providers.faux import FauxCore, faux_assistant_message, faux_provider, faux_tool_call
 
+from pi_agent import Session
 from pi_agent._harness_types import (
     AgentHarnessError,
     AgentHarnessOptions,
     AgentHarnessResources,
     AgentHarnessStreamOptionsPatch,
     BeforeAgentStartResult,
+    BeforeProviderPayloadResult,
     BeforeProviderRequestResult,
     CompactResult,
     ContextResult,
+    NavigateOptions,
     PromptTemplate,
     SessionBeforeCompactResult,
     SessionBeforeTreeResult,
@@ -24,6 +30,7 @@ from pi_agent._harness_types import (
     ToolCallResult,
     ToolResultPatch,
 )
+from pi_agent.session import InMemorySessionStorage
 from pi_agent._harness import AgentHarness
 from pi_agent._types import AgentTool, AgentToolResult, StreamFn
 
@@ -50,6 +57,43 @@ def _make_faux(responses: list) -> FauxCore:
 
 def _make_stream_fn(responses: list) -> StreamFn:
     return _make_faux(responses).stream
+
+
+def _make_models(*, responses: list | None = None, stream_fn=None) -> Models:
+    if stream_fn is None:
+        core = _make_faux(responses if responses is not None else [_text_response("Hello!")])
+        stream_fn = core.stream
+    provider = create_provider(
+        "test",
+        "Test",
+        None,
+        [_make_model()],
+        stream_fn=stream_fn,
+    )
+    models = Models()
+    models.add_provider(provider)
+    return models
+
+
+def _make_session() -> Session:
+    return Session(InMemorySessionStorage())
+
+
+def _make_options(
+    *,
+    stream_fn=None,
+    responses: list | None = None,
+    tools=None,
+    model: Model | None = None,
+    **kwargs,
+) -> AgentHarnessOptions:
+    return AgentHarnessOptions(
+        model=model or _make_model(),
+        session=_make_session(),
+        models=_make_models(responses=responses, stream_fn=stream_fn),
+        tools=tools,
+        **kwargs,
+    )
 
 
 def _text_response(text: str):
@@ -111,13 +155,7 @@ def _make_harness(
     tools: list[AgentTool] | None = None,
     **kwargs,
 ) -> AgentHarness:
-    responses = responses if responses is not None else [_text_response("Hello!")]
-    options = AgentHarnessOptions(
-        model=_make_model(),
-        stream_fn=_make_stream_fn(responses),
-        tools=tools,
-        **kwargs,
-    )
+    options = _make_options(responses=responses, tools=tools, **kwargs)
     return AgentHarness(options)
 
 
@@ -154,12 +192,7 @@ class TestHarnessPrompt:
     async def test_prompt_while_busy_raises(self):
         core = faux_provider(tokens_per_second=200)
         core.set_responses([faux_assistant_message("A" * 200)])
-        harness = AgentHarness(
-            AgentHarnessOptions(
-                model=_make_model(),
-                stream_fn=core.stream,
-            )
-        )
+        harness = AgentHarness(_make_options(stream_fn=core.stream))
 
         first = asyncio.create_task(harness.prompt("Q1"))
         await asyncio.sleep(0.05)
@@ -177,12 +210,7 @@ class TestHarnessPrompt:
     async def test_wait_for_idle(self):
         core = faux_provider(tokens_per_second=200)
         core.set_responses([faux_assistant_message("A" * 100)])
-        harness = AgentHarness(
-            AgentHarnessOptions(
-                model=_make_model(),
-                stream_fn=core.stream,
-            )
-        )
+        harness = AgentHarness(_make_options(stream_fn=core.stream))
 
         task = asyncio.create_task(harness.prompt("Hi"))
         await harness.wait_for_idle()
@@ -245,12 +273,7 @@ class TestHarnessDualEvents:
             llm_inputs.append(list(context.messages))
             return await original(model, context, options)
 
-        harness = AgentHarness(
-            AgentHarnessOptions(
-                model=_make_model(),
-                stream_fn=_capturing_stream,
-            )
-        )
+        harness = AgentHarness(_make_options(stream_fn=_capturing_stream))
 
         async def _context_hook(event):
             return ContextResult(
@@ -338,12 +361,7 @@ class TestHarnessDualEvents:
             captured.append(dict(options or {}))
             return await original(model, context, options)
 
-        harness = AgentHarness(
-            AgentHarnessOptions(
-                model=_make_model(),
-                stream_fn=_capturing_stream,
-            )
-        )
+        harness = AgentHarness(_make_options(stream_fn=_capturing_stream))
 
         def _provider_hook(event):
             return BeforeProviderRequestResult(
@@ -393,11 +411,7 @@ class TestHarnessSavePoint:
             return await original(model, context, options)
 
         harness = AgentHarness(
-            AgentHarnessOptions(
-                model=_make_model("model-a"),
-                stream_fn=_capturing_stream,
-                tools=[tool],
-            )
+            _make_options(model=_make_model("model-a"), stream_fn=_capturing_stream, tools=[tool])
         )
 
         # 第一轮流式输出后工具执行；工具等待测试任务切换模型
@@ -482,12 +496,7 @@ class TestHarnessQueues:
                 faux_assistant_message("B" * 20),
             ]
         )
-        harness = AgentHarness(
-            AgentHarnessOptions(
-                model=_make_model(),
-                stream_fn=core.stream,
-            )
-        )
+        harness = AgentHarness(_make_options(stream_fn=core.stream))
 
         async def _steer_mid_run():
             await asyncio.sleep(0.05)
@@ -508,12 +517,7 @@ class TestHarnessQueues:
                 faux_assistant_message("B" * 20),
             ]
         )
-        harness = AgentHarness(
-            AgentHarnessOptions(
-                model=_make_model(),
-                stream_fn=core.stream,
-            )
-        )
+        harness = AgentHarness(_make_options(stream_fn=core.stream))
 
         async def _follow_up_mid_run():
             await asyncio.sleep(0.05)
@@ -596,7 +600,7 @@ class TestHarnessCompactNavigate:
                 faux_assistant_message("## Goal\ncompacted"),
             ]
         )
-        harness = AgentHarness(AgentHarnessOptions(model=_make_model(), stream_fn=core.stream))
+        harness = AgentHarness(_make_options(stream_fn=core.stream))
         compact_events: list[dict] = []
         harness.subscribe(
             lambda e, signal: compact_events.append(e) if e["type"] == "session_compact" else None
@@ -639,7 +643,7 @@ class TestHarnessCompactNavigate:
     @pytest.mark.asyncio
     async def test_navigate_tree_moves_leaf(self):
         core = _make_faux([_text_response("a1"), _text_response("a2")])
-        harness = AgentHarness(AgentHarnessOptions(model=_make_model(), stream_fn=core.stream))
+        harness = AgentHarness(_make_options(stream_fn=core.stream))
         await harness.prompt("q1")
         first_leaf = await harness.get_leaf_id()
         assert first_leaf is not None
@@ -670,7 +674,7 @@ class TestHarnessCompactNavigate:
                 faux_assistant_message("## Goal\nbranch summary"),
             ]
         )
-        harness = AgentHarness(AgentHarnessOptions(model=_make_model(), stream_fn=core.stream))
+        harness = AgentHarness(_make_options(stream_fn=core.stream))
         await harness.prompt("q1")
         first_leaf = await harness.get_leaf_id()
         assert first_leaf is not None
@@ -678,7 +682,7 @@ class TestHarnessCompactNavigate:
         await harness.navigate_tree(first_entry)
         await harness.prompt("q2")
 
-        result = await harness.navigate_tree(first_leaf, summarize=True)
+        result = await harness.navigate_tree(first_leaf, NavigateOptions(summarize=True))
 
         assert result.cancelled is False
         assert result.summary_entry is not None
@@ -710,7 +714,7 @@ class TestHarnessCompactNavigate:
             lambda e: SessionBeforeTreeResult(summary="hook summary"),
         )
 
-        result = await harness.navigate_tree(target, summarize=True)
+        result = await harness.navigate_tree(target, NavigateOptions(summarize=True))
 
         assert result.cancelled is False
         assert result.summary_entry is not None
@@ -718,6 +722,114 @@ class TestHarnessCompactNavigate:
         assert result.summary_entry.get("fromHook") is True
         context = await harness._session.build_context()
         assert any(m.get("role") == "branchSummary" for m in context["messages"])
+
+
+class TestHarnessLegacyFeatures:
+    """对齐 TS legacy：payload/response hooks、retry 事件、生命周期拆分。"""
+
+    @pytest.mark.asyncio
+    async def test_before_provider_payload_replaces_payload(self):
+        recorded: dict[str, Any] = {}
+        original = _make_faux([_text_response("ok")]).stream
+
+        async def _stream(model, context, options=None):
+            on_payload = (options or {}).get("on_payload")
+            if on_payload is not None:
+                result = on_payload({"marker": 1}, model)
+                if asyncio.iscoroutine(result):
+                    result = await result
+                recorded["payload"] = result
+            return await original(model, context, options)
+
+        harness = AgentHarness(_make_options(stream_fn=_stream))
+        harness.on(
+            "before_provider_payload",
+            lambda event: BeforeProviderPayloadResult(payload={"replaced": True}),
+        )
+
+        await harness.prompt("Hi")
+
+        assert recorded["payload"] == {"replaced": True}
+
+    @pytest.mark.asyncio
+    async def test_after_provider_response_emits_event(self):
+        received: list[dict] = []
+        original = _make_faux([_text_response("ok")]).stream
+
+        async def _stream(model, context, options=None):
+            on_response = (options or {}).get("on_response")
+            if on_response is not None:
+                result = on_response({"status": 201, "headers": {"x": "y"}}, model)
+                if asyncio.iscoroutine(result):
+                    await result
+            return await original(model, context, options)
+
+        harness = AgentHarness(_make_options(stream_fn=_stream))
+        harness.subscribe(
+            lambda e, signal: received.append(e) if e["type"] == "after_provider_response" else None
+        )
+
+        await harness.prompt("Hi")
+
+        assert received and received[-1]["status"] == 201
+        assert received[-1]["headers"] == {"x": "y"}
+
+    @pytest.mark.asyncio
+    async def test_compaction_retry_emits_events(self):
+        calls = 0
+        retry_events: list[dict] = []
+
+        async def _stream(model, context, options=None):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                response = _text_response("first answer")
+            elif calls == 2:
+                response = faux_assistant_message(
+                    "",
+                    stop_reason="error",
+                    error_message="503 Service Unavailable",
+                )
+            else:
+                response = faux_assistant_message("## Goal\ncompacted")
+            core = _make_faux([response])
+            return await core.stream(model, context, options)
+
+        harness = AgentHarness(
+            _make_options(
+                stream_fn=_stream,
+                retry=RetryPolicy(enabled=True, max_retries=1, base_delay_ms=1, jitter=False),
+            )
+        )
+        harness.subscribe(
+            lambda e, signal: (
+                retry_events.append(e)
+                if e["type"] in ("retry_scheduled", "retry_attempt_start", "retry_finished")
+                else None
+            )
+        )
+
+        await harness.prompt("question")
+        result = await harness.compact()
+
+        assert "## Goal" in result.summary
+        assert calls == 3
+        assert any(e["type"] == "retry_scheduled" for e in retry_events)
+        assert any(e["type"] == "retry_attempt_start" for e in retry_events)
+        assert any(e["type"] == "retry_finished" for e in retry_events)
+
+    @pytest.mark.asyncio
+    async def test_request_shutdown_and_wait_for_shutdown(self):
+        harness = _make_harness()
+
+        with pytest.raises(AgentHarnessError, match="Shutdown has not been requested"):
+            await harness.wait_for_shutdown()
+
+        harness.request_shutdown()
+        await harness.wait_for_shutdown()
+
+        with pytest.raises(AgentHarnessError, match="shut down"):
+            await harness.prompt("Hi")
 
 
 # ============================================================================
@@ -730,12 +842,7 @@ class TestHarnessAbortShutdown:
     async def test_abort_clears_queues_and_stops_run(self):
         core = faux_provider(tokens_per_second=100)
         core.set_responses([faux_assistant_message("A" * 300)])
-        harness = AgentHarness(
-            AgentHarnessOptions(
-                model=_make_model(),
-                stream_fn=core.stream,
-            )
-        )
+        harness = AgentHarness(_make_options(stream_fn=core.stream))
 
         run_task = asyncio.create_task(harness.prompt("Q"))
         await asyncio.sleep(0.05)

@@ -74,6 +74,7 @@ from .types import (
     AsyncHTTPClient,
     Context,
     Model,
+    SimpleStreamOptions,
     StreamFunction,
     StreamOptions,
 )
@@ -385,6 +386,53 @@ class Provider:
         """
 
         stream = await self.stream(model, context, options)
+        return await stream.result()
+
+    async def stream_simple(
+        self,
+        model: Model,
+        context: Context,
+        options: SimpleStreamOptions | None = None,
+    ) -> AssistantMessageEventStream:
+        """streamSimple 分发（对齐 TS Provider.streamSimple）。"""
+        if self._stream_fn is not None:
+            return await self._stream_fn(model, context, options)
+
+        opts = options or {}
+        api_key = opts.get("api_key")
+        if api_key is None:
+            if self.auth is None:
+                api_key = "ollama"
+            else:
+                api_key = await resolve_api_key(self.auth, self._credential_store, self.id)
+        base_url = self.base_url or ""
+
+        api_id = model.api or _API_KIND_IDS.get(self._api_kind, self._api_kind)
+        entry = get_api_provider(api_id)
+        if entry is None:
+            raise ValueError(
+                f"No API provider registered for api: {api_id} "
+                f"(provider api kind: {self._api_kind})"
+            )
+
+        request_options = dict(options or {})
+        request_options["api_key"] = api_key
+        request_options["base_url"] = base_url
+        return await invoke_api_stream(
+            entry.streamSimple,
+            model,
+            context,
+            cast(StreamOptions, request_options),
+        )
+
+    async def complete_simple(
+        self,
+        model: Model,
+        context: Context,
+        options: SimpleStreamOptions | None = None,
+    ) -> AssistantMessage:
+        """completeSimple 分发。"""
+        stream = await self.stream_simple(model, context, options)
         return await stream.result()
 
 

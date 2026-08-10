@@ -276,6 +276,45 @@ class TestProviderComplete:
 
 
 # ---------------------------------------------------------------------------
+# Provider.stream_simple() / complete_simple()
+# ---------------------------------------------------------------------------
+
+
+class TestProviderStreamSimple:
+    """Provider.stream_simple() 按 model.api 从注册表 streamSimple 分发。"""
+
+    @pytest.mark.asyncio
+    async def test_stream_simple_dispatches(self):
+        record: list = []
+        register_api_provider(_stub_provider("openai-completions", record), source_id="test")
+        provider = _make_provider(api_kind="completions", base_url="https://api.test.com")
+        model = _make_model()
+        options = {"reasoning": "low"}
+
+        with patch("pi_ai.provider.resolve_api_key", new=AsyncMock(return_value="sk-test")):
+            await provider.stream_simple(model, _context(), options)
+
+        received_model, received_context, received_options = record[0]
+        assert received_model is model
+        assert received_options["api_key"] == "sk-test"
+        assert received_options["base_url"] == "https://api.test.com"
+        assert received_options["reasoning"] == "low"
+
+    @pytest.mark.asyncio
+    async def test_complete_simple_returns_assistant_message(self):
+        record: list = []
+        register_api_provider(_stub_provider("openai-completions", record), source_id="test")
+        provider = _make_provider(api_kind="completions")
+        model = _make_model()
+
+        with patch("pi_ai.provider.resolve_api_key", new=AsyncMock(return_value="sk-test")):
+            result = await provider.complete_simple(model, _context())
+
+        assert result["role"] == "assistant"
+        assert result["stop_reason"] == "stop"
+
+
+# ---------------------------------------------------------------------------
 # create_provider
 # ---------------------------------------------------------------------------
 

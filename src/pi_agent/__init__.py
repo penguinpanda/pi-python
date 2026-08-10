@@ -21,24 +21,32 @@ from ._agent_loop import (
     run_agent_loop,
     run_agent_loop_continue,
 )
-from ._harness import AgentHarness, AgentHarnessSession
+from ._harness import AgentHarness
 from ._harness_types import (
     AbortResult,
     AgentHarnessError,
+    AgentHarnessEvent,
+    AgentHarnessEventResultMap,
     AgentHarnessOptions,
+    AgentHarnessPhase,
     AgentHarnessResources,
     AgentHarnessStreamOptions,
     AgentHarnessStreamOptionsPatch,
+    AgentHarnessTool,
     BeforeAgentStartResult,
+    BeforeProviderPayloadResult,
     CompactResult,
     ContextResult,
+    NavigateOptions,
     NavigateTreeResult,
     PromptTemplate,
+    Result,
     SessionBeforeCompactResult,
     SessionBeforeTreeResult,
     Skill,
     ToolCallResult,
     ToolResultPatch,
+    TreePreparation,
 )
 from ._stream_fn import get_default_stream_fn, set_default_stream_fn
 from .branch_summarization import (
@@ -142,12 +150,19 @@ __all__ = [
     "agent_loop_continue",
     # Harness
     "AgentHarness",
-    "AgentHarnessSession",
     "AgentHarnessError",
+    "AgentHarnessEvent",
+    "AgentHarnessEventResultMap",
     "AgentHarnessOptions",
+    "AgentHarnessPhase",
     "AgentHarnessResources",
     "AgentHarnessStreamOptions",
     "AgentHarnessStreamOptionsPatch",
+    "AgentHarnessTool",
+    "Result",
+    "NavigateOptions",
+    "TreePreparation",
+    "BeforeProviderPayloadResult",
     # Session
     "Session",
     "SessionError",

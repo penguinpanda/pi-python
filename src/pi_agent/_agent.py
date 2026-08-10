@@ -54,7 +54,7 @@ from pi_ai.types import AssistantMessage, ThinkingBudgets, Transport
 AgentListener = Callable[[AgentEvent, asyncio.Event | None], Awaitable[None] | None]
 
 # ---------------------------------------------------------------------------
-# PendingMessageQueue（1.2 双消息队列的前置实现，1.1 双重嵌套循环的输入源）
+# PendingMessageQueue（双消息队列的，双重嵌套循环的输入源）
 # ---------------------------------------------------------------------------
 
 
@@ -135,7 +135,7 @@ class AgentOptions:
         prepare_next_turn_with_context: (Callable[[PrepareNextTurnContext], Any] | None) = None,
         should_stop_after_turn: Callable[[AgentContext], bool] | None = None,
         tool_execution: ToolExecutionMode = "parallel",
-        # 消息队列消费策略（1.2 前置；默认逐条消费）
+        # 消息队列消费策略（默认逐条消费）
         steering_mode: QueueMode = "one-at-a-time",
         follow_up_mode: QueueMode = "one-at-a-time",
         # 提示缓存与会话标识（透传给 StreamOptions）
@@ -247,7 +247,10 @@ class Agent:
     ) -> None:
         """发送用户消息，运行完整 agent loop。阻塞直到完成。"""
         if self._active:
-            raise RuntimeError("Agent is already running. Use abort() to stop.")
+            raise RuntimeError(
+                "Agent is already running. Use steer() or follow_up() to queue messages, "
+                "or wait for completion."
+            )
 
         # 标准化输入
         prompts = _normalize_input(input, images)
@@ -257,7 +260,7 @@ class Agent:
         await self._run_prompt(prompts)
 
     async def continue_(self) -> None:
-        """从当前 transcript 继续（对齐 TS continue()）。
+        """从当前 transcript 继续（continue()）。
 
         最后一条消息为非 assistant 时直接续跑；为 assistant 时先消费队列：
         1. steering 队列非空 → 作为 prompt 运行（跳过首次 steering 轮询，
@@ -266,7 +269,7 @@ class Agent:
         3. 队列均为空 → 抛异常
         """
         if self._active:
-            raise RuntimeError("Agent is already running. Use abort() to stop.")
+            raise RuntimeError("Agent is already running. Wait for completion before continuing.")
 
         messages = self._state._messages
         if not messages:
@@ -327,7 +330,7 @@ class Agent:
             await self._settled.wait()
 
     # ------------------------------------------------------------------
-    # 双消息队列 API（1.2 前置：steer / follow-up）
+    # 双消息队列 API（steer / follow-up）
     # ------------------------------------------------------------------
 
     @property
@@ -403,13 +406,12 @@ class Agent:
         self._state.streaming_message = None
         self._state.error_message = None
 
-        context = AgentContext(
-            system_prompt=self._state.system_prompt,
-            messages=list(self._state._messages),
-            tools=list(self._state._tools),
-        )
-
         try:
+            context = AgentContext(
+                system_prompt=self._state.system_prompt,
+                messages=list(self._state._messages),
+                tools=list(self._state._tools),
+            )
             await run_agent_loop(
                 prompts=prompts,
                 context=context,
@@ -448,13 +450,12 @@ class Agent:
         self._state.streaming_message = None
         self._state.error_message = None
 
-        context = AgentContext(
-            system_prompt=self._state.system_prompt,
-            messages=list(self._state._messages),
-            tools=list(self._state._tools),
-        )
-
         try:
+            context = AgentContext(
+                system_prompt=self._state.system_prompt,
+                messages=list(self._state._messages),
+                tools=list(self._state._tools),
+            )
             await run_agent_loop_continue(
                 context=context,
                 config=self._create_loop_config(),
@@ -490,7 +491,7 @@ class Agent:
     ) -> AgentLoopConfig:
         """将 Agent 公开属性桥接为 AgentLoopConfig。
 
-        skip_initial_steering_poll 对齐 TS runPromptMessages 的
+        skip_initial_steering_poll runPromptMessages 的
         skipInitialSteeringPoll：只跳过本次运行的首次 steering 轮询
         （continue() 已手动排空队列并把消息作为 prompt 注入时使用）。
         """
@@ -615,7 +616,7 @@ def _normalize_input(
 def _default_convert_to_llm(
     messages: list[AgentMessage],
 ) -> list[Message]:
-    """默认 AgentMessage → LLM Message 转换（对齐 TS agent 包 defaultConvertToLlm）。
+    """默认 AgentMessage → LLM Message 转换（agent 包 defaultConvertToLlm）。
 
     只透传 user / assistant / toolResult；其余 role（含 compactionSummary、
     bashExecution、custom 等）由应用层转换器处理

@@ -1,22 +1,39 @@
-"""AgentHarness 类型定义（Phase 2 骨架）。
+"""AgentHarness 类型定义（对齐 TS legacy harness，44289550a^ / 0.84.0 之前）。
 
-对齐 TS `harness/types.ts` 中 Phase 2 需要的部分：错误分类、资源
-（Skill / PromptTemplate）、StreamOptions（+Patch）、harness 事件、
-hook 结果与 AgentHarnessOptions。
+包含：
+- Result / ok / err 辅助；
+- 泛型资源、工具与选项（Python 用 dict JSON Schema 代替 TypeBox）；
+- provider payload / response hooks 与 compaction/branch-summary retry 事件；
+- navigate 完整选项与 TreePreparation。
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Literal, TypedDict
+from dataclasses import dataclass, field
+from typing import Any, Awaitable, Callable, Generic, Literal, Protocol, TypeVar, TypedDict
+from typing_extensions import NotRequired
 
-from pi_ai.types import CacheRetention, ImageContent, Model, Usage
+from pi_ai import Models, RetryPolicy
+from pi_ai.types import (
+    CacheRetention,
+    ImageContent,
+    Model,
+    Usage,
+)
 
-from ._types import AgentEvent, AgentMessage, AgentTool, QueueMode, StreamFn, ThinkingLevel
+from ._types import (
+    AgentEvent,
+    AgentMessage,
+    AgentToolResult,
+    QueueMode,
+    ThinkingLevel,
+    ToolExecutionMode,
+)
 from .compaction import CompactionSettings
+from .session import Session
 
 # ---------------------------------------------------------------------------
-# 错误
+# Result / 错误
 # ---------------------------------------------------------------------------
 
 AgentHarnessErrorCode = Literal[
@@ -28,7 +45,6 @@ AgentHarnessErrorCode = Literal[
     "auth",
     "compaction",
     "branch_summary",
-    "not_implemented",
     "unknown",
 ]
 
@@ -45,6 +61,42 @@ class AgentHarnessError(Exception):
         super().__init__(message)
         self.code = code
         self.cause = cause
+
+
+T = TypeVar("T")
+E = TypeVar("E")
+
+
+@dataclass(frozen=True, slots=True)
+class Result(Generic[T, E]):
+    """对齐 TS `Result<T, E>`：`{ok: true, value}` / `{ok: false, error}`。"""
+
+    ok: bool
+    value: T | None = None
+    error: E | None = None
+
+    def is_ok(self) -> bool:
+        return self.ok
+
+    def get_or_throw(self) -> T:
+        if not self.ok:
+            error = self.error
+            if isinstance(error, BaseException):
+                raise error
+            raise AgentHarnessError("unknown", str(error or "Result failed"))
+        assert self.value is not None
+        return self.value
+
+    def get_or_none(self) -> T | None:
+        return self.value if self.ok else None
+
+
+def ok(value: T) -> Result[T, Any]:
+    return Result(ok=True, value=value)
+
+
+def err(error: E) -> Result[Any, E]:
+    return Result(ok=False, error=error)
 
 
 # ---------------------------------------------------------------------------
@@ -72,20 +124,48 @@ class PromptTemplate:
     description: str | None = None
 
 
+TSkill = TypeVar("TSkill")
+TPromptTemplate = TypeVar("TPromptTemplate")
+TContext = TypeVar("TContext")
+TContextIn = TypeVar("TContextIn", contravariant=True)
+
+
 @dataclass(slots=True)
-class AgentHarnessResources:
+class AgentHarnessResources(Generic[TSkill, TPromptTemplate]):
     """提供给显式调用方法与 system-prompt 回调的资源。"""
 
-    skills: list[Skill] | None = None
-    prompt_templates: list[PromptTemplate] | None = None
+    skills: list[TSkill] | None = None
+    prompt_templates: list[TPromptTemplate] | None = None
 
-    def clone(self) -> "AgentHarnessResources":
+    def clone(self) -> "AgentHarnessResources[TSkill, TPromptTemplate]":
         return AgentHarnessResources(
             skills=list(self.skills) if self.skills is not None else None,
             prompt_templates=(
                 list(self.prompt_templates) if self.prompt_templates is not None else None
             ),
         )
+
+
+class AgentHarnessTool(Protocol[TContextIn]):
+    """context-aware 工具（对齐 TS AgentHarnessTool；schema 用 dict JSON Schema）。"""
+
+    name: str
+    description: str
+    input_schema: dict[str, Any]
+    label: str
+    execution_mode: ToolExecutionMode
+    prompt_snippet: str | None
+    before_execute: Callable[[dict[str, Any], Any], Awaitable[Any]] | None
+    after_execute: Callable[[Any], Awaitable[Any]] | None
+
+    def execute(
+        self,
+        tool_call_id: str,
+        params: Any,
+        signal: Any,
+        on_update: Any,
+        context: TContextIn,
+    ) -> Awaitable[AgentToolResult]: ...
 
 
 # ---------------------------------------------------------------------------
@@ -177,10 +257,30 @@ def apply_stream_options_patch(
 
 
 # ---------------------------------------------------------------------------
-# 阶段
+# 阶段 / 导航 / 树
 # ---------------------------------------------------------------------------
 
 AgentHarnessPhase = Literal["idle", "turn", "compaction", "branch_summary", "retry"]
+
+
+@dataclass(slots=True)
+class NavigateOptions:
+    summarize: bool = False
+    custom_instructions: str | None = None
+    replace_instructions: bool = False
+    label: str | None = None
+
+
+@dataclass(slots=True)
+class TreePreparation:
+    target_id: str
+    old_leaf_id: str | None
+    common_ancestor_id: str | None = None
+    entries_to_summarize: list[Any] = field(default_factory=list)
+    user_wants_summary: bool = False
+    custom_instructions: str | None = None
+    replace_instructions: bool = False
+    label: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +331,18 @@ class BeforeProviderRequestEvent(TypedDict):
     stream_options: AgentHarnessStreamOptions
 
 
+class BeforeProviderPayloadEvent(TypedDict):
+    type: Literal["before_provider_payload"]
+    model: Model
+    payload: Any
+
+
+class AfterProviderResponseEvent(TypedDict):
+    type: Literal["after_provider_response"]
+    status: int
+    headers: dict[str, str]
+
+
 class ToolCallEvent(TypedDict):
     type: Literal["tool_call"]
     tool_call_id: str
@@ -254,27 +366,46 @@ class SessionBeforeCompactEvent(TypedDict):
     preparation: Any
     branch_entries: list[Any]
     custom_instructions: str | None
-
-
-class SessionBeforeTreeEvent(TypedDict):
-    type: Literal["session_before_tree"]
-    target_id: str
-    old_leaf_id: str | None
-    summarize: bool
-    custom_instructions: str | None
-    label: str | None
+    signal: Any
 
 
 class SessionCompactEvent(TypedDict):
     type: Literal["session_compact"]
+    compaction_entry: Any
     from_hook: bool
+
+
+class SessionBeforeTreeEvent(TypedDict):
+    type: Literal["session_before_tree"]
+    preparation: TreePreparation
+    signal: Any
 
 
 class SessionTreeEvent(TypedDict):
     type: Literal["session_tree"]
     new_leaf_id: str
     old_leaf_id: str | None
+    summary_entry: NotRequired[Any]
     from_hook: bool
+
+
+class RetryScheduledEvent(TypedDict):
+    type: Literal["retry_scheduled"]
+    operation: Literal["compaction", "branch_summary"]
+    attempt: int
+    max_attempts: int
+    delay_ms: float
+    error_message: str
+
+
+class RetryAttemptStartEvent(TypedDict):
+    type: Literal["retry_attempt_start"]
+    operation: Literal["compaction", "branch_summary"]
+
+
+class RetryFinishedEvent(TypedDict):
+    type: Literal["retry_finished"]
+    operation: Literal["compaction", "branch_summary"]
 
 
 class ModelUpdateEvent(TypedDict):
@@ -313,12 +444,17 @@ HarnessOwnEvent = (
     | BeforeAgentStartEvent
     | ContextEvent
     | BeforeProviderRequestEvent
+    | BeforeProviderPayloadEvent
+    | AfterProviderResponseEvent
     | ToolCallEvent
     | ToolResultEvent
     | SessionBeforeCompactEvent
     | SessionCompactEvent
     | SessionBeforeTreeEvent
     | SessionTreeEvent
+    | RetryScheduledEvent
+    | RetryAttemptStartEvent
+    | RetryFinishedEvent
     | ModelUpdateEvent
     | ThinkingLevelUpdateEvent
     | ToolsUpdateEvent
@@ -329,7 +465,7 @@ AgentHarnessEvent = AgentEvent | HarnessOwnEvent
 
 
 # ---------------------------------------------------------------------------
-# Hook 结果
+# Hook 结果 / 事件结果表
 # ---------------------------------------------------------------------------
 
 
@@ -347,6 +483,11 @@ class ContextResult:
 @dataclass(slots=True)
 class BeforeProviderRequestResult:
     stream_options: AgentHarnessStreamOptionsPatch | None = None
+
+
+@dataclass(slots=True)
+class BeforeProviderPayloadResult:
+    payload: Any
 
 
 @dataclass(slots=True)
@@ -379,6 +520,31 @@ class SessionBeforeTreeResult:
     label: str | None = None
 
 
+class AgentHarnessEventResultMap(TypedDict, total=False):
+    before_agent_start: BeforeAgentStartResult | None
+    context: ContextResult | None
+    before_provider_request: BeforeProviderRequestResult | None
+    before_provider_payload: BeforeProviderPayloadResult | None
+    after_provider_response: None
+    tool_call: ToolCallResult | None
+    tool_result: ToolResultPatch | None
+    session_before_compact: SessionBeforeCompactResult | None
+    session_compact: None
+    session_before_tree: SessionBeforeTreeResult | None
+    session_tree: None
+    retry_scheduled: None
+    retry_attempt_start: None
+    retry_finished: None
+    model_update: None
+    thinking_level_update: None
+    resources_update: None
+    tools_update: None
+    queue_update: None
+    save_point: None
+    abort: None
+    settled: None
+
+
 # ---------------------------------------------------------------------------
 # 操作结果
 # ---------------------------------------------------------------------------
@@ -404,7 +570,7 @@ class CompactResult:
 class NavigateTreeResult:
     cancelled: bool
     editor_text: str | None = None
-    summary_entry: Any = None  # BranchSummaryEntry（Phase 3）
+    summary_entry: Any = None  # BranchSummaryEntry
 
 
 # ---------------------------------------------------------------------------
@@ -415,19 +581,76 @@ AgentHarnessSystemPrompt = str | Callable[[dict], str | Awaitable[str]]
 
 
 @dataclass(slots=True)
-class AgentHarnessOptions:
-    """AgentHarness 构造选项（Phase 2 骨架）。"""
+class AgentHarnessOptions(Generic[TContext]):
+    """AgentHarness 构造选项（对齐 TS legacy AgentHarnessOptionsBase）。"""
 
     model: Model
-    session: Any | None = None  # Session 或 SessionStorage；None 时自动创建内存 DAG 会话
+    session: Session
+    models: Models
     system_prompt: AgentHarnessSystemPrompt | None = None
-    tools: list[AgentTool] | None = None
+    tools: list[AgentHarnessTool[TContext]] | None = None
     active_tool_names: list[str] | None = None
     resources: AgentHarnessResources | None = None
-    stream_fn: StreamFn | None = None
     stream_options: AgentHarnessStreamOptions | None = None
     compaction_settings: CompactionSettings | None = None
     thinking_level: ThinkingLevel = "off"
-    tool_context: Any = None
+    tool_context: TContext | Callable[[], TContext | Awaitable[TContext]] | None = None
     steering_mode: QueueMode = "one-at-a-time"
     follow_up_mode: QueueMode = "one-at-a-time"
+    retry: RetryPolicy | None = None
+
+
+__all__ = [
+    "AgentHarnessError",
+    "AgentHarnessErrorCode",
+    "AgentHarnessOptions",
+    "AgentHarnessResources",
+    "AgentHarnessStreamOptions",
+    "AgentHarnessStreamOptionsPatch",
+    "AgentHarnessSystemPrompt",
+    "AgentHarnessPhase",
+    "AgentHarnessEvent",
+    "AgentHarnessEventResultMap",
+    "Result",
+    "ok",
+    "err",
+    "Skill",
+    "PromptTemplate",
+    "AgentHarnessTool",
+    "NavigateOptions",
+    "TreePreparation",
+    "QueueUpdateEvent",
+    "SavePointEvent",
+    "AbortEvent",
+    "SettledEvent",
+    "BeforeAgentStartEvent",
+    "ContextEvent",
+    "BeforeProviderRequestEvent",
+    "BeforeProviderPayloadEvent",
+    "AfterProviderResponseEvent",
+    "ToolCallEvent",
+    "ToolResultEvent",
+    "SessionBeforeCompactEvent",
+    "SessionCompactEvent",
+    "SessionBeforeTreeEvent",
+    "SessionTreeEvent",
+    "RetryScheduledEvent",
+    "RetryAttemptStartEvent",
+    "RetryFinishedEvent",
+    "ModelUpdateEvent",
+    "ThinkingLevelUpdateEvent",
+    "ToolsUpdateEvent",
+    "ResourcesUpdateEvent",
+    "BeforeAgentStartResult",
+    "ContextResult",
+    "BeforeProviderRequestResult",
+    "BeforeProviderPayloadResult",
+    "ToolCallResult",
+    "ToolResultPatch",
+    "SessionBeforeCompactResult",
+    "SessionBeforeTreeResult",
+    "AbortResult",
+    "CompactResult",
+    "NavigateTreeResult",
+    "apply_stream_options_patch",
+]

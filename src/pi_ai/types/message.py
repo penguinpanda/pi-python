@@ -31,6 +31,8 @@ class BaseMessage(TypedDict):
     以构成 Message 可辨识联合（mypy 不支持基类收窄字段类型）。
     """
 
+    pass
+
 
 class SystemMessage(BaseMessage):
     """System Prompt"""
@@ -60,7 +62,7 @@ class UserMessage(BaseMessage):
 
     role: Literal["user"]
     content: str | list[TextContent | ImageContent]
-    timestamp: int  # Unix 毫秒时间戳（必填，对齐 TS）
+    timestamp: int  # Unix 毫秒时间戳（必填）
 
 
 class Cost(TypedDict):
@@ -91,7 +93,7 @@ class Usage(TypedDict):
 
 
 class DiagnosticErrorInfo(TypedDict, total=False):
-    """诊断错误信息（对齐 TS `DiagnosticErrorInfo`）。"""
+    """诊断错误信息（`DiagnosticErrorInfo`）。"""
 
     name: str  # 错误类型名（如 ProviderError）
     message: str  # 错误消息
@@ -100,7 +102,7 @@ class DiagnosticErrorInfo(TypedDict, total=False):
 
 
 class AssistantMessageDiagnostic(TypedDict, total=False):
-    """助手消息诊断条目（对齐 TS `AssistantMessageDiagnostic`）。
+    """助手消息诊断条目（`AssistantMessageDiagnostic`）。
 
     记录 provider / runtime 失败与恢复信息，供调试定位。
     """

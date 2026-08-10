@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from pi_ai import Models
+from pi_ai.provider import create_provider
 from pi_ai.types import Model, TextContent
 from pi_ai.providers.faux import faux_assistant_message, faux_provider, faux_tool_call
 
@@ -31,6 +33,39 @@ def _make_model() -> Model:
         name="Test",
         max_tokens=4096,
         context_window=128000,
+    )
+
+
+def _make_models(*, responses: list | None = None, stream_fn=None) -> Models:
+    if stream_fn is None:
+        core = faux_provider()
+        core.set_responses(responses if responses is not None else [faux_assistant_message("ok")])
+        stream_fn = core.stream
+    provider = create_provider(
+        "test",
+        "Test",
+        None,
+        [_make_model()],
+        stream_fn=stream_fn,
+    )
+    models = Models()
+    models.add_provider(provider)
+    return models
+
+
+def _make_session() -> Session:
+    return Session(InMemorySessionStorage())
+
+
+def _make_options(
+    *, stream_fn=None, responses: list | None = None, tools=None, **kwargs
+) -> AgentHarnessOptions:
+    return AgentHarnessOptions(
+        model=_make_model(),
+        session=_make_session(),
+        models=_make_models(responses=responses, stream_fn=stream_fn),
+        tools=tools,
+        **kwargs,
     )
 
 
@@ -79,8 +114,7 @@ class TestHarnessToolsIntegration:
             ]
         )
         harness = AgentHarness(
-            AgentHarnessOptions(
-                model=_make_model(),
+            _make_options(
                 tools=[tool],
                 tool_context=type("ToolContext", (), {"env": env})(),
                 stream_fn=core.stream,
@@ -113,12 +147,7 @@ class TestHarnessToolsIntegration:
             captured.append(dict(options or {}))
             return await original(model, context, options)
 
-        harness = AgentHarness(
-            AgentHarnessOptions(
-                model=_make_model(),
-                stream_fn=_capturing_stream,
-            )
-        )
+        harness = AgentHarness(_make_options(stream_fn=_capturing_stream))
         await harness.set_thinking_level("low")
         await harness.prompt("Hi")
 
@@ -148,8 +177,7 @@ class TestHarnessToolsIntegration:
             ]
         )
         harness = AgentHarness(
-            AgentHarnessOptions(
-                model=_make_model(),
+            _make_options(
                 tools=[tool],
                 tool_context=None,
                 stream_fn=core.stream,
@@ -222,8 +250,7 @@ class TestHarnessSkillInstructions:
         core = faux_provider()
         core.set_responses([faux_assistant_message("ok")])
         harness = AgentHarness(
-            AgentHarnessOptions(
-                model=_make_model(),
+            _make_options(
                 resources=AgentHarnessResources(skills=[skill]),
                 stream_fn=core.stream,
             )
