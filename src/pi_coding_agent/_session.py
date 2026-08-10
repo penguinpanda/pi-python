@@ -1300,7 +1300,19 @@ class AgentSession:
             return text
         try:
             body = strip_frontmatter(Path(skill.file_path).read_text(encoding="utf-8")).strip()
-        except OSError:
+        except Exception as exc:
+            if self._extension_runner is not None:
+                # 延迟导入避免扩展类型与 Session 循环依赖。
+                from .extensions.types import ExtensionError
+
+                self._extension_runner.emit_error(
+                    ExtensionError(
+                        extension_path=skill.file_path,
+                        event="skill_expansion",
+                        error=str(exc),
+                        stack=None,
+                    )
+                )
             return text
         block = (
             f'<skill name="{skill.name}" location="{skill.file_path}">\n'

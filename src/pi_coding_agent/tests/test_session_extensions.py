@@ -36,6 +36,7 @@ def _make_session(
     *,
     extension_state: dict | None = None,
     system_prompt_builder=None,
+    skill_loader=None,
 ) -> AgentSession:
     models = Models(credentials=AuthStorage.in_memory())
     core = faux_provider()
@@ -63,6 +64,7 @@ def _make_session(
         extension_runner=runner,
         extension_state=extension_state,
         system_prompt_builder=system_prompt_builder,
+        skill_loader=skill_loader,
     )
 
 
@@ -809,6 +811,33 @@ async def test_bash_tool_session_env_and_spawn_hook(tmp_path):
     )
     text = "".join(block.get("text", "") for block in result.content if isinstance(block, dict))
     assert "abc|1" in text
+
+
+@pytest.mark.asyncio
+async def test_skill_expansion_emits_error_on_invalid_yaml(tmp_path):
+    from pi_coding_agent.skills import SkillLoader
+
+    skills_dir = tmp_path / "skills"
+    (skills_dir / "bad").mkdir(parents=True)
+    skill_file = skills_dir / "bad" / "SKILL.md"
+    skill_file.write_text("---\ndescription: Bad\n---\n\nBody", encoding="utf-8")
+    loader = SkillLoader(global_dir=skills_dir)
+    loader.load()
+
+    errors: list = []
+    extension = Extension(path="<inline>", resolved_path="<inline>")
+    runner = ExtensionRunner([extension], cwd=str(tmp_path))
+    runner.on_error(errors.append)
+    holder: dict = {}
+    session = _make_session(tmp_path, runner, holder, skill_loader=loader)
+    try:
+        skill_file.write_text("---\ndescription: [unclosed\n---\n\nBody", encoding="utf-8")
+        text = session._expand_skill_command("/skill:bad arg")
+        assert text == "/skill:bad arg"
+        assert errors and errors[-1].event == "skill_expansion"
+        assert errors[-1].extension_path == str(skill_file)
+    finally:
+        await session.dispose()
 
 
 @pytest.mark.asyncio

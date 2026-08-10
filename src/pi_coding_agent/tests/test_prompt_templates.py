@@ -70,6 +70,13 @@ class TestLoad:
         loader = PromptTemplateLoader(global_dir=tmp_path / "nope")
         assert loader.load() == []
 
+    def test_invalid_yaml_returns_empty(self, tmp_path):
+        root = tmp_path / "prompts"
+        root.mkdir()
+        (root / "bad.md").write_text("---\ndescription: [unclosed\n---\n\nBody", encoding="utf-8")
+        loader = PromptTemplateLoader(global_dir=root)
+        assert loader.load() == []
+
 
 class TestParseCommandArgs:
     def test_simple(self):

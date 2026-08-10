@@ -407,7 +407,7 @@ class TestSessionCommands:
         prompts_dir = tmp_path / "prompts"
         prompts_dir.mkdir(parents=True)
         (prompts_dir / "shorten.md").write_text(
-            "---\ndescription: Shorten the following text to one sentence:\n---\nBody",
+            '---\ndescription: "Shorten the following text to one sentence:"\n---\nBody',
             encoding="utf-8",
         )
         template_loader = PromptTemplateLoader(global_dir=prompts_dir)

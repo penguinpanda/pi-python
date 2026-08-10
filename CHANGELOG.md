@@ -98,6 +98,9 @@
 - bash 子进程环境：先删除 PI_SESSION_ID / PI_SESSION_FILE / PI_PROVIDER /
   PI_MODEL / PI_REASONING_LEVEL 再按需注入，并把 pi bin 目录前置到 PATH；
   激活工具变化（扩展注册 / `set_active_tools`）会重建系统提示
+- 技能系统对齐 TS v0.84.0：frontmatter 改用完整 YAML 解析（PyYAML），
+  gitignore 匹配改用 pathspec（完整 gitignore 语义），harness 层补齐 symlink
+  解析与 TS 路径语义；显式技能路径补齐非 .md 警告与来源归属
 
 ### Fixed
 

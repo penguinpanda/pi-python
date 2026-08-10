@@ -11,6 +11,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from pathspec import GitIgnoreSpec
+
 from ._config import get_agent_dir
 from .frontmatter import parse_frontmatter
 
@@ -57,36 +59,21 @@ class LoadSkillsResult:
 # ---------------------------------------------------------------------------
 
 
-def _glob_match(pattern: str, path: str) -> bool:
-    """简化 glob（支持 * 与 **）。"""
-    regex = re.escape(pattern)
-    regex = regex.replace(r"\*\*", "__DOUBLE__").replace(r"\*", "[^/]*")
-    regex = regex.replace("__DOUBLE__", ".*")
-    return re.match(f"^{regex}$", path) is not None
-
-
 class _IgnoreMatcher:
-    """gitignore 模式匹配（目录前缀 + glob）。"""
+    """gitignore 匹配（基于 pathspec GitIgnoreSpec，对齐 TS ignore npm 库）。"""
 
     def __init__(self) -> None:
-        self._patterns: list[tuple[str, bool]] = []
+        self._patterns: list[str] = []
+        self._spec: GitIgnoreSpec | None = None
 
     def add(self, patterns: list[str]) -> None:
-        for pattern in patterns:
-            negated = pattern.startswith("!")
-            raw = pattern[1:] if negated else pattern
-            self._patterns.append((raw, negated))
+        self._patterns.extend(patterns)
+        self._spec = None
 
     def ignores(self, path: str) -> bool:
-        ignored = False
-        for raw, negated in self._patterns:
-            pattern = raw.rstrip("/")
-            if raw.endswith("/"):
-                if path == pattern or path.startswith(pattern + "/"):
-                    ignored = not negated
-            elif _glob_match(pattern, path):
-                ignored = not negated
-        return ignored
+        if self._spec is None:
+            self._spec = GitIgnoreSpec.from_lines(self._patterns)
+        return self._spec.match_file(path)
 
 
 def _prefix_ignore_pattern(line: str, prefix: str) -> str | None:
@@ -172,11 +159,19 @@ def _load_skill_from_file(
     diagnostics: list[ResourceDiagnostic] = []
     try:
         raw_content = file_path.read_text(encoding="utf-8")
-        frontmatter, _body = parse_frontmatter(raw_content)
     except OSError as exc:
         diagnostics.append(
             ResourceDiagnostic(
                 type="warning", message=str(exc), path=str(file_path), code="read_failed"
+            )
+        )
+        return None, diagnostics
+    try:
+        frontmatter, _body = parse_frontmatter(raw_content)
+    except Exception as exc:
+        diagnostics.append(
+            ResourceDiagnostic(
+                type="warning", message=str(exc), path=str(file_path), code="parse_failed"
             )
         )
         return None, diagnostics
@@ -302,6 +297,24 @@ class SkillLoader:
         real_paths: set[str] = set()
         diagnostics: list[ResourceDiagnostic] = []
 
+        def is_under(target: Path, root: Path) -> bool:
+            if target == root:
+                return True
+            prefix = str(root) + os.sep
+            return str(target).startswith(prefix)
+
+        def get_source(resolved_path: Path) -> str:
+            if only_explicit:
+                return "path"
+            global_root = Path(self._global_dir).resolve()
+            if is_under(resolved_path, global_root):
+                return "user"
+            if self._project_dir is not None:
+                project_root = Path(self._project_dir).resolve()
+                if is_under(resolved_path, project_root):
+                    return "project"
+            return "path"
+
         def add(result: LoadSkillsResult) -> None:
             diagnostics.extend(result.diagnostics)
             for skill in result.skills:
@@ -346,16 +359,26 @@ class SkillLoader:
                 )
                 continue
             if resolved.is_dir():
+                source = get_source(resolved)
                 path_skills, path_diagnostics = _load_skills_from_dir(
-                    resolved, "path", True, _IgnoreMatcher(), resolved
+                    resolved, source, True, _IgnoreMatcher(), resolved
                 )
                 add(LoadSkillsResult(skills=path_skills, diagnostics=path_diagnostics))
             elif resolved.is_file() and resolved.name.endswith(".md"):
-                skill, skill_diagnostics = _load_skill_from_file(resolved, "path")
+                skill, skill_diagnostics = _load_skill_from_file(resolved, get_source(resolved))
                 if skill is not None:
                     add(LoadSkillsResult(skills=[skill], diagnostics=skill_diagnostics))
                 else:
                     diagnostics.extend(skill_diagnostics)
+            else:
+                diagnostics.append(
+                    ResourceDiagnostic(
+                        type="warning",
+                        message="skill path is not a markdown file",
+                        path=str(resolved),
+                        code="path_not_markdown",
+                    )
+                )
 
         self._skills = skill_map
         self._diagnostics = diagnostics

@@ -15,6 +15,9 @@ import os
 import re
 from typing import Any
 
+import yaml
+from pathspec import GitIgnoreSpec
+
 from .env import ExecutionEnv
 
 MAX_NAME_LENGTH = 64
@@ -48,7 +51,7 @@ def format_skill_invocation(
     additional_instructions: str | None = None,
 ) -> str:
     """把技能格式化为模型可见的调用块（对齐 TS formatSkillInvocation）。"""
-    directory = os.path.dirname(file_path).replace("\\", "/")
+    directory = _dirname_env_path(file_path)
     skill_block = (
         f'<skill name="{_xml_escape(name)}" location="{_xml_escape(file_path)}">\n'
         f"References are relative to {_xml_escape(directory)}.\n\n{content}\n</skill>"
@@ -59,7 +62,7 @@ def format_skill_invocation(
 
 
 def _parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
-    """解析 YAML frontmatter 子集（key: value；无 pyyaml 依赖）。"""
+    """解析 YAML frontmatter（完整 YAML；非法内容抛异常，调用方转 parse_failed）。"""
     normalized = content.replace("\r\n", "\n").replace("\r", "\n")
     if not normalized.startswith("---"):
         return {}, normalized
@@ -69,22 +72,11 @@ def _parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
         return {}, normalized
     yaml_string = normalized[4:end_index]
     body = normalized[end_index + 4 :].strip()
-    frontmatter: dict[str, Any] = {}
-    for line in yaml_string.split("\n"):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if ":" not in stripped:
-            continue
-        key, _, value = stripped.partition(":")
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if value.lower() == "true":
-            frontmatter[key] = True
-        elif value.lower() == "false":
-            frontmatter[key] = False
-        else:
-            frontmatter[key] = value
+    parsed = yaml.safe_load(yaml_string)
+    if parsed is None or not isinstance(parsed, dict):
+        frontmatter: dict[str, Any] = {}
+    else:
+        frontmatter = dict(parsed)
     return frontmatter, body
 
 
@@ -122,42 +114,41 @@ def _basename(path: str) -> str:
     return os.path.basename(path)
 
 
-def _relative_path(root: str, path: str) -> str:
-    return os.path.relpath(path, root).replace("\\", "/")
+def _dirname_env_path(path: str) -> str:
+    """目录路径（对齐 TS dirnameEnvPath：Windows 盘符与根路径特殊处理）。"""
+    normalized = path.rstrip("/\\")
+    separator_index = max(normalized.rfind("/"), normalized.rfind("\\"))
+    if separator_index == 2 and normalized[1] == ":":
+        return normalized[:3]
+    return "/" if separator_index <= 0 else normalized[:separator_index]
+
+
+def _relative_env_path(root: str, path: str) -> str:
+    """root 相对路径（对齐 TS relativeEnvPath：root 外路径去前导斜杠）。"""
+    normalized_root = root.replace("\\", "/").rstrip("/")
+    normalized_path = path.replace("\\", "/").rstrip("/")
+    if normalized_path == normalized_root:
+        return ""
+    if normalized_path.startswith(f"{normalized_root}/"):
+        return normalized_path[len(normalized_root) + 1 :]
+    return normalized_path.lstrip("/")
 
 
 class _IgnoreMatcher:
-    """简化 gitignore 匹配（目录前缀 + glob 模式）。"""
+    """gitignore 匹配（基于 pathspec GitIgnoreSpec，对齐 TS ignore npm 库）。"""
 
     def __init__(self) -> None:
-        self.patterns: list[tuple[str, bool]] = []
+        self._patterns: list[str] = []
+        self._spec: GitIgnoreSpec | None = None
 
     def add(self, patterns: list[str]) -> None:
-        for pattern in patterns:
-            negated = pattern.startswith("!")
-            raw = pattern[1:] if negated else pattern
-            self.patterns.append((raw, negated))
+        self._patterns.extend(patterns)
+        self._spec = None
 
     def ignores(self, path: str) -> bool:
-        ignored = False
-        for raw, negated in self.patterns:
-            pattern = raw.rstrip("/")
-            is_dir_pattern = raw.endswith("/")
-            if is_dir_pattern:
-                if path == pattern or path.startswith(pattern + "/"):
-                    ignored = not negated
-            elif _glob_match(pattern, path):
-                ignored = not negated
-        return ignored
-
-
-def _glob_match(pattern: str, path: str) -> bool:
-    """把简化 glob 转成正则（支持 * 与 **）。"""
-    regex = re.escape(pattern)
-    regex = regex.replace(r"\*\*", "__DOUBLE__").replace(r"\*", "[^/]*")
-    regex = regex.replace("__DOUBLE__", ".*")
-    regex = f"^{regex}$"
-    return re.match(regex, path) is not None
+        if self._spec is None:
+            self._spec = GitIgnoreSpec.from_lines(self._patterns)
+        return self._spec.match_file(path)
 
 
 def _prefix_ignore_pattern(line: str, prefix: str) -> str | None:
@@ -186,7 +177,7 @@ async def _add_ignore_rules(
     root_dir: str,
     diagnostics: list[SkillDiagnostic],
 ) -> None:
-    relative_dir = _relative_path(root_dir, directory)
+    relative_dir = _relative_env_path(root_dir, directory)
     prefix = f"{relative_dir}/" if relative_dir else ""
     for filename in IGNORE_FILE_NAMES:
         ignore_path = f"{directory.rstrip('/')}/{filename}"
@@ -262,7 +253,8 @@ async def _load_skills_from_dir(
         if dir_info[1].code != "not_found":
             diagnostics.append(SkillDiagnostic("file_info_failed", str(dir_info[1]), directory))
         return skills, diagnostics
-    if dir_info[1].kind != "directory":
+    dir_kind = await _resolve_kind(env, dir_info[1], diagnostics)
+    if dir_kind != "directory":
         return skills, diagnostics
 
     await _add_ignore_rules(env, ignore_matcher, directory, root_dir, diagnostics)
@@ -276,9 +268,10 @@ async def _load_skills_from_dir(
     for entry in entries:
         if entry.name != "SKILL.md":
             continue
-        if entry.kind != "file":
+        kind = await _resolve_kind(env, entry, diagnostics)
+        if kind != "file":
             continue
-        rel_path = _relative_path(root_dir, entry.path)
+        rel_path = _relative_env_path(root_dir, entry.path)
         if ignore_matcher.ignores(rel_path):
             continue
         skill, skill_diagnostics = await _load_skill_from_file(env, entry.path)
@@ -290,24 +283,48 @@ async def _load_skills_from_dir(
     for entry in sorted(entries, key=lambda e: e.name):
         if entry.name.startswith(".") or entry.name == "node_modules":
             continue
-        rel_path = _relative_path(root_dir, entry.path)
-        ignore_path = f"{rel_path}/" if entry.kind == "directory" else rel_path
+        kind = await _resolve_kind(env, entry, diagnostics)
+        if kind is None:
+            continue
+        rel_path = _relative_env_path(root_dir, entry.path)
+        ignore_path = f"{rel_path}/" if kind == "directory" else rel_path
         if ignore_matcher.ignores(ignore_path):
             continue
-        if entry.kind == "directory":
+        if kind == "directory":
             sub_skills, sub_diagnostics = await _load_skills_from_dir(
                 env, entry.path, False, ignore_matcher, root_dir
             )
             skills.extend(sub_skills)
             diagnostics.extend(sub_diagnostics)
             continue
-        if entry.kind != "file" or not include_root_files or not entry.name.endswith(".md"):
+        if kind != "file" or not include_root_files or not entry.name.endswith(".md"):
             continue
         skill, skill_diagnostics = await _load_skill_from_file(env, entry.path)
         if skill:
             skills.append(skill)
         diagnostics.extend(skill_diagnostics)
     return skills, diagnostics
+
+
+async def _resolve_kind(
+    env: ExecutionEnv,
+    info: Any,
+    diagnostics: list[SkillDiagnostic],
+) -> str | None:
+    """把条目解析为 file / directory（symlink 跟随目标，对齐 TS resolveKind）。"""
+    if info.kind in ("file", "directory"):
+        return info.kind
+    canonical = await env.canonical_path(info.path)
+    if not canonical[0]:
+        if canonical[1].code != "not_found":
+            diagnostics.append(SkillDiagnostic("file_info_failed", str(canonical[1]), info.path))
+        return None
+    target = await env.file_info(canonical[1])
+    if not target[0]:
+        if target[1].code != "not_found":
+            diagnostics.append(SkillDiagnostic("file_info_failed", str(target[1]), info.path))
+        return None
+    return target[1].kind if target[1].kind in ("file", "directory") else None
 
 
 async def load_skills(
@@ -325,6 +342,9 @@ async def load_skills(
             continue
         if info[1].kind != "directory":
             continue
+        root_kind = await _resolve_kind(env, info[1], diagnostics)
+        if root_kind != "directory":
+            continue
         result, result_diagnostics = await _load_skills_from_dir(
             env, info[1].path, True, _IgnoreMatcher(), info[1].path
         )
@@ -336,6 +356,7 @@ async def load_skills(
 async def load_sourced_skills(
     env: ExecutionEnv,
     inputs: list[dict[str, Any]],
+    map_skill=None,
 ) -> dict[str, Any]:
     """从带来源标记的目录加载技能（来源原样保留）。"""
     skills: list[dict[str, Any]] = []
@@ -343,7 +364,8 @@ async def load_sourced_skills(
     for input_item in inputs:
         result = await load_skills(env, input_item["path"])
         for skill in result["skills"]:
-            skills.append({"skill": skill, "source": input_item["source"]})
+            mapped = map_skill(skill, input_item["source"]) if map_skill is not None else skill
+            skills.append({"skill": mapped, "source": input_item["source"]})
         for diagnostic in result["diagnostics"]:
             diagnostics.append({**vars(diagnostic), "source": input_item["source"]})
     return {"skills": skills, "diagnostics": diagnostics}

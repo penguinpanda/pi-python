@@ -10,14 +10,22 @@ from pi_coding_agent.skills import (
 )
 
 
-def _write_skill(directory: Path, body: str, name: str | None = None) -> Path:
+def _write_skill(
+    directory: Path,
+    body: str,
+    name: str | None = None,
+    frontmatter: str | None = None,
+) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
-    frontmatter = []
-    if name is not None:
-        frontmatter.append(f"name: {name}")
-    frontmatter.append("description: Test skill")
     path = directory / "SKILL.md"
-    path.write_text(f"---\n{chr(10).join(frontmatter)}\n---\n\n{body}", encoding="utf-8")
+    if frontmatter is not None:
+        path.write_text(f"---\n{frontmatter}\n---\n\n{body}", encoding="utf-8")
+    else:
+        lines = []
+        if name is not None:
+            lines.append(f"name: {name}")
+        lines.append("description: Test skill")
+        path.write_text(f"---\n{chr(10).join(lines)}\n---\n\n{body}", encoding="utf-8")
     return path
 
 
@@ -113,6 +121,60 @@ class TestSkillLoaderLoad:
         result = loader.load(explicit_paths=[str(tmp_path / "nope")])
         assert result.skills == []
         assert any(diag.code == "path_missing" for diag in result.diagnostics)
+
+    def test_full_yaml_frontmatter(self, tmp_path):
+        root = tmp_path / "skills"
+        _write_skill(
+            root / "full",
+            "Body",
+            frontmatter=(
+                'description: "Multi\\nline"\nname: full\ntags:\n  - a\n  - b\n'
+                "disable-model-invocation: true"
+            ),
+        )
+        loader = SkillLoader(global_dir=root)
+        result = loader.load()
+        skill = result.skills[0]
+        assert skill.description == "Multi\nline"
+        assert skill.disable_model_invocation is True
+
+    def test_invalid_yaml_parse_failed(self, tmp_path):
+        root = tmp_path / "skills"
+        _write_skill(root / "bad", "Body", frontmatter="description: [unclosed")
+        loader = SkillLoader(global_dir=root)
+        result = loader.load()
+        assert result.skills == []
+        assert any(diag.code == "parse_failed" for diag in result.diagnostics)
+
+    def test_gitignore_nested_star_pattern(self, tmp_path):
+        root = tmp_path / "skills"
+        _write_skill(root / "ok", "Ok")
+        _write_skill(root / "x.log" / "app", "Log")
+        (root / ".gitignore").write_text("*.log\n", encoding="utf-8")
+        loader = SkillLoader(global_dir=root)
+        result = loader.load()
+        assert [skill.name for skill in result.skills] == ["ok"]
+
+    def test_explicit_non_markdown_warns(self, tmp_path):
+        root = tmp_path / "skills"
+        notes = tmp_path / "notes.txt"
+        notes.write_text("x", encoding="utf-8")
+        loader = SkillLoader(global_dir=root)
+        result = loader.load(explicit_paths=[str(notes)])
+        assert result.skills == []
+        assert any(diag.code == "path_not_markdown" for diag in result.diagnostics)
+
+    def test_explicit_path_source_attribution(self, tmp_path):
+        global_dir = tmp_path / "agent" / "skills"
+        project_dir = tmp_path / "proj" / ".pi" / "skills"
+        outside = tmp_path / "extra"
+        _write_skill(global_dir / "g", "G", frontmatter="name: g\ndescription: G")
+        _write_skill(project_dir / "p", "P", frontmatter="name: p\ndescription: P")
+        _write_skill(outside / "x", "X", frontmatter="name: x\ndescription: X")
+        loader = SkillLoader(global_dir=global_dir, project_dir=project_dir)
+        result = loader.load(explicit_paths=[str(global_dir), str(project_dir), str(outside)])
+        sources = {skill.name: skill.source for skill in result.skills}
+        assert sources == {"g": "user", "p": "project", "x": "path"}
 
 
 class TestSkillFormatting:

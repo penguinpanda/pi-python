@@ -58,7 +58,7 @@ def _load_template_from_file(file_path: Path, source: str) -> PromptTemplate | N
     try:
         raw_content = file_path.read_text(encoding="utf-8")
         frontmatter, body = parse_frontmatter(raw_content)
-    except OSError:
+    except Exception:
         return None
 
     name = file_path.stem
