@@ -106,6 +106,7 @@ from .auth import (
     env_api_key_auth,
 )
 from .auth.resolve import ModelsError
+from .memory import InMemoryMemoryStore
 from .api.api_provider_registry import (
     ApiProvider,
     ApiStreamFunction,
@@ -207,6 +208,7 @@ __all__ = [
     "ModelInput",
     "ModelOutput",
     "Context",
+    "InMemoryMemoryStore",
     "MemoryStore",
     "Tool",
     "Message",

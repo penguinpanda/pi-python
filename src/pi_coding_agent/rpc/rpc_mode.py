@@ -662,7 +662,9 @@ class RpcMessageHandler:
         target = manager.get_entry(entry_id)
         if target is None:
             return error_response(command_id, "fork", f"Entry not found: {entry_id}")
-        forked = manager.fork(entry_id)
+        from .._session_manager_v4 import fork_session_manager
+
+        forked = await fork_session_manager(manager, entry_id)
         try:
             new_session = await self._rebuild_session(forked)
         except Exception as exc:
@@ -681,7 +683,9 @@ class RpcMessageHandler:
             return error_response(
                 command_id, "clone", "Cannot clone session: no current entry selected"
             )
-        forked = self.session.session_manager.fork(leaf_id)
+        from .._session_manager_v4 import fork_session_manager
+
+        forked = await fork_session_manager(self.session.session_manager, leaf_id)
         try:
             new_session = await self._rebuild_session(forked)
         except Exception as exc:
@@ -695,7 +699,9 @@ class RpcMessageHandler:
         if not isinstance(session_path, str):
             return error_response(command_id, "switch_session", "sessionPath is required")
         try:
-            manager = self.session.session_manager.open(session_path, cwd_override=self.session.cwd)
+            from .._session_manager_v4 import open_session_manager
+
+            manager = await open_session_manager(session_path, cwd_override=self.session.cwd)
             new_session = await self._rebuild_session(manager)
         except Exception as exc:
             return error_response(command_id, "switch_session", str(exc))

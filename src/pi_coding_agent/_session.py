@@ -46,7 +46,7 @@ from pi_ai.utils.retry import (
     is_retryable_error,
 )
 
-from ._session_manager import SessionManager
+from ._session_manager_v4 import SessionManagerLike
 from .frontmatter import strip_frontmatter
 from .messages import convert_to_llm
 from .model_resolver import ScopedModel
@@ -74,6 +74,39 @@ from .compaction import (
 )
 from .cache_stats import compute_cache_waste
 from .tools import create_all_tools
+
+
+async def _record_operation(
+    manager: SessionManagerLike,
+    kind: str,
+    **kwargs,
+) -> str | None:
+    """写入 operation record；v3 管理器无此能力时静默跳过。"""
+    start = getattr(manager, "start_operation", None)
+    if start is None:
+        return None
+    try:
+        return await start(kind, **kwargs)
+    except Exception:
+        return None
+
+
+async def _finish_recorded_operation(
+    manager: SessionManagerLike,
+    run_id: str | None,
+    outcome: str = "completed",
+    error: dict[str, str] | None = None,
+) -> None:
+    """关闭 operation record；失败不阻断主流程。"""
+    if run_id is None:
+        return
+    finish = getattr(manager, "finish_operation", None)
+    if finish is None:
+        return
+    try:
+        await finish(run_id, outcome=outcome, error=error)
+    except Exception:
+        pass
 
 
 @dataclass(slots=True)
@@ -106,7 +139,7 @@ class AgentSession:
     def __init__(
         self,
         agent: Agent,
-        session_manager: SessionManager,
+        session_manager: SessionManagerLike,
         cwd: str,
         model: Model,
         *,
@@ -450,7 +483,7 @@ class AgentSession:
         return self._cwd
 
     @property
-    def session_manager(self) -> SessionManager:
+    def session_manager(self) -> SessionManagerLike:
         return self._session_manager
 
     @property
@@ -762,6 +795,13 @@ class AgentSession:
 
         self._emit({"type": "compaction_start", "reason": "manual"})
         self._is_compacting = True
+        run_id = await _record_operation(
+            self._session_manager,
+            "compaction",
+            custom_instructions=custom_instructions,
+        )
+        outcome = "completed"
+        error: dict[str, str] | None = None
         try:
             cancelled, ext_result, from_extension = await self._run_compaction_hooks(
                 preparation, "manual", False, custom_instructions
@@ -824,6 +864,8 @@ class AgentSession:
             )
             return result
         except Exception as exc:
+            outcome = "failed"
+            error = {"code": "error", "message": str(exc)}
             self._emit(
                 {
                     "type": "compaction_end",
@@ -836,6 +878,7 @@ class AgentSession:
             )
             return None
         finally:
+            await _finish_recorded_operation(self._session_manager, run_id, outcome, error)
             self._is_compacting = False
 
     async def _get_summarization_request_auth(self, model: Model) -> dict:
@@ -881,6 +924,40 @@ class AgentSession:
         if manager.get_entry(entry_id) is None:
             raise ValueError(f"Entry not found: {entry_id}")
 
+        run_id = await _record_operation(
+            self._session_manager,
+            "navigation",
+            target_id=entry_id,
+            summarize=summarize,
+            custom_instructions=custom_instructions,
+        )
+        outcome = "completed"
+        error: dict[str, str] | None = None
+        try:
+            return await self._navigate_to_impl(
+                entry_id,
+                summarize=summarize,
+                custom_instructions=custom_instructions,
+                old_leaf=old_leaf,
+                manager=manager,
+            )
+        except BaseException as exc:
+            outcome = "failed"
+            error = {"code": "error", "message": str(exc)}
+            raise
+        finally:
+            await _finish_recorded_operation(self._session_manager, run_id, outcome, error)
+
+    async def _navigate_to_impl(
+        self,
+        entry_id: str,
+        *,
+        summarize: bool,
+        custom_instructions: str | None,
+        old_leaf: str | None,
+        manager: SessionManagerLike,
+    ) -> bool:
+        """navigate_to 主体（由 operation record 包装调用）。"""
         summary: dict | None = None
         from_extension = False
         runner = self._extension_runner
@@ -913,7 +990,7 @@ class AgentSession:
             class _BranchSessionAdapter:
                 """branch_summarization 需要 async get_branch/get_entry。"""
 
-                def __init__(self, manager: SessionManager) -> None:
+                def __init__(self, manager: SessionManagerLike) -> None:
                     self._manager = manager
 
                 async def get_branch(self, from_id: str | None = None):
@@ -1197,6 +1274,19 @@ class AgentSession:
         self._abort = asyncio.Event()
         started = time.perf_counter()
         started_at_ms = int(time.time() * 1000)
+        run_id = await _record_operation(
+            self._session_manager,
+            "run",
+            original_prompt=[
+                {
+                    "role": "user",
+                    "content": text,
+                    "timestamp": int(time.time() * 1000),
+                }
+            ],
+        )
+        outcome = "completed"
+        error: dict[str, str] | None = None
         try:
             self._overflow_recovery_attempted = False
             # 发送前检查：上一轮 aborted/error 响应触发压缩（不重试）。
@@ -1241,7 +1331,12 @@ class AgentSession:
                 await self._agent.prompt(expanded, images)
             await self._check_compaction()
             await self._retry_failed_turn()
+        except BaseException as exc:
+            outcome = "aborted" if self._abort is not None and self._abort.is_set() else "failed"
+            error = {"code": "error", "message": str(exc)}
+            raise
         finally:
+            await _finish_recorded_operation(self._session_manager, run_id, outcome, error)
             self._abort = None
             self._turn_timings.append(
                 {
@@ -1580,7 +1675,64 @@ class AgentSession:
 
     async def continue_(self) -> None:
         """从当前 transcript 继续（/input 编辑消息并重建会话后重跑分支用）。"""
-        await self._agent.continue_()
+        run_id = await _record_operation(self._session_manager, "run")
+        try:
+            await self._agent.continue_()
+        except BaseException as exc:
+            await _finish_recorded_operation(
+                self._session_manager,
+                run_id,
+                "failed",
+                {"code": "error", "message": str(exc)},
+            )
+            raise
+        await _finish_recorded_operation(self._session_manager, run_id)
+
+    async def recovery_state(self) -> str:
+        """当前会话恢复状态：idle / suspended / corrupt（v3 管理器恒为 idle）。"""
+        check = getattr(self._session_manager, "recovery_state", None)
+        if check is None:
+            return "idle"
+        return await check()
+
+    async def open_operations(self, limit: int = 2) -> list[dict]:
+        """当前未完成的操作记录（v3 管理器返回空）。"""
+        operations = getattr(self._session_manager, "open_operations", None)
+        if operations is None:
+            return []
+        return await operations(limit=limit)
+
+    async def resume_suspended_operation(self) -> bool:
+        """检测挂起的 run 并重放原始 prompt；无挂起或无法重放返回 False。"""
+        if await self.recovery_state() != "suspended":
+            return False
+        operations = await self.open_operations(limit=1)
+        if not operations:
+            return False
+        operation = operations[0]
+        intent = operation.get("intent") or {}
+        if intent.get("kind") != "run":
+            return False
+        text: str | None = None
+        for message in intent.get("originalPrompt") or []:
+            content = message.get("content")
+            if isinstance(content, str):
+                text = content
+                break
+        if text is None:
+            return False
+        finish = getattr(self._session_manager, "finish_operation", None)
+        if finish is not None:
+            try:
+                await finish(
+                    operation["id"],
+                    outcome="aborted",
+                    error={"code": "crash", "message": "resumed after suspend"},
+                )
+            except Exception:
+                pass
+        await self.prompt(text)
+        return True
 
     @property
     def is_bash_running(self) -> bool:

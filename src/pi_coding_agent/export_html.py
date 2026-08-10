@@ -19,13 +19,13 @@ from pygments.formatters import HtmlFormatter
 from pygments.lexers import get_lexer_by_name, guess_lexer
 from pygments.util import ClassNotFound
 
-from ._session_manager import SessionManager
+from ._session_manager_v4 import SessionManagerLike
 
 _CODE_FENCE_RE = re.compile(r"```([\w+-]*)\n(.*?)```", re.DOTALL)
 
 
 def collect_session_data(
-    session: SessionManager,
+    session: SessionManagerLike,
     *,
     system_prompt: str | None = None,
     tools: list | None = None,
@@ -150,7 +150,7 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
 
 
 def export_session_to_html(
-    session: SessionManager,
+    session: SessionManagerLike,
     output_path: str | Path,
     *,
     theme=None,

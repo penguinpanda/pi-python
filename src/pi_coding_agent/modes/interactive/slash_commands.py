@@ -398,7 +398,9 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
         manager = context.session.session_manager
         if manager.get_entry(entry_id) is None:
             return f"Entry not found: {entry_id}"
-        forked = manager.fork(entry_id)
+        from ..._session_manager_v4 import fork_session_manager
+
+        forked = await fork_session_manager(manager, entry_id)
         new_session = await context.rebuild(forked)
         context.session = new_session
         return f"Forked at {entry_id} (session {new_session.session_id})"
@@ -407,7 +409,9 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
         leaf_id = context.session.session_manager.get_leaf_id()
         if leaf_id is None:
             return "No current entry to clone"
-        forked = context.session.session_manager.fork(leaf_id)
+        from ..._session_manager_v4 import fork_session_manager
+
+        forked = await fork_session_manager(context.session.session_manager, leaf_id)
         new_session = await context.rebuild(forked)
         context.session = new_session
         return f"Cloned to session {new_session.session_id}"
@@ -620,24 +624,24 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
         path = args.strip()
         if not path:
             return "Usage: /import <session.jsonl>"
-        from ..._session_manager import SessionManager
+        from ..._session_manager_v4 import open_session_manager
 
-        manager = SessionManager.open(path, cwd_override=context.session.cwd)
+        manager = await open_session_manager(path, cwd_override=context.session.cwd)
         new_session = await context.rebuild(manager)
         context.session = new_session
         return f"Imported {manager.session_id} ({len(manager.get_entries())} entries)"
 
     async def _resume(context: SlashContext, args: str) -> str:
         from ..._config import get_sessions_dir
-        from ..._session_manager import SessionManager
+        from ..._session_manager_v4 import list_sessions, open_session_manager
 
         path = args.strip()
         if path:
-            manager = SessionManager.open(path, cwd_override=context.session.cwd)
+            manager = await open_session_manager(path, cwd_override=context.session.cwd)
             new_session = await context.rebuild(manager)
             context.session = new_session
             return f"Resumed {new_session.session_id}"
-        infos = SessionManager.list_sessions(get_sessions_dir())
+        infos = await list_sessions(get_sessions_dir())
         if not infos:
             return "No saved sessions"
         lines = ["Saved sessions (use /resume <path>):"]

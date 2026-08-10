@@ -72,12 +72,12 @@ async def test_bare_pi_defaults_to_tui(tmp_path, monkeypatch):
     async def fake_tui(*_args, **_kwargs):
         return 0
 
-    def fake_session_create(cwd, **kwargs):
+    async def fake_session_create(cwd, **kwargs):
         return SessionManager.in_memory(cwd=cwd)
 
     monkeypatch.setattr(_cli, "_resolve_initial_model", fake_resolve)
     monkeypatch.setattr(_cli, "run_tui_mode", fake_tui)
-    monkeypatch.setattr(_cli.SessionManager, "create", staticmethod(fake_session_create))
+    monkeypatch.setattr(_cli, "create_session_manager", fake_session_create)
 
     monkeypatch.chdir(tmp_path)
     code = await _cli._async_main([])
@@ -118,12 +118,12 @@ async def test_cli_loads_skills_and_templates_on_startup(tmp_path, monkeypatch):
     async def fake_print_mode(*_args, **_kwargs):
         return 0
 
-    def fake_session_create(cwd, **kwargs):
+    async def fake_session_create(cwd, **kwargs):
         return SessionManager.in_memory(cwd=cwd)
 
     monkeypatch.setattr(_cli, "_resolve_initial_model", fake_resolve)
     monkeypatch.setattr(_cli, "run_print_mode", fake_print_mode)
-    monkeypatch.setattr(_cli.SessionManager, "create", staticmethod(fake_session_create))
+    monkeypatch.setattr(_cli, "create_session_manager", fake_session_create)
 
     monkeypatch.chdir(tmp_path)
     code = await _cli._async_main(["-p", "hi"])
@@ -155,12 +155,12 @@ async def test_cli_loads_extensions_and_warns_on_syntax_error(tmp_path, monkeypa
         captured_sessions.append(session)
         return 0
 
-    def fake_session_create(cwd, **kwargs):
+    async def fake_session_create(cwd, **kwargs):
         return SessionManager.in_memory(cwd=cwd)
 
     monkeypatch.setattr(_cli, "_resolve_initial_model", fake_resolve)
     monkeypatch.setattr(_cli, "run_print_mode", fake_print_mode)
-    monkeypatch.setattr(_cli.SessionManager, "create", staticmethod(fake_session_create))
+    monkeypatch.setattr(_cli, "create_session_manager", fake_session_create)
 
     extensions_dir = tmp_path / ".pi" / "extensions"
     extensions_dir.mkdir(parents=True)
@@ -250,12 +250,12 @@ async def test_no_context_files_skips_agents_in_system_prompt(tmp_path, monkeypa
         captured.append(session)
         return 0
 
-    def fake_session_create(cwd, **kwargs):
+    async def fake_session_create(cwd, **kwargs):
         return SessionManager.in_memory(cwd=cwd)
 
     monkeypatch.setattr(_cli, "_resolve_initial_model", fake_resolve)
     monkeypatch.setattr(_cli, "run_print_mode", fake_print_mode)
-    monkeypatch.setattr(_cli.SessionManager, "create", staticmethod(fake_session_create))
+    monkeypatch.setattr(_cli, "create_session_manager", fake_session_create)
     monkeypatch.chdir(tmp_path)
 
     code = await _cli._async_main(["-p", "hi"])

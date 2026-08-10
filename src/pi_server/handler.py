@@ -434,11 +434,11 @@ class PiServer:
             )
         )
         from pi_coding_agent._session import AgentSession
-        from pi_coding_agent._session_manager import SessionManager
+        from pi_coding_agent._session_manager_v4 import in_memory_session_manager
 
         return AgentSession(
             agent=agent,
-            session_manager=SessionManager.in_memory(cwd=cwd),
+            session_manager=await in_memory_session_manager(cwd=cwd),
             cwd=cwd,
             model=model,
             model_runtime=runtime,

@@ -197,7 +197,11 @@ def session_entry_to_context_messages(
     """把一条条目投影为 LLM 上下文消息。"""
     entry_type = entry["type"]
     if entry_type == "message":
-        return [cast(MessageEntry, entry)["message"]]
+        message = cast(MessageEntry, entry)["message"]
+        # 对齐 TS v0.84：deferred 响应不进入 LLM 上下文。
+        if message.get("role") == "assistant" and message.get("stopReason") == "deferred":
+            return []
+        return [message]
     if entry_type == "custom_message":
         custom = cast(CustomMessageEntry, entry)
         return [

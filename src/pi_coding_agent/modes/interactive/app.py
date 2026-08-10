@@ -48,6 +48,7 @@ from pi_tui.theme import BUILTIN_THEMES, Theme, ThemeLoader
 from ..._config import get_agent_dir, get_sessions_dir
 from ..._session import AgentSession
 from ..._session_manager import SessionManager, SessionTreeNode
+from ..._session_manager_v4 import SessionManagerLike
 from ...extensions import ExtensionRunner
 from ...extensions.registry import ExtensionRegistry
 from ...model_runtime import ModelRuntime
@@ -1143,7 +1144,9 @@ class PiTuiApp(App):
             await session.abort()
             await session.wait_for_idle()
             manager = session.session_manager
-            manager.edit_message(entry_id, text)
+            from ..._session_manager_v4 import edit_session_message
+
+            await edit_session_message(manager, entry_id, text)
             new_session = await self._apply_rebuilt_session(manager)
             self._set_status("Continuing from edited message")
             await new_session.continue_()
@@ -1385,7 +1388,9 @@ class PiTuiApp(App):
             self._notify(f"Entry not found: {entry_id}")
             return
         try:
-            forked = manager.fork(entry_id)
+            from ..._session_manager_v4 import fork_session_manager
+
+            forked = await fork_session_manager(manager, entry_id)
             new_session = await self._apply_rebuilt_session(forked)
             self._slash_context.session = new_session
             self._notify(f"Forked at {entry_id[:8]} (session {new_session.session_id})")
@@ -1730,7 +1735,7 @@ def _list_sessions() -> list[dict[str, Any]]:
     ]
 
 
-def _user_message_nodes(manager: SessionManager) -> list[SessionTreeNode]:
+def _user_message_nodes(manager: SessionManagerLike) -> list[SessionTreeNode]:
     """构造仅含 user 消息的扁平树节点（/input 选择器用）。"""
     nodes: list[SessionTreeNode] = []
     for entry in manager.get_entries():

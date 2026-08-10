@@ -1,0 +1,723 @@
+"""v4 版会话管理器（M3：应用层消费 v4 Session）。
+
+与 `_session_manager.SessionManager` 保持同名 API，但底层使用
+`pi_agent.session.v4` 的 `JsonlSessionRepo` / `Session`：
+- 新会话写入 JSONL v4；
+- 打开 v3 文件时由 `JsonlSessionRepo.open_path` 惰性转换；
+- 同步访问器（get_entries / build_context / get_tree 等）读内存缓存，
+  每次异步写入后刷新缓存。
+"""
+
+from __future__ import annotations
+
+import asyncio
+import inspect
+import os
+import time
+from pathlib import Path
+from typing import Any, Protocol, cast
+
+from filelock import FileLock
+from pi_ai.utils.uuid import uuidv7
+
+from pi_agent._types import AgentMessage
+from pi_agent.session.v4.context import build_session_context
+from pi_agent.session.v4.memory import InMemorySessionRepo
+from pi_agent.session.v4.repo import JsonlSessionRepo
+from pi_agent.session.v4.session import Session
+from pi_agent.session.v4.jsonl_types import JsonlSessionListOptions
+from pi_agent.session.v4.types import Entry, SessionMetadata
+
+from ._session_manager import SessionInfo, SessionTreeNode, _schedule_task
+
+
+def _default_sessions_dir() -> Path:
+    from ._config import get_sessions_dir
+
+    return get_sessions_dir()
+
+
+class SessionManagerLike(Protocol):
+    """AgentSession 需要的会话管理器接口（v3 SessionManager / V4SessionManager 通用）。"""
+
+    @property
+    def session_id(self) -> str: ...
+
+    @property
+    def session_path(self) -> Path | None: ...
+
+    @property
+    def session_name(self) -> str | None: ...
+
+    @property
+    def cwd(self) -> str: ...
+
+    def is_persisted(self) -> bool: ...
+
+    def set_session_name(self, name: str) -> None: ...
+
+    def build_context(self) -> list[AgentMessage]: ...
+
+    def get_entries(self) -> list[Any]: ...
+
+    def get_entry(self, entry_id: str) -> Any | None: ...
+
+    def get_leaf_id(self) -> str | None: ...
+
+    def get_branch(self, from_id: str | None = None) -> list[Any]: ...
+
+    def get_tree(self) -> list[Any]: ...
+
+    def get_last_model_change(self) -> tuple[str, str] | None: ...
+
+    async def append_message(self, message: AgentMessage) -> str: ...
+
+    async def append_compaction(
+        self,
+        summary: str,
+        first_kept_entry_id: str,
+        tokens_before: int,
+        details: dict | None = None,
+    ) -> str: ...
+
+    async def append_model_change(self, provider: str, model_id: str) -> str: ...
+
+    async def append_thinking_level_change(self, thinking_level: str) -> str: ...
+
+    async def append_custom_entry(self, custom_type: str, data: Any = None) -> str: ...
+
+    async def append_custom_message_entry(
+        self,
+        custom_type: str,
+        content: Any,
+        *,
+        display: bool = True,
+        details: Any = None,
+    ) -> str: ...
+
+    async def append_session_info(self, name: str | None) -> str: ...
+
+    async def append_label(self, target_id: str, label: str | None) -> str: ...
+
+    def set_label(self, target_id: str, label: str | None) -> None: ...
+
+    async def move_to(
+        self, entry_id: str | None, summary: dict[str, Any] | None = None
+    ) -> str | None: ...
+
+
+def v4_sessions_enabled() -> bool:
+    """PI_SESSION_FORMAT=v3 时回退 v3 会话（过渡期调试）。"""
+    return os.environ.get("PI_SESSION_FORMAT", "auto") != "v3"
+
+
+async def create_session_manager(
+    cwd: str,
+    sessions_dir: str | Path | None = None,
+    session_id: str | None = None,
+) -> SessionManagerLike:
+    """按格式开关创建会话管理器（默认 v4）。"""
+    if v4_sessions_enabled():
+        return await V4SessionManager.create(cwd, sessions_dir, session_id)
+    from ._session_manager import SessionManager
+
+    return SessionManager.create(cwd, sessions_dir, session_id)
+
+
+async def open_session_manager(
+    filepath: str | Path,
+    cwd_override: str | None = None,
+) -> SessionManagerLike:
+    """按格式开关打开会话（v3 文件在 v4 模式下惰性转换）。"""
+    if v4_sessions_enabled():
+        return await V4SessionManager.open(filepath, cwd_override)
+    from ._session_manager import SessionManager
+
+    return SessionManager.open(filepath, cwd_override)
+
+
+async def in_memory_session_manager(cwd: str, session_id: str | None = None) -> SessionManagerLike:
+    if v4_sessions_enabled():
+        return await V4SessionManager.in_memory(cwd, session_id)
+    from ._session_manager import SessionManager
+
+    return SessionManager.in_memory(cwd, session_id)
+
+
+async def list_sessions(directory: str | Path, cwd: str | None = None) -> list[SessionInfo]:
+    """按格式开关列出会话。"""
+    if v4_sessions_enabled():
+        return await V4SessionManager.list_sessions(directory, cwd)
+    from ._session_manager import SessionManager
+
+    return SessionManager.list_sessions(directory)
+
+
+async def fork_session_manager(
+    manager: Any,
+    from_entry_id: str,
+    *,
+    position: str = "at",
+    session_id: str | None = None,
+    sessions_dir: str | Path | None = None,
+) -> Any:
+    """fork 会话：v3 同步 / v4 异步统一入口。"""
+    result = manager.fork(
+        from_entry_id,
+        position=position,
+        session_id=session_id,
+        sessions_dir=sessions_dir,
+    )
+    if inspect.isawaitable(result):
+        return await result
+    return result
+
+
+async def edit_session_message(
+    manager: Any,
+    entry_id: str,
+    new_text: str,
+    *,
+    mode: str = "merge",
+) -> str:
+    """编辑历史 user 消息：v3 同步 / v4 异步统一入口。"""
+    result = manager.edit_message(entry_id, new_text, mode=mode)
+    if inspect.isawaitable(result):
+        return await result
+    return result
+
+
+class V4SessionManager:
+    """v4 持久化会话管理器（API 对齐 SessionManager）。"""
+
+    def __init__(
+        self,
+        *,
+        cwd: str,
+        session: Session,
+        repo: JsonlSessionRepo | InMemorySessionRepo,
+        session_path: Path | None = None,
+        sessions_root: Path | None = None,
+    ) -> None:
+        self._cwd = cwd
+        self._session = session
+        self._repo = repo
+        self._session_path = session_path
+        self._sessions_root = sessions_root
+        self._entries: list[Entry] = []
+        self._by_id: dict[str, Entry] = {}
+        self._leaf_id: str | None = None
+        self._name: str | None = None
+        self._labels: dict[str, str | None] = {}
+        self._session_id = ""
+        self._lock = asyncio.Lock()
+
+    # ------------------------------------------------------------------
+    # 工厂
+    # ------------------------------------------------------------------
+
+    @classmethod
+    async def create(
+        cls,
+        cwd: str,
+        sessions_dir: str | Path | None = None,
+        session_id: str | None = None,
+    ) -> "V4SessionManager":
+        """创建新 v4 会话（目录布局与 SessionManager 一致）。"""
+        root = Path(sessions_dir) if sessions_dir else _default_sessions_dir()
+        repo = JsonlSessionRepo(root)
+        session = await repo.create({"cwd": cwd, "id": session_id or uuidv7()})
+        return await cls._from_session(cwd, session, repo, root)
+
+    @classmethod
+    async def open(
+        cls,
+        filepath: str | Path,
+        cwd_override: str | None = None,
+    ) -> "V4SessionManager":
+        """打开已有会话文件（v3 自动惰性转换，v4 直接读取）。"""
+        repo = JsonlSessionRepo(_default_sessions_dir())
+        session = await repo.open_path(filepath, cwd_override)
+        metadata = await session.get_metadata()
+        cwd = cwd_override or cast(dict[str, Any], metadata)["cwd"]
+        return await cls._from_session(
+            cwd,
+            session,
+            repo,
+            Path(filepath).parent.parent,
+        )
+
+    @classmethod
+    async def in_memory(cls, cwd: str, session_id: str | None = None) -> "V4SessionManager":
+        """非持久化 v4 会话（内存模式）。"""
+        repo = InMemorySessionRepo()
+        session = await repo.create({"id": session_id or uuidv7()})
+        return await cls._from_session(cwd, session, repo, None)
+
+    @classmethod
+    async def _from_session(
+        cls,
+        cwd: str,
+        session: Session,
+        repo: JsonlSessionRepo | InMemorySessionRepo,
+        sessions_root: Path | None,
+    ) -> "V4SessionManager":
+        metadata = await session.get_metadata()
+        manager = cls(
+            cwd=cwd,
+            session=session,
+            repo=repo,
+            session_path=Path(cast(dict[str, Any], metadata)["path"])
+            if isinstance(repo, JsonlSessionRepo)
+            else None,
+            sessions_root=sessions_root,
+        )
+        await manager._refresh()
+        return manager
+
+    # ------------------------------------------------------------------
+    # 属性
+    # ------------------------------------------------------------------
+
+    @property
+    def session_id(self) -> str:
+        return self._session_id
+
+    @property
+    def session_path(self) -> Path | None:
+        return self._session_path
+
+    @property
+    def session_name(self) -> str | None:
+        return self._name
+
+    @property
+    def cwd(self) -> str:
+        return self._cwd
+
+    def is_persisted(self) -> bool:
+        return self._session_path is not None
+
+    # ------------------------------------------------------------------
+    # 同步访问器（读内存缓存）
+    # ------------------------------------------------------------------
+
+    def get_entries(self) -> list[Entry]:
+        return list(self._entries)
+
+    def get_entry(self, entry_id: str) -> Entry | None:
+        return self._by_id.get(entry_id)
+
+    def get_leaf_id(self) -> str | None:
+        return self._leaf_id
+
+    def get_label(self, target_id: str) -> str | None:
+        return self._labels.get(target_id)
+
+    def get_branch(self, from_id: str | None = None) -> list[Entry]:
+        start = from_id if from_id is not None else self._leaf_id
+        if start is None:
+            return []
+        path: list[Entry] = []
+        current: Entry | None = self._by_id.get(start)
+        seen: set[str] = set()
+        while current is not None:
+            if current["id"] in seen:
+                raise ValueError(f"Session branch contains a cycle at {current['id']}")
+            seen.add(current["id"])
+            path.append(current)
+            parent_id = current.get("parentId")
+            current = self._by_id.get(parent_id) if parent_id is not None else None
+        path.reverse()
+        return path
+
+    def build_context(self) -> list[AgentMessage]:
+        return list(build_session_context(self.get_branch())["messages"])
+
+    def get_last_model_change(self) -> tuple[str, str] | None:
+        for entry in reversed(self._entries):
+            if entry["type"] == "model_change":
+                return (
+                    cast(dict[str, Any], entry)["provider"],
+                    cast(dict[str, Any], entry)["modelId"],
+                )
+        return None
+
+    def get_tree(self) -> list[SessionTreeNode]:
+        """构建会话树（v4 无 leaf/label 条目：标签来自 labels 缓存）。"""
+        nodes: dict[str, SessionTreeNode] = {}
+        for entry in self._entries:
+            entry_id = entry["id"]
+            nodes[entry_id] = SessionTreeNode(
+                id=entry_id,
+                parent_id=entry.get("parentId"),
+                entry=cast(Any, entry),
+            )
+        for target_id, label in self._labels.items():
+            node = nodes.get(target_id)
+            if node is not None and label is not None:
+                node.label = label
+        roots: list[SessionTreeNode] = []
+        for entry in self._entries:
+            node = nodes[entry["id"]]
+            parent_id = entry.get("parentId")
+            if parent_id is None or parent_id == entry["id"]:
+                roots.append(node)
+                continue
+            parent = nodes.get(parent_id)
+            if parent is not None:
+                parent.children.append(node)
+            else:
+                roots.append(node)
+
+        def _sort(nodes_to_sort: list[SessionTreeNode]) -> None:
+            for node in nodes_to_sort:
+                node.children.sort(
+                    key=lambda child: int(cast(Any, child.entry or {}).get("timestamp", 0) or 0)
+                )
+                _sort(node.children)
+
+        _sort(roots)
+        return roots
+
+    # ------------------------------------------------------------------
+    # 写入（异步，写后刷新缓存）
+    # ------------------------------------------------------------------
+
+    async def append_message(self, message: AgentMessage) -> str:
+        entry_id = await self._session.append_message(message)
+        await self._refresh()
+        return entry_id
+
+    async def append_compaction(
+        self,
+        summary: str,
+        first_kept_entry_id: str,
+        tokens_before: int,
+        details: dict | None = None,
+    ) -> str:
+        entry_id = await self._session.append_compaction(
+            summary,
+            first_kept_entry_id=first_kept_entry_id,
+            tokens_before=tokens_before,
+            details=details,
+        )
+        await self._refresh()
+        return entry_id
+
+    async def append_model_change(self, provider: str, model_id: str) -> str:
+        entry_id = await self._session.append_model_change(provider, model_id)
+        await self._refresh()
+        return entry_id
+
+    async def append_thinking_level_change(self, thinking_level: str) -> str:
+        entry_id = await self._session.append_thinking_level_change(thinking_level)
+        await self._refresh()
+        return entry_id
+
+    async def append_custom_entry(self, custom_type: str, data: Any = None) -> str:
+        entry_id = await self._session.append_custom_entry(custom_type, data)
+        await self._refresh()
+        return entry_id
+
+    async def append_custom_message_entry(
+        self,
+        custom_type: str,
+        content: Any,
+        *,
+        display: bool = True,
+        details: Any = None,
+    ) -> str:
+        entry_id = await self._session.append_custom_message_entry(
+            custom_type, content, display=display, details=details
+        )
+        await self._refresh()
+        return entry_id
+
+    async def append_session_info(self, name: str | None) -> str:
+        if name is not None:
+            await self._session.set_name(name)
+        else:
+            self._name = None
+        await self._refresh()
+        return ""
+
+    def set_session_name(self, name: str) -> None:
+        """同步设置会话名（异步持久化，对齐 SessionManager）。"""
+        self._name = name
+        _schedule_task(self.append_session_info(name))
+
+    async def append_label(self, target_id: str, label: str | None) -> str:
+        await self._session.set_label(target_id, label)
+        await self._refresh()
+        return target_id
+
+    def set_label(self, target_id: str, label: str | None) -> None:
+        """同步设置标签（异步持久化）。"""
+        self._labels[target_id] = label
+        _schedule_task(self.append_label(target_id, label))
+
+    async def move_to(
+        self, entry_id: str | None, summary: dict[str, Any] | None = None
+    ) -> str | None:
+        result = await self._session.move_to(entry_id, summary)
+        await self._refresh()
+        return result
+
+    async def fork(
+        self,
+        from_entry_id: str,
+        *,
+        position: str = "at",
+        session_id: str | None = None,
+        sessions_dir: str | Path | None = None,
+    ) -> "V4SessionManager":
+        """从指定条目 fork 新分支（v4 branch scope）。"""
+        path = self.get_branch(from_entry_id)
+        if not path:
+            raise ValueError(f"Entry not found: {from_entry_id}")
+        root = (
+            Path(sessions_dir) if sessions_dir else (self._sessions_root or _default_sessions_dir())
+        )
+        repo = JsonlSessionRepo(root)
+        session = await repo.fork(
+            cast(SessionMetadata, await self._session.get_metadata()),
+            cast(
+                Any,
+                {
+                    "scope": "branch",
+                    "entryId": from_entry_id,
+                    "position": position,
+                    "id": session_id or uuidv7(),
+                    "cwd": self._cwd,
+                },
+            ),
+        )
+        return await V4SessionManager._from_session(self._cwd, session, repo, root)
+
+    # ------------------------------------------------------------------
+    # Operation records（M4）
+    # ------------------------------------------------------------------
+
+    async def start_operation(
+        self,
+        kind: str,
+        *,
+        run_id: str | None = None,
+        source_leaf_id: str | None = None,
+        original_prompt: list[AgentMessage] | None = None,
+        initial_messages: list[dict[str, Any]] | None = None,
+        custom_instructions: str | None = None,
+        result_entry_id: str | None = None,
+        target_id: str | None = None,
+        summarize: bool = False,
+    ) -> str:
+        """写入 operation_started 记录（run / compaction / navigation）。"""
+        record_id = run_id or uuidv7()
+        if kind == "run":
+            intent: dict[str, Any] = {
+                "kind": "run",
+                "originalPrompt": list(original_prompt or []),
+                "initialMessages": list(initial_messages or []),
+            }
+        elif kind == "compaction":
+            intent = {"kind": "compaction", "resultEntryId": result_entry_id or ""}
+        elif kind == "navigation":
+            intent = {"kind": "navigation", "targetId": target_id, "summarize": summarize}
+            if custom_instructions is not None:
+                intent["customInstructions"] = custom_instructions
+        else:
+            raise ValueError(f"Unknown operation kind: {kind}")
+        await self._session.append_record(
+            {
+                "type": "operation_started",
+                "id": record_id,
+                "lane": "main",
+                "sourceLeafId": source_leaf_id or self._leaf_id,
+                "intent": intent,
+            }
+        )
+        return record_id
+
+    async def finish_operation(
+        self,
+        run_id: str,
+        outcome: str = "completed",
+        error: dict[str, str] | None = None,
+    ) -> None:
+        """写入 operation_finished 记录。"""
+        record: dict[str, Any] = {
+            "type": "operation_finished",
+            "id": uuidv7(),
+            "lane": "main",
+            "runId": run_id,
+            "outcome": outcome,
+        }
+        if error is not None:
+            record["error"] = error
+        await self._session.append_record(record)
+
+    async def record_usage(
+        self,
+        *,
+        cause: str,
+        usage: dict[str, Any],
+        run_id: str | None = None,
+        entry_id: str | None = None,
+        attempt: int | None = None,
+        stop_reason: str | None = None,
+        details: Any = None,
+    ) -> None:
+        """写入 usage 记录（影响会话统计）。"""
+        record: dict[str, Any] = {
+            "type": "usage",
+            "id": uuidv7(),
+            "lane": "main",
+            "cause": cause,
+            "usage": usage,
+        }
+        if run_id is not None:
+            record["runId"] = run_id
+        if entry_id is not None:
+            record["entryId"] = entry_id
+        if attempt is not None:
+            record["attempt"] = attempt
+        if stop_reason is not None:
+            record["stopReason"] = stop_reason
+        if details is not None:
+            record["details"] = details
+        await self._session.append_record(record)
+
+    async def find_records(self, query: dict[str, Any] | None = None) -> list[dict]:
+        return [
+            cast(dict[str, Any], record)
+            for record in await self._session.find_records(cast(Any, query))
+        ]
+
+    async def open_operations(self, lane: str = "main", limit: int = 2) -> list[dict]:
+        return [
+            cast(dict[str, Any], operation)
+            for operation in await self._session.find_open_operations(lane, {"limit": limit})
+        ]
+
+    async def recovery_state(self, lane: str = "main") -> str:
+        """0=idle、1=suspended、>=2=corrupt（对齐 TS findOpenOperations）。"""
+        operations = await self.open_operations(lane, limit=2)
+        if len(operations) == 0:
+            return "idle"
+        if len(operations) == 1:
+            return "suspended"
+        return "corrupt"
+
+    async def get_session_stats(self) -> dict[str, Any]:
+        return cast(dict[str, Any], await self._session.get_stats())
+
+    # ------------------------------------------------------------------
+    # 其他
+    # ------------------------------------------------------------------
+
+    async def edit_message(
+        self,
+        entry_id: str,
+        new_text: str,
+        *,
+        mode: str = "merge",
+    ) -> str:
+        """把新文本合并/替换进一条历史 user 消息（v4 原生语义）。
+
+        v4 仅追加：追加一条合并后的 user 消息并把 main lane 移到它，
+        旧条目保留在文件中（旧分支仍可被树查看）。
+        """
+        if mode not in ("merge", "replace"):
+            raise ValueError(f"Unknown edit mode: {mode}")
+        target = self.get_entry(entry_id)
+        if target is None:
+            raise ValueError(f"Entry not found: {entry_id}")
+        if target["type"] != "message":
+            raise ValueError(f"Entry {entry_id} is not a message")
+        message = cast(dict[str, Any], target).get("message")
+        if not isinstance(message, dict) or message.get("role") != "user":
+            raise ValueError(f"Entry {entry_id} is not a user message")
+        if not isinstance(message.get("content"), str):
+            raise ValueError(f"Entry {entry_id} is not a plain-text user message")
+        original = cast(str, message.get("content", ""))
+        if mode == "replace":
+            merged = new_text
+        elif original:
+            merged = f"{original}\n\n{new_text}".strip()
+        else:
+            merged = new_text
+        new_message = cast(
+            AgentMessage,
+            {
+                "role": "user",
+                "content": merged,
+                "timestamp": time.time_ns() // 1_000_000,
+            },
+        )
+        new_id = await self._session.append_message(new_message)
+        await self._session.move_lane("main", new_id)
+        await self._refresh()
+        return merged
+
+    @staticmethod
+    async def list_sessions(directory: str | Path, cwd: str | None = None) -> list[SessionInfo]:
+        """列出会话（v4 元数据；v3 文件同样可列出）。"""
+        repo = JsonlSessionRepo(directory)
+        options: JsonlSessionListOptions | None = {"cwd": cwd} if cwd is not None else None
+        metadata = await repo.list(options)
+        return [
+            SessionInfo(
+                path=item["path"],
+                session_id=item["id"],
+                cwd=item.get("cwd", ""),
+                modified=item.get("modifiedAt", 0) / 1000,
+            )
+            for item in metadata
+        ]
+
+    async def with_lock(self, fn):
+        """文件级锁保护（对齐 SessionManager）。"""
+
+        async def _run() -> Any:
+            result = fn(self)
+            if inspect.isawaitable(result):
+                return await result
+            return result
+
+        if self._session_path is None:
+            return await _run()
+        lock = FileLock(str(self._session_path) + ".lock", timeout=30)
+        lock.acquire()
+        try:
+            return await _run()
+        finally:
+            lock.release()
+
+    # ------------------------------------------------------------------
+    # 内部
+    # ------------------------------------------------------------------
+
+    async def _refresh(self) -> None:
+        self._entries = await self._session.find_entries({"order": "oldestFirst"})
+        self._by_id = {entry["id"]: entry for entry in self._entries}
+        self._leaf_id = await self._session.get_leaf_id()
+        self._name = await self._session.get_name()
+        self._labels = {}
+        for entry in self._entries:
+            self._labels[entry["id"]] = await self._session.get_label(entry["id"])
+        metadata = await self._session.get_metadata()
+        self._session_id = metadata["id"]
+
+
+__all__ = [
+    "SessionManagerLike",
+    "V4SessionManager",
+    "create_session_manager",
+    "edit_session_message",
+    "fork_session_manager",
+    "open_session_manager",
+    "in_memory_session_manager",
+    "list_sessions",
+    "v4_sessions_enabled",
+]

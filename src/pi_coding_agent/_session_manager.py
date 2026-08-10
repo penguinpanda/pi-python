@@ -4,6 +4,10 @@ JSONL 会话持久化
 格式: 每行一个 JSON 对象，首行为 SessionHeader，后续为 SessionMessageEntry。
 parentId 形成会话树（支持分支、树查看、压缩与分支摘要）。
 
+注意：本模块是 v3 遗留实现（写 v3 JSONL）。默认会话已切换到
+`_session_manager_v4.V4SessionManager`（JSONL v4）；本模块仅保留给
+`PI_SESSION_FORMAT=v3` 调试回退与既有测试使用，不再演进。
+
 用法:
     mgr = SessionManager.create(cwd="/path/to/project")
     mgr.append_message(msg)            # 追加消息
@@ -212,8 +216,9 @@ class SessionManager:
         return self._session_name
 
     def set_session_name(self, name: str) -> None:
-        """设置会话显示名（当前为进程内属性，不写入 JSONL）。"""
+        """设置会话显示名并异步持久化为 session_info 条目。"""
         self._session_name = name
+        _schedule_task(self.append_session_info(name))
 
     @property
     def cwd(self) -> str:

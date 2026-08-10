@@ -29,7 +29,13 @@ from .tools import create_all_tools, filter_tools_by_names
 from .rpc import run_rpc_mode
 from .modes.interactive import run_tui_mode
 from ._session import AgentSession
-from ._session_manager import SessionManager
+from ._session_manager_v4 import (
+    SessionManagerLike,
+    create_session_manager,
+    in_memory_session_manager,
+    list_sessions,
+    open_session_manager,
+)
 from .auth_storage import AuthStorage
 from .compaction import compaction_settings_from_config
 from .model_resolver import (
@@ -146,17 +152,17 @@ async def _async_main(args: list[str] | None = None) -> int:
         return _print_models(runtime, provider_id=parsed.provider)
 
     # 会话管理
-    session_manager: SessionManager
+    session_manager: SessionManagerLike
     if parsed.no_session:
-        session_manager = SessionManager.in_memory(cwd)
+        session_manager = await in_memory_session_manager(cwd)
     elif parsed.continue_session:
         # 继续最近的会话
-        session_manager = _find_latest_session(cwd)
+        session_manager = await _find_latest_session(cwd)
     elif parsed.session:
-        session_manager = SessionManager.open(parsed.session, cwd_override=cwd)
+        session_manager = await open_session_manager(parsed.session, cwd_override=cwd)
     else:
         # 全新会话
-        session_manager = SessionManager.create(cwd)
+        session_manager = await create_session_manager(cwd)
 
     # 解析模型（含 --models 循环列表；继续会话时优先恢复）
     is_continuing = bool(parsed.continue_session or parsed.session)
@@ -278,7 +284,7 @@ async def _async_main(args: list[str] | None = None) -> int:
 
     # 创建 Agent
     def build_session(
-        sm: SessionManager,
+        sm: SessionManagerLike,
         session_model: Model,
         session_scoped: list[ScopedModel],
     ) -> AgentSession:
@@ -325,20 +331,20 @@ async def _async_main(args: list[str] | None = None) -> int:
         session.set_thinking_level(preset["thinking"])
 
     async def session_factory() -> AgentSession:
-        fresh_manager = SessionManager.create(cwd)
+        fresh_manager = await create_session_manager(cwd)
         fresh_model, fresh_scoped = await _resolve_initial_model(
             runtime, parsed, settings, fresh_manager, is_continuing=False
         )
         return build_session(fresh_manager, fresh_model, fresh_scoped)
 
     async def resume_factory(path: str) -> AgentSession:
-        restored_manager = SessionManager.open(path, cwd_override=cwd)
+        restored_manager = await open_session_manager(path, cwd_override=cwd)
         restored_model, restored_scoped = await _resolve_initial_model(
             runtime, parsed, settings, restored_manager, is_continuing=True
         )
         return build_session(restored_manager, restored_model, restored_scoped)
 
-    async def rebuilder(manager: SessionManager) -> AgentSession:
+    async def rebuilder(manager: SessionManagerLike) -> AgentSession:
         model, scoped = await _resolve_initial_model(
             runtime, parsed, settings, manager, is_continuing=True
         )
@@ -716,7 +722,7 @@ async def _resolve_initial_model(
     runtime: ModelRuntime,
     parsed,
     settings: dict,
-    session_manager: SessionManager,
+    session_manager: SessionManagerLike,
     is_continuing: bool,
 ) -> tuple[Model, list[ScopedModel]]:
     """解析初始模型 + --models 循环列表。返回 (model, scoped_models)。"""
@@ -759,19 +765,19 @@ def _read_stdin() -> str | None:
         return None
 
 
-def _find_latest_session(cwd: str) -> SessionManager:
+async def _find_latest_session(cwd: str) -> SessionManagerLike:
     """在默认会话目录中查找最近修改的会话文件并打开。"""
     sessions_dir = get_sessions_dir()
     if not sessions_dir.exists():
         # 无会话目录，创建新会话
-        return SessionManager.create(cwd)
+        return await create_session_manager(cwd)
 
-    infos = SessionManager.list_sessions(sessions_dir)
+    infos = await list_sessions(sessions_dir)
     if infos:
-        return SessionManager.open(infos[0].path, cwd_override=cwd)
+        return await open_session_manager(infos[0].path, cwd_override=cwd)
 
     # 无会话文件，创建新会话
-    return SessionManager.create(cwd)
+    return await create_session_manager(cwd)
 
 
 if __name__ == "__main__":

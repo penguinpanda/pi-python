@@ -101,9 +101,22 @@
 - 技能系统对齐 TS v0.84.0：frontmatter 改用完整 YAML 解析（PyYAML），
   gitignore 匹配改用 pathspec（完整 gitignore 语义），harness 层补齐 symlink
   解析与 TS 路径语义；显式技能路径补齐非 .md 警告与来源归属
+- 会话接入 JSONL v4（`pi_agent.session.v4`）：多 lane / 全局 seq / facts /
+  自包含 compaction；新会话默认写 v4，旧 v3 文件打开时惰性转换并保留 `.bak`，
+  `PI_SESSION_FORMAT=v3` 可回退；`V4SessionManager` 与 `SessionManager` API
+  对齐并接入 CLI / RPC / TUI / server
+- v4 会话写入 operation records（run / compaction / navigation 的开始与结束 +
+  usage），`findOpenOperations` 支持挂起恢复检测；`/input` 编辑改为 v4 原生
+  追加改写（合并后的 user 消息 + 移动 lane，旧条目保留）
+- `AgentSession` 新增挂起恢复入口（`recovery_state` / `open_operations` /
+  `resume_suspended_operation`：重放挂起 run 的原始 prompt）；v3
+  `SessionManager` 标记为 legacy，默认会话统一走 v4（`PI_SESSION_FORMAT=v3`
+  仅作调试回退）
 
 ### Fixed
 
+- 修复 `test_cli.py` 对 `_cli.SessionManager` 的引用：改为 patch
+  `create_session_manager` 工厂（配合 CLI 默认 v4 会话接线）
 - `Agent._run_prompt` / `_run_continue` 将 context 快照构造移入 try/finally，
   构造异常时也能复位运行状态并置位 `_settled`（ `runWithLifecycle`）；
   运行中 `prompt()` / `continue_()` 的 `RuntimeError` 消息补充
