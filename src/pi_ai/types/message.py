@@ -133,6 +133,7 @@ class AssistantMessage(BaseMessage):
     diagnostics: NotRequired[list[AssistantMessageDiagnostic]]  # 诊断信息
     error_message: NotRequired[str | None]  # 错误信息
     raw_stop_reason: NotRequired[str]  # 上游原始 finish_reason
+    responses_items: NotRequired[list[dict[str, Any]]]  # Responses 原始 item（如 web_search_call）
 
 
 class ToolDetails(TypedDict, total=False):

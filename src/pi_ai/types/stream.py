@@ -28,9 +28,9 @@ from typing_extensions import NotRequired
 from .common import (
     AsyncHTTPClient,
     CacheRetention,
+    ModelThinkingLevel,
     ProviderEnv,
     ThinkingBudgets,
-    ThinkingLevel,
     Transport,
 )
 from .content import ToolCall
@@ -189,6 +189,10 @@ class StreamOptions(TypedDict, total=False):
 
     temperature: float
     max_tokens: int
+    # 推理级别（Responses / Completions 通用；由各 API 实现翻译为协议字段）。
+    reasoning: NotRequired[ModelThinkingLevel]
+    # 是否启用服务端 web_search；None 表示由 API 实现按 provider/compat 决定。
+    web_search: NotRequired[bool]
     api_key: str
     # Provider 层解析后的 Base URL（注册表分发时注入；None 时回退 model.base_url）
     base_url: NotRequired[str]
@@ -247,10 +251,7 @@ ProviderStreamOptions = StreamOptions
 
 
 class SimpleStreamOptions(StreamOptions):
-    """统一选项 + 推理参数（streamSimple / completeSimple 使用）"""
-
-    # 推理级别
-    reasoning: NotRequired[ThinkingLevel]
+    """统一选项 + 推理预算参数（streamSimple / completeSimple 使用）"""
 
     # 各推理级别的自定义 token 预算（仅 token-based provider）
     thinking_budgets: NotRequired[ThinkingBudgets]

@@ -98,12 +98,12 @@ def _chunk(content=None, tool_calls=None, finish_reason=None, usage=None, reason
 
 
 def _make_deepseek_v4_model() -> Model:
-    """deepseek-v4-flash 元数据（镜像生成目录 deepseek.json）。"""
+    """deepseek-v4-pro 元数据（Completions 路径，flash 已切到 Responses）。"""
     return Model(
-        id="deepseek-v4-flash",
+        id="deepseek-v4-pro",
         provider="deepseek",
         api="openai-completions",
-        name="DeepSeek V4 Flash",
+        name="DeepSeek V4 Pro",
         input=["text"],
         output=["text"],
         reasoning=True,

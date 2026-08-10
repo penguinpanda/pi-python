@@ -82,6 +82,7 @@ class OpenAIResponsesCompat(TypedDict, total=False):
     supportsDeveloperRole: bool
     sessionAffinityFormat: SessionAffinityFormat
     supportsLongCacheRetention: bool
+    supportsWebSearch: bool
     supportsStrictMode: bool
     supportsOpenAIGrammarTools: bool
     supportsToolSearch: bool

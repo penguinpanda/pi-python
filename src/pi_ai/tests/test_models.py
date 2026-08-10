@@ -52,6 +52,10 @@ class TestModelsRegistry:
         assert gpt5.api == "openai-responses"
         assert gpt5.context_window == 128000
 
+        ds_flash = models.get_model("deepseek", "deepseek-v4-flash")
+        assert ds_flash is not None
+        assert ds_flash.api == "openai-responses"
+
         ds_pro = models.get_model("deepseek", "deepseek-v4-pro")
         assert ds_pro is not None
         assert ds_pro.api == "openai-completions"

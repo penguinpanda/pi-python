@@ -22,6 +22,7 @@ import sys
 
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 # 本文件位于 <repo>/src/pi_ai/scripts/ 或安装后的 pi_ai/scripts/。
 _HERE = Path(__file__).resolve().parent
@@ -36,6 +37,26 @@ if (_SRC.parent / "src" / "pi_ai").is_dir():
     REPO_ROOT = _SRC.parent
 else:
     REPO_ROOT = _HERE.parent
+
+
+# 生成目录的本地协议/兼容覆盖（对齐 TS 上游数据尚未同步前的 Python 侧修正）。
+# 这里只放无法从当前 TS 产物直接继承的字段；上游 TS 数据更新后应优先改上游。
+_MODEL_OVERRIDES: dict[str, dict[str, dict[str, Any]]] = {
+    "deepseek": {
+        "deepseek-v4-flash": {
+            "api": "openai-responses",
+            "compat": {
+                "supportsStore": False,
+                "supportsDeveloperRole": False,
+                "requiresReasoningContentOnAssistantMessages": True,
+                "thinkingFormat": "deepseek",
+                "supportsExplicitPromptCacheMode": False,
+                "supportsLongCacheRetention": False,
+                "supportsWebSearch": True,
+            },
+        },
+    },
+}
 
 
 def _number(value) -> float:
@@ -87,13 +108,85 @@ def convert_ts_model(ts: dict) -> dict:
     }
 
 
+def _generated_to_ts_model(model: dict[str, Any]) -> dict[str, Any]:
+    """已生成的 snake_case 模型 → TS camelCase，支持把 generated 目录作为输入。"""
+    cost = model.get("cost") or {}
+    return {
+        "id": model["id"],
+        "provider": model.get("provider", ""),
+        "api": model.get("api", ""),
+        "name": model.get("name", ""),
+        "input": list(model.get("input") or []),
+        "output": list(model.get("output") or []),
+        "cost": {
+            "input": _number(cost.get("input")),
+            "output": _number(cost.get("output")),
+            "cacheRead": _number(cost.get("cache_read")),
+            "cacheWrite": _number(cost.get("cache_write")),
+            "tiers": [
+                {
+                    "input": _number(tier.get("input")),
+                    "output": _number(tier.get("output")),
+                    "cacheRead": _number(tier.get("cache_read")),
+                    "cacheWrite": _number(tier.get("cache_write")),
+                    "inputTokensAbove": int(tier.get("input_tokens_above", 0) or 0),
+                }
+                for tier in cost.get("tiers") or []
+            ],
+        },
+        "maxTokens": model.get("max_tokens", 4096),
+        "baseUrl": model.get("base_url", ""),
+        "contextWindow": model.get("context_window", 0),
+        "headers": model.get("headers"),
+        "compat": model.get("compat"),
+        "thinkingLevelMap": model.get("thinking_level_map"),
+        "reasoning": bool(model.get("reasoning", False)),
+    }
+
+
+def _apply_model_overrides(
+    provider_id: str,
+    model_id: str,
+    converted: dict[str, Any],
+) -> dict[str, Any]:
+    """应用本地模型 override；compat 按字段合并，其余字段直接覆盖。"""
+    override = _MODEL_OVERRIDES.get(provider_id, {}).get(model_id)
+    if not override:
+        return converted
+
+    result = dict(converted)
+    for key, value in override.items():
+        if key == "compat":
+            merged = dict(converted.get("compat") or {})
+            merged.update(value)
+            result["compat"] = merged
+        else:
+            result[key] = value
+    return result
+
+
+def _normalize_catalog_format(
+    catalog: dict[str, dict[str, dict]],
+) -> dict[str, dict[str, dict]]:
+    """识别已生成的 snake_case 目录并转回 TS camelCase。"""
+    normalized: dict[str, dict[str, dict]] = {}
+    for provider_id, models in catalog.items():
+        if models and "max_tokens" in next(iter(models.values())):
+            normalized[provider_id] = {
+                model_id: _generated_to_ts_model(model) for model_id, model in models.items()
+            }
+        else:
+            normalized[provider_id] = models
+    return normalized
+
+
 def load_ts_catalog(source: Path) -> dict[str, dict[str, dict]]:
     """加载 TS JSON 目录 → {provider_id: {model_id: model}}。"""
     if source.is_file():
         data = json.loads(source.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             raise ValueError(f"Invalid catalog file: {source}")
-        return data
+        return _normalize_catalog_format(data)
     if not source.is_dir():
         raise ValueError(f"Source does not exist: {source}")
 
@@ -121,7 +214,7 @@ def load_ts_catalog(source: Path) -> dict[str, dict[str, dict]]:
             continue
         seen.add(provider_id)
         catalog[provider_id] = data
-    return catalog
+    return _normalize_catalog_format(catalog)
 
 
 def write_generated(
@@ -136,7 +229,11 @@ def write_generated(
     provider_ids = sorted(catalog)
     for provider_id in provider_ids:
         converted = {
-            model_id: convert_ts_model(model)
+            model_id: _apply_model_overrides(
+                provider_id,
+                model_id,
+                convert_ts_model(model),
+            )
             for model_id, model in sorted(catalog[provider_id].items())
         }
         (providers_dir / f"{provider_id}.json").write_text(
@@ -151,7 +248,7 @@ def write_generated(
 
 
 def _generated_init_template(generated_at: str, provider_ids: list[str]) -> str:
-    ids_repr = ", ".join(repr(p) for p in provider_ids)
+    ids_lines = "\n".join(f"    {json.dumps(provider_id)}," for provider_id in provider_ids)
     return f'''"""自动生成的模型目录（由 src/pi_ai/scripts/generate_models.py 生成，勿手改）。"""
 
 import json
@@ -160,8 +257,10 @@ from pathlib import Path
 from ..models_store import model_from_dict
 from ...types import Model
 
-GENERATED_AT = {generated_at!r}
-MODEL_PROVIDERS: list[str] = [{ids_repr}]
+GENERATED_AT = {json.dumps(generated_at)}
+MODEL_PROVIDERS: list[str] = [
+{ids_lines}
+]
 
 
 def load_generated_models() -> dict[str, list[Model]]:

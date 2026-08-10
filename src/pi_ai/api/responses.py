@@ -58,6 +58,7 @@ Responses API 返回的是"事件(Event)"，
 import asyncio
 import json
 from typing import Any, cast
+from urllib.parse import urlparse
 
 import httpx
 from openai import AsyncOpenAI
@@ -69,6 +70,7 @@ from ..types import (
     ContentBlock,
     Context,
     Model,
+    ModelThinkingLevel,
     StartEvent,
     StopReason,
     StreamOptions,
@@ -91,10 +93,14 @@ from ._shared import (
     build_error_message,
     empty_usage,
     parse_tool_arguments,
-    to_openai_tools,
+    to_responses_tools,
 )
 from .simple_options import clamp_max_tokens_to_context
-from .compat_runtime import max_tokens_field, supports_long_cache_retention, supports_strict_mode
+from .compat_runtime import (
+    compat_value,
+    supports_long_cache_retention,
+    supports_strict_mode,
+)
 from .transform_messages import (
     normalize_responses_tool_call_id,
     short_hash,
@@ -232,10 +238,90 @@ def _create_client(
     return AsyncOpenAI(**kwargs)
 
 
+def _is_official_deepseek_base_url(base_url: str) -> bool:
+    """DeepSeek 官方域名（api.deepseek.com 及 *.deepseek.com）。"""
+    host = urlparse(base_url).hostname or ""
+    return host == "api.deepseek.com" or host.endswith(".deepseek.com")
+
+
+def _resolve_web_search(
+    model: Model,
+    base_url: str,
+    options: StreamOptions | None,
+) -> bool:
+    """解析是否启用服务端 web_search。
+
+    显式 StreamOptions.web_search 优先；未显式时仅在官方 DeepSeek
+    Responses 且模型 compat 声明支持时默认开启。
+    """
+    opts = options or {}
+    if opts.get("web_search") is not None:
+        return bool(opts["web_search"])
+    if not compat_value(model, "supportsWebSearch", False):
+        return False
+    return model.provider == "deepseek" and _is_official_deepseek_base_url(base_url)
+
+
+def _build_responses_reasoning(
+    model: Model,
+    reasoning_level: ModelThinkingLevel | None,
+) -> dict[str, Any] | None:
+    """把 pi 推理级别翻译为 Responses API 的 reasoning 参数。"""
+    if reasoning_level is None:
+        return None
+
+    mapping = model.thinking_level_map or {}
+    if reasoning_level == "off":
+        if mapping.get("off") is None and "off" in mapping:
+            return None
+        return {"effort": "none"}
+
+    if reasoning_level in mapping:
+        mapped = mapping[reasoning_level]
+        if mapped is None:
+            return None
+        return {"effort": mapped}
+    return {"effort": reasoning_level}
+
+
+def _parse_response_usage(resp: Any, model: Model) -> Usage:
+    """从 Responses response 提取 usage，包含缓存与推理 token 明细。"""
+    usage_obj = getattr(resp, "usage", None)
+    if not usage_obj:
+        return empty_usage()
+
+    input_tokens = getattr(usage_obj, "input_tokens", 0) or 0
+    output_tokens = getattr(usage_obj, "output_tokens", 0) or 0
+    total_tokens = getattr(usage_obj, "total_tokens", 0) or 0
+    input_details = getattr(usage_obj, "input_tokens_details", None)
+    output_details = getattr(usage_obj, "output_tokens_details", None)
+    cache_read = 0
+    cache_write = 0
+    reasoning_tokens = 0
+    if input_details is not None:
+        cache_read = getattr(input_details, "cached_tokens", 0) or 0
+        cache_write = getattr(input_details, "cache_write_tokens", 0) or 0
+    if output_details is not None:
+        reasoning_tokens = getattr(output_details, "reasoning_tokens", 0) or 0
+
+    usage = Usage(
+        input=input_tokens,
+        output=output_tokens,
+        cache_read=cache_read,
+        cache_write=cache_write,
+        total_tokens=total_tokens or (input_tokens + output_tokens),
+        cost={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0},
+    )
+    if reasoning_tokens:
+        usage["reasoning"] = reasoning_tokens
+    calculate_cost(model, usage)
+    return usage
+
+
 def _to_responses_input(
     messages: list[Any],
-    system: str | None,
     model: Model | None = None,
+    replay_web_search_items: bool = True,
 ) -> list[dict[str, Any]]:
     """
     将 SDK Message
@@ -284,12 +370,12 @@ def _to_responses_input(
         当模型不支持 image 时，图片内容会被跳过。
 
         为 None 时不做过滤（保持向后兼容）。
+
+    replay_web_search_items
+        是否回放历史 assistant 消息中的 web_search_call 原始 item。
+        服务端 web_search 关闭时传 False，避免把已失效的搜索项塞回 input。
     """
     items: list[dict[str, Any]] = []
-
-    # System prompt as first item
-    if system:
-        items.append({"role": "system", "content": system})
 
     # 消息索引：用于文本消息 fallback id（msg_pi_{index}）。
     msg_index = 0
@@ -366,6 +452,13 @@ def _to_responses_input(
                 and msg.get("api") == model.api
             )
             text_block_index = 0
+
+            # 服务端 web_search 的历史项在 stateless 模式下必须原样回传，
+            # 否则后续轮次拿不到搜索结果上下文。
+            if replay_web_search_items and not is_different_model:
+                for item in msg.get("responses_items") or []:
+                    if isinstance(item, dict) and item.get("type") == "web_search_call":
+                        output.append(item)
 
             for block in msg["content"]:
                 block_type = block["type"]
@@ -556,18 +649,25 @@ async def responses_stream(
             # 孤立 tool call 合成错误结果。
             #
             # Responses 系 provider 使用管道分隔 ID（call_id|fc_item_id）。
+            web_search_enabled = _resolve_web_search(model, base_url, options)
             transformed_messages = transform_messages(
                 context.messages, model, normalize_responses_tool_call_id
             )
-            input_items = _to_responses_input(transformed_messages, context.system_prompt, model)
-            tools = (
-                to_openai_tools(
-                    context.tools,
-                    supports_strict_mode=supports_strict_mode(model),
-                )
-                if context.tools
-                else None
+            input_items = _to_responses_input(
+                transformed_messages,
+                model,
+                replay_web_search_items=web_search_enabled,
             )
+            tools: list[dict[str, Any]] = []
+            if web_search_enabled:
+                tools.append({"type": "web_search"})
+            if context.tools:
+                tools.extend(
+                    to_responses_tools(
+                        context.tools,
+                        supports_strict_mode=supports_strict_mode(model),
+                    )
+                )
 
             # Responses API 请求参数。
             #
@@ -577,7 +677,11 @@ async def responses_stream(
             #
             # temperature
             #
-            # max_tokens
+            # max_output_tokens
+            #
+            # instructions
+            #
+            # reasoning
             #
             # tools。
             kwargs: dict[str, Any] = {
@@ -585,29 +689,39 @@ async def responses_stream(
                 "input": input_items,
                 "stream": True,
             }
+            if context.system_prompt:
+                kwargs["instructions"] = context.system_prompt
             if tools:
                 kwargs["tools"] = tools
             temperature = opts.get("temperature")
             if temperature is not None:
                 kwargs["temperature"] = temperature
-            # max_tokens 收敛到模型上下文窗口内（对齐 TS buildBaseOptions）：
+            # max_output_tokens 收敛到模型上下文窗口内（对齐 TS buildBaseOptions）：
             # 未指定时使用模型默认 max_tokens，始终发送收敛后的值。
             requested = opts.get("max_tokens")
-            kwargs[max_tokens_field(model)] = clamp_max_tokens_to_context(
+            kwargs["max_output_tokens"] = clamp_max_tokens_to_context(
                 model,
                 context,
                 requested if requested is not None else model.max_tokens,
             )
+            reasoning = _build_responses_reasoning(model, opts.get("reasoning"))
+            if reasoning is not None:
+                kwargs["reasoning"] = reasoning
 
             # 提示缓存（Prompt Cache，对齐 TS openai-responses.ts）：
-            #   prompt_cache_key：cache_retention != none 时发送（session_id 截断 64 字符）
+            #   prompt_cache_key：仅 supportsExplicitPromptCacheMode 时发送
             #   prompt_cache_retention：long 且支持长缓存时发送 "24h"
-            cache_retention = resolve_cache_retention(opts.get("cache_retention"), opts.get("env"))
-            supports_long = supports_long_cache_retention(model)
-            if cache_retention != "none":
-                kwargs["prompt_cache_key"] = clamp_openai_prompt_cache_key(opts.get("session_id"))
-            if cache_retention == "long" and supports_long:
-                kwargs["prompt_cache_retention"] = "24h"
+            if compat_value(model, "supportsExplicitPromptCacheMode", True):
+                cache_retention = resolve_cache_retention(
+                    opts.get("cache_retention"), opts.get("env")
+                )
+                supports_long = supports_long_cache_retention(model)
+                if cache_retention != "none":
+                    kwargs["prompt_cache_key"] = clamp_openai_prompt_cache_key(
+                        opts.get("session_id")
+                    )
+                if cache_retention == "long" and supports_long:
+                    kwargs["prompt_cache_retention"] = "24h"
 
             # 发起流式请求。
             #
@@ -629,6 +743,8 @@ async def responses_stream(
             # Token 使用统计。
             usage: Usage = empty_usage()
             stop_reason: StopReason = "stop"
+            responses_items: list[dict[str, Any]] = []
+            failed = False
 
             def _partial() -> AssistantMessage:
                 """构造当前累积状态的 partial AssistantMessage 快照。"""
@@ -741,6 +857,16 @@ async def responses_stream(
                         )
                     )
 
+                # 文本块完成（DeepSeek 可能只发 done 不发 delta）。
+                elif event_type == "response.output_text.done":
+                    text = getattr(event, "text", "") or ""
+                    if text:
+                        if current_kind == "text" and current_index is not None:
+                            cast(TextContent, content_blocks[current_index])["text"] = text
+                        else:
+                            idx = _begin_text()
+                            cast(TextContent, content_blocks[idx])["text"] = text
+
                 # 新 Tool Call。
                 elif event_type == "response.output_item.added":
                     item = getattr(event, "item", None)
@@ -795,6 +921,12 @@ async def responses_stream(
                 elif event_type == "response.output_item.done":
                     item = getattr(event, "item", None)
                     item_type = getattr(item, "type", None) if item else None
+
+                    # 服务端 web_search 项：保留完整原始 item 供 stateless 回放。
+                    if item_type == "web_search_call" and web_search_enabled:
+                        raw_item = _to_jsonable(item)
+                        if isinstance(raw_item, dict) and raw_item.get("id"):
+                            responses_items.append(raw_item)
 
                     # Reasoning 项：
                     #
@@ -855,6 +987,37 @@ async def responses_stream(
                         )
                     )
 
+                elif event_type == "response.reasoning_text.done":
+                    text = getattr(event, "text", "") or ""
+                    if text:
+                        if current_kind == "thinking" and current_index is not None:
+                            cast(ThinkingContent, content_blocks[current_index])["thinking"] = text
+                        else:
+                            idx = _begin_thinking()
+                            cast(ThinkingContent, content_blocks[idx])["thinking"] = text
+
+                elif event_type == "response.reasoning_summary_text.delta":
+                    delta = getattr(event, "delta", "")
+                    idx = _begin_thinking()
+                    cast(ThinkingContent, content_blocks[idx])["thinking"] += delta
+                    stream.push(
+                        ThinkingDeltaEvent(
+                            type="thinking_delta",
+                            content_index=idx,
+                            delta=delta,
+                            partial=_partial(),
+                        )
+                    )
+
+                elif event_type == "response.reasoning_summary_text.done":
+                    text = getattr(event, "text", "") or ""
+                    if text:
+                        if current_kind == "thinking" and current_index is not None:
+                            cast(ThinkingContent, content_blocks[current_index])["thinking"] = text
+                        else:
+                            idx = _begin_thinking()
+                            cast(ThinkingContent, content_blocks[idx])["thinking"] = text
+
                 # 整个 Responses 请求结束。
                 elif event_type == "response.completed":
                     resp = getattr(event, "response", None)
@@ -888,23 +1051,25 @@ async def responses_stream(
                                     )
                                 )
 
-                        # Extract usage
-                        if hasattr(resp, "usage") and resp.usage:
-                            usage = Usage(
-                                input=resp.usage.input_tokens or 0,
-                                output=resp.usage.output_tokens or 0,
-                                cache_read=0,
-                                cache_write=0,
-                                total_tokens=resp.usage.total_tokens or 0,
-                                cost={
-                                    "input": 0,
-                                    "output": 0,
-                                    "cache_read": 0,
-                                    "cache_write": 0,
-                                    "total": 0,
-                                },
-                            )
-                            calculate_cost(model, usage)
+                        usage = _parse_response_usage(resp, model)
+
+                # 请求提前结束（max_output_tokens / content_filter 等）。
+                elif event_type == "response.incomplete":
+                    resp = getattr(event, "response", None)
+                    if resp:
+                        usage = _parse_response_usage(resp, model)
+                        incomplete = getattr(resp, "incomplete_details", None)
+                        reason = getattr(incomplete, "reason", "") or ""
+                        stop_reason = "length" if reason == "max_output_tokens" else "error"
+
+                # 请求失败：推送 error 事件，不再补 done。
+                elif event_type == "response.failed":
+                    failed = True
+                    resp = getattr(event, "response", None)
+                    response_error = getattr(resp, "error", None) if resp else None
+                    message = getattr(response_error, "message", "") or "response failed"
+                    err_msg = build_error_message(model, RuntimeError(message))
+                    stream.push({"type": "error", "reason": "error", "error": err_msg})
 
             # 所有事件已处理完成，
             #
@@ -922,15 +1087,16 @@ async def responses_stream(
                 error_message=None,
                 timestamp=now_ms(),
             )
-            # reason 与 stop_reason 一致；Responses API 无独立 error 映射，
-            # 未知情况仍以 done 事件结束（保持既有行为）。
-            stream.push(
-                {
-                    "type": "done",
-                    "reason": cast(Any, stop_reason),
-                    "message": msg,
-                }
-            )
+            if responses_items:
+                msg["responses_items"] = responses_items
+            if not failed:
+                stream.push(
+                    {
+                        "type": "done",
+                        "reason": cast(Any, stop_reason),
+                        "message": msg,
+                    }
+                )
             # stream.end(msg)
 
         except asyncio.CancelledError:

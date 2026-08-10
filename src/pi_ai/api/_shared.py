@@ -319,6 +319,34 @@ def to_openai_tools(
     return result
 
 
+def to_responses_tools(
+    tools: list[Tool],
+    *,
+    supports_strict_mode: bool = True,
+) -> list[dict[str, Any]]:
+    """
+    将 SDK Tool 转换为 OpenAI Responses API 的扁平 Tool Schema。
+
+    与 Chat Completions 的嵌套格式不同：
+
+        {"type":"function","function":{...}}   # completions
+        {"type":"function","name":...,...}      # responses
+    """
+    result: list[dict[str, Any]] = []
+    for t in tools:
+        strict = resolve_json_schema_strict_sampling(t, supports_strict_mode)
+        tool_schema: dict[str, Any] = {
+            "type": "function",
+            "name": t.name,
+            "description": t.description,
+            "parameters": t.input_schema,
+        }
+        if strict:
+            tool_schema["strict"] = True
+        result.append(tool_schema)
+    return result
+
+
 def empty_usage() -> Usage:
     """
     创建一个空 Usage。

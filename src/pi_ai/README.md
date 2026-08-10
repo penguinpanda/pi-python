@@ -14,7 +14,7 @@
 |----------|---------|----------|:--------:|:------------:|:--------:|:---------:|
 | OpenAI | `gpt-5-chat-latest` | Responses | ✗ | ✓ | ✓ | 16,384 |
 | OpenAI | `gpt-5.6-luna` / `gpt-5.6-sol` / `gpt-5.6-terra` | Responses | ✓ | ✓ | ✓ | 128,000 |
-| DeepSeek | `deepseek-v4-flash` | Completions | ✓ | ✓ | ✗ | 384,000 |
+| DeepSeek | `deepseek-v4-flash` | Responses | ✓ | ✓ | ✗ | 384,000 |
 | DeepSeek | `deepseek-v4-pro` | Completions | ✓ | ✓ | ✗ | 384,000 |
 | Qwen | `qwen-turbo` | Completions | ✗ | ✓ | ✗ | 8,192 |
 | Qwen | `qwen-plus` | Completions | ✗ | ✓ | ✗ | 8,192 |

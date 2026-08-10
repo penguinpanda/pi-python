@@ -6,7 +6,7 @@ from pathlib import Path
 from ..models_store import model_from_dict
 from ...types import Model
 
-GENERATED_AT = "2026-08-03T03:25:21.904808+00:00"
+GENERATED_AT = "2026-08-10T06:49:58.077403+00:00"
 MODEL_PROVIDERS: list[str] = [
     "ant-ling",
     "azure-openai-responses",

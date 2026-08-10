@@ -85,3 +85,41 @@ def test_write_generated_roundtrip(tmp_path):
     assert model.reasoning is True
     assert "image" in model.input
     assert "MODEL_PROVIDERS" in init.read_text(encoding="utf-8")
+
+
+def test_generated_snake_case_catalog_roundtrip_with_overrides(tmp_path):
+    providers = tmp_path / "providers"
+    providers.mkdir()
+    generated = {
+        "deepseek-v4-flash": {
+            "id": "deepseek-v4-flash",
+            "provider": "deepseek",
+            "api": "openai-completions",
+            "name": "DeepSeek V4 Flash",
+            "input": ["text"],
+            "output": [],
+            "cost": {"input": 0.14, "output": 0.28, "cache_read": 0.0028, "cache_write": 0.0},
+            "max_tokens": 384000,
+            "base_url": "https://api.deepseek.com",
+            "context_window": 1000000,
+            "headers": None,
+            "compat": {"supportsStore": False},
+            "thinking_level_map": {"high": "high"},
+            "reasoning": True,
+        }
+    }
+    (providers / "deepseek.json").write_text(
+        json.dumps(generated, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    catalog = load_ts_catalog(tmp_path)
+    out = tmp_path / "out"
+    write_generated(catalog, out)
+
+    raw = json.loads((out / "providers" / "deepseek.json").read_text(encoding="utf-8"))
+    flash = raw["deepseek-v4-flash"]
+    assert flash["api"] == "openai-responses"
+    assert flash["compat"]["supportsWebSearch"] is True
+    assert flash["compat"]["supportsExplicitPromptCacheMode"] is False
+    assert flash["max_tokens"] == 384000

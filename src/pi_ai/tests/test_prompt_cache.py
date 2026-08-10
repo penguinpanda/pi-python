@@ -270,3 +270,14 @@ class TestResponsesPromptCache:
         # Responses：key 在 != none 时发送；retention 仅 long+支持
         assert kwargs["prompt_cache_key"] == "s-123"
         assert "prompt_cache_retention" not in kwargs
+
+    def test_deepseek_explicit_prompt_cache_disabled(self):
+        kwargs = self._run(
+            options={"session_id": "s-123", "cache_retention": "long"},
+            compat={
+                "supportsExplicitPromptCacheMode": False,
+                "supportsLongCacheRetention": False,
+            },
+        )
+        assert "prompt_cache_key" not in kwargs
+        assert "prompt_cache_retention" not in kwargs

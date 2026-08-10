@@ -162,7 +162,7 @@ uv run python -m pi_coding_agent --no-session -p "what is 2+2?"
 |----------|---------|----------|:--------:|:------------:|:--------:|:---------:|
 | OpenAI | `gpt-5-chat-latest` | Responses | ✗ | ✓ | ✓ | 16,384 |
 | OpenAI | `gpt-5.6-luna` / `gpt-5.6-sol` / `gpt-5.6-terra` | Responses | ✓ | ✓ | ✓ | 128,000 |
-| DeepSeek | `deepseek-v4-flash` | Completions | ✓ | ✓ | ✗ | 384,000 |
+| DeepSeek | `deepseek-v4-flash` | Responses | ✓ | ✓ | ✗ | 384,000 |
 | DeepSeek | `deepseek-v4-pro` | Completions | ✓ | ✓ | ✗ | 384,000 |
 | Qwen | `qwen-turbo` / `qwen-plus` / `qwen-max` | Completions | ✗ | ✓ | ✗ | 8,192 |
 | Qwen | `qwen3-235b-a22b` | Completions | ✓ | ✓ | ✗ | 131,072 |

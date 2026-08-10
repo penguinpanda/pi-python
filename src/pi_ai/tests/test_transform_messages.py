@@ -507,7 +507,7 @@ class TestResponsesToolCallNormalization:
         assert len(item_id) <= 64
 
     def test_disallowed_provider_degrades_to_single_part(self):
-        model = _make_model(model_id="deepseek-chat", provider="deepseek", api="openai-completions")
+        model = _make_model(model_id="qwen-plus", provider="qwen", api="openai-completions")
         raw_id = "call_1|fc_abc"
         messages: list[Message] = [
             {"role": "user", "content": "run", "timestamp": 1},
@@ -668,7 +668,7 @@ class TestResponsesIntegration:
             },
         ]
         transformed = transform_messages(messages, model)
-        items = _to_responses_input(transformed, None, model)
+        items = _to_responses_input(transformed, model)
         # 工具调用历史 → 顶层 function_call item。
         fc = next(i for i in items if i.get("type") == "function_call")
         assert fc == {
@@ -693,7 +693,7 @@ class TestResponsesIntegration:
             ),
         ]
         transformed = transform_messages(messages, model)
-        items = _to_responses_input(transformed, None, model)
+        items = _to_responses_input(transformed, model)
         fco = next(i for i in items if i.get("type") == "function_call_output")
         assert fco["call_id"] == "call_9"
         assert fco["output"] == "No result provided"

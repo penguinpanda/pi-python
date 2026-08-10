@@ -245,7 +245,9 @@ def normalize_tool_call_id(
 #
 # OpenAI Responses API 的 item id 以 "fc_" 开头（可达 400+ 字符、含特殊字符），
 # 只有这些 provider 生成的 ID 需要保留双段结构；其他 provider 一律退化为单段。
-ALLOWED_RESPONSES_TOOL_CALL_PROVIDERS = frozenset({"openai", "openai-codex", "opencode"})
+ALLOWED_RESPONSES_TOOL_CALL_PROVIDERS = frozenset(
+    {"openai", "openai-codex", "opencode", "deepseek"}
+)
 
 
 def normalize_id_part(part: str) -> str:

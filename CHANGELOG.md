@@ -87,6 +87,10 @@
   `DEEPSEEK_MODELS`）；`openai-completions` 的 DeepSeek thinking 参数对齐 TS：
   未指定 effort 时显式发送 `thinking.type=disabled`，map 缺失或为 `null` 的级别
   按原值透传 `reasoning_effort`
+- `deepseek-v4-flash` 切换到 OpenAI Responses API：`responses.py` 补齐
+  `instructions` / `max_output_tokens` / `reasoning` / `incomplete` / `failed` /
+  usage 缓存与推理明细；DeepSeek 官方 Responses 默认启用服务端 `web_search`
+  （可显式关闭），并支持 `web_search_call` stateless 回放
 - bash 子进程环境对齐 TS：先删除 PI_SESSION_ID / PI_SESSION_FILE / PI_PROVIDER /
   PI_MODEL / PI_REASONING_LEVEL 再按需注入，并把 pi bin 目录前置到 PATH；
   激活工具变化（扩展注册 / `set_active_tools`）会重建系统提示

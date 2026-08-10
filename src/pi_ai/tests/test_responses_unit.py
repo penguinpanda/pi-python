@@ -13,14 +13,33 @@ def _make_model(model_id="gpt-4o", provider="openai", api="openai-responses"):
     )
 
 
+def _make_deepseek_responses_model() -> Model:
+    return Model(
+        id="deepseek-v4-flash",
+        provider="deepseek",
+        api="openai-responses",
+        name="DeepSeek V4 Flash",
+        input=["text"],
+        output=["text"],
+        reasoning=True,
+        thinking_level_map={"high": "high", "max": "max"},
+        compat={
+            "supportsWebSearch": True,
+            "supportsExplicitPromptCacheMode": False,
+            "supportsLongCacheRetention": False,
+        },
+    )
+
+
 class TestToResponsesInput:
     def test_system_message(self):
-        result = _to_responses_input([], system="Be helpful")
-        assert result == [{"role": "system", "content": "Be helpful"}]
+        # 顶层 system prompt 由 requests.create 的 instructions 承载，不进 input。
+        result = _to_responses_input([])
+        assert result == []
 
     def test_user_string(self):
         messages = [{"role": "user", "content": "Hello"}]
-        result = _to_responses_input(messages, system=None)
+        result = _to_responses_input(messages)
         assert result == [{"role": "user", "content": "Hello"}]
 
     def test_user_multimodal_text_and_image_url(self):
@@ -38,7 +57,7 @@ class TestToResponsesInput:
                 ],
             }
         ]
-        result = _to_responses_input(messages, system=None)
+        result = _to_responses_input(messages)
         parts = result[0]["content"]
         assert parts[0] == {"type": "input_text", "text": "Describe:"}
         assert parts[1] == {"type": "input_image", "image_url": "https://example.com/pic.png"}
@@ -52,7 +71,7 @@ class TestToResponsesInput:
                 ],
             }
         ]
-        result = _to_responses_input(messages, system=None)
+        result = _to_responses_input(messages)
         img = result[0]["content"][0]
         assert img["image_url"] == "data:image/jpeg;base64,abc123"
 
@@ -66,7 +85,7 @@ class TestToResponsesInput:
                 "model": "gpt-4o",
             }
         ]
-        result = _to_responses_input(messages, system=None)
+        result = _to_responses_input(messages)
         # 文本块展开为独立的 message item（含 fallback id）。
         assert result[0] == {
             "type": "message",
@@ -85,22 +104,20 @@ class TestToResponsesInput:
                 "content": [{"type": "text", "text": "42 results"}],
             }
         ]
-        result = _to_responses_input(messages, system=None)
+        result = _to_responses_input(messages)
         assert result[0]["type"] == "function_call_output"
         assert result[0]["call_id"] == "call_1"
         assert result[0]["output"] == "42 results"
 
     def test_system_in_messages(self):
         messages = [{"role": "system", "content": "Mid note"}]
-        result = _to_responses_input(messages, system=None)
+        result = _to_responses_input(messages)
         assert result == [{"role": "system", "content": "Mid note"}]
 
     def test_combined_system_and_messages(self):
         messages = [{"role": "user", "content": "Hi"}]
-        result = _to_responses_input(messages, system="Top-level system")
-        assert len(result) == 2
-        assert result[0] == {"role": "system", "content": "Top-level system"}
-        assert result[1] == {"role": "user", "content": "Hi"}
+        result = _to_responses_input(messages)
+        assert result == [{"role": "user", "content": "Hi"}]
 
     def test_user_image_filtered_when_model_no_images(self):
         messages = [
@@ -118,7 +135,7 @@ class TestToResponsesInput:
             }
         ]
         # _make_model() default input=['text'] — no image capability
-        result = _to_responses_input(messages, system=None, model=_make_model())
+        result = _to_responses_input(messages, _make_model())
         parts = result[0]["content"]
         # image should be filtered out; only text remains
         assert len(parts) == 1
@@ -140,7 +157,7 @@ class TestToResponsesInput:
         ]
         model = _make_model()
         model.input = ["text", "image"]
-        result = _to_responses_input(messages, system=None, model=model)
+        result = _to_responses_input(messages, model)
         img = result[0]["content"][0]
         assert img["type"] == "input_image"
         assert img["image_url"] == "https://example.com/pic.png"
@@ -179,6 +196,21 @@ class TestResponsesNormalizeToolCallId:
         assert item_id.startswith("fc_")
         assert len(item_id) <= 64
 
+    def test_pipe_id_kept_for_deepseek(self):
+        from pi_ai.api.transform_messages import normalize_responses_tool_call_id
+
+        model = _make_model(
+            model_id="deepseek-v4-flash", provider="deepseek", api="openai-responses"
+        )
+        source = {
+            "role": "assistant",
+            "provider": "deepseek",
+            "api": "openai-responses",
+            "model": "deepseek-v4-flash",
+        }
+        result = normalize_responses_tool_call_id("call_1|fc_abc", model, source)
+        assert result == "call_1|fc_abc"
+
     def test_non_pipe_id_normalized_single_part(self):
         from pi_ai.api.transform_messages import normalize_responses_tool_call_id
 
@@ -195,7 +227,7 @@ class TestResponsesNormalizeToolCallId:
     def test_disallowed_provider_degrades_to_single_part(self):
         from pi_ai.api.transform_messages import normalize_responses_tool_call_id
 
-        model = _make_model(provider="deepseek", api="openai-completions")
+        model = _make_model(provider="qwen", api="openai-completions")
         source = {
             "role": "assistant",
             "provider": "openai",
@@ -233,7 +265,7 @@ class TestResponsesReasoningReplay:
                 "model": "gpt-4o",
             }
         ]
-        result = _to_responses_input(messages, None, model)
+        result = _to_responses_input(messages, model)
         # thinking → 独立 reasoning item（原样回放）。
         assert result[0] == reasoning_item
         # text → message item。
@@ -255,7 +287,7 @@ class TestResponsesReasoningReplay:
                 "model": "gpt-4o",
             }
         ]
-        result = _to_responses_input(messages, None, model)
+        result = _to_responses_input(messages, model)
         assert result == []
 
     def test_text_signature_id_and_phase_replayed(self):
@@ -275,7 +307,7 @@ class TestResponsesReasoningReplay:
                 "model": "gpt-4o",
             }
         ]
-        result = _to_responses_input(messages, None, model)
+        result = _to_responses_input(messages, model)
         assert result[0]["id"] == "msg_abc"
         assert result[0]["phase"] == "final_answer"
 
@@ -293,7 +325,7 @@ class TestResponsesReasoningReplay:
                 "model": "gpt-4o",
             }
         ]
-        result = _to_responses_input(messages, None, model)
+        result = _to_responses_input(messages, model)
         assert result[0]["id"].startswith("msg_")
         assert len(result[0]["id"]) < 20
 
@@ -316,7 +348,7 @@ class TestResponsesReasoningReplay:
                 "model": "gpt-4o",
             }
         ]
-        result = _to_responses_input(messages, None, model)
+        result = _to_responses_input(messages, model)
         assert result[0] == {
             "type": "function_call",
             "id": "fc_123",
@@ -345,7 +377,7 @@ class TestResponsesReasoningReplay:
                 "model": "gpt-4o",
             }
         ]
-        result = _to_responses_input(messages, None, model)
+        result = _to_responses_input(messages, model)
         assert result[0] == {
             "type": "function_call",
             "call_id": "call_1",
@@ -364,7 +396,7 @@ class TestResponsesReasoningReplay:
                 "is_error": False,
             }
         ]
-        result = _to_responses_input(messages, None, model)
+        result = _to_responses_input(messages, model)
         assert result[0] == {
             "type": "function_call_output",
             "call_id": "call_1",
@@ -382,7 +414,7 @@ class TestResponsesReasoningReplay:
                 "is_error": False,
             }
         ]
-        result = _to_responses_input(messages, None, model)
+        result = _to_responses_input(messages, model)
         assert result[0]["output"] == "(no tool output)"
 
 
@@ -672,7 +704,16 @@ class TestResponsesStream:
                 "response.completed",
                 response=SimpleNamespace(
                     output_text="Hi",
-                    usage=SimpleNamespace(input_tokens=7, output_tokens=3, total_tokens=10),
+                    usage=SimpleNamespace(
+                        input_tokens=7,
+                        output_tokens=3,
+                        total_tokens=10,
+                        input_tokens_details=SimpleNamespace(
+                            cached_tokens=4,
+                            cache_write_tokens=2,
+                        ),
+                        output_tokens_details=SimpleNamespace(reasoning_tokens=1),
+                    ),
                 ),
             ),
         ]
@@ -684,10 +725,11 @@ class TestResponsesStream:
         assert msg["usage"] == {
             "input": 7,
             "output": 3,
-            "cache_read": 0,
-            "cache_write": 0,
+            "cache_read": 4,
+            "cache_write": 2,
             "total_tokens": 10,
             "cost": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0},
+            "reasoning": 1,
         }
 
     @pytest.mark.asyncio
@@ -703,6 +745,88 @@ class TestResponsesStream:
         msg = collected[-1]["message"]
         assert msg["content"] == []
         assert msg["usage"]["total_tokens"] == 0
+
+    @pytest.mark.asyncio
+    async def test_output_text_done(self):
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        events = [
+            _event("response.output_text.done", text="Hello"),
+            _event(
+                "response.completed",
+                response=SimpleNamespace(output_text="", usage=None),
+            ),
+        ]
+        client = _mock_client(events)
+
+        collected, _ = await _collect_events(model, context, client)
+        msg = collected[-1]["message"]
+        assert msg["content"] == [{"type": "text", "text": "Hello"}]
+
+    @pytest.mark.asyncio
+    async def test_reasoning_text_done(self):
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        events = [
+            _event("response.reasoning_text.done", text="Let me think"),
+            _event(
+                "response.completed",
+                response=SimpleNamespace(output_text="", usage=None),
+            ),
+        ]
+        client = _mock_client(events)
+
+        collected, _ = await _collect_events(model, context, client)
+        msg = collected[-1]["message"]
+        assert msg["content"] == [{"type": "thinking", "thinking": "Let me think"}]
+
+    @pytest.mark.asyncio
+    async def test_incomplete_max_output_tokens(self):
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        events = [
+            _event(
+                "response.incomplete",
+                response=SimpleNamespace(
+                    output_text="partial",
+                    usage=SimpleNamespace(
+                        input_tokens=7,
+                        output_tokens=3,
+                        total_tokens=10,
+                        input_tokens_details=None,
+                        output_tokens_details=None,
+                    ),
+                    incomplete_details=SimpleNamespace(reason="max_output_tokens"),
+                ),
+            ),
+        ]
+        client = _mock_client(events)
+
+        collected, _ = await _collect_events(model, context, client)
+        assert collected[-1]["type"] == "done"
+        assert collected[-1]["reason"] == "length"
+        assert collected[-1]["message"]["stop_reason"] == "length"
+        assert collected[-1]["message"]["usage"]["total_tokens"] == 10
+
+    @pytest.mark.asyncio
+    async def test_failed_event(self):
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        events = [
+            _event(
+                "response.failed",
+                response=SimpleNamespace(
+                    output_text="",
+                    usage=None,
+                    error=SimpleNamespace(message="boom"),
+                ),
+            ),
+        ]
+        client = _mock_client(events)
+
+        collected, _ = await _collect_events(model, context, client)
+        assert [e["type"] for e in collected] == ["start", "error"]
+        assert collected[-1]["error"]["error_message"] == "boom"
 
     @pytest.mark.asyncio
     async def test_empty_stream(self):
@@ -741,20 +865,79 @@ class TestResponsesStream:
         assert kwargs["model"] == "gpt-4o"
         assert kwargs["stream"] is True
         assert kwargs["temperature"] == 0.5
-        assert kwargs["max_tokens"] == 100
-        # System 作为第一条 input item。
-        assert kwargs["input"][0] == {"role": "system", "content": "Be helpful"}
-        assert kwargs["input"][1] == {"role": "user", "content": "Hi"}
+        assert kwargs["max_output_tokens"] == 100
+        assert kwargs["instructions"] == "Be helpful"
+        # System prompt 走 instructions，不进 input。
+        assert kwargs["input"] == [{"role": "user", "content": "Hi"}]
         assert kwargs["tools"] == [
             {
                 "type": "function",
-                "function": {
-                    "name": "get_weather",
-                    "description": "Get weather",
-                    "parameters": {"type": "object", "properties": {}},
-                },
+                "name": "get_weather",
+                "description": "Get weather",
+                "parameters": {"type": "object", "properties": {}},
             }
         ]
+
+    @pytest.mark.asyncio
+    async def test_deepseek_request_kwargs_default_web_search(self):
+        model = _make_deepseek_responses_model()
+        tool = Tool(
+            name="get_weather",
+            description="Get weather",
+            input_schema={"type": "object", "properties": {}},
+        )
+        context = Context(
+            messages=[{"role": "user", "content": "Hi"}],
+            tools=[tool],
+            system_prompt="Be helpful",
+        )
+        options = {
+            "reasoning": "high",
+            "max_tokens": 100,
+            "session_id": "s-123",
+            "cache_retention": "long",
+        }
+        client = _mock_client([_event("response.completed", response=None)])
+        with patch("pi_ai.api.responses._create_client", return_value=client):
+            stream = await responses_stream(
+                model, context, "sk-test", "https://api.deepseek.com", options
+            )
+            [e async for e in stream]
+
+        kwargs = client.responses.create.call_args.kwargs
+        assert kwargs["instructions"] == "Be helpful"
+        assert kwargs["input"] == [{"role": "user", "content": "Hi"}]
+        assert kwargs["max_output_tokens"] == 100
+        assert kwargs["reasoning"] == {"effort": "high"}
+        assert kwargs["tools"] == [
+            {"type": "web_search"},
+            {
+                "type": "function",
+                "name": "get_weather",
+                "description": "Get weather",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        ]
+        assert "prompt_cache_key" not in kwargs
+        assert "prompt_cache_retention" not in kwargs
+
+    @pytest.mark.asyncio
+    async def test_deepseek_web_search_explicit_off(self):
+        model = _make_deepseek_responses_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        client = _mock_client([_event("response.completed", response=None)])
+        with patch("pi_ai.api.responses._create_client", return_value=client):
+            stream = await responses_stream(
+                model,
+                context,
+                "sk-test",
+                "https://api.deepseek.com",
+                {"web_search": False},
+            )
+            [e async for e in stream]
+
+        kwargs = client.responses.create.call_args.kwargs
+        assert "tools" not in kwargs or kwargs["tools"] == []
 
     @pytest.mark.asyncio
     async def test_options_max_retries_timeout_forwarded(self):
@@ -960,3 +1143,57 @@ class TestResponsesStreamReasoningCapture:
         collected, _ = await _collect_events(model, context, client)
         msg = collected[-1]["message"]
         assert msg["content"][0]["id"] == "call_1"
+
+
+class TestResponsesWebSearch:
+    """DeepSeek Responses 服务端 web_search 捕获与 stateless 回放。"""
+
+    @pytest.mark.asyncio
+    async def test_capture_and_replay(self):
+        model = _make_deepseek_responses_model()
+        context = Context(messages=[{"role": "user", "content": "search?"}])
+        events = [
+            _event(
+                "response.output_item.done",
+                item=SimpleNamespace(
+                    type="web_search_call",
+                    id="ws_1",
+                    status="completed",
+                ),
+            ),
+            _event("response.output_text.delta", delta="result"),
+            _event(
+                "response.completed",
+                response=SimpleNamespace(
+                    output_text="result",
+                    usage=None,
+                ),
+            ),
+        ]
+        client = _mock_client(events)
+
+        collected, _ = await _collect_events(
+            model,
+            context,
+            client,
+            base_url="https://api.deepseek.com",
+        )
+        msg = collected[-1]["message"]
+        assert msg.get("responses_items") == [
+            {"type": "web_search_call", "id": "ws_1", "status": "completed"}
+        ]
+
+        replayed = _to_responses_input([msg], model)
+        assert replayed[0] == {
+            "type": "web_search_call",
+            "id": "ws_1",
+            "status": "completed",
+        }
+        assert replayed[1]["type"] == "message"
+
+        without_replay = _to_responses_input(
+            [msg],
+            model,
+            replay_web_search_items=False,
+        )
+        assert all(item["type"] != "web_search_call" for item in without_replay)

@@ -103,7 +103,7 @@ class TestDeepSeekProvider:
         by_id = {m.id: m for m in provider.get_models()}
 
         v4_flash = by_id["deepseek-v4-flash"]
-        assert v4_flash.api == "openai-completions"
+        assert v4_flash.api == "openai-responses"
         assert v4_flash.reasoning is True
         assert v4_flash.max_tokens == 384000
         assert v4_flash.context_window == 1000000
@@ -123,6 +123,9 @@ class TestDeepSeekProvider:
             "supportsDeveloperRole": False,
             "requiresReasoningContentOnAssistantMessages": True,
             "thinkingFormat": "deepseek",
+            "supportsExplicitPromptCacheMode": False,
+            "supportsLongCacheRetention": False,
+            "supportsWebSearch": True,
         }
 
         v4_pro = by_id["deepseek-v4-pro"]

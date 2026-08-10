@@ -2,7 +2,7 @@
   "deepseek-v4-flash": {
     "id": "deepseek-v4-flash",
     "provider": "deepseek",
-    "api": "openai-completions",
+    "api": "openai-responses",
     "name": "DeepSeek V4 Flash",
     "input": [
       "text"
@@ -23,7 +23,10 @@
       "supportsStore": false,
       "supportsDeveloperRole": false,
       "requiresReasoningContentOnAssistantMessages": true,
-      "thinkingFormat": "deepseek"
+      "thinkingFormat": "deepseek",
+      "supportsExplicitPromptCacheMode": false,
+      "supportsLongCacheRetention": false,
+      "supportsWebSearch": true
     },
     "thinking_level_map": {
       "minimal": null,
