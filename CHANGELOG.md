@@ -50,6 +50,9 @@
 - 扩展 API 补齐：`ctx.ui.custom`（自定义交互组件）、`ToolDefinition.execution_mode`
   与 `render_call`/`render_result`、CLI 扩展 flags 两段解析、
   `before_agent_start` message 注入、`send_message` 的 `deliverAs`/`triggerTurn`
+- 新增 `scripts/verify_web_search.py`：离线验证 DeepSeek Responses 服务端
+  web_search 的请求构造 / web_search_call 捕获 / stateless 回放，`--live`
+  可选真实调用（需 `DEEPSEEK_API_KEY` 或 `--api-key`）
 
 ### Changed
 
