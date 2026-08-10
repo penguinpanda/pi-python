@@ -221,6 +221,32 @@ async def test_before_agent_start_can_override_system_prompt(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_before_agent_start_injects_message(tmp_path):
+    def on_before_agent_start(event, ctx):
+        return {
+            "message": {
+                "customType": "plan-mode-context",
+                "content": "[PLAN MODE ACTIVE] read-only",
+                "display": False,
+            }
+        }
+
+    extension = Extension(path="<inline>", resolved_path="<inline>")
+    extension.handlers["before_agent_start"] = [on_before_agent_start]
+    runner = ExtensionRunner([extension], cwd=str(tmp_path))
+    holder: dict = {}
+    session = _make_session(tmp_path, runner, holder)
+
+    await session.prompt("hi")
+    await session.wait_for_idle()
+    messages = session._agent.state.messages
+    injected = [m for m in messages if m.get("customType") == "plan-mode-context"]
+    assert injected and injected[-1]["content"] == "[PLAN MODE ACTIVE] read-only"
+    assert any(m.get("content") == "hi" for m in messages)
+    await session.dispose()
+
+
+@pytest.mark.asyncio
 async def test_model_and_thinking_events(tmp_path):
     seen: list[str] = []
 
@@ -737,6 +763,27 @@ async def test_send_user_message_deliver_as(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_send_message_deliver_as_follow_up(tmp_path):
+    extension = Extension(path="<inline>", resolved_path="<inline>")
+    runner = ExtensionRunner([extension], cwd=str(tmp_path))
+    holder: dict = {}
+    session = _make_session(tmp_path, runner, holder)
+
+    runner._action_send_message(
+        session,
+        {"customType": "plan-mode-execute", "content": "Execute the plan", "display": True},
+        {"customType": "plan-mode-execute", "deliverAs": "followUp", "triggerTurn": True},
+    )
+    await _drain_background(runner)
+
+    entries = session._session_manager.get_entries()
+    custom_messages = [e for e in entries if e.get("type") == "custom_message"]
+    assert custom_messages and custom_messages[-1]["customType"] == "plan-mode-execute"
+    assert session.pending_message_count > 0
+    await session.dispose()
+
+
+@pytest.mark.asyncio
 async def test_session_info_changed_event(tmp_path):
     seen: list[dict] = []
 
@@ -1063,6 +1110,7 @@ async def test_extension_tools_merged_and_normalized(tmp_path):
             "properties": {"name": {"type": "string"}},
             "required": ["name"],
         },
+        execution_mode="sequential",
         execute=execute,
     )
     runner = ExtensionRunner([extension], cwd=str(tmp_path))
@@ -1071,6 +1119,7 @@ async def test_extension_tools_merged_and_normalized(tmp_path):
     try:
         tools = {tool.name: tool for tool in session._agent.state.tools}
         assert "greet" in tools
+        assert tools["greet"].execution_mode == "sequential"
         result = await tools["greet"].execute("c1", {"name": "x"})
         assert isinstance(result, AgentToolResult)
         assert result.content[0]["text"] == "hi x"

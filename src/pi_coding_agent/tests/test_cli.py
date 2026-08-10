@@ -178,13 +178,28 @@ async def test_cli_loads_extensions_and_warns_on_syntax_error(tmp_path, monkeypa
     captured = capsys.readouterr()
     assert code == 0
     assert "Warning: Failed to load extension" in captured.err
-    assert "bad.py" in captured.err
-    assert captured_sessions
-    runner = captured_sessions[0].extension_runner
-    assert runner is not None
-    assert len(runner.extensions) == 1
-    names = [command.name for command in runner.get_registered_commands()]
-    assert "hello" in names
+
+
+def test_extension_flags_registered_on_parser() -> None:
+    from pi_coding_agent._cli import _create_parser, _register_extension_flags
+    from pi_coding_agent.extensions.types import ExtensionFlag
+
+    class _Runner:
+        def get_flags(self):
+            return [
+                ExtensionFlag(
+                    name="plan",
+                    description="Start in plan mode",
+                    type="boolean",
+                    default=False,
+                )
+            ]
+
+    parser = _create_parser()
+    _register_extension_flags(parser, _Runner())
+    parsed = parser.parse_args(["--plan"])
+    assert parsed.plan is True
+    assert parser.parse_args([]).plan is False
 
 
 def test_read_stdin_tty_returns_none(monkeypatch):

@@ -41,6 +41,7 @@ class _StubApp:
         self._working_message = None
         self._working_visible = True
         self._theme_call = None
+        self._keybindings = object()
 
     def set_title(self, title: str) -> None:
         self.title = title
@@ -85,6 +86,7 @@ def test_theme_facade_fg_bg():
     assert "\x1b[38;2;" in ctx.theme.fg("accent", "hi")
     assert "\x1b[48;2;" in ctx.theme.bg("error", "hi")
     assert ctx.theme.fg("missing", "hi") == "hi"
+    assert ctx.theme.strikethrough("done") == "\x1b[9mdone\x1b[0m"
 
 
 def test_set_status_editor_title():
@@ -141,6 +143,31 @@ async def test_select_confirm_input_resolve_callbacks():
     await asyncio.sleep(0)
     app._screens[2][1]("value")
     assert await task == "value"
+
+
+@pytest.mark.asyncio
+async def test_custom_resolves_via_done():
+    app = _StubApp()
+    ctx = TuiUIContext(app)
+
+    class _Dialog:
+        def __init__(self, done) -> None:
+            self.done = done
+            self.app = None
+
+        def handle_key(self, _key) -> bool:
+            return False
+
+        def render(self, _width, _height):
+            return []
+
+        def content_size(self):
+            return (0, 0)
+
+    task = asyncio.create_task(ctx.custom(lambda tui, theme, keybindings, done: _Dialog(done)))
+    await asyncio.sleep(0)
+    app._screens[0][1]("custom-result")
+    assert await task == "custom-result"
 
 
 def test_rpc_ui_context_set_footer_header():

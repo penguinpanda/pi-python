@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from pi_tui.components import MessageEntry
+from pi_tui.components import MessageEntry, ToolExecutionEntry
 from pi_tui.engine import App, FakeTerminal
 from pi_tui.engine.cells import Cell, Line, blank_line
 from pi_tui.engine.keys import Key, KeyEvent, MouseEvent, parse_input
@@ -64,6 +64,25 @@ def test_message_markdown_renders_with_absolute_path() -> None:
     assert not any("# Title" in text for text in texts)
     assert any("Title" in text for text in texts)
     assert any("**bold**" in text for text in texts) is False
+
+
+def test_tool_entry_uses_render_hooks() -> None:
+    entry = ToolExecutionEntry(
+        "question",
+        "c1",
+        {"question": "Pick?", "options": []},
+        render_call=lambda args, theme, context: f"CALL {args['question']}",
+        render_result=lambda result, options, theme, context: (
+            f"RESULT {result['details']['answer']}"
+        ),
+        render_theme=object(),
+    )
+    lines = entry.render(60, 1)
+    assert "CALL Pick?" in lines[0].text()
+    entry.set_result("ignored", result={"details": {"answer": "A"}})
+    entry.set_expanded(True)
+    lines = entry.render(60, 4)
+    assert any("RESULT A" in line.text() for line in lines)
 
 
 def test_editor_cursor_highlight_uses_character_cell_for_cjk() -> None:
