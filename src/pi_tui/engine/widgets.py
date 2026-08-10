@@ -1296,9 +1296,9 @@ class Editor(Widget):
             text = " " * self.padding_x + raw
             line = line_from_text(text, width, self.base_style)
             if self.focused and row == self.cursor_row:
-                cursor_visible_col = self._cursor_visible_col()
-                if self.padding_x + cursor_visible_col < width:
-                    index = self.padding_x + cursor_visible_col
+                cursor_index = self.padding_x + (self.cursor_col - self.scroll_col)
+                if 0 <= cursor_index < width:
+                    index = cursor_index
                     cell = line.cells[index]
                     cell.style = (cell.style or Style()) + Style(reverse=True)
             if start is not None and end is not None and start[0] <= row <= end[0]:

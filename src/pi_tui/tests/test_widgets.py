@@ -56,6 +56,23 @@ def test_cjk_lines_never_exceed_terminal_width() -> None:
     assert cell_len(normalized[0].text()) == 10
 
 
+def test_editor_cursor_highlight_uses_character_cell_for_cjk() -> None:
+    """回归：CJK 光标高亮应落在字符格而不是可见列，避免每次输入一个
+    宽字符就多空一列。"""
+    editor = Editor(text="你好", border=True)
+    editor.focused = True
+    editor.cursor_col = 2
+    lines = editor.render(10, 3)
+    content = lines[1]
+    reverse_indices = [
+        index
+        for index, cell in enumerate(content.cells)
+        if cell.style is not None and cell.style.reverse
+    ]
+    assert reverse_indices == [2]
+    assert content.cells[2].char == " "
+
+
 def test_empty_static_has_zero_natural_size() -> None:
     assert Static("").content_size() == (0, 0)
     assert Static("x").content_size()[1] == 1
