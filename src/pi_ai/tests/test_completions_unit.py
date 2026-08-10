@@ -98,7 +98,7 @@ def _chunk(content=None, tool_calls=None, finish_reason=None, usage=None, reason
 
 
 def _make_deepseek_v4_model() -> Model:
-    """deepseek-v4-flash 元数据（含 thinking_level_map 与 DeepSeek compat）。"""
+    """deepseek-v4-flash 元数据（镜像生成目录 deepseek.json）。"""
     return Model(
         id="deepseek-v4-flash",
         provider="deepseek",
@@ -108,18 +108,17 @@ def _make_deepseek_v4_model() -> Model:
         output=["text"],
         reasoning=True,
         thinking_level_map={
-            "off": "disabled",
-            "minimal": "low",
-            "low": "low",
-            "medium": "high",
+            "minimal": None,
+            "low": None,
+            "medium": None,
             "high": "high",
-            "xhigh": "high",
             "max": "max",
         },
         compat={
-            "thinkingFormat": "deepseek",
+            "supportsStore": False,
+            "supportsDeveloperRole": False,
             "requiresReasoningContentOnAssistantMessages": True,
-            "supportsReasoningEffort": True,
+            "thinkingFormat": "deepseek",
         },
     )
 
@@ -537,20 +536,45 @@ class TestCompletionsStream:
         assert kwargs["thinking"] == {"type": "disabled"}
         assert "reasoning_effort" not in kwargs
 
+    @pytest.mark.asyncio
+    async def test_deepseek_thinking_disabled_when_no_effort(self):
+        """DeepSeek V4：未指定 effort 且 map 无 off 时显式 thinking.type=disabled。"""
+        model = _make_deepseek_v4_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        client = _mock_client([_chunk(content="ok", finish_reason="stop")])
+
+        _, _ = await _collect_events(model, context, client)
+        kwargs = client.chat.completions.create.call_args.kwargs
+        assert kwargs["thinking"] == {"type": "disabled"}
+        assert "reasoning_effort" not in kwargs
+
+    @pytest.mark.asyncio
+    async def test_deepseek_off_null_skips_disabled(self):
+        """DeepSeek V4：map 把 off 声明为 None 时不发送 thinking.type=disabled。"""
+        model = _make_deepseek_v4_model()
+        model.thinking_level_map = {"off": None}
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        client = _mock_client([_chunk(content="ok", finish_reason="stop")])
+
+        _, _ = await _collect_events(model, context, client)
+        kwargs = client.chat.completions.create.call_args.kwargs
+        assert "thinking" not in kwargs
+        assert "reasoning_effort" not in kwargs
+
     @pytest.mark.parametrize(
         "level,expected",
         [
-            ("minimal", "low"),
+            ("minimal", "minimal"),
             ("low", "low"),
-            ("medium", "high"),
+            ("medium", "medium"),
             ("high", "high"),
-            ("xhigh", "high"),
+            ("xhigh", "xhigh"),
             ("max", "max"),
         ],
     )
     @pytest.mark.asyncio
-    async def test_deepseek_level_map_applied(self, level, expected):
-        """DeepSeek V4 Flash 官方 effort 映射：minimal/low->low，xhigh->high，max->max。"""
+    async def test_deepseek_effort_passthrough(self, level, expected):
+        """DeepSeek V4：map 中缺失或为 None 的级别按原值透传（对齐 TS）。"""
         model = _make_deepseek_v4_model()
         context = Context(messages=[{"role": "user", "content": "Hi"}])
         client = _mock_client([_chunk(content="ok", finish_reason="stop")])

@@ -7,9 +7,14 @@ DeepSeek Provider。
 
 本模块负责注册 DeepSeek Provider。
 
+模型元数据不在此手写，统一从自动生成的模型目录加载
+（src/pi_ai/models/generated/providers/deepseek.json，
+由 scripts/generate_models.py 基于 TS 数据生成），
+避免与生成目录形成双数据源。
+
 主要包括：
 
-    ① 定义 DeepSeek 支持的模型
+    ① 加载生成目录中的 DeepSeek 模型
 
     ② 配置认证方式
 
@@ -22,152 +27,22 @@ DeepSeek Provider。
     deepseek_provider()
 
 创建一个可直接使用的 Provider。
-
-整体关系：
-
-        DEEPSEEK_MODELS
-                │
-                ▼
-      env_api_key_auth()
-                │
-                ▼
-        create_provider()
-                │
-                ▼
-           Provider
 """
 
-from ..types import Model, ModelCost
+from __future__ import annotations
+
 from ..auth import env_api_key_auth
-from ..provider import create_provider, Provider
+from ..models.generated import load_generated_models
+from ..provider import Provider, create_provider
+from ..types import Model
 
 
-# ------------------------------------------------------
-# DeepSeek 支持的模型列表。
-#
-# 每个 Model 描述模型的元数据，
-# 不涉及具体调用逻辑。
-#
-# Provider 初始化时会直接使用该列表。
-# ------------------------------------------------------
-DEEPSEEK_MODELS: list[Model] = [
-    # # DeepSeek Chat
-    # #
-    # # 通用对话模型。
-    # #
-    # # 已从官方定价页下架（Deprecated），保留以兼容旧会话。
-    # #
-    # # 特点：
-    # #
-    # # • 文本输入
-    # # • 文本输出
-    # # • 支持 Tool Calling
-    # # • 不支持推理(Thinking)
-    # Model(
-    #     id="deepseek-chat",
-    #     provider="deepseek",
-    #     api="openai-completions",
-    #     name="DeepSeek Chat",
-    #     input=["text"],
-    #     output=["text"],
-    #     max_tokens=65536,            # 64K output # 最大输出 Token 数
-    #     context_window=128000,
-    #     deprecated=True,
-    #     # 价格（每百万 Token）。
-    #     #
-    #     # 单位由 Provider 自行约定，
-    #     # 一般与官方 API 定价一致。
-    #     cost=ModelCost(input=0.27, output=1.10, cache_read=0.07, cache_write=0.27),
-    # ),
-    # # DeepSeek Reasoner
-    # #
-    # # 推理模型。
-    # #
-    # # 已从官方定价页下架（Deprecated），保留以兼容旧会话。
-    # #
-    # # 特点：
-    # #
-    # # • 支持 Thinking
-    # # • 不支持 Tool Calling
-    # Model(
-    #     id="deepseek-reasoner",
-    #     provider="deepseek",
-    #     api="openai-completions",
-    #     name="DeepSeek Reasoner",
-    #     input=["text"],
-    #     output=["text"],
-    #     max_tokens=65536,
-    #     context_window=65536,
-    #     reasoning=True, # 模型会生成推理过程。
-    #     deprecated=True,
-    #     cost=ModelCost(input=0.55, output=2.19, cache_read=0.14, cache_write=0.55),
-    # ),
-    # DeepSeek V4 Flash
-    #
-    # 高速对话模型。
-    #
-    # 特点：
-    # • 高速响应
-    # • 支持 Tool Calling
-    Model(
-        id="deepseek-v4-flash",
-        provider="deepseek",
-        api="openai-completions",
-        name="DeepSeek V4 Flash",
-        input=["text"],
-        output=["text"],
-        max_tokens=384000,  # 最大输出 Token 数
-        context_window=1000000,
-        reasoning=True,  # 支持推理
-        # DeepSeek V4 thinking 模式：thinking.type 开关 + reasoning_effort。
-        # 官方 effort 映射（deepseek-v4-flash）：
-        #   minimal/low -> low，medium/high/xhigh -> high，max -> max；
-        # "disabled" 由适配器翻译为 thinking.type=disabled。
-        thinking_level_map={
-            "off": "disabled",
-            "minimal": "low",
-            "low": "low",
-            "medium": "high",
-            "high": "high",
-            "xhigh": "high",
-            "max": "max",
-        },
-        compat={
-            "thinkingFormat": "deepseek",
-            "requiresReasoningContentOnAssistantMessages": True,
-            "supportsReasoningEffort": True,
-        },
-        # 价格（每百万 Token）。
-        cost=ModelCost(input=0.14, output=0.28, cache_read=0.0028, cache_write=0.0),
-    ),
-    # DeepSeek V4 Pro
-    #
-    # 旗舰推理模型。
-    #
-    # 特点：
-    # • 支持 Thinking
-    # • 支持 Tool Calling
-    Model(
-        id="deepseek-v4-pro",
-        provider="deepseek",
-        api="openai-completions",
-        name="DeepSeek V4 Pro",
-        input=["text"],
-        output=["text"],
-        max_tokens=384000,  # 最大输出 Token 数
-        context_window=1000000,
-        reasoning=True,  # 支持推理
-        compat={
-            "thinkingFormat": "deepseek",
-            "requiresReasoningContentOnAssistantMessages": True,
-            "supportsReasoningEffort": True,
-        },
-        cost=ModelCost(input=0.435, output=0.87, cache_read=0.003625, cache_write=0.0),
-    ),
-]
+def _load_deepseek_models() -> list[Model]:
+    """从自动生成的模型目录加载 DeepSeek 模型（唯一数据源）。"""
+    return load_generated_models().get("deepseek", [])
 
 
-def deepseek_provider() -> Provider:
+def deepseek_provider(models: list[Model] | None = None) -> Provider:
     """
     创建并返回一个 DeepSeek Provider。
 
@@ -175,7 +50,7 @@ def deepseek_provider() -> Provider:
 
         • Provider ID
 
-        • 模型列表
+        • 模型列表（默认来自生成目录，可传入自定义列表覆盖）
 
         • API Key 认证
 
@@ -202,7 +77,7 @@ def deepseek_provider() -> Provider:
         #
         # 环境变量读取。
         auth=env_api_key_auth("DeepSeek API key", ["DEEPSEEK_API_KEY"]),
-        models=DEEPSEEK_MODELS,
+        models=models if models is not None else _load_deepseek_models(),
         # DeepSeek 兼容 OpenAI Chat Completions API。
         api_kind="completions",
         # DeepSeek OpenAI Compatible API 地址。

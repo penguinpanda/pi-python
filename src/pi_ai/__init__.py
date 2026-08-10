@@ -119,7 +119,6 @@ from .api.api_provider_registry import (
 from .models import Models
 from .provider import Provider, create_provider
 from .providers import (
-    DEEPSEEK_MODELS,
     FAUX_MODEL,
     OLLAMA_MODELS,
     OPENAI_MODELS,
@@ -193,7 +192,6 @@ __all__ = [
     "faux_provider",
     # Model lists
     "OPENAI_MODELS",
-    "DEEPSEEK_MODELS",
     "OLLAMA_MODELS",
     "FAUX_MODEL",
     # Faux helpers

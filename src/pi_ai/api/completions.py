@@ -342,22 +342,29 @@ async def chat_completions_stream(
             if cache_retention == "long" and supports_long:
                 kwargs["prompt_cache_retention"] = "24h"
 
-            # 推理级别转发（模型显式声明 thinking_level_map 时才生效）。
+            # 推理级别转发（对齐 TS openai-completions.ts buildParams）。
             #
-            # DeepSeek V4：thinking.type 控制开关，reasoning_effort 控制强度；
-            # map 值 "disabled" 翻译为 thinking.type=disabled。
+            # DeepSeek V4（thinkingFormat="deepseek"）：
+            #   - 指定 effort：thinking.type=enabled + reasoning_effort；
+            #     thinking_level_map 中缺失或为 None 的级别按原值透传；
+            #   - 未指定 effort 且 map 未把 off 声明为 None：
+            #     thinking.type=disabled（显式关闭推理）。
             reasoning_level = cast(ModelThinkingLevel | None, opts.get("reasoning"))
             thinking_map = model.thinking_level_map or {}
-            if reasoning_level is not None and reasoning_level in thinking_map:
-                mapped_effort = thinking_map[reasoning_level]
-                if mapped_effort == "disabled":
-                    if thinking_format(model) == "deepseek":
-                        kwargs["thinking"] = {"type": "disabled"}
-                elif mapped_effort is not None:
+            if thinking_format(model) == "deepseek" and model.reasoning:
+                if reasoning_level is not None and reasoning_level != "off":
+                    kwargs["thinking"] = {"type": "enabled"}
                     if supports_reasoning_effort(model):
-                        kwargs["reasoning_effort"] = mapped_effort
-                    if thinking_format(model) == "deepseek":
-                        kwargs["thinking"] = {"type": "enabled"}
+                        mapped_effort = thinking_map.get(reasoning_level)
+                        kwargs["reasoning_effort"] = (
+                            mapped_effort if mapped_effort is not None else reasoning_level
+                        )
+                elif "off" not in thinking_map or thinking_map["off"] is not None:
+                    kwargs["thinking"] = {"type": "disabled"}
+            elif reasoning_level is not None and reasoning_level in thinking_map:
+                mapped_effort = thinking_map[reasoning_level]
+                if mapped_effort not in (None, "disabled") and supports_reasoning_effort(model):
+                    kwargs["reasoning_effort"] = mapped_effort
 
             # 发起流式请求。
             #

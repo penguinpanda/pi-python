@@ -1,5 +1,5 @@
 from .openai import openai_provider, OPENAI_MODELS
-from .deepseek import deepseek_provider, DEEPSEEK_MODELS
+from .deepseek import deepseek_provider
 from .qwen import qwen_provider, QWEN_MODELS
 from .ollama import (
     OLLAMA_BASE_URL,
@@ -20,7 +20,6 @@ __all__ = [
     "openai_provider",
     "OPENAI_MODELS",
     "deepseek_provider",
-    "DEEPSEEK_MODELS",
     "qwen_provider",
     "QWEN_MODELS",
     "ollama_provider",

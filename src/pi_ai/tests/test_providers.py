@@ -12,7 +12,6 @@ Unit tests for providers — openai_provider() / deepseek_provider() 工厂。
 from pi_ai._types import Model, ModelCost
 from pi_ai.auth import EnvApiKeyAuth
 from pi_ai.providers import (
-    DEEPSEEK_MODELS,
     OLLAMA_MODELS,
     OPENAI_MODELS,
     QWEN_MODELS,
@@ -112,6 +111,19 @@ class TestDeepSeekProvider:
         assert v4_flash.cost.output == 0.28
         assert v4_flash.cost.cache_read == 0.0028
         assert v4_flash.cost.cache_write == 0.0
+        assert v4_flash.thinking_level_map == {
+            "minimal": None,
+            "low": None,
+            "medium": None,
+            "high": "high",
+            "max": "max",
+        }
+        assert v4_flash.compat == {
+            "supportsStore": False,
+            "supportsDeveloperRole": False,
+            "requiresReasoningContentOnAssistantMessages": True,
+            "thinkingFormat": "deepseek",
+        }
 
         v4_pro = by_id["deepseek-v4-pro"]
         assert v4_pro.api == "openai-completions"
@@ -175,7 +187,7 @@ class TestQwenProvider:
 
 
 class TestModelConstants:
-    """OPENAI_MODELS / DEEPSEEK_MODELS / OLLAMA_MODELS 常量。"""
+    """OPENAI_MODELS / OLLAMA_MODELS 常量及 DeepSeek 生成目录。"""
 
     def test_openai_models_constant(self):
         assert _model_ids(OPENAI_MODELS) == [
@@ -185,8 +197,8 @@ class TestModelConstants:
             "gpt-5.6-terra",
         ]
 
-    def test_deepseek_models_constant(self):
-        assert _model_ids(DEEPSEEK_MODELS) == [
+    def test_deepseek_models_from_generated_catalog(self):
+        assert _model_ids(deepseek_provider().get_models()) == [
             "deepseek-v4-flash",
             "deepseek-v4-pro",
         ]
@@ -215,7 +227,7 @@ class TestModelConstants:
         ]
 
     def test_all_models_have_provider_and_api(self):
-        for model in OPENAI_MODELS + DEEPSEEK_MODELS + OLLAMA_MODELS:
+        for model in OPENAI_MODELS + OLLAMA_MODELS + deepseek_provider().get_models():
             assert model.provider in ("openai", "deepseek", "ollama")
             assert model.api in ("openai-completions", "openai-responses")
 
