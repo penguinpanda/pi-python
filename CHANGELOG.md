@@ -127,6 +127,11 @@
 - deferred responses 基础层：`DeferredHandle` 类型、`split_deferred_tools`、
   Provider/Models 的 `fetch_deferred` / `cancel_deferred`（faux 参考实现）、
   `AgentSession.fetch_deferred` / `cancel_deferred` 与 `write_deferred` 记录
+- `pi_storage` 新增 PostgreSQL v4 会话后端（对齐 TS sqlite-node）：
+  `PostgresV4SessionRepo` / `PostgresV4SessionStorage` / `PgSessionSearch`，
+  含 lanes / records / lane_moves / facts / branch cache / session_stats /
+  writer lease（TTL 30s + 心跳 + fence）；`V4SessionManager.from_repo` /
+  `open_with_repo` 与工厂 `repo` 参数接入，`AgentSession.dispose` 释放连接
 
 ### Fixed
 

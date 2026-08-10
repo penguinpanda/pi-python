@@ -2064,6 +2064,12 @@ class AgentSession:
             cleanup_session_resources(self._session_manager.session_id)
         except Exception:
             pass
+        close = getattr(self._session_manager, "close", None)
+        if close is not None:
+            try:
+                await close()
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # 内部：事件桥接

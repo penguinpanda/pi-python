@@ -115,8 +115,11 @@ async def create_session_manager(
     cwd: str,
     sessions_dir: str | Path | None = None,
     session_id: str | None = None,
+    repo: Any = None,
 ) -> SessionManagerLike:
     """按格式开关创建会话管理器（默认 v4）。"""
+    if repo is not None:
+        return await V4SessionManager.from_repo(repo, cwd, session_id)
     if v4_sessions_enabled():
         return await V4SessionManager.create(cwd, sessions_dir, session_id)
     from ._session_manager import SessionManager
@@ -127,8 +130,14 @@ async def create_session_manager(
 async def open_session_manager(
     filepath: str | Path,
     cwd_override: str | None = None,
+    repo: Any = None,
+    metadata: SessionMetadata | None = None,
 ) -> SessionManagerLike:
     """按格式开关打开会话（v3 文件在 v4 模式下惰性转换）。"""
+    if repo is not None:
+        if metadata is None:
+            raise ValueError("open_session_manager with repo requires metadata")
+        return await V4SessionManager.open_with_repo(repo, metadata)
     if v4_sessions_enabled():
         return await V4SessionManager.open(filepath, cwd_override)
     from ._session_manager import SessionManager
@@ -228,6 +237,28 @@ class V4SessionManager:
         repo = JsonlSessionRepo(root)
         session = await repo.create({"cwd": cwd, "id": session_id or uuidv7()})
         return await cls._from_session(cwd, session, repo, root)
+
+    @classmethod
+    async def from_repo(
+        cls,
+        repo: Any,
+        cwd: str,
+        session_id: str | None = None,
+    ) -> "V4SessionManager":
+        """在指定 v4 SessionRepo（如 PostgresV4SessionRepo）上创建会话。"""
+        session = await repo.create({"cwd": cwd, "id": session_id or uuidv7()})
+        return await cls._from_session(cwd, session, repo, None)
+
+    @classmethod
+    async def open_with_repo(
+        cls,
+        repo: Any,
+        metadata: SessionMetadata,
+    ) -> "V4SessionManager":
+        """按元数据在指定 v4 SessionRepo 上打开会话。"""
+        session = await repo.open(metadata)
+        cwd = str(cast(dict[str, Any], metadata).get("cwd") or "")
+        return await cls._from_session(cwd, session, repo, None)
 
     @classmethod
     async def open(
@@ -708,6 +739,12 @@ class V4SessionManager:
             return await _run()
         finally:
             lock.release()
+
+    async def close(self) -> None:
+        """释放底层 repo（连接池 / writer leases）。"""
+        close = getattr(self._repo, "close", None)
+        if close is not None:
+            await close()
 
     # ------------------------------------------------------------------
     # 内部

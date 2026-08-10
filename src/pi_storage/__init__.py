@@ -6,11 +6,21 @@
 
 from .migrations import MIGRATIONS, SCHEMA_VERSION, apply_migrations
 from .store import PostgresSessionStore, SessionMetadata
+from .v4 import (
+    PgSessionSearch,
+    PostgresV4SessionRepo,
+    PostgresV4SessionStorage,
+    create_postgres_v4_repo,
+)
 
 __all__ = [
     "MIGRATIONS",
     "SCHEMA_VERSION",
     "PostgresSessionStore",
+    "PostgresV4SessionRepo",
+    "PostgresV4SessionStorage",
+    "PgSessionSearch",
+    "create_postgres_v4_repo",
     "SessionMetadata",
     "apply_migrations",
 ]
