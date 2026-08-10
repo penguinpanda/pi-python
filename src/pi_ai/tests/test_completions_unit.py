@@ -79,7 +79,14 @@ def _async_iter(items):
     return gen()
 
 
-def _chunk(content=None, tool_calls=None, finish_reason=None, usage=None, reasoning_content=None):
+def _chunk(
+    content=None,
+    tool_calls=None,
+    finish_reason=None,
+    usage=None,
+    reasoning_content=None,
+    reasoning=None,
+):
     """构造一个假的 OpenAI Streaming Chunk。"""
     return SimpleNamespace(
         choices=[
@@ -89,6 +96,7 @@ def _chunk(content=None, tool_calls=None, finish_reason=None, usage=None, reason
                     content=content,
                     tool_calls=tool_calls,
                     reasoning_content=reasoning_content,
+                    reasoning=reasoning,
                 ),
                 finish_reason=finish_reason,
             )
@@ -257,6 +265,36 @@ class TestCompletionsStream:
         assert msg["usage"]["output"] == 20
         assert msg["usage"]["total_tokens"] == 120
         assert msg["usage"]["cache_read"] == 5
+
+    @pytest.mark.asyncio
+    async def test_ollama_reasoning_field_emits_thinking_events(self):
+        """ollama/qwen3 流式 reasoning 字段应进入 thinking 块（对齐 reasoning_content）。"""
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        chunks = [
+            _chunk(reasoning="Think", finish_reason=None),
+            _chunk(reasoning=" more", finish_reason=None),
+            _chunk(content="Answer", finish_reason="stop"),
+        ]
+        client = _mock_client(chunks)
+
+        events, _ = await _collect_events(model, context, client)
+        assert [e["type"] for e in events] == [
+            "start",
+            "thinking_start",
+            "thinking_delta",
+            "thinking_delta",
+            "thinking_end",
+            "text_start",
+            "text_delta",
+            "text_end",
+            "done",
+        ]
+        msg = events[-1]["message"]
+        assert msg["content"] == [
+            {"type": "thinking", "thinking": "Think more"},
+            {"type": "text", "text": "Answer"},
+        ]
 
     @pytest.mark.asyncio
     async def test_result_returns_message(self):

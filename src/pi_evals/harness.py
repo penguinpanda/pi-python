@@ -180,7 +180,7 @@ async def _prompt_agent(
     session: AgentSession,
     text: str,
     signal: asyncio.Event | None,
-) -> str:
+) -> str | None:
     """运行一次 prompt 并返回最后一条 assistant 文本（对齐 TS promptAgent）。"""
     if signal is not None and signal.is_set():
         raise RuntimeError("Eval run aborted.")
@@ -206,8 +206,12 @@ async def _prompt_agent(
                 )
             )
         output = session.get_last_assistant_text()
-        if not output:
-            raise RuntimeError("Agent run produced no assistant text.")
+        has_tool_calls = any(
+            isinstance(block, dict) and block.get("type") == "toolCall"
+            for block in (assistant.get("content") or [])
+        )
+        if not output and not has_tool_calls:
+            raise RuntimeError("Agent run produced no assistant text or tool calls.")
         return output
     finally:
         if watcher is not None:
@@ -389,10 +393,12 @@ async def run_pi_coding_agent(
 
         steps = input if isinstance(input, list) else [{"type": "prompt", "content": input}]
         response: str | None = None
+        saw_prompt_step = False
         for step in steps:
             if not isinstance(step, dict):
                 raise RuntimeError("Pi eval input steps must be objects.")
             if step.get("type") == "prompt":
+                saw_prompt_step = True
                 response = await _prompt_agent(session, str(step.get("content") or ""), signal)
             else:
                 await _reload_session(
@@ -401,7 +407,7 @@ async def run_pi_coding_agent(
                     runtime,
                     options.reload_setup,
                 )
-        if response is None:
+        if not saw_prompt_step:
             raise RuntimeError("Pi eval input must include at least one prompt step.")
         output: JsonValue = response
         if options.output is not None:

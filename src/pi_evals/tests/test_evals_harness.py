@@ -20,6 +20,7 @@ from pi_evals.harness import (
     create_pi_coding_agent_harness,
     resolve_model_selection,
     _make_runtime,
+    _prompt_agent,
 )
 from pi_evals.vitest_evals.harness import HarnessContext
 
@@ -282,6 +283,72 @@ async def test_unexpected_stop_reason_raises():
     )
     with pytest.raises(RuntimeError, match="boom"):
         await harness.run("hi", HarnessContext())
+
+
+class _StubSession:
+    """_prompt_agent 的最小会话桩。"""
+
+    def __init__(self, messages: list, last_text: str | None) -> None:
+        self._messages = messages
+        self._last_text = last_text
+        self.prompted: str | None = None
+        self.aborted = False
+
+    def get_messages(self):
+        if self.prompted is None:
+            return []
+        return list(self._messages)
+
+    def get_last_assistant_text(self) -> str | None:
+        return self._last_text
+
+    async def prompt(self, text: str) -> None:
+        self.prompted = text
+
+    async def abort(self) -> None:
+        self.aborted = True
+
+
+@pytest.mark.asyncio
+async def test_prompt_agent_allows_tool_call_only_turn():
+    session = _StubSession(
+        messages=[
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "toolCall",
+                        "id": "c1",
+                        "name": "read",
+                        "arguments": {"path": "x"},
+                    }
+                ],
+                "stop_reason": "stop",
+                "timestamp": 1,
+            }
+        ],
+        last_text=None,
+    )
+    result = await _prompt_agent(session, "go", None)
+    assert result is None
+    assert session.prompted == "go"
+
+
+@pytest.mark.asyncio
+async def test_prompt_agent_rejects_empty_turn():
+    session = _StubSession(
+        messages=[
+            {
+                "role": "assistant",
+                "content": [],
+                "stop_reason": "stop",
+                "timestamp": 1,
+            }
+        ],
+        last_text=None,
+    )
+    with pytest.raises(RuntimeError, match="no assistant text or tool calls"):
+        await _prompt_agent(session, "go", None)
 
 
 HELLO_EXTENSION_SOURCE = """\

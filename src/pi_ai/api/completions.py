@@ -472,7 +472,11 @@ async def chat_completions_stream(
                 #
                 # 与 text 块类似，但独立成 thinking 块；DeepSeek 通常先输出
                 # reasoning_content 再输出 content。
+                # DeepSeek 用 reasoning_content；ollama/qwen3 的 OpenAI 兼容
+                # 流式字段名是 reasoning（openai SDK 作为额外字段保留）。
                 reasoning_delta = getattr(delta, "reasoning_content", None)
+                if not reasoning_delta:
+                    reasoning_delta = getattr(delta, "reasoning", None)
                 if reasoning_delta:
                     if current_kind != "thinking":
                         _end_current_block()
