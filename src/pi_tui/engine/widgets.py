@@ -12,10 +12,14 @@ from typing import Any, Callable, Iterator, Sequence
 from rich.style import Style
 
 from .cells import Cell, Line, blank_line, line_from_text
+from .fuzzy import fuzzy_filter
 from .keys import Key, MouseEvent
+from .kill_ring import KillRing
 from .layout import render_layout_frame
 from .layout_node import ScrollLayoutNode, StackLayoutEntry, StackLayoutNode
 from .text import render_markdown, render_markup
+from .undo_stack import UndoStack
+from .word_navigation import find_word_backward, find_word_forward
 
 
 class Message:
@@ -604,9 +608,10 @@ class Editor(Widget):
         self.vim_mode = "insert"
         self.vim_enabled = False
         self._pending = ""
-        self._undo_stack: list[tuple[list[str], int, int]] = []
-        self._redo_stack: list[tuple[list[str], int, int]] = []
-        self.kill_ring: list[str] = []
+        self._undo_stack: UndoStack[tuple[list[str], int, int]] = UndoStack(max_length=500)
+        self._redo_stack: UndoStack[tuple[list[str], int, int]] = UndoStack()
+        self._kill_ring = KillRing()
+        self._autocomplete_provider: Any = None
         self._jump_mode: str | None = None
         self.selection_anchor: tuple[int, int] | None = None
         self.history: list[str] = []
@@ -644,6 +649,26 @@ class Editor(Widget):
         self._pending = ""
         self._exit_history_browsing()
         self.refresh()
+
+    @property
+    def kill_ring(self) -> list[str]:
+        """Backward-compatible view of the kill ring entries."""
+        return self._kill_ring.entries
+
+    def get_text(self) -> str:
+        return self.text
+
+    def set_text(self, text: str) -> None:
+        self.text = text
+
+    def insert_text_at_cursor(self, text: str) -> None:
+        self.insert(text)
+
+    def get_expanded_text(self) -> str:
+        return self.text
+
+    def set_autocomplete_provider(self, provider: Any) -> None:
+        self._autocomplete_provider = provider
 
     def insert(self, value: str) -> None:
         """在光标处插入文本（含换行）。"""
@@ -698,10 +723,11 @@ class Editor(Widget):
         return cursor, anchor
 
     def undo(self) -> None:
-        if not self._undo_stack:
+        snapshot = self._undo_stack.pop()
+        if snapshot is None:
             return
-        lines, row, col = self._undo_stack.pop()
-        self._redo_stack.append((self.lines, self.cursor_row, self.cursor_col))
+        lines, row, col = snapshot
+        self._redo_stack.push((self.lines, self.cursor_row, self.cursor_col))
         self.lines = lines
         self.cursor_row = row
         self.cursor_col = col
@@ -710,10 +736,11 @@ class Editor(Widget):
         self.refresh()
 
     def redo(self) -> None:
-        if not self._redo_stack:
+        snapshot = self._redo_stack.pop()
+        if snapshot is None:
             return
-        lines, row, col = self._redo_stack.pop()
-        self._undo_stack.append((self.lines, self.cursor_row, self.cursor_col))
+        lines, row, col = snapshot
+        self._undo_stack.push((self.lines, self.cursor_row, self.cursor_col))
         self.lines = lines
         self.cursor_row = row
         self.cursor_col = col
@@ -722,9 +749,7 @@ class Editor(Widget):
         self.refresh()
 
     def _snapshot(self) -> None:
-        self._undo_stack.append(([line for line in self.lines], self.cursor_row, self.cursor_col))
-        if len(self._undo_stack) > 500:
-            self._undo_stack.pop(0)
+        self._undo_stack.push((self.lines, self.cursor_row, self.cursor_col))
         self._redo_stack.clear()
 
     def _clamp_cursor(self) -> None:
@@ -796,17 +821,10 @@ class Editor(Widget):
         """ctrl+shift+方向：按词扩展选区（不把分隔符并入词尾）。"""
         if self.selection_anchor is None:
             self.selection_anchor = (self.cursor_row, self.cursor_col)
-        text = self.lines[self.cursor_row]
         if direction < 0:
             self.cursor_col = self._word_start(self.cursor_row, self.cursor_col)
         else:
-            index = self.cursor_col
-            length = len(text)
-            while index < length and not (text[index].isalnum() or text[index] == "_"):
-                index += 1
-            while index < length and (text[index].isalnum() or text[index] == "_"):
-                index += 1
-            self.cursor_col = index
+            self.cursor_col = find_word_forward(self.lines[self.cursor_row], self.cursor_col)
         self.refresh()
 
     def delete(self, start: tuple[int, int], end: tuple[int, int]) -> None:
@@ -891,9 +909,7 @@ class Editor(Widget):
 
     def _yank_pop(self) -> None:
         """alt+y：kill ring 循环回退（对齐 TS yankPop）。"""
-        if not self.kill_ring:
-            return
-        self.kill_ring.insert(0, self.kill_ring.pop())
+        self._kill_ring.rotate()
         self._yank()
 
     def _jump_to_char(self, char: str, direction: str) -> None:
@@ -921,10 +937,10 @@ class Editor(Widget):
         line = self.lines[row]
         if self.cursor_col < len(line):
             killed = line[self.cursor_col :]
-            self.kill_ring.append(killed)
+            self._kill_ring.push(killed, prepend=False)
             self.delete((row, self.cursor_col), (row, len(line)))
         elif row < len(self.lines) - 1:
-            self.kill_ring.append("")
+            self._kill_ring.push("", prepend=False)
             self._snapshot()
             self.lines[row] = line + self.lines[row + 1]
             self.lines.pop(row + 1)
@@ -933,27 +949,15 @@ class Editor(Widget):
 
     def _yank(self) -> None:
         """ctrl+y：粘贴最近一次 kill。"""
-        if self.kill_ring:
-            self.insert(self.kill_ring[-1])
+        entry = self._kill_ring.peek()
+        if entry is not None:
+            self.insert(entry)
 
     def _word_start(self, row: int, col: int) -> int:
-        text = self.lines[row]
-        index = col
-        while index > 0 and not text[index - 1].isalnum() and text[index - 1] != "_":
-            index -= 1
-        while index > 0 and (text[index - 1].isalnum() or text[index - 1] == "_"):
-            index -= 1
-        return index
+        return find_word_backward(self.lines[row], col)
 
     def _word_end(self, row: int, col: int) -> int:
-        text = self.lines[row]
-        index = col
-        length = len(text)
-        while index < length and (text[index].isalnum() or text[index] == "_"):
-            index += 1
-        while index < length and not text[index].isalnum() and text[index] != "_":
-            index += 1
-        return index
+        return find_word_forward(self.lines[row], col, include_separator=True)
 
     def _move_word_forward(self) -> None:
         col = self._word_end(self.cursor_row, self.cursor_col)
@@ -1827,30 +1831,14 @@ def _normalize_select_items(items: Sequence[SelectItem | str]) -> list[SelectIte
     return [item if isinstance(item, SelectItem) else SelectItem(value=str(item)) for item in items]
 
 
-def _filter_score(text: str, query: str) -> int:
-    """模糊匹配打分：2=前缀，1=子串，0=子序列，-1=不匹配。"""
-    text = text.lower()
-    query = query.strip().lower()
-    if not query:
-        return 0
-    if text.startswith(query):
-        return 2
-    if query in text:
-        return 1
-    iterator = iter(text)
-    if all(any(ch == wanted for ch in iterator) for wanted in query):
-        return 0
-    return -1
-
-
 def _filter_items(items: list[SelectItem], query: str) -> list[SelectItem]:
-    scored: list[tuple[int, SelectItem]] = []
-    for item in items:
-        score = max(_filter_score(item.value, query), _filter_score(item.display_label, query))
-        if score >= 0:
-            scored.append((score, item))
-    scored.sort(key=lambda pair: (-pair[0], pair[1].display_label.lower()))
-    return [item for _, item in scored]
+    if not query.strip():
+        return list(items)
+    return fuzzy_filter(
+        items,
+        query.strip(),
+        lambda item: f"{item.value} {item.display_label}",
+    )
 
 
 class SelectList(Widget):
