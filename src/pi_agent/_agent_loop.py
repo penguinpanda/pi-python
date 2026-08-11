@@ -833,6 +833,8 @@ async def _stream_assistant_response(
         options["thinking_budgets"] = config.thinking_budgets
     if config.transport is not None:
         options["transport"] = config.transport
+    if config.thinking_level is not None:
+        options["reasoning"] = config.thinking_level
 
     # retry_policy 为 None 时使用默认策略（enabled=True, max_retries=3）。
     # 显式传入 RetryPolicy(enabled=False) 可关闭重试。

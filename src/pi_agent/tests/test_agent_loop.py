@@ -62,6 +62,26 @@ def _make_stream_fn(message: AssistantMessage) -> StreamFn:
     return _make_faux([message]).stream
 
 
+@pytest.mark.asyncio
+async def test_agent_forwards_thinking_level_to_stream_options():
+    from pi_agent import Agent, AgentOptions
+
+    model = _make_model()
+    captured: dict = {}
+
+    async def capturing_stream(_model, _context, options=None):
+        captured["options"] = dict(options or {})
+        core = faux_provider()
+        core.set_responses([faux_assistant_message("ok")])
+        return await core.stream(_model, _context, options)
+
+    agent = Agent(AgentOptions(model=model, system_prompt="", thinking_level="off"))
+    agent.stream_function = capturing_stream
+    await agent.prompt(UserMessage(role="user", content="hi"))
+    await agent.wait_for_idle()
+    assert captured["options"].get("reasoning") == "off"
+
+
 def _make_counting_stream_fn(messages: list[AssistantMessage]) -> StreamFn:
     """创建按调用次数顺序消费脚本化响应的 Faux stream_fn。"""
     return _make_faux(list(messages)).stream

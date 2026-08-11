@@ -449,6 +449,8 @@ class AgentLoopConfig:
     # 透传给 StreamOptions（SimpleStreamOptions）
     thinking_budgets: ThinkingBudgets | None = None
     transport: Transport | None = None
+    # 推理级别（透传给 StreamOptions.reasoning；None 表示不覆盖）。
+    thinking_level: ThinkingLevel | None = None
 
     # 重试策略。None 表示使用默认策略（enabled=True, max_retries=3）。
     # 显式传入 RetryPolicy(enabled=False) 可关闭重试。

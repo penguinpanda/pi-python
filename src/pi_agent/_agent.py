@@ -531,6 +531,7 @@ class Agent:
             cache_retention=self.cache_retention,
             thinking_budgets=self.thinking_budgets,
             transport=self.transport,
+            thinking_level=self._state.thinking_level,
             retry_policy=self.retry_policy,
             get_steering_messages=_get_steering,
             get_follow_up_messages=self._get_follow_up_messages,
