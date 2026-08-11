@@ -74,6 +74,13 @@ export OPENAI_API_KEY="sk-..."
 
 # DeepSeek
 export DEEPSEEK_API_KEY="sk-..."
+
+# Qwen（DashScope 按量计费）
+export DASHSCOPE_API_KEY="sk-..."
+
+# Qwen Token Plan（阿里云百炼 Token Plan 套餐，sk-sp- 前缀）
+export QWEN_TOKEN_PLAN_API_KEY="sk-sp-..."      # 国际站
+export QWEN_TOKEN_PLAN_CN_API_KEY="sk-sp-..."   # 中国站
 ```
 
 Ollama 是本地服务，默认不需要 API Key：

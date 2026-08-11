@@ -19,18 +19,21 @@ class TestModelsRegistry:
     def test_create_default_models(self):
         models = create_default_models()
         providers = models.get_providers()
-        assert len(providers) == 5
+        assert len(providers) == 7
         assert models.get_provider("openai") is not None
         assert models.get_provider("deepseek") is not None
         assert models.get_provider("qwen") is not None
+        assert models.get_provider("qwen-token-plan") is not None
+        assert models.get_provider("qwen-token-plan-cn") is not None
         assert models.get_provider("ollama") is not None
         assert models.get_provider("faux") is not None
 
     def test_get_models_all(self):
         models = create_default_models()
         all_models = models.get_models()
-        # 4 openai (GPT-5 系列) + 2 deepseek (v4) + 8 qwen + 7 ollama + 1 faux
-        assert len(all_models) == 22
+        # 4 openai (GPT-5 系列) + 2 deepseek (v4) + 8 qwen
+        # + 16 qwen-token-plan + 16 qwen-token-plan-cn + 7 ollama + 1 faux
+        assert len(all_models) == 54
 
     def test_get_models_by_provider(self):
         models = create_default_models()

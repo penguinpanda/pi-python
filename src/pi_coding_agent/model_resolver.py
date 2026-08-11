@@ -36,6 +36,8 @@ default_model_per_provider: dict[str, str] = {
     "openai": "gpt-5-chat-latest",
     "deepseek": "deepseek-v4-flash",
     "qwen": "qwen-plus",
+    "qwen-token-plan": "qwen3.7-max",
+    "qwen-token-plan-cn": "qwen3.7-max",
     "faux": "faux-1",
 }
 

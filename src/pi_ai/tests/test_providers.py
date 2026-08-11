@@ -15,10 +15,14 @@ from pi_ai.providers import (
     OLLAMA_MODELS,
     OPENAI_MODELS,
     QWEN_MODELS,
+    QWEN_TOKEN_PLAN_BASE_URL,
+    QWEN_TOKEN_PLAN_CN_BASE_URL,
     deepseek_provider,
     ollama_provider,
     openai_provider,
     qwen_provider,
+    qwen_token_plan_cn_provider,
+    qwen_token_plan_provider,
 )
 from pi_ai.providers.ollama import _merge_ollama_models
 
@@ -414,3 +418,146 @@ class TestOllamaDiscovery:
         monkeypatch.setattr(ollama_mod.httpx, "AsyncClient", lambda **kw: _FakeClient())
 
         assert await ollama_mod.discover_ollama_models() is None
+
+
+class TestQwenTokenPlanProviders:
+    """qwen_token_plan_provider() / qwen_token_plan_cn_provider() 工厂。
+
+    对齐 TS test/qwen-token-plan-models.test.ts 的覆盖范围。
+    """
+
+    TEXT_MODELS = [
+        "MiniMax-M2.5",
+        "deepseek-v3.2",
+        "deepseek-v4-flash",
+        "deepseek-v4-flash-0731",
+        "deepseek-v4-pro",
+        "glm-5",
+        "glm-5.1",
+        "glm-5.2",
+        "kimi-k2.5",
+        "kimi-k2.6",
+        "kimi-k2.7-code",
+        "qwen3.6-flash",
+        "qwen3.6-plus",
+        "qwen3.7-max",
+        "qwen3.7-plus",
+        "qwen3.8-max",
+    ]
+
+    # 图像/视频生成模型不支持工具调用，生成目录应排除。
+    EXCLUDED_MODELS = [
+        "qwen-image-2.0",
+        "qwen-image-2.0-pro",
+        "wan2.7-image",
+        "wan2.7-image-pro",
+        "happyhorse-1.1-t2v",
+        # 已退役的 preview id。
+        "qwen3.8-max-preview",
+    ]
+
+    def test_factory_config(self):
+        provider = qwen_token_plan_provider()
+        assert provider.id == "qwen-token-plan"
+        assert provider.name == "Qwen Token Plan"
+        assert provider._api_kind == "completions"
+        assert (
+            provider.base_url
+            == "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
+        )
+
+        cn_provider = qwen_token_plan_cn_provider()
+        assert cn_provider.id == "qwen-token-plan-cn"
+        assert cn_provider.name == "Qwen Token Plan CN"
+        assert cn_provider._api_kind == "completions"
+        assert (
+            cn_provider.base_url
+            == "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+        )
+
+    def test_auth_uses_env_var(self):
+        auth = qwen_token_plan_provider().auth
+        assert isinstance(auth, EnvApiKeyAuth)
+        assert auth.display_name == "Qwen Token Plan API key"
+        assert auth.env_vars == ["QWEN_TOKEN_PLAN_API_KEY"]
+
+        cn_auth = qwen_token_plan_cn_provider().auth
+        assert isinstance(cn_auth, EnvApiKeyAuth)
+        assert cn_auth.display_name == "Qwen Token Plan CN API key"
+        assert cn_auth.env_vars == ["QWEN_TOKEN_PLAN_CN_API_KEY"]
+
+    def test_model_catalog(self):
+        for provider in (qwen_token_plan_provider(), qwen_token_plan_cn_provider()):
+            ids = _model_ids(provider.get_models())
+            assert ids == sorted(ids), provider.id
+            for expected in self.TEXT_MODELS:
+                assert expected in ids, f"{provider.id} missing {expected}"
+            for excluded in self.EXCLUDED_MODELS:
+                assert excluded not in ids, f"{provider.id} includes {excluded}"
+
+    def test_both_regions_share_catalog_with_distinct_endpoints(self):
+        intl = qwen_token_plan_provider()
+        cn = qwen_token_plan_cn_provider()
+        assert _model_ids(intl.get_models()) == _model_ids(cn.get_models())
+        intl_by_id = {m.id: m for m in intl.get_models()}
+        cn_by_id = {m.id: m for m in cn.get_models()}
+        for model_id in self.TEXT_MODELS:
+            assert intl_by_id[model_id].base_url == QWEN_TOKEN_PLAN_BASE_URL
+            assert cn_by_id[model_id].base_url == QWEN_TOKEN_PLAN_CN_BASE_URL
+
+    def test_model_metadata(self):
+        by_id = {m.id: m for m in qwen_token_plan_provider().get_models()}
+
+        qwen38 = by_id["qwen3.8-max"]
+        assert qwen38.provider == "qwen-token-plan"
+        assert qwen38.api == "openai-completions"
+        assert qwen38.reasoning is True
+        assert "image" in qwen38.input
+        assert qwen38.context_window == 1000000
+        assert qwen38.max_tokens == 131072
+        # Token Plan 为订阅制套餐，按 token 计费为 0。
+        assert qwen38.cost.input == 0.0
+        assert qwen38.cost.output == 0.0
+        assert qwen38.compat == {
+            "thinkingFormat": "qwen",
+            "supportsDeveloperRole": False,
+            "supportsStore": False,
+            "supportsReasoningEffort": True,
+        }
+        assert qwen38.thinking_level_map == {
+            "minimal": None,
+            "low": "low",
+            "medium": "medium",
+            "high": None,
+            "xhigh": "xhigh",
+            "max": None,
+        }
+
+        # 不支持 reasoning_effort 的模型：关闭 effort 且无思考级别映射。
+        kimi = by_id["kimi-k2.7-code"]
+        assert kimi.reasoning is True
+        assert kimi.compat is not None
+        assert kimi.compat.get("supportsReasoningEffort") is False
+        assert kimi.compat.get("thinkingFormat") == "qwen"
+        assert kimi.thinking_level_map is None
+
+        # 其余支持 effort 的推理模型映射 high/max（qwen3.8-max 除外）。
+        v4_flash = by_id["deepseek-v4-flash"]
+        assert v4_flash.thinking_level_map == {
+            "minimal": None,
+            "low": None,
+            "medium": None,
+            "high": "high",
+            "xhigh": None,
+            "max": "max",
+        }
+
+    def test_custom_models_override(self):
+        custom = Model(
+            id="custom-model",
+            provider="qwen-token-plan",
+            api="openai-completions",
+            name="Custom",
+        )
+        provider = qwen_token_plan_provider(models=[custom])
+        assert _model_ids(provider.get_models()) == ["custom-model"]

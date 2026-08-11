@@ -79,11 +79,15 @@ pre-commit install
 $env:OPENAI_API_KEY="sk-..."
 $env:DEEPSEEK_API_KEY="sk-..."
 $env:DASHSCOPE_API_KEY="sk-..."
+$env:QWEN_TOKEN_PLAN_API_KEY="sk-sp-..."
+$env:QWEN_TOKEN_PLAN_CN_API_KEY="sk-sp-..."
 
 # Linux/macOS
 export OPENAI_API_KEY="sk-..."
 export DEEPSEEK_API_KEY="sk-..."
 export DASHSCOPE_API_KEY="sk-..."
+export QWEN_TOKEN_PLAN_API_KEY="sk-sp-..."
+export QWEN_TOKEN_PLAN_CN_API_KEY="sk-sp-..."
 ```
 
 ### pi_ai — 直接调用 LLM

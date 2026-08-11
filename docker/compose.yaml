@@ -35,6 +35,8 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
       - QWEN_API_KEY=${QWEN_API_KEY:-}
+      - QWEN_TOKEN_PLAN_API_KEY=${QWEN_TOKEN_PLAN_API_KEY:-}
+      - QWEN_TOKEN_PLAN_CN_API_KEY=${QWEN_TOKEN_PLAN_CN_API_KEY:-}
       # 容器内 Ollama 通过 host.docker.internal 访问宿主机
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
     stdin_open: true
@@ -70,6 +72,8 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
       - QWEN_API_KEY=${QWEN_API_KEY:-}
+      - QWEN_TOKEN_PLAN_API_KEY=${QWEN_TOKEN_PLAN_API_KEY:-}
+      - QWEN_TOKEN_PLAN_CN_API_KEY=${QWEN_TOKEN_PLAN_CN_API_KEY:-}
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
     stdin_open: true
     tty: true

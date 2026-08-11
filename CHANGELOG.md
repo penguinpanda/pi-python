@@ -60,6 +60,11 @@
   `reasoning.encrypted_content`（终态回填）、assistant 消息写入
   `text_signature`、支持 `reasoning_summary` / `refusal.delta` /
   `include_system_prompt`，并接入 deferred tools（tool_search 协议）
+- 新增 Qwen Token Plan provider（阿里云百炼 Token Plan，OpenAI 兼容模式）：
+  国际站 `qwen-token-plan`（`QWEN_TOKEN_PLAN_API_KEY`）与中国站
+  `qwen-token-plan-cn`（`QWEN_TOKEN_PLAN_CN_API_KEY`），模型目录经
+  `scripts/generate_models.py` 从 TS 上游数据生成（16 个 tool-capable 模型/站，
+  含 qwen3.x / deepseek / kimi / glm / minimax），并注册默认模型 `qwen3.7-max`
 
 ### Changed
 

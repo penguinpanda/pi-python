@@ -5,15 +5,23 @@ from ..providers import (
     ollama_provider,
     openai_provider,
     qwen_provider,
+    qwen_token_plan_cn_provider,
+    qwen_token_plan_provider,
 )
 
 
 def create_default_models() -> Models:
-    """创建一个预加载了OpenAI、DeepSeek、Ollama与Faux的Models实例。"""
+    """创建一个预加载内置 Provider 的 Models 实例。
+
+    包含 OpenAI、DeepSeek、Qwen、Qwen Token Plan（国际站/中国站）、
+    Ollama 与 Faux。
+    """
     models = Models()
     models.add_provider(openai_provider())
     models.add_provider(deepseek_provider())
     models.add_provider(qwen_provider())
+    models.add_provider(qwen_token_plan_provider())
+    models.add_provider(qwen_token_plan_cn_provider())
     models.add_provider(ollama_provider())
     # Faux 放在最后：不改变默认模型回退顺序（第一个可用模型仍是 openai 的）。
     models.add_provider(faux_provider().provider)
