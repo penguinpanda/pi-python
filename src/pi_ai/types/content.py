@@ -6,7 +6,6 @@ ContentBlock 是消息内容的统一抽象：
     ImageContent    图片
     ToolCall        工具调用
     ThinkingContent 推理过程
-    CodeContent     代码块（插件化扩展示例）
 
 扩展机制：所有内容块都继承 BaseContent（type 判别字段），
 新增类型只需继承 BaseContent 并把 Literal 收窄为唯一 type。
@@ -122,24 +121,8 @@ class ThinkingContent(BaseContent):
     redacted: NotRequired[bool]
 
 
-class CodeContent(BaseContent):
-    """
-    代码内容块（插件化扩展示例）
-
-    {
-        "type": "code",
-        "language": "python",
-        "code": "print('hi')"
-    }
-    """
-
-    type: Literal["code"]
-    language: str  # 编程语言（python / typescript / ...）
-    code: str  # 代码内容
-
-
 # ContentBlock 可以是任意一种内容
-ContentBlock = TextContent | ImageContent | ToolCall | ThinkingContent | CodeContent
+ContentBlock = TextContent | ImageContent | ToolCall | ThinkingContent
 
 
 class TextSignatureV1(TypedDict):
@@ -156,7 +139,6 @@ __all__ = [
     "ImageContent",
     "ToolCall",
     "ThinkingContent",
-    "CodeContent",
     "ContentBlock",
     "TextSignatureV1",
 ]

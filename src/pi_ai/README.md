@@ -567,7 +567,7 @@ pi_ai/types/
 
 - `Message` 联合含 `AgentMessage`（planner / observation / memory 等通用 role），
   Agent 层可携带任意 Agent role；转换函数对未知 role 安全跳过。
-- `ContentBlock` 继承 `BaseContent`，新增类型（如 `CodeContent`）即可插件化扩展。
+- `ContentBlock` 继承 `BaseContent`，新增类型只需继承并把 `type` 收窄为唯一字面量即可插件化扩展。
 - `ToolCall` 含 `raw_arguments`（流式原始 JSON）与 `arguments`（解析后 dict / None）。
 - `Tool` 支持 `before_execute` / `after_execute` 生命周期钩子（默认 None）。
 - `Context` 可注入 `state` / `memory`（`MemoryStore`）/ `trace_id`。

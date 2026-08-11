@@ -49,7 +49,6 @@ from typing import Any, Callable, cast
 
 from ..types import (
     AssistantMessage,
-    CodeContent,
     ContentBlock,
     Message,
     Model,
@@ -469,8 +468,8 @@ def transform_messages(
                     transformed_content.append(cast(ToolCall, normalized_tool_call))
                     continue
 
-                # 未知块类型（code 等）原样透传。
-                transformed_content.append(cast(CodeContent, content_block))
+                # 未知块类型原样透传。
+                transformed_content.append(content_block)
 
             new_msg = dict(asst)
             new_msg["content"] = transformed_content

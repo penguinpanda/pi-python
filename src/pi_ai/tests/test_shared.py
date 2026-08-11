@@ -232,23 +232,6 @@ class TestToOpenaiMessages:
         # 未知 role 安全跳过，不抛异常
         assert result == [{"role": "user", "content": "Hi"}]
 
-    def test_assistant_code_content_skipped(self):
-        """Assistant 消息中的 CodeContent（未知块类型）安全跳过。"""
-        messages: list[Message] = [
-            {
-                "role": "assistant",
-                "content": [
-                    {"type": "text", "text": "Here is code:"},
-                    {"type": "code", "language": "python", "code": "print('hi')"},
-                ],
-                "api": "openai-completions",
-                "provider": "test",
-                "model": "test",
-            },  # type: ignore[typeddict-unknown-key]
-        ]
-        result = to_openai_messages(messages, _make_model())
-        assert result == [{"role": "assistant", "content": "Here is code:"}]
-
 
 # ---------------------------------------------------------------------------
 # to_openai_tools

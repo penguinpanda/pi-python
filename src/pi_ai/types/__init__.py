@@ -42,7 +42,6 @@ from .common import (
 )
 from .content import (
     BaseContent,
-    CodeContent,
     ContentBlock,
     ImageContent,
     TextContent,
@@ -153,7 +152,6 @@ __all__ = [
     "ImageContent",
     "ToolCall",
     "ThinkingContent",
-    "CodeContent",
     "ContentBlock",
     "TextSignatureV1",
     # message
