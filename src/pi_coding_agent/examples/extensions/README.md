@@ -10,7 +10,9 @@ cp hello.py ~/.pi/agent/extensions/
 cp hello.py .pi/extensions/          # 项目需先被信任
 ```
 
-CLI 暂未提供 TS 的 `--extension` / `-e` 标志；扩展由 `ResourceLoader` 发现（子目录入口为 `index.py` / `pi_extension.py`）。
+CLI 支持 `-e/--extension` 显式加载，也可由 `ResourceLoader` 自动发现
+（全局 `~/.pi/agent/extensions`、项目 `.pi/extensions`；子目录入口为
+`index.py` / `pi_extension.py`）。
 
 ## 已移植示例
 

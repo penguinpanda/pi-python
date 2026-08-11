@@ -130,6 +130,7 @@ header.base_style = Style(bgcolor=theme.colors["bgToolbar"], color=theme.colors[
 |------|------|------|
 | `PiHeader` | `Static` | Logo + 快捷键提示（读取 KeybindingsManager 生成） |
 | `PiChatContainer` | `ScrollView` | 消息列表；`add_message_agent()` 追加并滚动到底部，`clear_messages()` 清空，`set_visibility()` 控制工具/思考块显隐 |
+| `ToolExecutionEntry` / `BashExecutionEntry` | `Widget` | 工具执行与 bash 交互条目：名称/参数 + 流式输出 + 状态色，可展开/折叠 |
 | `PiEditor` | `Editor` | 多行输入；Enter 提交并发出 `Submitted` 事件（空文本忽略）；vim 模式 `PiEditorVim` |
 | `PiStatusBar` | `Label` | 状态栏：Working / Compacting / Idle 等 |
 | `PiFooter` | `Label` | 底部栏：`update_info(model, thinking, message_count, session_name)` |
@@ -220,7 +221,7 @@ dismiss 时移除 overlay 并把焦点恢复到打开前位置。
 
 ## 主题（theme.py）
 
-42 种命名颜色，覆盖背景、边框、状态、文本、基础色板与 Markdown/diff 语义，内置 dark / light 两套主题：
+56 种命名颜色，覆盖背景、边框、状态、文本、基础色板、Markdown/diff 与 thinking/工具执行语义，内置 dark / light 两套主题：
 
 | 分类 | 键 |
 |------|-----|
@@ -230,6 +231,7 @@ dismiss 时移除 overlay 并把焦点恢复到打开前位置。
 | 文本 | `text` `textAlt` `textDim` `textDisabled` `textLight` `textSelected` `textSystem` `textWarning` `dim` |
 | 色板 | `black` `red` `green` `yellow` `blue` `magenta` `cyan` `white` |
 | Markdown / diff | `markdownHeading` `markdownLink` `diffAdd` `diffRemove` `diffChange` |
+| thinking / 工具执行 / bash | `thinkingText` `thinkingOff` `thinkingMinimal` `thinkingLow` `thinkingMedium` `thinkingHigh` `thinkingXhigh` `thinkingMax` `toolPendingBg` `toolSuccessBg` `toolErrorBg` `toolTitle` `toolOutput` `bashMode` |
 
 内置主题为 Catppuccin 风格：`dark`（Mocha）、`light`（Latte）。
 
@@ -244,7 +246,7 @@ dismiss 时移除 overlay 并把焦点恢复到打开前位置。
 
 ### 自定义 JSON 主题
 
-主题文件须为 JSON 对象且包含全部 42 个颜色键，值为十六进制字符串（`validate_theme_colors` 校验）：
+主题文件须为 JSON 对象且包含全部 56 个颜色键，值为十六进制字符串（`validate_theme_colors` 校验）：
 
 ```json
 {

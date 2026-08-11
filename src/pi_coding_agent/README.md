@@ -173,7 +173,8 @@ pi login [provider] | pi logout <provider> | pi list
 import asyncio
 from pi_agent import Agent, AgentOptions, set_default_stream_fn
 from pi_ai import create_default_models
-from pi_coding_agent import AgentSession, SessionManager, run_print_mode
+from pi_coding_agent import AgentSession, run_print_mode
+from pi_coding_agent._session_manager_v4 import create_session_manager
 
 
 async def main():
@@ -188,7 +189,7 @@ async def main():
         )
     )
 
-    session_manager = SessionManager.create(cwd=".")
+    session_manager = await create_session_manager(cwd=".")
     session = AgentSession(
         agent=agent,
         session_manager=session_manager,
@@ -208,9 +209,18 @@ asyncio.run(main())
 ### 会话工厂
 
 ```python
-SessionManager.create(cwd=".")  # 新建持久化会话
-SessionManager.in_memory(cwd=".")  # 内存会话
-SessionManager.open("~/.pi/agent/sessions/abc.jsonl", cwd_override=".")
+from pi_coding_agent._session_manager_v4 import (
+    create_session_manager,
+    in_memory_session_manager,
+    open_session_manager,
+)
+
+manager = await create_session_manager(cwd=".")       # 新建持久化会话（v4 默认）
+manager = await in_memory_session_manager(cwd=".")    # 内存会话
+manager = await open_session_manager(
+    "~/.pi/agent/sessions/.../session.jsonl",
+    cwd_override=".",
+)
 ```
 
 ---
@@ -223,7 +233,7 @@ SessionManager.open("~/.pi/agent/sessions/abc.jsonl", cwd_override=".")
 |---|------|----------|----------|------|
 | 1 | read | `read` | `path`(必填), `offset`, `limit` | 行号标头，路径遍历防护，图片自动归一化（BMP/JPEG/GIF/WebP → PNG） |
 | 2 | write | `write` | `path`(必填), `content`(必填) | 自动创建父目录 |
-| 3 | edit | `edit` | `path`(必填), `diff`(必填) | unified diff 应用，出错返回错误结果 |
+| 3 | edit | `edit` | `path`(必填), `edits[].oldText/newText` | 精确文本替换（兼容 legacy oldText/newText），返回 unified diff/patch |
 | 4 | bash | `bash` | `command`(必填), `timeout` | 平台感知 shell，输出截断；禁止全盘搜索约束 |
 | 5 | grep | `grep` | `pattern`(必填), `path`, `include`, `max_results` | `file:lineno:line` 输出，忽略 `.git/`、`node_modules/` 等 |
 | 6 | find | `find` | `pattern`(必填), `path`, `max_results` | 支持 `**` 递归，仅文件 |
@@ -237,20 +247,21 @@ SessionManager.open("~/.pi/agent/sessions/abc.jsonl", cwd_override=".")
 
 ## 会话管理
 
-JSONL 会话文件（`~/.pi/agent/sessions/{encoded_cwd}/{timestamp}_{session_id}.jsonl`，
-版本 3；布局与 TS JsonlSessionStore 对齐，旧平铺文件自动迁移，详见
-[agent-directory.md](../../docs/agent-directory.md)），DAG 树结构：
+会话默认使用 JSONL v4（`V4SessionManager`，见 `_session_manager_v4.py`）：
+首行 header（`kind: header` / `version: 4` / `id` / `createdAt` / `cwd`），后续为带
+全局 seq 的 mutation 行（message / compaction / fact / operation records 等）。
+打开 v3 文件时惰性转换（`.bak` 备份），`PI_SESSION_FORMAT=v3` 可回退旧实现。
+文件布局详见 [agent-directory.md](../../docs/agent-directory.md)。
 
-```
-{"type":"session","version":3,"id":"abc123...","timestamp":"...","cwd":"/path"}
-{"type":"message","id":"msg1","parentId":null,"timestamp":"...","message":{...}}
-{"type":"compaction","id":"cmp1","parentId":"msg2","timestamp":"...","summary":"...","firstKeptEntryId":"msg1","tokensBefore":12345}
-```
-
-`SessionManager` 支持：`append_message` / `append_compaction` / `append_model_change` /
-`append_thinking_level_change` / `append_branch_summary` / `move_to`（分支导航）/
-`fork` / `get_tree` / `get_branch` / `get_entries` / `get_leaf_id` / `list_sessions` /
-`build_context`（沿 parentId 链重建，遇 compaction 停止回溯）。
+统一入口 `create_session_manager` / `open_session_manager` /
+`in_memory_session_manager` / `fork_session_manager`
+（`pi_coding_agent._session_manager_v4`）返回 `SessionManagerLike`，支持：
+`append_message` / `append_compaction` / `append_model_change` /
+`append_thinking_level_change` / `move_to`（分支导航）/ `fork` / `get_tree` /
+`get_branch` / `get_entries` / `get_leaf_id` / `list_sessions` / `build_context`
+（沿 parentId 链重建，遇 compaction 停止回溯），以及 v4 records：
+`start_operation` / `finish_operation` / `record_usage` / `find_records` /
+`open_operations` / `recovery_state` / `edit_session_message`。
 
 `AgentSession` 额外提供：`prompt` / `steer` / `follow_up` / `abort` / `compact` /
 `navigate_to` / `set_model` / `cycle_model` / `set_thinking_level` / `cycle_thinking_level` /

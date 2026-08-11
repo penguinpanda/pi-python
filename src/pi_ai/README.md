@@ -24,8 +24,8 @@
 | Qwen | `qwen3-vl-flash` | Completions | ✗ | ✓ | ✓ | 8,192 |
 | Qwen | `qwen-vl-plus` | Completions | ✗ | ✓ | ✓ | 4,096 |
 | Qwen | `qwen-vl-max` | Completions | ✗ | ✓ | ✓ | 8,192 |
-| Ollama | `qwen3:30b` | Completions | ✓ | ✓ | ✗ | 8,192 |
-| Ollama | `qwen3:30b-a3b` | Completions | ✓ | ✓ | ✗ | 8,192 |
+| Ollama | `qwen3:30b` | Completions | ✓ | ✓ | ✗ | 32,768 |
+| Ollama | `qwen3:30b-a3b` | Completions | ✓ | ✓ | ✗ | 32,768 |
 | Ollama | `richardyoung/qwen3-14b-abliterated:Q5_K_M` | Completions | ✓ | ✓ | ✗ | 8,192 |
 | Ollama | `gpt-oss:20b` | Completions | ✓ | ✓ | ✗ | 32,768 |
 | Ollama | `llama3.2-vision:latest` | Completions | ✗ | ✓ | ✓ | 4,096 |
@@ -382,7 +382,7 @@ async for event in await models.stream(model, context):
         # content 中同时包含 thinking 和 text
         for block in msg["content"]:
             if block["type"] == "thinking":
-                print(f"\n\n推理 Token: {len(block['text'])}")
+                print(f"\n\n推理 Token: {len(block['thinking'])}")
 ```
 
 通过 `StreamOptions` 控制 thinking 行为：
@@ -552,8 +552,8 @@ model = models.get_model("openrouter", "anthropic/claude-sonnet-4")
 ```
 pi_ai/types/
 ├── common.py     # 基础枚举 / 协议（StopReason、AsyncHTTPClient ...）
-├── content.py    # ContentBlock（Text / Image / ToolCall / Thinking / Code）
-├── message.py    # Message（System / User / Assistant / ToolResult / Agent）
+├── content.py    # ContentBlock（Text / Image / ToolCall / Thinking）
+├── message.py    # Message（System / User / Assistant / ToolResult）
 ├── tool.py       # Tool（含 before_execute / after_execute 生命周期钩子）
 ├── model.py      # Model / ModelCost
 ├── context.py    # Context（含 state / trace_id）
