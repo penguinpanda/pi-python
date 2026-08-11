@@ -9,11 +9,10 @@
         UserMessage,
         AssistantMessage,
         ToolResultMessage,
-        AgentMessage,      # Agent 运行时扩展（可选的通用 Agent role）
     ]
 
 扩展机制：所有消息继承 BaseMessage（role + timestamp），
-Agent 层可通过 AgentMessage 携带任意 Agent role（planner/observation/memory...）。
+应用层自定义 role 由 pi_agent 的 AgentMessage 显式扩展（对齐 TS CustomAgentMessages）。
 """
 
 from typing import Any, Literal, TypedDict
@@ -180,39 +179,8 @@ class ToolResultMessage(BaseMessage):
     usage: NotRequired[Usage]  # 工具自身 usage（不计入主 LLM 上下文）
 
 
-class AgentMessage(BaseMessage):
-    """Agent 运行时消息（通用扩展 role）。
-
-    用于多 Agent 协作 / ReAct / 规划器等场景，
-    携带 Chat API 原生不认识的 role：
-
-        planner / observation / memory / function /
-        developer / critic / reflection / ...
-
-    注意：role 刻意排除 "system" / "user" / "assistant" / "toolResult"
-    （这四个已由专用 Message 类型占用，避免判别联合冲突）。
-    """
-
-    role: Literal[
-        "planner",
-        "observation",
-        "memory",
-        "function",
-        "developer",
-        "critic",
-        "reflection",
-    ]
-    content: str | list[ContentBlock]
-
-    # 可选字段
-    name: NotRequired[str]  # 发送者/工具名
-    tool_call_id: NotRequired[str]  # 关联的 tool call（如 function 结果）
-    metadata: NotRequired[dict[str, Any]]  # 附加信息
-    timestamp: NotRequired[int]
-
-
 # 所有 Message 的联合类型
-Message = SystemMessage | UserMessage | AssistantMessage | ToolResultMessage | AgentMessage
+Message = SystemMessage | UserMessage | AssistantMessage | ToolResultMessage
 
 
 __all__ = [
@@ -221,7 +189,6 @@ __all__ = [
     "UserMessage",
     "AssistantMessage",
     "ToolResultMessage",
-    "AgentMessage",
     "Message",
     "Cost",
     "Usage",

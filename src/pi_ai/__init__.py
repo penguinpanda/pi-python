@@ -7,7 +7,6 @@ pi-ai  统一管理不同模型的 API,返回一个一致的 AI 调用接口。
 from .utils._event_stream import AssistantMessageEventStream, EventStream
 from .utils.cost import calculate_cost
 from .types import (
-    AgentMessage,
     AnthropicMessagesCompat,
     AssistantImages,
     AssistantMessage,
@@ -45,7 +44,6 @@ from .types import (
     KnownImagesApi,
     KnownImagesProvider,
     ApiId,
-    MemoryStore,
     Message,
     Model,
     ModelCompat,
@@ -106,7 +104,6 @@ from .auth import (
     env_api_key_auth,
 )
 from .auth.resolve import ModelsError
-from .memory import InMemoryMemoryStore
 from .api.api_provider_registry import (
     ApiProvider,
     ApiStreamFunction,
@@ -208,15 +205,12 @@ __all__ = [
     "ModelInput",
     "ModelOutput",
     "Context",
-    "InMemoryMemoryStore",
-    "MemoryStore",
     "Tool",
     "Message",
     "SystemMessage",
     "UserMessage",
     "AssistantMessage",
     "ToolResultMessage",
-    "AgentMessage",
     "BaseMessage",
     "ContentBlock",
     "BaseContent",

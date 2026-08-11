@@ -556,7 +556,7 @@ pi_ai/types/
 ├── message.py    # Message（System / User / Assistant / ToolResult / Agent）
 ├── tool.py       # Tool（含 before_execute / after_execute 生命周期钩子）
 ├── model.py      # Model / ModelCost
-├── context.py    # Context（含 state / memory / trace_id）+ MemoryStore
+├── context.py    # Context（含 state / trace_id）
 ├── stream.py     # 流事件（BaseEvent + 12 种事件）+ StreamOptions
 ├── image.py      # 图片生成类型
 ├── compat.py     # Provider 兼容配置（Compat）
@@ -565,12 +565,13 @@ pi_ai/types/
 
 扩展要点：
 
-- `Message` 联合含 `AgentMessage`（planner / observation / memory 等通用 role），
-  Agent 层可携带任意 Agent role；转换函数对未知 role 安全跳过。
+- `Message` 联合为封闭的 4 种消息；应用层自定义 role 由
+  `pi_agent.AgentMessage` 显式扩展（bashExecution / custom / branchSummary /
+  compactionSummary，对齐 TS `CustomAgentMessages`）；转换函数对未知 role 安全跳过。
 - `ContentBlock` 继承 `BaseContent`，新增类型只需继承并把 `type` 收窄为唯一字面量即可插件化扩展。
 - `ToolCall` 含 `raw_arguments`（流式原始 JSON）与 `arguments`（解析后 dict / None）。
 - `Tool` 支持 `before_execute` / `after_execute` 生命周期钩子（默认 None）。
-- `Context` 可注入 `state` / `memory`（`MemoryStore`）/ `trace_id`。
+- `Context` 可注入 `state` / `trace_id`。
 
 ### 工具函数（`pi_ai.utils`）
 

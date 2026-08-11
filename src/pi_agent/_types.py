@@ -57,10 +57,61 @@ from pi_ai import RetryPolicy
 # ---------------------------------------------------------------------------
 # AgentMessage
 # ---------------------------------------------------------------------------
-# Agent 层的"消息"即 pi_ai.Message 联合类型（含系统/用户/助手/工具结果，以及 pi_ai 的 AgentMessage 通用扩展 role）。
-# TypeScript 版通过 Declaration Merging 扩展 CustomAgentMessages，
-# Python 不支持声明合并，用 pi_ai.types.AgentMessage 承载通用 Agent role。
-AgentMessage = Message
+# 对齐 TS：pi_ai 的 Message 保持封闭（system/user/assistant/toolResult），
+# 应用层自定义消息由 AgentMessage 联合显式声明，对应 TS CustomAgentMessages
+# 声明合并扩展的 bashExecution / custom / branchSummary / compactionSummary。
+
+
+class BashExecutionMessage(TypedDict, total=False):
+    """bash 执行消息（对齐 TS BashExecutionMessage）。"""
+
+    role: Literal["bashExecution"]
+    command: str
+    output: str
+    exitCode: int | None
+    cancelled: bool
+    truncated: bool
+    fullOutputPath: str | None
+    timestamp: int
+    excludeFromContext: bool
+
+
+class CustomMessage(TypedDict, total=False):
+    """自定义消息（对齐 TS CustomMessage）。"""
+
+    role: Literal["custom"]
+    customType: str
+    content: str | list[TextContent | ImageContent]
+    display: bool
+    details: Any
+    timestamp: int
+
+
+class BranchSummaryMessage(TypedDict, total=False):
+    """分支摘要消息（对齐 TS BranchSummaryMessage）。"""
+
+    role: Literal["branchSummary"]
+    summary: str
+    fromId: str
+    timestamp: int
+
+
+class CompactionSummaryMessage(TypedDict, total=False):
+    """压缩摘要消息（对齐 TS CompactionSummaryMessage）。"""
+
+    role: Literal["compactionSummary"]
+    summary: str
+    tokensBefore: int
+    timestamp: int
+
+
+AgentMessage = (
+    Message
+    | BashExecutionMessage
+    | CustomMessage
+    | BranchSummaryMessage
+    | CompactionSummaryMessage
+)
 
 # ---------------------------------------------------------------------------
 # StreamFn（依赖注入抽象）

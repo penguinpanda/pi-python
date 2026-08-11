@@ -9,7 +9,7 @@
     message.py   消息（Message）
     tool.py      工具定义（Tool）
     model.py     模型元数据（Model / ModelCost）
-    context.py   请求上下文（Context / MemoryStore）
+    context.py   请求上下文（Context）
     stream.py    流事件与流式参数（Event / StreamOptions）
     image.py     图片生成类型
     compat.py    Provider 兼容配置（Compat）
@@ -50,7 +50,6 @@ from .content import (
     ToolCall,
 )
 from .message import (
-    AgentMessage,
     AssistantMessage,
     AssistantMessageDiagnostic,
     BaseMessage,
@@ -83,7 +82,7 @@ from .model import (
     ModelOutput,
     ProviderId,
 )
-from .context import Context, MemoryStore
+from .context import Context
 from .image import (
     AssistantImages,
     ImagesApi,
@@ -160,7 +159,6 @@ __all__ = [
     "UserMessage",
     "AssistantMessage",
     "ToolResultMessage",
-    "AgentMessage",
     "Message",
     "Cost",
     "Usage",
@@ -180,7 +178,6 @@ __all__ = [
     "Model",
     # context
     "Context",
-    "MemoryStore",
     # stream
     "BaseEvent",
     "StartEvent",

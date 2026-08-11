@@ -476,7 +476,7 @@ def transform_messages(
             transformed.append(cast(Message, new_msg))
             continue
 
-        # 其余 role（system / AgentMessage 等）原样透传。
+        # 其余 role（system / 应用层自定义 role 等）原样透传。
         transformed.append(cast(Message, msg))
 
     # --------------------------------------------------
@@ -546,11 +546,10 @@ def transform_messages(
             result.append(msg)
 
         else:
-            # 其余 role（system / AgentMessage 的 planner/observation/... 等）
-            # 直接透传，不触发孤立 tool call flush。
+            # 其余 role（system / 应用层自定义 role 等）直接透传，
+            # 不触发孤立 tool call flush。
             #
-            # 注意：TS 没有 AgentMessage 类型，仅 user 会打断工具流；
-            # 这里刻意与 TS 语义保持一致（observation 等角色不打断），
+            # 注意：对齐 TS——仅 user 会打断工具流，应用层自定义 role 不打断，
             # 避免后人误以为是遗漏的 bug。
             result.append(msg)
 

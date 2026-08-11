@@ -9,39 +9,15 @@ Context 从纯 ChatContext（messages/tools/system_prompt）
     ├── system_prompt  System Prompt
     ├── metadata       附加元数据（session_id / user_id ...）
     ├── state          运行时状态（Agent 间共享的可变 KV）
-    ├── memory         MemoryStore 接口（可选）
     └── trace_id       可观测性 trace 标识（可选）
 """
 
 from dataclasses import dataclass, field
 
-from typing import Any, Protocol
+from typing import Any
 
 from .message import Message
 from .tool import Tool
-
-
-class MemoryStore(Protocol):
-    """Agent 记忆存储接口（最小契约，供 Context.memory 注入）。
-
-    实现示例：内存 dict / Redis / 向量库。
-    """
-
-    async def get(self, key: str) -> Any:
-        """读取记忆；不存在返回 None。"""
-        ...
-
-    async def set(self, key: str, value: Any) -> None:
-        """写入记忆。"""
-        ...
-
-    async def delete(self, key: str) -> None:
-        """删除记忆。"""
-        ...
-
-    async def search(self, query: str, limit: int = 10) -> list[Any]:
-        """按语义/关键词检索记忆。"""
-        ...
 
 
 @dataclass(slots=True)
@@ -69,11 +45,8 @@ class Context:
     # 运行时状态（Agent 间共享的可变 KV；不发送给 Provider）
     state: dict[str, Any] = field(default_factory=dict)
 
-    # 记忆存储接口（可选；实现 MemoryStore 协议）
-    memory: MemoryStore | None = None
-
     # 可观测性 trace 标识（可选；关联 Trace 记录）
     trace_id: str | None = None
 
 
-__all__ = ["Context", "MemoryStore"]
+__all__ = ["Context"]
