@@ -9,10 +9,35 @@ import asyncio
 import base64
 import os
 import sys
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from .cells import Cell, Line, _visible_slice, line_to_ansi
 from .keys import KeyEvent
+
+
+@runtime_checkable
+class TerminalProtocol(Protocol):
+    """终端抽象接口, 对齐 TS Terminal interface。
+
+    方法名沿用 Python 侧现有实现 (enter/exit/read_chunk/write/size)。
+    """
+
+    @property
+    def size(self) -> tuple[int, int]: ...
+
+    async def enter(self, *, alt_screen: bool = True) -> None: ...
+
+    async def exit(self, *, alt_screen: bool | None = None) -> None: ...
+
+    async def read_chunk(self) -> bytes | None: ...
+
+    def write(self, data: str) -> None: ...
+
+    def flush(self) -> None: ...
+
+    def set_progress(self, active: bool) -> None: ...
+
+    def set_hardware_cursor(self, row: int, col: int) -> None: ...
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -332,6 +357,9 @@ class Terminal:
         return os.read(self.stdin.fileno(), 4096)
 
 
+ProcessTerminal = Terminal
+
+
 class FakeTerminal:
     """无 TTY 测试驱动：注入输入字节、捕获输出。"""
 
@@ -408,4 +436,11 @@ class FakeTerminal:
         self.output = []
 
 
-__all__ = ["Terminal", "FakeTerminal", "ScreenBuffer", "_env_flag"]
+__all__ = [
+    "Terminal",
+    "ProcessTerminal",
+    "TerminalProtocol",
+    "FakeTerminal",
+    "ScreenBuffer",
+    "_env_flag",
+]
