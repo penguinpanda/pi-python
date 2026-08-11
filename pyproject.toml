@@ -56,6 +56,7 @@ packages = [
     "src/pi_agent",
     "src/pi_coding_agent",
     "src/pi_tui",
+    "src/pi_telemetry",
     "src/pi_protocol",
     "src/pi_storage",
     "src/pi_server",
@@ -73,6 +74,7 @@ testpaths = [
     "src/pi_server/tests",
     "src/pi_evals/tests",
     "src/pi_tui/tests",
+    "src/pi_telemetry/tests",
 ]
 pythonpath = ["src", "."]
 
@@ -87,6 +89,7 @@ omit = [
     "src/pi_server/tests/*",
     "src/pi_evals/tests/*",
     "src/pi_tui/tests/*",
+    "src/pi_telemetry/tests/*",
 ]
 
 [tool.coverage.report]
