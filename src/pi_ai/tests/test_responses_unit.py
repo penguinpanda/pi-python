@@ -908,7 +908,9 @@ class TestResponsesStream:
         assert kwargs["instructions"] == "Be helpful"
         assert kwargs["input"] == [{"role": "user", "content": "Hi"}]
         assert kwargs["max_output_tokens"] == 100
-        assert kwargs["reasoning"] == {"effort": "high"}
+        assert kwargs["reasoning"] == {"effort": "high", "summary": "auto"}
+        assert kwargs["include"] == ["reasoning.encrypted_content"]
+        assert kwargs["store"] is False
         assert kwargs["tools"] == [
             {"type": "web_search"},
             {
@@ -1230,3 +1232,259 @@ class TestResponsesWebSearch:
             replay_web_search_items=False,
         )
         assert all(item["type"] != "web_search_call" for item in without_replay)
+
+    @pytest.mark.asyncio
+    async def test_reasoning_item_content_backfilled_from_deltas(self):
+        """DeepSeek 流式 reasoning_text 需在回放项中补全 content。"""
+        model = _make_deepseek_responses_model()
+        context = Context(messages=[{"role": "user", "content": "think?"}])
+        events = [
+            _event("response.reasoning_text.delta", delta="first "),
+            _event("response.reasoning_text.delta", delta="second"),
+            _event(
+                "response.output_item.done",
+                item=SimpleNamespace(
+                    type="reasoning",
+                    id="rs_1",
+                    summary=[SimpleNamespace(type="summary_text", text="sum")],
+                    content=[],
+                ),
+            ),
+            _event("response.output_text.delta", delta="answer"),
+            _event(
+                "response.completed",
+                response=SimpleNamespace(output_text="answer", usage=None),
+            ),
+        ]
+        client = _mock_client(events)
+        collected, _ = await _collect_events(
+            model,
+            context,
+            client,
+            base_url="https://api.deepseek.com",
+        )
+        msg = collected[-1]["message"]
+        thinking_block = next(block for block in msg["content"] if block["type"] == "thinking")
+        replayed = _to_responses_input([msg], model)
+        reasoning_item = replayed[0]
+        assert reasoning_item["type"] == "reasoning"
+        assert reasoning_item["content"] == [
+            {"type": "reasoning_text", "text": "first second", "annotations": []}
+        ]
+        assert thinking_block["thinking"] == "sum"
+
+
+class TestResponsesStatelessAndEvents:
+    @pytest.mark.asyncio
+    async def test_store_false_include_and_reasoning_summary(self):
+        model = _make_deepseek_responses_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        client = _mock_client([_event("response.completed", response=None)])
+        with patch("pi_ai.api.responses._create_client", return_value=client):
+            stream = await responses_stream(
+                model,
+                context,
+                "sk-test",
+                "https://api.deepseek.com",
+                {"reasoning": "high", "reasoning_summary": "concise"},
+            )
+            [e async for e in stream]
+        kwargs = client.responses.create.call_args.kwargs
+        assert kwargs["store"] is False
+        assert kwargs["include"] == ["reasoning.encrypted_content"]
+        assert kwargs["reasoning"] == {"effort": "high", "summary": "concise"}
+
+    @pytest.mark.asyncio
+    async def test_reasoning_off_no_include(self):
+        model = _make_deepseek_responses_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        client = _mock_client([_event("response.completed", response=None)])
+        with patch("pi_ai.api.responses._create_client", return_value=client):
+            stream = await responses_stream(
+                model,
+                context,
+                "sk-test",
+                "https://api.deepseek.com",
+                {"reasoning": "off"},
+            )
+            [e async for e in stream]
+        kwargs = client.responses.create.call_args.kwargs
+        assert kwargs["store"] is False
+        assert "include" not in kwargs
+        assert kwargs["reasoning"] == {"effort": "none"}
+
+    @pytest.mark.asyncio
+    async def test_xai_requests_encrypted_content(self):
+        model = _make_model(model_id="grok", provider="xai")
+        model.reasoning = True
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        client = _mock_client([_event("response.completed", response=None)])
+        with patch("pi_ai.api.responses._create_client", return_value=client):
+            stream = await responses_stream(model, context, "sk-test", "https://api.x.ai")
+            [e async for e in stream]
+        kwargs = client.responses.create.call_args.kwargs
+        assert kwargs["include"] == ["reasoning.encrypted_content"]
+
+    @pytest.mark.asyncio
+    async def test_include_system_prompt_false_omits_instructions(self):
+        model = _make_model()
+        context = Context(
+            messages=[{"role": "user", "content": "Hi"}],
+            system_prompt="Be helpful",
+        )
+        client = _mock_client([_event("response.completed", response=None)])
+        with patch("pi_ai.api.responses._create_client", return_value=client):
+            stream = await responses_stream(
+                model,
+                context,
+                "sk-test",
+                "https://api.test.com",
+                {"include_system_prompt": False},
+            )
+            [e async for e in stream]
+        kwargs = client.responses.create.call_args.kwargs
+        assert "instructions" not in kwargs
+
+    @pytest.mark.asyncio
+    async def test_refusal_delta_accumulates_text(self):
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        events = [
+            _event("response.refusal.delta", delta="I cannot"),
+            _event("response.refusal.delta", delta=" help"),
+            _event(
+                "response.completed",
+                response=SimpleNamespace(output_text="I cannot help", usage=None),
+            ),
+        ]
+        client = _mock_client(events)
+        collected, _ = await _collect_events(model, context, client)
+        assert [e["type"] for e in collected] == [
+            "start",
+            "text_start",
+            "text_delta",
+            "text_delta",
+            "text_end",
+            "done",
+        ]
+        assert collected[-1]["message"]["content"][0]["text"] == "I cannot help"
+
+    @pytest.mark.asyncio
+    async def test_message_text_signature_captured_and_replayed(self):
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        events = [
+            _event("response.output_text.delta", delta="answer"),
+            _event(
+                "response.output_item.done",
+                item=SimpleNamespace(
+                    type="message",
+                    id="msg_1",
+                    phase="final_answer",
+                ),
+            ),
+            _event(
+                "response.completed",
+                response=SimpleNamespace(output_text="answer", usage=None),
+            ),
+        ]
+        client = _mock_client(events)
+        collected, _ = await _collect_events(model, context, client)
+        msg = collected[-1]["message"]
+        text_block = next(block for block in msg["content"] if block["type"] == "text")
+        assert text_block["text_signature"] == json.dumps(
+            {"v": 1, "id": "msg_1", "phase": "final_answer"}, ensure_ascii=False
+        )
+        replayed = _to_responses_input([msg], model)
+        assert replayed[0]["type"] == "message"
+        assert replayed[0]["id"] == "msg_1"
+        assert replayed[0]["phase"] == "final_answer"
+
+    @pytest.mark.asyncio
+    async def test_completed_backfills_encrypted_content(self):
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        events = [
+            _event("response.reasoning_text.delta", delta="think"),
+            _event(
+                "response.output_item.done",
+                item=SimpleNamespace(
+                    type="reasoning",
+                    id="rs_1",
+                    summary=[],
+                    content=[],
+                ),
+            ),
+            _event(
+                "response.completed",
+                response=SimpleNamespace(
+                    output_text="",
+                    usage=None,
+                    output=[
+                        SimpleNamespace(
+                            type="reasoning",
+                            id="rs_1",
+                            encrypted_content="enc",
+                        )
+                    ],
+                ),
+            ),
+        ]
+        client = _mock_client(events)
+        collected, _ = await _collect_events(model, context, client)
+        msg = collected[-1]["message"]
+        thinking_block = next(block for block in msg["content"] if block["type"] == "thinking")
+        stored = json.loads(thinking_block["thinking_signature"])
+        assert stored["encrypted_content"] == "enc"
+
+
+class TestResponsesDeferredTools:
+    @pytest.mark.asyncio
+    async def test_deferred_tool_search_items(self):
+        from pi_ai import Tool
+
+        model = Model(
+            id="gpt-4o",
+            provider="openai",
+            api="openai-responses",
+            name="gpt-4o",
+            input=["text"],
+            output=["text"],
+            compat={"supportsToolSearch": True, "supportsWebSearch": False},
+        )
+        read_tool = Tool(
+            name="read",
+            description="Read files",
+            input_schema={"type": "object", "properties": {}},
+        )
+        custom_tool = Tool(
+            name="custom",
+            description="Custom tool",
+            input_schema={"type": "object", "properties": {}},
+        )
+        context = Context(
+            messages=[
+                {"role": "user", "content": "use custom"},
+                {
+                    "role": "toolResult",
+                    "tool_call_id": "c1",
+                    "content": [{"type": "text", "text": "ok"}],
+                    "added_tool_names": ["custom"],
+                },
+            ],
+            tools=[read_tool, custom_tool],
+        )
+        client = _mock_client([_event("response.completed", response=None)])
+        with patch("pi_ai.api.responses._create_client", return_value=client):
+            stream = await responses_stream(model, context, "sk-test", "https://api.test.com")
+            [e async for e in stream]
+        kwargs = client.responses.create.call_args.kwargs
+        assert [tool["name"] for tool in kwargs["tools"]] == ["read"]
+        input_items = kwargs["input"]
+        search_output = next(
+            item for item in input_items if item.get("type") == "tool_search_output"
+        )
+        assert search_output["execution"] == "client"
+        assert search_output["tools"][0]["name"] == "custom"
+        assert search_output["tools"][0]["defer_loading"] is True
+        assert any(item.get("type") == "tool_search_call" for item in input_items)

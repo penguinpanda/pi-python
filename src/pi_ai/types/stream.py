@@ -193,6 +193,10 @@ class StreamOptions(TypedDict, total=False):
     reasoning: NotRequired[ModelThinkingLevel]
     # 是否启用服务端 web_search；None 表示由 API 实现按 provider/compat 决定。
     web_search: NotRequired[bool]
+    # Responses reasoning.summary 取值（默认 "auto"，仅发送 reasoning 时生效）。
+    reasoning_summary: NotRequired[str]
+    # 是否把 system_prompt 写入 Responses 的 instructions（默认 True）。
+    include_system_prompt: NotRequired[bool]
     api_key: str
     # Provider 层解析后的 Base URL（注册表分发时注入；None 时回退 model.base_url）
     base_url: NotRequired[str]

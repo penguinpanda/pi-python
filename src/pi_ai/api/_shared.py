@@ -323,6 +323,7 @@ def to_responses_tools(
     tools: list[Tool],
     *,
     supports_strict_mode: bool = True,
+    defer_loading: bool = False,
 ) -> list[dict[str, Any]]:
     """
     将 SDK Tool 转换为 OpenAI Responses API 的扁平 Tool Schema。
@@ -343,6 +344,8 @@ def to_responses_tools(
         }
         if strict:
             tool_schema["strict"] = True
+        if defer_loading:
+            tool_schema["defer_loading"] = True
         result.append(tool_schema)
     return result
 

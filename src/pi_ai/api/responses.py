@@ -74,6 +74,7 @@ from ..types import (
     StartEvent,
     StopReason,
     StreamOptions,
+    Tool,
     TextContent,
     TextDeltaEvent,
     TextEndEvent,
@@ -110,6 +111,7 @@ from ..utils.prompt_cache import (
     clamp_openai_prompt_cache_key,
     resolve_cache_retention,
 )
+from ..utils.deferred_tools import split_deferred_tools
 
 
 def encode_text_signature_v1(id_: str, phase: str | None = None) -> str:
@@ -265,6 +267,7 @@ def _resolve_web_search(
 def _build_responses_reasoning(
     model: Model,
     reasoning_level: ModelThinkingLevel | None,
+    reasoning_summary: str | None = None,
 ) -> dict[str, Any] | None:
     """把 pi 推理级别翻译为 Responses API 的 reasoning 参数。"""
     if reasoning_level is None:
@@ -280,8 +283,12 @@ def _build_responses_reasoning(
         mapped = mapping[reasoning_level]
         if mapped is None:
             return None
-        return {"effort": mapped}
-    return {"effort": reasoning_level}
+        effort = mapped
+    else:
+        effort = reasoning_level
+    result: dict[str, Any] = {"effort": effort}
+    result["summary"] = reasoning_summary or "auto"
+    return result
 
 
 def _parse_response_usage(resp: Any, model: Model) -> Usage:
@@ -322,6 +329,7 @@ def _to_responses_input(
     messages: list[Any],
     model: Model | None = None,
     replay_web_search_items: bool = True,
+    deferred_tools: dict[str, Tool] | None = None,
 ) -> list[dict[str, Any]]:
     """
     将 SDK Message
@@ -376,6 +384,7 @@ def _to_responses_input(
         服务端 web_search 关闭时传 False，避免把已失效的搜索项塞回 input。
     """
     items: list[dict[str, Any]] = []
+    loaded_deferred_names: set[str] = set()
 
     # 消息索引：用于文本消息 fallback id（msg_pi_{index}）。
     msg_index = 0
@@ -562,6 +571,45 @@ def _to_responses_input(
                     "output": _convert_tool_result_output(model, msg["content"]),
                 }
             )
+            # Deferred tools：toolResult 里新增的工具通过 tool_search 协议
+            # 以 client 执行方式补交定义（对齐 TS deferredTools 路径）。
+            if deferred_tools:
+                deferred_list: list[Tool] = []
+                for name in msg.get("added_tool_names") or []:
+                    tool = deferred_tools.get(name)
+                    if tool is None or name in loaded_deferred_names:
+                        continue
+                    loaded_deferred_names.add(name)
+                    deferred_list.append(tool)
+                if deferred_list:
+                    names = [tool.name for tool in deferred_list]
+                    tool_call_key = str(msg.get("tool_call_id"))
+                    names_key = ",".join(names)
+                    search_call_id = f"pi_tool_load_{short_hash(f'{tool_call_key}:{names_key}')}"
+                    items.append(
+                        {
+                            "type": "tool_search_call",
+                            "call_id": search_call_id,
+                            "execution": "client",
+                            "status": "completed",
+                            "arguments": {"query": " ".join(names), "limit": len(names)},
+                        }
+                    )
+                    items.append(
+                        {
+                            "type": "tool_search_output",
+                            "call_id": search_call_id,
+                            "execution": "client",
+                            "status": "completed",
+                            "tools": to_responses_tools(
+                                deferred_list,
+                                supports_strict_mode=(
+                                    supports_strict_mode(model) if model is not None else True
+                                ),
+                                defer_loading=True,
+                            ),
+                        }
+                    )
 
         msg_index += 1
 
@@ -650,6 +698,8 @@ async def responses_stream(
             #
             # Responses 系 provider 使用管道分隔 ID（call_id|fc_item_id）。
             web_search_enabled = _resolve_web_search(model, base_url, options)
+            tool_search_enabled = compat_value(model, "supportsToolSearch", False)
+            immediate_tools, deferred_tools = split_deferred_tools(context, tool_search_enabled)
             transformed_messages = transform_messages(
                 context.messages, model, normalize_responses_tool_call_id
             )
@@ -657,14 +707,15 @@ async def responses_stream(
                 transformed_messages,
                 model,
                 replay_web_search_items=web_search_enabled,
+                deferred_tools=deferred_tools,
             )
             tools: list[dict[str, Any]] = []
             if web_search_enabled:
                 tools.append({"type": "web_search"})
-            if context.tools:
+            if immediate_tools:
                 tools.extend(
                     to_responses_tools(
-                        context.tools,
+                        immediate_tools,
                         supports_strict_mode=supports_strict_mode(model),
                     )
                 )
@@ -688,8 +739,10 @@ async def responses_stream(
                 "model": model.id,
                 "input": input_items,
                 "stream": True,
+                "store": False,
             }
-            if context.system_prompt:
+            include_system_prompt = opts.get("include_system_prompt", True)
+            if include_system_prompt and context.system_prompt:
                 kwargs["instructions"] = context.system_prompt
             if tools:
                 kwargs["tools"] = tools
@@ -704,9 +757,17 @@ async def responses_stream(
                 context,
                 requested if requested is not None else model.max_tokens,
             )
-            reasoning = _build_responses_reasoning(model, opts.get("reasoning"))
+            reasoning = _build_responses_reasoning(
+                model,
+                opts.get("reasoning"),
+                opts.get("reasoning_summary"),
+            )
             if reasoning is not None:
                 kwargs["reasoning"] = reasoning
+                if reasoning.get("effort") not in (None, "none"):
+                    kwargs["include"] = ["reasoning.encrypted_content"]
+            elif model.provider == "xai" and model.reasoning:
+                kwargs["include"] = ["reasoning.encrypted_content"]
 
             # 提示缓存（Prompt Cache，对齐 TS openai-responses.ts）：
             #   prompt_cache_key：仅 supportsExplicitPromptCacheMode 时发送
@@ -744,6 +805,7 @@ async def responses_stream(
             usage: Usage = empty_usage()
             stop_reason: StopReason = "stop"
             responses_items: list[dict[str, Any]] = []
+            reasoning_blocks_by_id: dict[str, dict[str, Any]] = {}
             failed = False
 
             def _partial() -> AssistantMessage:
@@ -797,6 +859,28 @@ async def responses_stream(
                 current_kind = None
                 current_index = None
                 current_tool_id = ""
+
+            def _backfill_reasoning_signatures(response: Any) -> None:
+                """终态 response 补回 reasoning.encrypted_content（对齐 TS）。"""
+                output = getattr(response, "output", None) or []
+                for item in output:
+                    if getattr(item, "type", None) != "reasoning":
+                        continue
+                    encrypted = getattr(item, "encrypted_content", None)
+                    item_id = getattr(item, "id", None)
+                    if not encrypted or not isinstance(item_id, str):
+                        continue
+                    block = reasoning_blocks_by_id.get(item_id)
+                    if block is None or not block.get("thinking_signature"):
+                        continue
+                    try:
+                        stored = json.loads(block["thinking_signature"])
+                    except (ValueError, TypeError):
+                        continue
+                    if not isinstance(stored, dict) or stored.get("encrypted_content"):
+                        continue
+                    stored["encrypted_content"] = encrypted
+                    block["thinking_signature"] = json.dumps(stored, ensure_ascii=False)
 
             def _begin_text() -> int:
                 """确保当前块为文本块，返回 content_index。"""
@@ -866,6 +950,21 @@ async def responses_stream(
                         else:
                             idx = _begin_text()
                             cast(TextContent, content_blocks[idx])["text"] = text
+
+                # 拒绝内容（refusal）并入文本输出。
+                elif event_type == "response.refusal.delta":
+                    delta = getattr(event, "delta", "")
+                    if delta:
+                        idx = _begin_text()
+                        cast(TextContent, content_blocks[idx])["text"] += delta
+                        stream.push(
+                            TextDeltaEvent(
+                                type="text_delta",
+                                content_index=idx,
+                                delta=delta,
+                                partial=_partial(),
+                            )
+                        )
 
                 # 新 Tool Call。
                 elif event_type == "response.output_item.added":
@@ -943,10 +1042,30 @@ async def responses_stream(
                         content = getattr(item, "content", None) or []
                         summary_text = "\n\n".join(getattr(p, "text", "") or "" for p in summary)
                         content_text = "\n\n".join(getattr(p, "text", "") or "" for p in content)
-                        block["thinking"] = summary_text or content_text or block["thinking"]
-                        block["thinking_signature"] = json.dumps(
-                            _to_jsonable(item), ensure_ascii=False
-                        )
+                        # DeepSeek 流式下 reasoning_text 通过 delta 下发，
+                        # output_item.done 的 item.content 可能为空；用已累积
+                        # 的 delta 文本补全回放项，否则下一轮会报
+                        # "reasoning_text ... must be passed back"。
+                        delta_text = block["thinking"]
+                        block["thinking"] = summary_text or content_text or delta_text
+                        raw_item = _to_jsonable(item)
+                        if (
+                            isinstance(raw_item, dict)
+                            and not raw_item.get("content")
+                            and not raw_item.get("encrypted_content")
+                            and delta_text
+                        ):
+                            raw_item["content"] = [
+                                {
+                                    "type": "reasoning_text",
+                                    "text": delta_text,
+                                    "annotations": [],
+                                }
+                            ]
+                        block["thinking_signature"] = json.dumps(raw_item, ensure_ascii=False)
+                        item_id = raw_item.get("id") if isinstance(raw_item, dict) else None
+                        if isinstance(item_id, str) and item_id:
+                            reasoning_blocks_by_id[item_id] = block
                         stream.push(
                             ThinkingEndEvent(
                                 type="thinking_end",
@@ -957,6 +1076,20 @@ async def responses_stream(
                         )
                         current_kind = None
                         current_index = None
+
+                    # 消息项：持久化 text_signature 供后续轮次回放。
+                    if (
+                        item_type == "message"
+                        and current_kind == "text"
+                        and current_index is not None
+                    ):
+                        item_id = getattr(item, "id", None)
+                        if isinstance(item_id, str) and item_id:
+                            phase = getattr(item, "phase", None)
+                            text_block = cast(TextContent, content_blocks[current_index])
+                            text_block["text_signature"] = encode_text_signature_v1(
+                                item_id, phase if isinstance(phase, str) else None
+                            )
 
                 # 模型推理内容。
                 elif event_type == "response.reasoning_summary_part.added":
@@ -1022,6 +1155,7 @@ async def responses_stream(
                 elif event_type == "response.completed":
                     resp = getattr(event, "response", None)
                     if resp:
+                        _backfill_reasoning_signatures(resp)
                         # 权威输出文本：覆盖实时累积的 text 块；
                         # 若尚未有 text 块（如仅 completed 事件），则新建。
                         output_text = getattr(resp, "output_text", "")
@@ -1064,6 +1198,7 @@ async def responses_stream(
                 elif event_type == "response.incomplete":
                     resp = getattr(event, "response", None)
                     if resp:
+                        _backfill_reasoning_signatures(resp)
                         usage = _parse_response_usage(resp, model)
                         incomplete = getattr(resp, "incomplete_details", None)
                         reason = getattr(incomplete, "reason", "") or ""

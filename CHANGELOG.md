@@ -56,6 +56,10 @@
 - 补齐 TS 文档：从 pi TS 仓库复制 `packages/coding-agent/docs` 中 Python
   缺失的文档到 `src/pi_coding_agent/docs/`（原样保留，含 `docs.json` 与
   `images/`），已有中文移植的同名文档不覆盖
+- Responses 对齐 TS：请求显式 `store:false`、启用 reasoning 时请求
+  `reasoning.encrypted_content`（终态回填）、assistant 消息写入
+  `text_signature`、支持 `reasoning_summary` / `refusal.delta` /
+  `include_system_prompt`，并接入 deferred tools（tool_search 协议）
 
 ### Changed
 
@@ -146,6 +150,9 @@
 
 ### Fixed
 
+- 修复 DeepSeek Responses 多轮 400 “reasoning_text must be passed back”：
+  流式下 reasoning item 的 `content` 为空时，用已累积的 reasoning delta
+  文本补全回放项，确保后续轮次把 reasoning_text 原样传回
 - 修复 `test_cli.py` 对 `_cli.SessionManager` 的引用：改为 patch
   `create_session_manager` 工厂（配合 CLI 默认 v4 会话接线）
 - `Agent._run_prompt` / `_run_continue` 将 context 快照构造移入 try/finally，
