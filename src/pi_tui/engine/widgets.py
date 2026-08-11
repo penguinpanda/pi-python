@@ -457,6 +457,36 @@ class Text(Static):
     pass
 
 
+class TruncatedText(Static):
+    """单行截断文本组件（对齐 TS components/truncated-text.ts）。"""
+
+    def __init__(
+        self,
+        content: str = "",
+        *,
+        padding_x: int = 0,
+        padding_y: int = 0,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(content, **kwargs)
+        self.padding_x = max(0, int(padding_x))
+        self.padding_y = max(0, int(padding_y))
+
+    def render(self, width: int, height: int) -> list[Line]:
+        lines: list[Line] = []
+        lines.extend(blank_line(width, self.base_style) for _ in range(self.padding_y))
+        first = self._content.split("\n", 1)[0]
+        lines.append(line_from_text(" " * self.padding_x + first, width, self.base_style))
+        lines.extend(blank_line(width, self.base_style) for _ in range(self.padding_y))
+        while len(lines) < height:
+            lines.append(blank_line(width, self.base_style))
+        return lines[:height]
+
+    def content_size(self) -> tuple[int, int]:
+        first = self._content.split("\n", 1)[0]
+        return (min(1000, len(first) + self.padding_x * 2), 1 + self.padding_y * 2)
+
+
 class Input(Widget):
     """单行输入框（选择器搜索 / 对话框）。"""
 
@@ -2050,6 +2080,7 @@ __all__ = [
     "Static",
     "Label",
     "Text",
+    "TruncatedText",
     "Input",
     "Editor",
     "PiEditor",
