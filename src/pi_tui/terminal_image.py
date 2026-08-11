@@ -4,9 +4,16 @@ from __future__ import annotations
 
 import base64
 import os
+import random
+import re
 
 from pi_tui.engine.cells import Line, blank_line, line_from_text
 from pi_tui.engine.widgets import Widget
+
+KITTY_PREFIX = "\x1b_G"
+ITERM2_PREFIX = "\x1b]1337;File="
+
+_kitty_metadata: dict[int, dict[str, int]] = {}
 
 
 def detect_capabilities() -> tuple[str, ...]:
@@ -19,6 +26,60 @@ def detect_capabilities() -> tuple[str, ...]:
     if "iterm" in program:
         capabilities.append("iterm2")
     return tuple(capabilities)
+
+
+def is_image_line(line: str) -> bool:
+    """检测一行是否为 kitty/iTerm2 图片序列（含多行图片的游标前缀）。"""
+    return line.startswith((KITTY_PREFIX, ITERM2_PREFIX)) or (
+        KITTY_PREFIX in line or ITERM2_PREFIX in line
+    )
+
+
+def allocate_image_id() -> int:
+    """生成随机 image id, 避免不同模块实例之间的冲突。"""
+    return random.randint(1, 0xFFFFFFFF)
+
+
+def register_kitty_image_metadata(metadata: dict[str, int]) -> None:
+    """登记 kitty 图片元数据, 供行级裁剪使用; 上限 1000 条。"""
+    image_id = int(metadata["imageId"])
+    _kitty_metadata[image_id] = dict(metadata)
+    while len(_kitty_metadata) > 1000:
+        _kitty_metadata.pop(next(iter(_kitty_metadata)))
+
+
+def get_kitty_image_metadata(line: str) -> dict[str, int] | None:
+    """从行内 kitty 控制序列读取已登记的图片元数据。"""
+    match = re.search(r"\x1b_G([^;]*);", line)
+    if match is None:
+        return None
+    image_match = re.search(r"(?:^|,)i=(\d+)(?:,|$)", match.group(1))
+    if image_match is None:
+        return None
+    return _kitty_metadata.get(int(image_match.group(1)))
+
+
+def crop_kitty_image_line(line: str, hidden_rows: int, visible_rows: int) -> str:
+    """裁剪 kitty placement 行的可见行区域 (对齐 TS cropKittyImageLine)。"""
+    metadata = get_kitty_image_metadata(line)
+    match = re.search(r"\x1b_G([^;]*);", line)
+    if metadata is None or match is None:
+        return line
+    rows = int(metadata["rows"])
+    if hidden_rows < 0 or hidden_rows >= rows or visible_rows <= 0:
+        return line
+    cropped_rows = min(visible_rows, rows - hidden_rows)
+    if hidden_rows == 0 and cropped_rows == rows:
+        return line
+    height_px = int(metadata["heightPx"])
+    source_y = (height_px * hidden_rows) // rows
+    source_end = (height_px * (hidden_rows + cropped_rows) + rows - 1) // rows
+    source_height = max(1, min(height_px, source_end) - source_y)
+    controls = [part for part in match.group(1).split(",") if not re.fullmatch(r"[yhr]=.*", part)]
+    controls.append(f"y={source_y}")
+    controls.append(f"h={source_height}")
+    controls.append(f"r={cropped_rows}")
+    return f"{line[: match.start()]}{KITTY_PREFIX}{','.join(controls)};{line[match.end() :]}"
 
 
 def _encode_chunks(header: str, data: bytes, chunk_size: int) -> str:
@@ -122,8 +183,15 @@ class TerminalImage(Widget):
 
 
 __all__ = [
+    "KITTY_PREFIX",
+    "ITERM2_PREFIX",
     "TerminalImage",
     "detect_capabilities",
+    "is_image_line",
+    "allocate_image_id",
+    "register_kitty_image_metadata",
+    "get_kitty_image_metadata",
+    "crop_kitty_image_line",
     "encode_kitty_image",
     "encode_kitty_placement",
     "encode_kitty_delete",
