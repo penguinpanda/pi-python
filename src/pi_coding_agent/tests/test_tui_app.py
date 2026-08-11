@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from pi_coding_agent.modes.interactive.app import PiTuiApp
-from pi_tui.components import MessageEntry, ToolExecutionEntry
+from pi_tui.components import BashExecutionEntry, MessageEntry, ToolExecutionEntry
 from pi_tui.engine import FakeTerminal
 from pi_tui.selectors import ChoiceSelector
 
@@ -443,6 +443,73 @@ async def test_toggle_tools_expands_header() -> None:
         app.action_toggle_tools()
         assert app._header._expanded is True
         assert app._show_tools is False
+
+    await _run(app, term, actions)
+
+
+@pytest.mark.asyncio
+async def test_toggle_tools_expands_entries() -> None:
+    term = FakeTerminal(size=(100, 24))
+    app = _make_app(term)
+
+    async def actions(_term, _app) -> None:
+        await asyncio.sleep(0.1)
+        tool = ToolExecutionEntry("read", "c1", {"path": "a.txt"}, theme_colors={})
+        bash = BashExecutionEntry("ls", theme_colors={})
+        app._chat.mount(tool)
+        app._chat.mount(bash)
+        assert tool.expanded is False
+        assert bash.expanded is False
+        app.action_toggle_tools()
+        assert tool.expanded is True
+        assert bash.expanded is True
+        assert app._tools_expanded is True
+
+    await _run(app, term, actions)
+
+
+@pytest.mark.asyncio
+async def test_tool_execution_events_drive_entry() -> None:
+    term = FakeTerminal(size=(100, 24))
+    app = _make_app(term)
+
+    async def actions(_term, _app) -> None:
+        await asyncio.sleep(0.1)
+        app._on_session_event(
+            {
+                "type": "tool_execution_start",
+                "tool_call_id": "call-1",
+                "tool_name": "read",
+                "args": {"path": "a.txt"},
+            }
+        )
+        await asyncio.sleep(0.05)
+        entries = app._chat.query(ToolExecutionEntry)
+        assert len(entries) == 1
+        assert entries[0].status == "running"
+        assert entries[0].expanded is False
+
+        app._on_session_event(
+            {
+                "type": "tool_execution_update",
+                "tool_call_id": "call-1",
+                "result": {"content": [{"type": "text", "text": "partial body"}]},
+            }
+        )
+        assert entries[0].status == "running"
+        assert "partial body" in entries[0].output
+
+        app._on_session_event(
+            {
+                "type": "tool_execution_end",
+                "tool_call_id": "call-1",
+                "result": {"content": [{"type": "text", "text": "final body"}]},
+                "is_error": False,
+            }
+        )
+        assert entries[0].status == "success"
+        assert "final body" in entries[0].output
+        assert len(app._chat.query(ToolExecutionEntry)) == 1
 
     await _run(app, term, actions)
 

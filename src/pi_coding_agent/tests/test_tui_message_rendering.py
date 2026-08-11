@@ -194,6 +194,18 @@ def test_hidden_thinking_label():
     assert custom_entries == [("Pondering...", "reasoning")]
 
 
+def test_hidden_thinking_shows_placeholder_label():
+    message = {
+        "role": "assistant",
+        "content": [
+            {"type": "thinking", "thinking": "secret reasoning"},
+            {"type": "text", "text": "visible"},
+        ],
+    }
+    entries = message_to_entries(message, show_thinking=False)
+    assert entries == [("Thinking", ""), ("Assistant", "visible")]
+
+
 def test_tool_renderer():
     message = {
         "role": "toolResult",

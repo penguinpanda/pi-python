@@ -53,7 +53,7 @@ from ...extensions import ExtensionRunner
 from ...extensions.registry import ExtensionRegistry
 from ...model_runtime import ModelRuntime
 from ...system_prompt import load_project_context_files
-from ...tools.render_utils import shorten_path
+from ...tools.render_utils import get_text_output, shorten_path
 from .autocomplete import create_slash_command_provider
 from .slash_commands import SlashContext, SlashCommandRegistry, register_builtin_commands
 
@@ -176,6 +176,10 @@ class PiTuiApp(App):
         self._unsubscribe: Callable[[], None] | None = None
         self._show_tools = True
         self._show_thinking = True
+        if self._settings_manager is not None:
+            self._show_thinking = not self._settings_manager.get_hide_thinking_block()
+        self._tools_expanded = False
+        self._chat_theme_colors: dict = {}
         self._rendered_summary_ids: set[str] = set()
         self._custom_editor: PiEditor | None = None
         self._widget_above: dict[str, str] = {}
@@ -349,13 +353,20 @@ class PiTuiApp(App):
                 widget.base_style = _fg_style(theme, "textDim")
             else:
                 widget.base_style = _fg_style(theme, "text")
-        self._chat.set_theme_colors(
-            {
-                "heading": theme.colors.get("accent"),
-                "code_fg": theme.colors.get("text"),
-                "code_bg": theme.colors.get("bgPanel", theme.colors.get("bgAlt")),
-            }
-        )
+        self._chat_theme_colors = {
+            "heading": theme.colors.get("accent"),
+            "code_fg": theme.colors.get("text"),
+            "code_bg": theme.colors.get("bgPanel", theme.colors.get("bgAlt")),
+            "thinking": theme.colors.get("thinkingText"),
+            "toolPendingBg": theme.colors.get("toolPendingBg"),
+            "toolSuccessBg": theme.colors.get("toolSuccessBg"),
+            "toolErrorBg": theme.colors.get("toolErrorBg"),
+            "toolTitle": theme.colors.get("toolTitle"),
+            "toolOutput": theme.colors.get("toolOutput"),
+            "bashMode": theme.colors.get("bashMode"),
+            "dim": theme.colors.get("dim"),
+        }
+        self._chat.set_theme_colors(self._chat_theme_colors)
         self.request_render()
 
     # ------------------------------------------------------------------
@@ -412,6 +423,12 @@ class PiTuiApp(App):
                         "content": f"Invoked skill: {skill}",
                     }
                 )
+            elif event_type == "tool_execution_start":
+                self._on_tool_execution_start(event)
+            elif event_type == "tool_execution_update":
+                self._on_tool_execution_update(event)
+            elif event_type == "tool_execution_end":
+                self._on_tool_execution_end(event)
         except Exception:
             pass
 
@@ -440,7 +457,11 @@ class PiTuiApp(App):
             block_type = block.get("type")
             if block_type == "text" and block.get("text"):
                 parts.append(str(block.get("text", "")))
-            elif block_type == "thinking" and block.get("thinking"):
+            elif (
+                block_type == "thinking"
+                and self._show_thinking
+                and block.get("thinking")
+            ):
                 parts.append(str(block.get("thinking", "")))
             elif block_type == "toolCall":
                 parts.append(f"{block.get('name', 'tool')}({block.get('arguments', {})})")
@@ -469,37 +490,15 @@ class PiTuiApp(App):
         for block in content:
             if not isinstance(block, dict) or block.get("type") != "toolCall":
                 continue
-            call_id = str(block.get("id") or block.get("index") or len(self._tool_entries))
-            tool_name = str(block.get("name", "tool"))
-            render_call = None
-            render_result = None
-            runner = self._session.extension_runner
-            if runner is not None:
-                definition = runner.get_tool_definition(tool_name)
-                if definition is not None:
-                    render_call = definition.render_call
-                    render_result = definition.render_result
-            from .ui_context import ThemeFacade
-
-            render_theme = ThemeFacade(self._theme)
-            entry = self._tool_entries.get(call_id)
-            if entry is None:
-                entry = ToolExecutionEntry(
-                    tool_name,
-                    call_id,
-                    block.get("arguments", {}),
-                    render_call=render_call,
-                    render_result=render_result,
-                    render_theme=render_theme,
-                )
-                self._tool_entries[call_id] = entry
-                self._chat.mount(entry)
-                created = True
-            else:
-                entry.update_arguments(block.get("arguments", entry.arguments))
+            entry, was_created = self._ensure_tool_entry(
+                str(block.get("name", "tool")),
+                str(block.get("id") or block.get("index") or len(self._tool_entries)),
+                block.get("arguments", {}),
+            )
+            created = created or was_created
             result = block.get("result")
             if isinstance(result, dict):
-                output = str(result.get("content", result.get("text", "")) or result)
+                output = self._tool_result_text(result)
                 entry.set_result(
                     output,
                     is_error=bool(result.get("isError") or result.get("is_error")),
@@ -507,6 +506,97 @@ class PiTuiApp(App):
                 )
         if created:
             self._chat.scroll_end()
+
+    def _ensure_tool_entry(
+        self,
+        tool_name: str,
+        call_id: str,
+        arguments: Any,
+    ) -> tuple[ToolExecutionEntry, bool]:
+        """查找或创建工具执行条目（tool_execution_* 事件与消息块共用）。"""
+        entry = self._tool_entries.get(call_id)
+        if entry is not None:
+            entry.update_arguments(arguments)
+            return entry, False
+        render_call = None
+        render_result = None
+        runner = self._session.extension_runner
+        if runner is not None:
+            definition = runner.get_tool_definition(tool_name)
+            if definition is not None:
+                render_call = definition.render_call
+                render_result = definition.render_result
+        from .ui_context import ThemeFacade
+
+        entry = ToolExecutionEntry(
+            tool_name,
+            call_id,
+            arguments,
+            render_call=render_call,
+            render_result=render_result,
+            render_theme=ThemeFacade(self._theme),
+            theme_colors=self._chat_theme_colors,
+            image_width=self._image_width_cells,
+        )
+        entry.set_expanded(self._tools_expanded)
+        self._tool_entries[call_id] = entry
+        self._chat.mount(entry)
+        return entry, True
+
+    def _result_to_dict(self, result: Any) -> dict | None:
+        """工具结果（dict / AgentToolResult）统一为 content 块字典。"""
+        if isinstance(result, dict):
+            return result
+        if result is None:
+            return None
+        content = getattr(result, "content", None)
+        return {"content": list(content or [])}
+
+    def _tool_result_text(self, result: Any) -> str:
+        payload = self._result_to_dict(result)
+        if payload is None:
+            return ""
+        output = get_text_output(payload, self._show_images)
+        if output:
+            return output
+        raw = payload.get("content") or payload.get("text") or payload.get("details")
+        if raw is None:
+            return ""
+        return str(raw)
+
+    def _on_tool_execution_start(self, event: dict) -> None:
+        """工具开始执行：创建条目并挂进聊天（对齐 TS tool_execution_start）。"""
+        entry, created = self._ensure_tool_entry(
+            str(event.get("tool_name", "tool")),
+            str(event.get("tool_call_id")),
+            event.get("args", {}),
+        )
+        if created:
+            self._chat.scroll_end()
+
+    def _on_tool_execution_update(self, event: dict) -> None:
+        """工具流式局部结果（对齐 TS tool_execution_update）。"""
+        call_id = str(event.get("tool_call_id"))
+        entry = self._tool_entries.get(call_id)
+        if entry is None:
+            return
+        result = event.get("result") or event.get("partial_result")
+        output = self._tool_result_text(result)
+        entry.set_partial_result(output, result=result)
+
+    def _on_tool_execution_end(self, event: dict) -> None:
+        """工具执行完成（对齐 TS tool_execution_end）。"""
+        call_id = str(event.get("tool_call_id"))
+        entry = self._tool_entries.get(call_id)
+        if entry is None:
+            return
+        result = event.get("result")
+        output = self._tool_result_text(result)
+        entry.set_result(
+            output,
+            is_error=bool(event.get("is_error")),
+            result=result,
+        )
 
     def _extension_custom_message_renderer(self, message):
         runner = self._session.extension_runner
@@ -969,7 +1059,11 @@ class PiTuiApp(App):
             self._notify("A bash command is already running. Press Esc to cancel it first.")
             self._editor.text = text
             return
-        entry = BashExecutionEntry(command, exclude_from_context=is_excluded)
+        entry = BashExecutionEntry(
+            command,
+            exclude_from_context=is_excluded,
+            theme_colors=self._chat_theme_colors,
+        )
         self._chat.mount(entry)
         self._chat.scroll_end()
         self._set_status("Running bash")
@@ -1414,13 +1508,28 @@ class PiTuiApp(App):
             self._notify(f"Fork failed: {exc}")
 
     def action_toggle_tools(self) -> None:
+        """切换工具输出展开/折叠（对齐 TS toggleToolOutputExpansion）。"""
+        self._tools_expanded = not self._tools_expanded
         self._show_tools = not self._show_tools
-        self._header.set_expanded(not self._header._expanded)
-        self._rerender_chat()
+        self._header.set_expanded(self._tools_expanded)
+        self._chat.set_visibility(
+            show_tools=self._show_tools,
+            show_thinking=self._show_thinking,
+        )
+        for widget in self._chat.query(ToolExecutionEntry) + self._chat.query(BashExecutionEntry):
+            widget.set_expanded(self._tools_expanded)
+        self._set_status(
+            f"Tool output: {'expanded' if self._tools_expanded else 'collapsed'}"
+        )
 
     def action_toggle_thinking(self) -> None:
         self._show_thinking = not self._show_thinking
+        if self._settings_manager is not None:
+            self._settings_manager.set_hide_thinking_block(not self._show_thinking)
         self._rerender_chat()
+        self._set_status(
+            f"Thinking blocks: {'hidden' if not self._show_thinking else 'visible'}"
+        )
 
     def action_previous_prompt(self) -> None:
         self._scroll_to_prompt(-1)

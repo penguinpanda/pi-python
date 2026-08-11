@@ -71,6 +71,21 @@ COLOR_KEYS: tuple[str, ...] = (
     "diffAdd",
     "diffRemove",
     "diffChange",
+    # thinking / 工具执行 / bash（对齐 TS theme）
+    "thinkingText",
+    "thinkingOff",
+    "thinkingMinimal",
+    "thinkingLow",
+    "thinkingMedium",
+    "thinkingHigh",
+    "thinkingXhigh",
+    "thinkingMax",
+    "toolPendingBg",
+    "toolSuccessBg",
+    "toolErrorBg",
+    "toolTitle",
+    "toolOutput",
+    "bashMode",
 )
 
 
@@ -117,6 +132,20 @@ DARK_THEME: dict[str, str] = {
     "diffAdd": "#a6e3a1",
     "diffRemove": "#f38ba8",
     "diffChange": "#f9e2af",
+    "thinkingText": "#cba6f7",
+    "thinkingOff": "#45475a",
+    "thinkingMinimal": "#6c7086",
+    "thinkingLow": "#89b4fa",
+    "thinkingMedium": "#94e2d5",
+    "thinkingHigh": "#cba6f7",
+    "thinkingXhigh": "#f5c2e7",
+    "thinkingMax": "#f38ba8",
+    "toolPendingBg": "#313244",
+    "toolSuccessBg": "#2a3a2a",
+    "toolErrorBg": "#3a2a2a",
+    "toolTitle": "#cdd6f4",
+    "toolOutput": "#a6adc8",
+    "bashMode": "#89b4fa",
 }
 
 
@@ -163,6 +192,20 @@ LIGHT_THEME: dict[str, str] = {
     "diffAdd": "#40a02b",
     "diffRemove": "#d20f39",
     "diffChange": "#df8e1d",
+    "thinkingText": "#8839ef",
+    "thinkingOff": "#9ca0b0",
+    "thinkingMinimal": "#8c8fa1",
+    "thinkingLow": "#1e66f5",
+    "thinkingMedium": "#04a5e5",
+    "thinkingHigh": "#8839ef",
+    "thinkingXhigh": "#ea76cb",
+    "thinkingMax": "#d20f39",
+    "toolPendingBg": "#e6e9ef",
+    "toolSuccessBg": "#e8f0e8",
+    "toolErrorBg": "#f0e8e8",
+    "toolTitle": "#4c4f69",
+    "toolOutput": "#5c5f77",
+    "bashMode": "#1e66f5",
 }
 
 

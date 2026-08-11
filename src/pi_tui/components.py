@@ -5,8 +5,10 @@ from __future__ import annotations
 import base64
 from typing import Any
 
+from rich.style import Style
+
 from pi_tui.engine.cells import Cell, Line, blank_line, line_from_text
-from pi_tui.engine.text import render_markdown, render_markup
+from pi_tui.engine.text import DefaultTextStyle, render_markdown, render_markup, strip_ansi
 from pi_tui.engine.widgets import (
     Editor,
     Input,
@@ -139,11 +141,13 @@ def message_to_entries(
         thinking_parts: list[str] = []
         text_parts: list[str] = []
         tool_calls: list[str] = []
+        has_thinking = False
         for block in content or []:
             if not isinstance(block, dict):
                 continue
             block_type = block.get("type")
             if block_type == "thinking":
+                has_thinking = True
                 if show_thinking:
                     thinking_parts.append(block.get("thinking", ""))
             elif block_type == "toolCall":
@@ -162,6 +166,8 @@ def message_to_entries(
                     ),
                 )
             )
+        elif has_thinking and not show_thinking:
+            entries.append((hidden_thinking_label, ""))
         if text_parts:
             entries.append(
                 (
@@ -229,15 +235,25 @@ def _render_labeled_markdown(
     speaking: bool = False,
     prompt_marker: bool = False,
     theme_colors: dict | None = None,
+    kind: str = "text",
 ) -> list[Line]:
     """消息条目渲染：图标 + label（粗体，单独一行）+ 缩进正文。"""
-    from rich.style import Style
-
     suffix = " Speaking…" if speaking else ""
     label_line = line_from_text(f"{label_icon(label)} {label}{suffix}", width, Style(bold=True))
     body = normalize_path_slashes(text)
+    default_style = None
+    if kind == "thinking":
+        default_style = DefaultTextStyle(
+            color=(theme_colors or {}).get("thinking"),
+            italic=True,
+        )
     if "[/" not in body:
-        body_lines = render_markdown(body, max(0, width - 2), theme_colors=theme_colors)
+        body_lines = render_markdown(
+            body,
+            max(0, width - 2),
+            theme_colors=theme_colors,
+            default_style=default_style,
+        )
     else:
         body_lines = []
         for raw_line in linkify_paths(body).splitlines() or [""]:
@@ -267,11 +283,13 @@ class MessageEntry(Widget):
         images: list[bytes] | None = None,
         *,
         image_width: int | None = None,
+        kind: str = "text",
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.label = label
         self.entry_text = text
+        self.kind = kind
         self.images = list(images or [])
         self.image_width = image_width
         self.prompt_marker = False
@@ -329,6 +347,7 @@ class MessageEntry(Widget):
             self.speaking,
             self.prompt_marker,
             self.theme_colors or None,
+            self.kind,
         )
         if self.images:
             capabilities = detect_capabilities()
@@ -367,7 +386,15 @@ class MessageEntry(Widget):
 
     def content_size(self) -> tuple[int, int]:
         if self._content_size_cache is None:
-            lines = _render_labeled_markdown(self.label, self.entry_text, 1000, self.speaking)
+            lines = _render_labeled_markdown(
+                self.label,
+                self.entry_text,
+                1000,
+                self.speaking,
+                False,
+                self.theme_colors or None,
+                self.kind,
+            )
             self._content_size_cache = (1000, len(lines))
         return self._content_size_cache
 
@@ -383,6 +410,7 @@ class MessageEntry(Widget):
                 self.speaking,
                 self.prompt_marker,
                 self.theme_colors or None,
+                self.kind,
             )
             height = len(lines)
             self._size_cache[content_width] = height
@@ -391,6 +419,12 @@ class MessageEntry(Widget):
 
 class ToolExecutionEntry(Widget):
     """工具执行条目：名称/参数 + 输出 + 状态，可展开/折叠（对齐 TS ToolExecutionComponent）。"""
+
+    _STATUS_BG: dict[str, str] = {
+        "running": "toolPendingBg",
+        "success": "toolSuccessBg",
+        "error": "toolErrorBg",
+    }
 
     def __init__(
         self,
@@ -401,6 +435,8 @@ class ToolExecutionEntry(Widget):
         render_call=None,
         render_result=None,
         render_theme=None,
+        theme_colors: dict | None = None,
+        image_width: int | None = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -410,24 +446,53 @@ class ToolExecutionEntry(Widget):
         self.render_call = render_call
         self.render_result = render_result
         self.render_theme = render_theme
+        self.theme_colors = dict(theme_colors or {})
+        self.image_width = image_width
         self.result_payload: Any = None
         self.output = ""
         self.status = "running"  # running / success / error
         self.expanded = False
+        self.images: list[bytes] = []
+        self._image_id_base = id(self) & 0xFFFFFF
 
     def update_arguments(self, arguments) -> None:
         self.arguments = arguments
+        self.refresh()
+
+    def set_partial_result(self, output: str, result: Any = None) -> None:
+        """流式局部结果：状态保持 running，输出逐步更新。"""
+        self.output = output
+        self.result_payload = result
+        self.status = "running"
+        self._set_images(result)
         self.refresh()
 
     def set_result(self, output: str, is_error: bool = False, result: Any = None) -> None:
         self.output = output
         self.result_payload = result
         self.status = "error" if is_error else "success"
+        self._set_images(result)
         self.refresh()
 
     def set_expanded(self, expanded: bool) -> None:
         self.expanded = bool(expanded)
         self.refresh()
+
+    def _set_images(self, result: Any) -> None:
+        self.images = []
+        content = None
+        if isinstance(result, dict):
+            content = result.get("content")
+        elif result is not None:
+            content = getattr(result, "content", None)
+        _collect_image_data(content, self.images)
+
+    def remove(self, child=None) -> None:
+        """移除时清理已显示的 kitty 图片。"""
+        if self.images and "kitty" in detect_capabilities() and self.app is not None:
+            for index in range(len(self.images)):
+                self.app.terminal.write(encode_kitty_delete(self._image_id_base + index))
+        super().remove(child)
 
     def handle_mouse(self, event) -> bool:
         if event.type == "release":
@@ -463,7 +528,7 @@ class ToolExecutionEntry(Widget):
         return str(rendered)
 
     def content_size(self) -> tuple[int, int]:
-        lines = 1
+        lines = 1 + len(self.images)
         if self.expanded and self.output:
             lines += len(str(self.output).splitlines())
         return (1000, lines)
@@ -471,33 +536,69 @@ class ToolExecutionEntry(Widget):
     def render(self, width: int, height: int) -> list[Line]:
         status = {"running": "...", "success": "ok", "error": "error"}[self.status]
         label = f"Tool: {self.tool_name} ({status})"
-        lines = [line_from_text(f"{label}  {self._render_call_text()}", width, self.base_style)]
+        bg_key = self._STATUS_BG[self.status]
+        label_style = Style(
+            color=self.theme_colors.get("toolTitle"),
+            bgcolor=self.theme_colors.get(bg_key),
+        )
+        lines = [line_from_text(f"{label}  {self._render_call_text()}", width, label_style)]
         result_text = self._render_result_text()
         if self.expanded and result_text:
+            output_style = Style(color=self.theme_colors.get("toolOutput"))
             for raw in str(result_text).splitlines():
                 body = blank_line(width)
-                body.patch(2, line_from_text(raw, max(0, width - 2), self.base_style))
+                body.patch(2, line_from_text(raw, max(0, width - 2), output_style))
                 lines.append(body)
+        if self.images:
+            capabilities = detect_capabilities()
+            if capabilities:
+                while len(lines) < 2:
+                    lines.append(blank_line(width, self.base_style))
+                if "kitty" in capabilities:
+                    lines[1].passthrough = "".join(
+                        encode_kitty_placement(
+                            image,
+                            image_id=self._image_id_base + index,
+                            width=self.image_width,
+                            height=self.image_width,
+                        )
+                        for index, image in enumerate(self.images)
+                    )
+                elif "iterm2" in capabilities:
+                    lines[1].passthrough = "".join(
+                        encode_iterm2_image(image, name=f"tool-image-{index}")
+                        for index, image in enumerate(self.images)
+                    )
         while len(lines) < height:
             lines.append(blank_line(width, self.base_style))
         return lines[:height]
 
 
 class BashExecutionEntry(Widget):
-    """交互 bash 命令条目：流式输出 + 完成状态。"""
+    """交互 bash 命令条目：流式输出 + 完成状态 + 展开预览（对齐 TS BashExecutionComponent）。"""
+
+    PREVIEW_LINES = 20
 
     def __init__(
         self,
         command: str,
         *,
         exclude_from_context: bool = False,
+        theme_colors: dict | None = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.command = command
         self.exclude_from_context = exclude_from_context
+        self.theme_colors = dict(theme_colors or {})
+        self.output_lines: list[str] = []
         self.output = ""
-        self.status: str | None = None
+        self.status: str = "running"  # running / complete / cancelled / error
+        self.exit_code: int | None = None
+        self.cancelled = False
+        self.truncated = False
+        self.full_output_path: str | None = None
+        self.expanded = False
 
     @property
     def is_mounted(self) -> bool:
@@ -508,7 +609,14 @@ class BashExecutionEntry(Widget):
         return "Bash (excluded)" if self.exclude_from_context else "Bash"
 
     def append_output(self, chunk: str) -> None:
-        self.output += chunk
+        clean = strip_ansi(chunk).replace("\r\n", "\n").replace("\r", "\n")
+        new_lines = clean.split("\n")
+        if self.output_lines and new_lines:
+            self.output_lines[-1] += new_lines[0]
+            self.output_lines.extend(new_lines[1:])
+        else:
+            self.output_lines.extend(new_lines)
+        self.output = "\n".join(self.output_lines)
         self.refresh()
 
     def set_complete(
@@ -518,45 +626,93 @@ class BashExecutionEntry(Widget):
         truncated: bool = False,
         full_output_path: str | None = None,
     ) -> None:
-        if cancelled:
-            self.status = "(cancelled)"
+        self.exit_code = exit_code
+        self.cancelled = bool(cancelled)
+        self.truncated = bool(truncated)
+        self.full_output_path = full_output_path
+        if self.cancelled:
+            self.status = "cancelled"
         elif exit_code not in (None, 0):
-            self.status = f"(exit {exit_code})"
+            self.status = "error"
         else:
-            self.status = None
-        if truncated and full_output_path:
-            prefix = f"{self.status} " if self.status else ""
-            self.status = f"{prefix}Output truncated. Full output: {full_output_path}"
+            self.status = "complete"
         self.refresh()
 
     def set_error(self, message: str) -> None:
-        self.status = f"(failed: {message})"
+        self.status = "error"
+        self.full_output_path = None
+        self.output_lines.append(f"(failed: {message})")
+        self.output = "\n".join(self.output_lines)
         self.refresh()
 
+    def set_expanded(self, expanded: bool) -> None:
+        self.expanded = bool(expanded)
+        self.refresh()
+
+    def _status_parts(self) -> list[str]:
+        parts: list[str] = []
+        if self.status == "running":
+            parts.append("Running...")
+            return parts
+        available = self.output_lines
+        display = available if self.expanded else available[-self.PREVIEW_LINES :]
+        hidden = len(available) - len(display)
+        if hidden > 0:
+            parts.append(
+                "(to collapse)" if self.expanded else f"... {hidden} more lines (to expand)"
+            )
+        if self.status == "cancelled":
+            parts.append("(cancelled)")
+        elif self.status == "error":
+            failed = [line for line in self.output_lines if line.startswith("(failed:")]
+            if failed:
+                parts.append(failed[-1])
+            else:
+                parts.append(f"(exit {self.exit_code})")
+        if self.truncated and self.full_output_path:
+            parts.append(f"Output truncated. Full output: {self.full_output_path}")
+        return parts
+
     def render(self, width: int, height: int) -> list[Line]:
-        text = f"$ {self.command}"
-        if self.output:
-            text += f"\n{self.output}"
-        if self.status:
-            text += f"\n{self.status}"
-        lines = [line_from_text(f"{self.label}  {text}", width, self.base_style)]
+        color_key = "dim" if self.exclude_from_context else "bashMode"
+        border_color = self.theme_colors.get(color_key)
+        border_style = Style(color=border_color)
+        lines: list[Line] = []
+        lines.append(line_from_text("\u2500" * width, width, border_style))
+        lines.append(line_from_text("$ " + self.command, width, Style(color=border_color, bold=True)))
+        available = self.output_lines
+        display = available if self.expanded else available[-self.PREVIEW_LINES :]
+        output_style = Style(color=self.theme_colors.get("toolOutput"))
+        if display:
+            lines.append(blank_line(width, None))
+            for raw in display:
+                lines.append(line_from_text(raw, width, output_style))
+        status_parts = self._status_parts()
+        if status_parts:
+            lines.append(blank_line(width, None))
+            for part in status_parts:
+                lines.append(line_from_text(part, width, border_style))
+        lines.append(line_from_text("\u2500" * width, width, border_style))
         while len(lines) < height:
             lines.append(blank_line(width, self.base_style))
-        return lines
+        return lines[:height]
 
     def handle_mouse(self, event) -> bool:
         if event.type == "release":
-            parts = [f"$ {self.command}"]
-            if self.output:
-                parts.append(self.output)
-            if self.status:
-                parts.append(self.status)
+            parts = [f"$ {self.command}", "\n".join(self.output_lines)]
             self.post_message(CopyRequested("\n".join(parts)), "")
             return True
         return False
 
     def content_size(self) -> tuple[int, int]:
-        height = 1 + (2 if self.output else 0) + (1 if self.status else 0)
+        height = 3  # 上下边框 + 命令行
+        available = self.output_lines
+        display = available if self.expanded else available[-self.PREVIEW_LINES :]
+        if display:
+            height += 1 + len(display)
+        status_parts = self._status_parts()
+        if status_parts:
+            height += 1 + len(status_parts)
         return (1000, height)
 
 
@@ -685,12 +841,14 @@ class PiChatContainer(ScrollView):
             images_out=images,
         )
         for label, text in entries:
+            kind = "thinking" if label == self._hidden_thinking_label else "text"
             self.mount(
                 MessageEntry(
                     label,
                     text,
                     images=images if self._show_images else [],
                     image_width=self._image_width_cells,
+                    kind=kind,
                 )
             )
             if entries:

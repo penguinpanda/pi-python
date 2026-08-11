@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from pi_tui.components import MessageEntry, ToolExecutionEntry
+from pi_tui.components import BashExecutionEntry, MessageEntry, ToolExecutionEntry
 from pi_tui.engine import App, FakeTerminal
 from pi_tui.engine.cells import Cell, Line, blank_line
 from pi_tui.engine.keys import Key, KeyEvent, MouseEvent, parse_input
@@ -83,6 +83,65 @@ def test_tool_entry_uses_render_hooks() -> None:
     entry.set_expanded(True)
     lines = entry.render(60, 4)
     assert any("RESULT A" in line.text() for line in lines)
+
+
+def test_thinking_entry_renders_italic_with_theme_color() -> None:
+    entry = MessageEntry("Thinking", "reasoning text", kind="thinking")
+    entry.theme_colors = {"thinking": "#6c7086"}
+    lines = entry.render(60, 3)
+    body = lines[1]
+    styled = [cell for cell in body.cells if cell.char != " "]
+    assert styled
+    assert all(cell.style.italic for cell in styled if cell.style is not None)
+    assert any(cell.style.color is not None for cell in styled if cell.style is not None)
+
+
+def test_tool_entry_partial_result_keeps_running_and_collects_images() -> None:
+    entry = ToolExecutionEntry(
+        "read",
+        "c1",
+        {"path": "a.png"},
+        theme_colors={"toolPendingBg": "#111111", "toolTitle": "#ffffff"},
+    )
+    entry.set_partial_result(
+        "partial",
+        result={"content": [{"type": "text", "text": "partial"}]},
+    )
+    lines = entry.render(60, 2)
+    assert "Tool: read (...)" in lines[0].text()
+    assert lines[0].cells[0].style.bgcolor is not None
+
+    import base64
+
+    image_png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+    )
+    entry.set_result("", result={"content": [{"type": "image", "data": image_png}]})
+    assert entry.images == [image_png]
+    assert entry.status == "success"
+
+
+def test_bash_entry_strips_ansi_and_previews_output() -> None:
+    entry = BashExecutionEntry(
+        "npm test",
+        theme_colors={"bashMode": "#89b4fa", "toolOutput": "#a6adc8", "dim": "#6c7086"},
+    )
+    entry.append_output("\x1b[31mline one\x1b[0m\n")
+    entry.append_output("line two")
+    assert entry.output == "line one\nline two"
+
+    lines = entry.render(40, 8)
+    assert lines[0].text().strip() == "\u2500" * 40
+    assert any("$ npm test" in line.text() for line in lines)
+    assert any("line one" in line.text() for line in lines)
+    assert any("Running..." in line.text() for line in lines)
+    assert lines[-1].text().strip() == "\u2500" * 40
+
+    entry.set_complete(0)
+    entry.set_expanded(True)
+    lines = entry.render(40, 8)
+    assert any("line one" in line.text() for line in lines)
+    assert not any("Running..." in line.text() for line in lines)
 
 
 def test_editor_cursor_highlight_uses_character_cell_for_cjk() -> None:
