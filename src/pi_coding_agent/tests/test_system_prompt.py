@@ -302,6 +302,21 @@ class TestResourceLoaders:
 
 
 class TestConfigPaths:
+    def test_package_dir_points_to_coding_agent(self, monkeypatch):
+        from pi_coding_agent._config import (
+            get_docs_path,
+            get_examples_path,
+            get_package_dir,
+        )
+
+        monkeypatch.delenv("PI_PACKAGE_DIR", raising=False)
+        package_dir = get_package_dir()
+        assert package_dir == Path(__file__).resolve().parents[1]
+        assert (package_dir / "docs").is_dir()
+        assert (package_dir / "examples").is_dir()
+        assert get_docs_path() == package_dir / "docs"
+        assert get_examples_path() == package_dir / "examples"
+
     def test_agent_dir_env_overrides(self, tmp_path, monkeypatch):
         from pi_coding_agent._config import get_agent_dir, get_sessions_dir
 

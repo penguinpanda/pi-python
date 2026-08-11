@@ -107,24 +107,16 @@ def get_project_settings_path(cwd: str | Path) -> Path:
 
 
 def get_package_dir() -> Path:
-    """pi-python 包根目录（对齐 TS getPackageDir）。
+    """pi-coding-agent 包根目录（对齐 TS packages/coding-agent 的 getPackageDir）。
 
     - PI_PACKAGE_DIR 环境变量可覆盖（用于 Nix/Guix 等 store 路径）。
-    - 源码布局下向上找 pyproject.toml 所在目录。
-    - 找不到标记时回退到 pi_coding_agent 包目录。
+    - 默认指向本包目录（src/pi_coding_agent），docs/examples/README 随包分发。
     """
     env_dir = os.environ.get("PI_PACKAGE_DIR")
     if env_dir:
         # 不做 resolve()：Windows 形式（如 C:/pi-pkg）在 POSIX 上会被当作
         # 相对路径拼上 cwd，导致输出路径不一致（对齐 TS 直接使用环境变量值）。
         return Path(env_dir)
-    current = Path(__file__).resolve().parent
-    while True:
-        if (current / "pyproject.toml").is_file():
-            return current
-        if current.parent == current:
-            break
-        current = current.parent
     return Path(__file__).resolve().parent
 
 

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import pytest
 
 from pi_coding_agent.extensions.loader import ExtensionLoader
 
-sys.path.insert(0, "examples/extensions")
+EXAMPLES_EXTENSIONS = Path(__file__).resolve().parents[1] / "examples" / "extensions"
+sys.path.insert(0, str(EXAMPLES_EXTENSIONS))
 
 from pi_tui.engine.keys import Key  # noqa: E402
 from question import QuestionDialog  # noqa: E402
@@ -61,9 +63,9 @@ async def _load_examples(tmp_path) -> tuple[dict[str, object], object]:
     loader = ExtensionLoader(global_dir=tmp_path / "none")
     result = await loader.load(
         explicit_paths=[
-            "examples/extensions/question.py",
-            "examples/extensions/questionnaire.py",
-            "examples/extensions/plan_mode.py",
+            str(EXAMPLES_EXTENSIONS / "question.py"),
+            str(EXAMPLES_EXTENSIONS / "questionnaire.py"),
+            str(EXAMPLES_EXTENSIONS / "plan_mode.py"),
         ]
     )
     assert not result.errors, [error.error for error in result.errors]
@@ -153,7 +155,7 @@ async def test_questionnaire_definition_and_errors(tmp_path):
 
 @pytest.mark.asyncio
 async def test_plan_mode_utils():
-    from examples.extensions.plan_mode_utils import (
+    from pi_coding_agent.examples.extensions.plan_mode_utils import (
         extract_todo_items,
         is_safe_command,
         mark_completed_steps,

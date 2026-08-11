@@ -58,7 +58,7 @@ If rebase conflicts occur:
 
 - src layout: `pi_ai` / `pi_agent` / `pi_coding_agent` / `pi_tui` / `pi_protocol` / `pi_storage` / `pi_server` / `pi_evals`.
 - `pi_tui` is a standalone reusable TUI framework with its own engine (`src/pi_tui/engine/`) and overlay runtime (`src/pi_tui/overlay/`); there is no Textual dependency. Core (model/layout/focus/manager) stays unit-testable without a terminal.
-- Docs: `docs/tui.md` (user docs), `docs/nd_upload/tui-ts-feature-gap.md` (TS gap and roadmap); `examples/extensions/` mirrors TS examples, status tracked in `STATUS.md`.
+- Docs: `docs/tui.md` (user docs), `docs/nd_upload/tui-ts-feature-gap.md` (TS gap and roadmap); `src/pi_coding_agent/examples/extensions/` 对齐 TS `packages/coding-agent/examples/extensions/`（含 TS 原文与 Python 移植），状态见 `STATUS.md`。
 - Tests: `src/pi_tui/tests/` (framework), `src/pi_coding_agent/tests/` (application), plus per-package `tests/` under `src/pi_*`.
 
 ## Issues and PRs

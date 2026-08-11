@@ -53,6 +53,9 @@
 - 新增 `scripts/verify_web_search.py`：离线验证 DeepSeek Responses 服务端
   web_search 的请求构造 / web_search_call 捕获 / stateless 回放，`--live`
   可选真实调用（需 `DEEPSEEK_API_KEY` 或 `--api-key`）
+- 补齐 TS 文档：从 pi TS 仓库复制 `packages/coding-agent/docs` 中 Python
+  缺失的文档到 `src/pi_coding_agent/docs/`（原样保留，含 `docs.json` 与
+  `images/`），已有中文移植的同名文档不覆盖
 
 ### Changed
 
@@ -110,6 +113,11 @@
 - 技能系统对齐 TS v0.84.0：frontmatter 改用完整 YAML 解析（PyYAML），
   gitignore 匹配改用 pathspec（完整 gitignore 语义），harness 层补齐 symlink
   解析与 TS 路径语义；显式技能路径补齐非 .md 警告与来源归属
+- `examples/` 与 `docs/` 迁入 `src/pi_coding_agent/`（对齐 TS
+  `packages/coding-agent/{examples,docs}`）：`get_package_dir()` 默认指向
+  包目录，系统提示中的 docs/examples/README 路径随包分发；新增
+  `examples/README.md` 索引；`docs/` 中 TS 没有的 `agent-directory.md` 与
+  `docs/nd_upload/` 保留在仓库根原位置
 - 会话接入 JSONL v4（`pi_agent.session.v4`）：多 lane / 全局 seq / facts /
   自包含 compaction；新会话默认写 v4，旧 v3 文件打开时惰性转换并保留 `.bak`，
   `PI_SESSION_FORMAT=v3` 可回退；`V4SessionManager` 与 `SessionManager` API
