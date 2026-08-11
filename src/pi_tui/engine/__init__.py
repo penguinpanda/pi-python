@@ -7,6 +7,9 @@
 
 from .app import App, OverlayWidget
 from .cells import Cell, Line, blank_line, line_from_text, line_to_ansi
+from .editor_component import EditorComponent
+from .fuzzy import FuzzyMatch, fuzzy_filter, fuzzy_match
+from .kill_ring import KillRing
 from .layout import (
     LayoutContext,
     allocate_stack_sizes,
@@ -36,7 +39,8 @@ from .markdown_render import (
     render_markdown_lines,
 )
 from .keys import Key, KeyEvent, KeyParser, MouseEvent, normalize_key_name, parse_input
-from .terminal import FakeTerminal, ScreenBuffer, Terminal
+from .stdin_buffer import StdinBuffer, is_complete_sequence
+from .terminal import FakeTerminal, ProcessTerminal, ScreenBuffer, Terminal, TerminalProtocol
 from .text import (
     markup_to_text,
     render_group,
@@ -46,6 +50,8 @@ from .text import (
     strip_ansi,
     visible_width,
 )
+from .undo_stack import UndoStack
+from .word_navigation import find_word_backward, find_word_forward
 from .widgets import (
     Box,
     CancellableLoader,
@@ -103,6 +109,16 @@ __all__ = [
     "render_cached",
     "render_layout_frame",
     "visible_stack_entries",
+    "EditorComponent",
+    "FuzzyMatch",
+    "fuzzy_filter",
+    "fuzzy_match",
+    "KillRing",
+    "UndoStack",
+    "find_word_backward",
+    "find_word_forward",
+    "StdinBuffer",
+    "is_complete_sequence",
     "Key",
     "KeyEvent",
     "KeyParser",
@@ -110,8 +126,10 @@ __all__ = [
     "normalize_key_name",
     "parse_input",
     "FakeTerminal",
+    "ProcessTerminal",
     "ScreenBuffer",
     "Terminal",
+    "TerminalProtocol",
     "markup_to_text",
     "render_group",
     "render_markdown",
