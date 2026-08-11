@@ -208,7 +208,7 @@ async def _prompt_agent(
         output = session.get_last_assistant_text()
         has_tool_calls = any(
             isinstance(block, dict) and block.get("type") == "toolCall"
-            for block in (assistant.get("content") or [])
+            for block in (cast(dict[str, Any], assistant).get("content") or [])
         )
         if not output and not has_tool_calls:
             raise RuntimeError("Agent run produced no assistant text or tool calls.")

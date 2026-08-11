@@ -679,7 +679,9 @@ class BashExecutionEntry(Widget):
         border_style = Style(color=border_color)
         lines: list[Line] = []
         lines.append(line_from_text("\u2500" * width, width, border_style))
-        lines.append(line_from_text("$ " + self.command, width, Style(color=border_color, bold=True)))
+        lines.append(
+            line_from_text("$ " + self.command, width, Style(color=border_color, bold=True))
+        )
         available = self.output_lines
         display = available if self.expanded else available[-self.PREVIEW_LINES :]
         output_style = Style(color=self.theme_colors.get("toolOutput"))

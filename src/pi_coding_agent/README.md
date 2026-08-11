@@ -215,8 +215,8 @@ from pi_coding_agent._session_manager_v4 import (
     open_session_manager,
 )
 
-manager = await create_session_manager(cwd=".")       # 新建持久化会话（v4 默认）
-manager = await in_memory_session_manager(cwd=".")    # 内存会话
+manager = await create_session_manager(cwd=".")  # 新建持久化会话（v4 默认）
+manager = await in_memory_session_manager(cwd=".")  # 内存会话
 manager = await open_session_manager(
     "~/.pi/agent/sessions/.../session.jsonl",
     cwd_override=".",

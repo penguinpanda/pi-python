@@ -54,19 +54,22 @@ def convert_to_llm(messages: list[AgentMessage]) -> list[Message]:
     for m in messages:
         role = m.get("role", "")
         if role in ("user", "assistant", "toolResult"):
-            result.append(m)
+            result.append(cast(Message, m))
         elif role == "bashExecution":
             if cast(dict[str, Any], m).get("excludeFromContext"):
                 continue
             result.append(
-                {
-                    "role": "user",
-                    "content": bash_execution_to_text(cast(dict[str, Any], m)),
-                    "timestamp": m.get("timestamp"),
-                }
+                cast(
+                    Message,
+                    {
+                        "role": "user",
+                        "content": bash_execution_to_text(cast(dict[str, Any], m)),
+                        "timestamp": m.get("timestamp"),
+                    },
+                )
             )
         elif role in ("compactionSummary", "branchSummary"):
-            summary = m.get("summary", "")
+            summary = str(m.get("summary", ""))
             prefix = (
                 COMPACTION_SUMMARY_PREFIX if role == "compactionSummary" else BRANCH_SUMMARY_PREFIX
             )
@@ -74,19 +77,25 @@ def convert_to_llm(messages: list[AgentMessage]) -> list[Message]:
                 COMPACTION_SUMMARY_SUFFIX if role == "compactionSummary" else BRANCH_SUMMARY_SUFFIX
             )
             result.append(
-                {
-                    "role": "user",
-                    "content": prefix + summary + suffix,
-                    "timestamp": m.get("timestamp"),
-                }
+                cast(
+                    Message,
+                    {
+                        "role": "user",
+                        "content": prefix + summary + suffix,
+                        "timestamp": m.get("timestamp"),
+                    },
+                )
             )
         elif role == "custom":
             result.append(
-                {
-                    "role": "user",
-                    "content": m.get("content"),
-                    "timestamp": m.get("timestamp"),
-                }
+                cast(
+                    Message,
+                    {
+                        "role": "user",
+                        "content": m.get("content"),
+                        "timestamp": m.get("timestamp"),
+                    },
+                )
             )
     return result
 

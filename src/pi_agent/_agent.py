@@ -627,7 +627,7 @@ def _default_convert_to_llm(
     for m in messages:
         role = m.get("role", "")
         if role in ("user", "assistant", "toolResult"):
-            result.append(m)
+            result.append(cast(Message, m))
     return result
 
 

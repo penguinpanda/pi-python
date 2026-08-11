@@ -255,6 +255,55 @@ class TestAgentAbort:
         assert "agent_end" in event_types
 
 
+class TestAgentSettled:
+    """agent_settled 在正常完成 / abort / 崩溃三条路径都发出。"""
+
+    @pytest.mark.asyncio
+    async def test_settled_emitted_on_normal_completion(self):
+        events: list[str] = []
+        agent = Agent(AgentOptions(model=_make_model(), stream_fn=_make_faux_stream_fn("hi")))
+        agent.subscribe(lambda e, signal: events.append(e["type"]))
+
+        await agent.prompt("hello")
+
+        assert events[-1] == "agent_settled"
+        assert events.count("agent_settled") == 1
+
+    @pytest.mark.asyncio
+    async def test_settled_emitted_after_abort(self):
+        events: list[str] = []
+        core = faux_provider(tokens_per_second=5)
+        core.set_responses([faux_assistant_message("A" * 500)])
+        agent = Agent(AgentOptions(model=_make_model(), stream_fn=core.stream))
+        agent.subscribe(lambda e, signal: events.append(e["type"]))
+
+        async def _run_and_abort():
+            await asyncio.sleep(0.05)
+            agent.abort()
+
+        await asyncio.wait_for(
+            asyncio.gather(agent.prompt("Hi"), _run_and_abort()),
+            timeout=2.0,
+        )
+
+        assert events[-1] == "agent_settled"
+
+    @pytest.mark.asyncio
+    async def test_settled_emitted_on_crash(self):
+        events: list[str] = []
+
+        def broken_stream_fn(model, context, options):
+            raise RuntimeError("boom")
+
+        agent = Agent(AgentOptions(model=_make_model(), stream_fn=broken_stream_fn))
+        agent.subscribe(lambda e, signal: events.append(e["type"]))
+
+        with pytest.raises(RuntimeError):
+            await agent.prompt("Hi")
+
+        assert events[-1] == "agent_settled"
+
+
 class TestAgentMutualExclusion:
     """互斥运行测试。"""
 

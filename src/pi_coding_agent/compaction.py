@@ -231,7 +231,7 @@ def extract_file_ops_from_message(message: AgentMessage, file_ops: dict[str, set
     """从 assistant 消息的 toolCall 块提取文件操作。"""
     if message.get("role") != "assistant":
         return
-    for block in message.get("content") or []:
+    for block in cast(dict[str, Any], message).get("content") or []:
         if not isinstance(block, dict):
             continue
         if block.get("type") != "toolCall":
@@ -314,7 +314,7 @@ def serialize_conversation(messages: list[AgentMessage]) -> str:
         elif role == "assistant":
             thinking_parts: list[str] = []
             tool_calls: list[str] = []
-            for block in msg.get("content") or []:
+            for block in cast(dict[str, Any], msg).get("content") or []:
                 if not isinstance(block, dict):
                     continue
                 block_dict = cast(dict[str, Any], block)
@@ -333,7 +333,8 @@ def serialize_conversation(messages: list[AgentMessage]) -> str:
             if thinking_parts:
                 parts.append(f"[Assistant thinking]: {chr(10).join(thinking_parts)}")
             if any(
-                isinstance(b, dict) and b.get("type") == "text" for b in (msg.get("content") or [])
+                isinstance(b, dict) and b.get("type") == "text"
+                for b in (cast(dict[str, Any], msg).get("content") or [])
             ):
                 parts.append(f"[Assistant]: {_content_text(msg.get('content'), '')}")
             if tool_calls:

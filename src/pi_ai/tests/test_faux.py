@@ -496,6 +496,47 @@ class TestStreamingEvents:
         assert events[-1]["error"]["stop_reason"] == "aborted"
         assert events[-1]["error"]["error_message"] == "Request was aborted"
 
+    @pytest.mark.asyncio
+    async def test_every_delta_event_carries_partial_snapshot(self):
+        """每个增量事件都携带完整的 partial 快照（消费者无需自行拼接）。"""
+        faux = faux_provider()
+        faux.set_responses(
+            [
+                faux_assistant_message(
+                    [
+                        faux_thinking("reason"),
+                        faux_text("hello"),
+                        faux_tool_call("my_tool", {"a": 1}),
+                    ]
+                )
+            ]
+        )
+
+        events = await _collect(await faux.provider.stream(faux.models[0], _context()))
+        delta_types = {
+            "text_start",
+            "text_delta",
+            "text_end",
+            "thinking_start",
+            "thinking_delta",
+            "thinking_end",
+            "toolcall_start",
+            "toolcall_delta",
+            "toolcall_end",
+        }
+        deltas = [event for event in events if event["type"] in delta_types]
+        assert deltas, events
+        for event in deltas:
+            partial = event["partial"]
+            assert partial["role"] == "assistant"
+            assert partial["api"] == "openai-completions"
+
+        # 仅靠 delta 事件即可重建全部内容。
+        text = "".join(e["delta"] for e in events if e["type"] == "text_delta")
+        thinking = "".join(e["delta"] for e in events if e["type"] == "thinking_delta")
+        assert text == "hello"
+        assert thinking == "reason"
+
 
 # ---------------------------------------------------------------------------
 # Models 集成

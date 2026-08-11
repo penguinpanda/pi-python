@@ -33,3 +33,19 @@ def test_uuidv7_embeds_timestamp():
     # 前 48 位（前两段共 12 个十六进制字符）即毫秒时间戳。
     ts = int(value[:8] + value[9:13], 16)
     assert before - 1 <= ts <= after + 1
+
+
+def test_uuidv7_thread_safe_unique_and_monotonic():
+    """并发调用：全局唯一，且每个线程内的调用序列保持时间排序。"""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def gen(count: int) -> list[str]:
+        return [uuidv7() for _ in range(count)]
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        batches = list(pool.map(gen, [200] * 8))
+
+    values = [value for batch in batches for value in batch]
+    assert len(set(values)) == len(values)
+    for batch in batches:
+        assert batch == sorted(batch)

@@ -11,6 +11,7 @@ from pi_ai._types import (
     Message,
     Model,
 )
+from pi_ai.api._shared import to_openai_messages
 from pi_ai.api.responses import _to_responses_input
 from pi_ai.api.transform_messages import (
     NON_VISION_TOOL_IMAGE_PLACEHOLDER,
@@ -662,6 +663,18 @@ class TestAgentMessagePassthrough:
         # observation 不触发 flush：孤立 tool call 只在结尾统一合成。
         assert [m["role"] for m in result] == ["user", "assistant", "observation", "toolResult"]
         assert result[-1]["tool_call_id"] == "call_1"
+
+    def test_unknown_content_block_passthrough_and_safe_skip(self):
+        """未知内容块（预留扩展类型）transform 原样透传，to_openai_messages 安全跳过。"""
+        message = _asst([{"type": "text", "text": "hi"}, {"type": "mystery", "payload": 1}])
+        transformed = transform_messages([message], _make_model())
+        assert transformed[0]["content"] == [
+            {"type": "text", "text": "hi"},
+            {"type": "mystery", "payload": 1},
+        ]
+
+        converted = to_openai_messages(transformed, _make_model())
+        assert converted[0]["content"] == "hi"
 
 
 # ---------------------------------------------------------------------------

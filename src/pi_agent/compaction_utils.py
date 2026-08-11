@@ -33,7 +33,7 @@ def create_file_ops() -> dict[str, set[str]]:
 def extract_file_ops_from_message(message: AgentMessage, file_ops: dict[str, set[str]]) -> None:
     if message.get("role") != "assistant":
         return
-    for block in message.get("content") or []:
+    for block in cast(dict[str, Any], message).get("content") or []:
         if not isinstance(block, dict) or block.get("type") != "toolCall":
             continue
         arguments = block.get("arguments")
@@ -110,7 +110,7 @@ def serialize_conversation(messages: list[AgentMessage]) -> str:
         elif role == "assistant":
             thinking_parts: list[str] = []
             tool_calls: list[str] = []
-            for block in message.get("content") or []:
+            for block in cast(dict[str, Any], message).get("content") or []:
                 if not isinstance(block, dict):
                     continue
                 block_dict = cast(dict[str, Any], block)
@@ -127,7 +127,7 @@ def serialize_conversation(messages: list[AgentMessage]) -> str:
                 parts.append(f"[Assistant thinking]: {chr(10).join(thinking_parts)}")
             if any(
                 isinstance(block, dict) and block.get("type") == "text"
-                for block in (message.get("content") or [])
+                for block in (cast(dict[str, Any], message).get("content") or [])
             ):
                 parts.append(f"[Assistant]: {_content_text(message.get('content'), '')}")
             if tool_calls:
@@ -216,7 +216,7 @@ def estimate_tokens(message: AgentMessage) -> int:
         return math.ceil(estimate_text_and_image_content_chars(message.get("content") or "") / 4)
     if role == "assistant":
         chars = 0
-        for block in message.get("content") or []:
+        for block in cast(dict[str, Any], message).get("content") or []:
             if not isinstance(block, dict):
                 continue
             block_dict = cast(dict[str, Any], block)
@@ -233,7 +233,7 @@ def estimate_tokens(message: AgentMessage) -> int:
     if role in ("custom", "toolResult"):
         return math.ceil(estimate_text_and_image_content_chars(message.get("content") or "") / 4)
     if role in ("branchSummary", "compactionSummary"):
-        return math.ceil(len(message.get("summary", "")) / 4)
+        return math.ceil(len(str(message.get("summary", ""))) / 4)
     if role == "bashExecution":
         return math.ceil(
             (len(str(message.get("command", ""))) + len(str(message.get("output", "")))) / 4

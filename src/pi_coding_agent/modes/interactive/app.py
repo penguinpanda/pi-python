@@ -457,11 +457,7 @@ class PiTuiApp(App):
             block_type = block.get("type")
             if block_type == "text" and block.get("text"):
                 parts.append(str(block.get("text", "")))
-            elif (
-                block_type == "thinking"
-                and self._show_thinking
-                and block.get("thinking")
-            ):
+            elif block_type == "thinking" and self._show_thinking and block.get("thinking"):
                 parts.append(str(block.get("thinking", "")))
             elif block_type == "toolCall":
                 parts.append(f"{block.get('name', 'tool')}({block.get('arguments', {})})")
@@ -1517,19 +1513,16 @@ class PiTuiApp(App):
             show_thinking=self._show_thinking,
         )
         for widget in self._chat.query(ToolExecutionEntry) + self._chat.query(BashExecutionEntry):
-            widget.set_expanded(self._tools_expanded)
-        self._set_status(
-            f"Tool output: {'expanded' if self._tools_expanded else 'collapsed'}"
-        )
+            if isinstance(widget, (ToolExecutionEntry, BashExecutionEntry)):
+                widget.set_expanded(self._tools_expanded)
+        self._set_status(f"Tool output: {'expanded' if self._tools_expanded else 'collapsed'}")
 
     def action_toggle_thinking(self) -> None:
         self._show_thinking = not self._show_thinking
         if self._settings_manager is not None:
             self._settings_manager.set_hide_thinking_block(not self._show_thinking)
         self._rerender_chat()
-        self._set_status(
-            f"Thinking blocks: {'hidden' if not self._show_thinking else 'visible'}"
-        )
+        self._set_status(f"Thinking blocks: {'hidden' if not self._show_thinking else 'visible'}")
 
     def action_previous_prompt(self) -> None:
         self._scroll_to_prompt(-1)

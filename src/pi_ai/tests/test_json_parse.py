@@ -64,3 +64,27 @@ def test_parse_streaming_json(partial, expected):
 def test_parse_streaming_json_never_raises():
     for text in [None, "", "}", "{", '{"a":', "tru", "123"]:
         parse_streaming_json(text)  # 不抛异常即可
+
+
+def test_parse_json_with_repair_fixes_illegal_escape():
+    # 非法转义 \x41 修复后反斜杠加倍，值变为字面量 "\x41"。
+    assert parse_json_with_repair(r'{"a": "\x41"}') == {"a": "\\x41"}
+
+
+def test_parse_json_with_repair_fixes_control_chars_in_nested_value():
+    assert parse_json_with_repair('{"a": {"b": "x\ty"}}') == {"a": {"b": "x\ty"}}
+
+
+@pytest.mark.parametrize(
+    ("partial", "expected"),
+    [
+        # 完整 JSON 但含原始控制字符：repair 后可直接解析。
+        ('{"a": "line1\nline2"}', {"a": "line1\nline2"}),
+        # 流式不完整：嵌套对象 / 数组 / 对象数组。
+        ('{"a": {"b": 1}', {"a": {"b": 1}}),
+        ('{"a": [1, 2', {"a": [1, 2]}),
+        ('[{"x": 1}, {"x": 2', [{"x": 1}, {"x": 2}]),
+    ],
+)
+def test_parse_streaming_json_partial_scenarios(partial, expected):
+    assert parse_streaming_json(partial) == expected

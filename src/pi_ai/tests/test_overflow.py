@@ -257,3 +257,15 @@ def test_get_overflow_patterns_returns_copy():
     patterns.clear()
     assert len(OVERFLOW_PATTERNS) == 25
     assert len(get_overflow_patterns()) == 25
+
+
+def test_chinese_only_error_message_not_matched():
+    """纯中文溢出错误当前不命中英文模式：验证不误报、不抛异常（已知限制）。"""
+    msg = _error_msg("输入长度超过模型最大上下文窗口，请减少输入内容")
+    assert is_context_overflow(msg, 8192) is False
+
+
+def test_english_pattern_matches_within_chinese_context():
+    """英文模式嵌入中英混合消息中仍能命中。"""
+    msg = _error_msg("请求失败：prompt is too long，请缩短输入")
+    assert is_context_overflow(msg, 8192) is True

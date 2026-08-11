@@ -741,7 +741,7 @@ class AgentSession:
                 continue
             parts = [
                 str(block.get("text", ""))
-                for block in message.get("content", [])
+                for block in cast(dict[str, Any], message).get("content", [])
                 if isinstance(block, dict) and block.get("type") == "text"
             ]
             text = "".join(parts)
@@ -763,7 +763,7 @@ class AgentSession:
                 user_messages += 1
             elif role == "assistant":
                 assistant_messages += 1
-                for block in message.get("content", []):
+                for block in cast(dict[str, Any], message).get("content", []):
                     if isinstance(block, dict) and block.get("type") == "toolCall":
                         tool_calls += 1
                 usage = message.get("usage")

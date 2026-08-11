@@ -106,11 +106,7 @@ class CompactionSummaryMessage(TypedDict, total=False):
 
 
 AgentMessage = (
-    Message
-    | BashExecutionMessage
-    | CustomMessage
-    | BranchSummaryMessage
-    | CompactionSummaryMessage
+    Message | BashExecutionMessage | CustomMessage | BranchSummaryMessage | CompactionSummaryMessage
 )
 
 # ---------------------------------------------------------------------------
