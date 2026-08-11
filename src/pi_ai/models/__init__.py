@@ -79,6 +79,9 @@ from ..types import (
     StreamOptions,
 )
 from ..auth import InMemoryCredentialStore
+from ..auth.context import AuthContext, default_auth_context
+from ..auth.resolve import ModelsError, resolve_provider_auth
+from ..auth.types import AuthInteraction, AuthResult, Credential, credential_type
 from ..provider import Provider, RefreshModelsContext
 from .models_store import (
     InMemoryModelsStore,
@@ -130,6 +133,7 @@ class Models:
         *,
         models_store: ModelsStore | None = None,
         credentials=None,
+        auth_context: AuthContext | None = None,
     ) -> None:
 
         # 已注册的 Provider
@@ -156,6 +160,7 @@ class Models:
         # credentials 可注入外部实现（例如 coding-agent 的 AuthStorage），
         # 满足 CredentialStore 接口（read/list/modify/delete）即可。
         self._credentials = credentials or InMemoryCredentialStore()
+        self._auth_context = auth_context or default_auth_context()
 
         # 模型目录持久化（ModelsStore）。
         self._models_store = models_store or InMemoryModelsStore()
@@ -467,6 +472,93 @@ class Models:
         from ..auth import ApiKeyCredential
 
         await self._credentials.write(provider_id, ApiKeyCredential(key=api_key))
+
+    # 认证查询与管理（对齐 TS Models.getAuth/checkAuth/login/logout）
+
+    async def get_auth(
+        self,
+        provider_or_model: str | Model,
+        overrides: dict[str, Any] | None = None,
+    ) -> AuthResult | None:
+        """解析 provider/model 认证（API Key 或 OAuth，含刷新）。"""
+        provider_id = (
+            provider_or_model if isinstance(provider_or_model, str) else provider_or_model.provider
+        )
+        provider = self._providers.get(provider_id)
+        if provider is None:
+            return None
+        return await resolve_provider_auth(
+            provider,
+            self._credentials,
+            self._auth_context,
+            overrides,
+        )
+
+    async def check_auth(
+        self,
+        provider_id: str,
+        overrides: dict[str, Any] | None = None,
+    ) -> dict[str, str] | None:
+        """检查 provider 是否已有可用的认证配置。"""
+        provider = self._providers.get(provider_id)
+        if provider is None:
+            return None
+        if getattr(provider, "auth", None) is None:
+            return {"type": "api_key", "source": "no auth required"}
+        credential = await self._credentials.read(provider_id)
+        if credential is not None:
+            ctype = credential_type(credential)
+            if ctype == "oauth":
+                oauth = getattr(provider.auth, "oauth", None)
+                return {"type": "oauth", "source": "OAuth"} if oauth is not None else None
+            if ctype == "api_key":
+                return {"type": "api_key", "source": "stored credential"}
+        result = await resolve_provider_auth(
+            provider,
+            self._credentials,
+            self._auth_context,
+            overrides,
+        )
+        if result is None:
+            return None
+        return {"type": "api_key", "source": result.source or "env"}
+
+    async def get_available(
+        self,
+        provider_id: str | None = None,
+        overrides: dict[str, Any] | None = None,
+    ) -> list[Model]:
+        """返回已配置认证的 provider 的模型列表。"""
+        providers = (
+            [self._providers[provider_id]]
+            if provider_id is not None and provider_id in self._providers
+            else list(self._providers.values())
+        )
+        available: list[Model] = []
+        for provider in providers:
+            if await self.check_auth(provider.id, overrides) is not None:
+                available.extend(provider.get_models())
+        return available
+
+    async def login(
+        self,
+        provider_id: str,
+        interaction: AuthInteraction,
+    ) -> Credential:
+        """运行 provider 的 OAuth 登录流程并持久化凭证。"""
+        provider = self._providers.get(provider_id)
+        if provider is None:
+            raise ModelsError("auth", f"Unknown provider: {provider_id}")
+        oauth = getattr(getattr(provider, "auth", None), "oauth", None)
+        if oauth is None:
+            raise ModelsError("auth", f"Provider {provider_id} does not support OAuth login")
+        credential = await oauth.login(interaction)
+        await self._credentials.write(provider_id, credential)
+        return credential
+
+    async def logout(self, provider_id: str) -> None:
+        """删除 provider 的存储凭证。"""
+        await self._credentials.delete(provider_id)
 
     # 辅助函数
 
