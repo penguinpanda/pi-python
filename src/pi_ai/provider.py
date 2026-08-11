@@ -85,6 +85,8 @@ from .api.api_provider_registry import (
     invoke_api_stream,
 )
 from .auth import EnvApiKeyAuth, InMemoryCredentialStore, resolve_api_key
+from .auth.context import default_auth_context
+from .auth.resolve import resolve_provider_auth
 from .models.models_store import (
     ModelsStoreEntry,
     ProviderModelsStore,
@@ -99,7 +101,18 @@ from .types import now_ms
 # responses
 #     Responses API
 
-ApiKind = Literal["completions", "responses"]
+ApiKind = Literal[
+    "completions",
+    "responses",
+    "pi-messages",
+    "anthropic-messages",
+    "google-generative-ai",
+    "google-vertex",
+    "mistral-conversations",
+    "azure-openai-responses",
+    "openai-codex-responses",
+    "bedrock-converse-stream",
+]
 
 # _api_kind → 注册表 API 协议 ID（model.api 为空时的回退映射）。
 _API_KIND_IDS: dict[str, str] = {
@@ -268,6 +281,47 @@ class Provider:
                 merged.append(model)
         return merged
 
+    async def _resolve_auth_options(
+        self,
+        options: StreamOptions | SimpleStreamOptions | None,
+    ) -> dict[str, Any]:
+        """解析 provider 认证并注入请求 options（API Key / OAuth 统一路径）。"""
+        request_options = dict(options or {})
+        if self.auth is None:
+            request_options.setdefault("api_key", "ollama")
+            request_options.setdefault("base_url", self.base_url or "")
+            return request_options
+        if request_options.get("api_key") is not None:
+            request_options.setdefault("base_url", self.base_url or "")
+            return request_options
+        if hasattr(self.auth, "oauth"):
+            result = await resolve_provider_auth(
+                self,
+                self._credential_store,
+                default_auth_context(),
+            )
+            if result is None:
+                raise ValueError(f"No auth configured for provider {self.id}")
+            auth = result.auth
+            request_options["api_key"] = auth.get("api_key") or ""
+            request_options["base_url"] = auth.get("base_url") or self.base_url or ""
+            headers = auth.get("headers")
+            if headers:
+                merged_headers = dict(
+                    cast(dict[str, str | None] | None, request_options.get("headers")) or {}
+                )
+                merged_headers.update(headers)
+                request_options["headers"] = merged_headers
+            if result.env:
+                merged_env = dict(cast(dict[str, str] | None, request_options.get("env")) or {})
+                merged_env.update(result.env)
+                request_options["env"] = merged_env
+            return request_options
+        api_key = await resolve_api_key(self.auth, self._credential_store, self.id)
+        request_options["api_key"] = api_key
+        request_options["base_url"] = self.base_url or ""
+        return request_options
+
     async def stream(
         self,
         model: Model,
@@ -320,32 +374,7 @@ class Provider:
         if self._stream_fn is not None:
             return await self._stream_fn(model, context, options)
 
-        # 解析 API Key。
-        #
-        # 优先级：
-        #
-        # StreamOptions.api_key（本次请求覆盖）
-        #
-        #       ↓
-        #
-        # Credential Store
-        #
-        #       ↓
-        #
-        # Environment Variable
-        #
-        # auth=None（本地服务，如 Ollama）：
-        # 跳过认证解析，使用占位值。
-        # OpenAI SDK 在发请求时要求 api_key 非空，
-        # 本地服务会忽略 Authorization 头。
-        opts = options or {}
-        api_key = opts.get("api_key")
-        if api_key is None:
-            if self.auth is None:
-                api_key = "ollama"
-            else:
-                api_key = await resolve_api_key(self.auth, self._credential_store, self.id)
-        base_url = self.base_url or ""
+        request_options = await self._resolve_auth_options(options)
 
         # 注册表分发：优先按模型 API 协议（model.api），
         # 模型未声明时回退 Provider._api_kind。
@@ -360,10 +389,6 @@ class Provider:
                 f"(provider api kind: {self._api_kind})"
             )
 
-        # 把已解析的凭证与 base_url 注入 options（对齐 TS withEnvApiKey）。
-        request_options = dict(options or {})
-        request_options["api_key"] = api_key
-        request_options["base_url"] = base_url
         return await invoke_api_stream(
             entry.stream,
             model,
@@ -410,14 +435,7 @@ class Provider:
         if self._stream_fn is not None:
             return await self._stream_fn(model, context, options)
 
-        opts = options or {}
-        api_key = opts.get("api_key")
-        if api_key is None:
-            if self.auth is None:
-                api_key = "ollama"
-            else:
-                api_key = await resolve_api_key(self.auth, self._credential_store, self.id)
-        base_url = self.base_url or ""
+        request_options = await self._resolve_auth_options(options)
 
         api_id = model.api or _API_KIND_IDS.get(self._api_kind, self._api_kind)
         entry = get_api_provider(api_id)
@@ -427,9 +445,6 @@ class Provider:
                 f"(provider api kind: {self._api_kind})"
             )
 
-        request_options = dict(options or {})
-        request_options["api_key"] = api_key
-        request_options["base_url"] = base_url
         return await invoke_api_stream(
             entry.streamSimple,
             model,
