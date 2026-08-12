@@ -1,27 +1,37 @@
-"""OpenAI Codex（ChatGPT OAuth）设备代码流程（对齐 TS openai-codex.ts）。
+"""OpenAI Codex（ChatGPT OAuth）登录（对齐 TS openai-codex.ts）。
 
-首批只实现设备代码流程（无本地回调服务器）；浏览器流程后续按需补充。
+优先浏览器流程（PKCE + 本地回调服务器 + 手动粘贴回退）；
+设备代码流程作为兼容路径。
 """
 
+import asyncio
 import base64
 import json
 import time
+import uuid
+import webbrowser
 
 from typing import Any
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 
 from ..types import AuthInteraction, ModelAuth, OAuthAuth, OAuthCredential
 from .device_code import poll_oauth_device_code_flow
+from .pkce import generate_pkce
 
 _AsyncClient = httpx.AsyncClient
 
 CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 AUTH_BASE_URL = "https://auth.openai.com"
 TOKEN_URL = f"{AUTH_BASE_URL}/oauth/token"
+AUTHORIZE_URL = f"{AUTH_BASE_URL}/oauth/authorize"
 DEVICE_USER_CODE_URL = f"{AUTH_BASE_URL}/api/accounts/deviceauth/usercode"
 DEVICE_TOKEN_URL = f"{AUTH_BASE_URL}/api/accounts/deviceauth/token"
 DEVICE_REDIRECT_URI = f"{AUTH_BASE_URL}/deviceauth/callback"
+BROWSER_REDIRECT_URI = "http://localhost:1455/auth/callback"
+BROWSER_SCOPE = "openid profile email offline_access"
+BROWSER_PORT = 1455
 DEVICE_CODE_TIMEOUT_SECONDS = 15 * 60
 JWT_CLAIM_PATH = "https://api.openai.com/auth"
 
@@ -198,8 +208,139 @@ def _credentials_from_token(token: dict[str, Any]) -> OAuthCredential:
     return credential
 
 
+def create_authorization_flow(originator: str = "pi") -> dict[str, str]:
+    """PKCE 授权 URL（对齐 TS createAuthorizationFlow）。"""
+    verifier, challenge = generate_pkce()
+    state = uuid.uuid4().hex
+    url = f"{AUTHORIZE_URL}?" + urlencode(
+        {
+            "response_type": "code",
+            "client_id": CLIENT_ID,
+            "redirect_uri": BROWSER_REDIRECT_URI,
+            "scope": BROWSER_SCOPE,
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+            "state": state,
+            "id_token_add_organizations": "true",
+            "codex_cli_simplified_flow": "true",
+            "originator": originator,
+        }
+    )
+    return {"verifier": verifier, "state": state, "url": url}
+
+
+async def _wait_for_browser_code(state: str, signal: Any) -> dict | None:
+    """本地回调服务器（对齐 TS startLocalOAuthServer；固定端口 1455）。"""
+    result: dict = {"code": None}
+    completed = asyncio.Event()
+
+    async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        request_line = await reader.readline()
+        parts = request_line.decode("utf-8", "replace").split()
+        path = parts[1] if len(parts) > 1 else "/"
+        parsed = urlparse(path)
+        if parsed.path != "/auth/callback":
+            _respond_html(writer, 404, "Callback route not found.")
+            return
+        query = parse_qs(parsed.query)
+        if query.get("state", [""])[0] != state:
+            _respond_html(writer, 400, "State mismatch.")
+            return
+        code = query.get("code", [""])[0]
+        if not code:
+            _respond_html(writer, 400, "Missing authorization code.")
+            return
+        _respond_html(writer, 200, "OpenAI authentication completed. You can close this window.")
+        result["code"] = code
+        completed.set()
+
+    try:
+        server = await asyncio.start_server(_handle, "127.0.0.1", BROWSER_PORT)
+    except OSError:
+        return None
+    try:
+        waiter = asyncio.create_task(completed.wait())
+        abort = asyncio.create_task(signal.wait()) if signal is not None else None
+        try:
+            if abort is not None:
+                done, _pending = await asyncio.wait(
+                    {waiter, abort}, return_when=asyncio.FIRST_COMPLETED
+                )
+            else:
+                done, _pending = await asyncio.wait({waiter})
+            for task in _pending if abort is not None else ():
+                task.cancel()
+        finally:
+            if not waiter.done():
+                waiter.cancel()
+            if abort is not None and not abort.done():
+                abort.cancel()
+    finally:
+        server.close()
+        await server.wait_closed()
+    return result if result["code"] else None
+
+
+def _respond_html(writer: asyncio.StreamWriter, status: int, message: str) -> None:
+    body = f"<html><body><p>{message}</p></body></html>".encode("utf-8")
+    reason = {200: "OK", 400: "Bad Request", 404: "Not Found"}.get(status, "OK")
+    writer.write(
+        f"HTTP/1.1 {status} {reason}\r\nContent-Type: text/html; charset=utf-8\r\n"
+        f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode("ascii")
+        + body
+    )
+    asyncio.get_running_loop().create_task(writer.drain())
+
+
+def _extract_code_from_pasted(value: str) -> str | None:
+    """从手动粘贴的授权 URL 提取 code 参数（对齐 TS 手动粘贴回退）。"""
+    try:
+        parsed = urlparse(value.strip())
+        if parsed.scheme:
+            return parse_qs(parsed.query).get("code", [None])[0]
+    except Exception:
+        pass
+    return None
+
+
+async def _browser_login(interaction: AuthInteraction) -> OAuthCredential:
+    flow = create_authorization_flow()
+    interaction.notify(
+        {
+            "type": "auth_url",
+            "url": flow["url"],
+            "instructions": "A browser window should open. Complete login to finish.",
+        }
+    )
+    try:
+        webbrowser.open(flow["url"])
+    except Exception:
+        pass
+    server_result = await _wait_for_browser_code(flow["state"], interaction.signal)
+    code = server_result["code"] if server_result else None
+    if code is None:
+        pasted = await interaction.prompt(
+            {
+                "type": "manual_code",
+                "message": "Complete login in your browser, or paste the authorization "
+                "code / redirect URL here:",
+                "placeholder": BROWSER_REDIRECT_URI,
+            }
+        )
+        code = _extract_code_from_pasted(pasted) or pasted.strip()
+    if not code:
+        raise RuntimeError("OpenAI Codex browser login was cancelled")
+    token = await exchange_authorization_code(code, flow["verifier"], BROWSER_REDIRECT_URI)
+    return _credentials_from_token(token)
+
+
 async def _login(interaction: AuthInteraction) -> OAuthCredential:
-    device = await start_device_auth(interaction.signal)
+    try:
+        device = await start_device_auth(interaction.signal)
+    except RuntimeError as exc:
+        if "browser login" in str(exc):
+            return await _browser_login(interaction)
+        raise
     interaction.notify(
         {
             "type": "device_code",
