@@ -359,6 +359,7 @@ class RpcMessageHandler:
         ui_context: RpcUiContext | None = None,
         session_factory: Callable[..., AgentSession | Awaitable[AgentSession]] | None = None,
         session_rebuilder=None,
+        output: Callable[[dict[Any, Any]], None] | None = None,
     ) -> None:
         self.session = session
         self.model_runtime = model_runtime
@@ -370,6 +371,8 @@ class RpcMessageHandler:
         self.created_sessions: list[AgentSession] = []
         # 后台 prompt 任务（命令循环不阻塞）。
         self._prompt_tasks: set[asyncio.Task] = set()
+        # 输出通道（preflight 成功后 prompt 的 success 响应经此发送）。
+        self.output = output or (lambda _obj: None)
 
         self._handlers: dict[str, Callable[[dict, str | None], Any]] = {
             "prompt": self._handle_prompt,
@@ -424,22 +427,33 @@ class RpcMessageHandler:
     # 提示类
     # ------------------------------------------------------------------
 
-    async def _handle_prompt(self, cmd: dict, command_id: str | None) -> dict:
+    async def _handle_prompt(self, cmd: dict, command_id: str | None) -> dict | None:
         message = cmd.get("message")
         if not isinstance(message, str) or not message.strip():
             return error_response(command_id, "prompt", "Message is required")
         images = _parse_images(cmd.get("images"))
 
+        # 对齐 TS prompt preflight：preflight 成功才发 success；
+        # 提交失败（未 preflight）发 error；运行失败由事件流呈现。
+        preflight_succeeded = False
+
+        def _on_preflight(did_succeed: bool) -> None:
+            nonlocal preflight_succeeded
+            if did_succeed:
+                preflight_succeeded = True
+                self.output(success_response(command_id, "prompt"))
+
         async def _run() -> None:
             try:
-                await self.session.prompt(message, images or None)
-            except Exception:
-                pass  # 失败通过事件流呈现（stop_reason=error）
+                await self.session.prompt(message, images or None, preflight_result=_on_preflight)
+            except Exception as exc:
+                if not preflight_succeeded:
+                    self.output(error_response(command_id, "prompt", str(exc)))
 
         task = asyncio.create_task(_run())
         self._prompt_tasks.add(task)
         task.add_done_callback(self._prompt_tasks.discard)
-        return success_response(command_id, "prompt")
+        return None
 
     async def _handle_steer(self, cmd: dict, command_id: str | None) -> dict:
         message = cmd.get("message")
@@ -928,16 +942,18 @@ async def run_rpc_mode(
     stdin_stream = stdin if stdin is not None else sys.stdin.buffer
     stdout_stream = stdout if stdout is not None else sys.stdout.buffer
 
+    write_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+
+    def output(obj: dict[Any, Any]) -> None:
+        write_queue.put_nowait(serialize_json_line(obj).encode("utf-8"))
+
     handler = RpcMessageHandler(
         session,
         model_runtime,
         session_factory=session_factory,
         session_rebuilder=session_rebuilder,
+        output=output,
     )
-    write_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
-
-    def output(obj: dict[Any, Any]) -> None:
-        write_queue.put_nowait(serialize_json_line(obj).encode("utf-8"))
 
     async def _flush_output() -> None:
         await write_queue.join()

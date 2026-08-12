@@ -1318,7 +1318,13 @@ class AgentSession:
         self._pending_writes.add(task)
         task.add_done_callback(self._pending_writes.discard)
 
-    async def prompt(self, text: str, images: list | None = None) -> None:
+    async def prompt(
+        self,
+        text: str,
+        images: list | None = None,
+        *,
+        preflight_result: Callable[[bool], Any] | None = None,
+    ) -> None:
         """发送用户消息，触发完整的 Agent 循环 + 工具执行。
 
         阻塞直到 agent 完成本轮（但 wait_for_idle 可以等待事件监听器完成）。
@@ -1328,6 +1334,9 @@ class AgentSession:
 
         上下文溢出（is_context_overflow）时先压缩再自动重试；
         上下文超阈值（should_compact）时压缩（不重试）。
+
+        preflight_result（对齐 TS prompt preflightResult）：提交成功（校验
+        通过、operation 已记录）时回调 True；提交失败抛异常且不回调。
         """
         self._abort = asyncio.Event()
         started = time.perf_counter()
@@ -1345,6 +1354,9 @@ class AgentSession:
         )
         outcome = "completed"
         error: dict[str, str] | None = None
+        # preflight 成功标记：operation 记录完成即视为提交成功（对齐 TS）。
+        if preflight_result is not None:
+            preflight_result(True)
         try:
             self._overflow_recovery_attempted = False
             # 发送前检查：上一轮 aborted/error 响应触发压缩（不重试）。

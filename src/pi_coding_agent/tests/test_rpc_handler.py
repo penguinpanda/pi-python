@@ -301,13 +301,17 @@ class TestPromptAndQueue:
     async def test_prompt_background(self, tmp_path):
         runtime = _make_runtime()
         handler = _make_handler(runtime, tmp_path)
+        # preflight 成功时 success 经 output 通道发出（对齐 TS preflight 语义）。
+        outputs: list = []
+        handler.output = outputs.append
         response = await handler.handle_command({"id": "1", "type": "prompt", "message": "hi"})
-        assert response["success"] is True
+        assert response is None
         # 等待后台 prompt 完成（faux 无脚本响应 → 立即返回 error）。
         for _ in range(100):
             if not handler._prompt_tasks:
                 break
             await asyncio.sleep(0.01)
+        assert any(obj.get("success") for obj in outputs)
         messages = handler.session.get_messages()
         roles = [message.get("role") for message in messages]
         assert "user" in roles
