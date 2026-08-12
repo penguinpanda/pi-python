@@ -19,7 +19,28 @@ class TestModelsRegistry:
     def test_create_default_models(self):
         models = create_default_models()
         providers = models.get_providers()
-        assert len(providers) == 7
+        assert len(providers) == 36
+        assert models.get_provider("google") is not None
+        assert models.get_provider("mistral") is not None
+        assert models.get_provider("azure-openai-responses") is not None
+        assert models.get_provider("github-copilot") is not None
+        assert models.get_provider("openrouter") is not None
+        assert models.get_provider("ant-ling") is not None
+        assert models.get_provider("openai-codex") is not None
+        assert models.get_provider("google-vertex") is not None
+        assert models.get_provider("amazon-bedrock") is not None
+        assert models.get_provider("groq") is not None
+        assert models.get_provider("together") is not None
+        assert models.get_provider("xai") is not None
+        assert models.get_provider("moonshotai-cn") is not None
+        assert models.get_provider("zai-coding-cn") is not None
+        assert models.get_provider("opencode") is not None
+        assert models.get_provider("opencode-go") is not None
+        assert models.get_provider("xiaomi-token-plan-ams") is not None
+        assert models.get_provider("xiaomi-token-plan-cn") is not None
+        assert models.get_provider("xiaomi-token-plan-sgp") is not None
+        assert models.get_provider("cloudflare-workers-ai") is not None
+        assert models.get_provider("cloudflare-ai-gateway") is not None
         assert models.get_provider("openai") is not None
         assert models.get_provider("deepseek") is not None
         assert models.get_provider("qwen") is not None
@@ -32,8 +53,8 @@ class TestModelsRegistry:
         models = create_default_models()
         all_models = models.get_models()
         # 4 openai (GPT-5 系列) + 2 deepseek (v4) + 8 qwen
-        # + 16 qwen-token-plan + 16 qwen-token-plan-cn + 7 ollama + 1 faux
-        assert len(all_models) == 54
+        # + 16 qwen-token-plan + 16 qwen-token-plan-cn + 7 ollama + 1 faux + 2 google + 2 vertex + 1 mistral + 4 azure + 2 github-copilot + 273 openrouter + 3 ant-ling + 7 openai-codex + 3 bedrock
+        assert len(all_models) == 351
 
     def test_get_models_by_provider(self):
         models = create_default_models()

@@ -59,21 +59,21 @@ def _isolated_registry():
 
 @pytest.mark.asyncio
 async def test_provider_dispatches_by_model_api() -> None:
-    anthropic_record: list[str] = []
+    google_record: list[str] = []
     responses_record: list[str] = []
-    register_api_provider(_stub_provider("anthropic-messages", anthropic_record), source_id="test")
+    register_api_provider(_stub_provider("google-generative-ai", google_record), source_id="test")
     register_api_provider(_stub_provider("openai-responses", responses_record), source_id="test")
     provider = create_provider(
         id="multi",
         name="Multi API",
         auth=EnvApiKeyAuth("Multi", ["MULTI_API_KEY"]),
         models=[_model("a", ""), _model("b", "openai-responses")],
-        api_kind="anthropic-messages",
+        api_kind="google-generative-ai",
     )
 
     with patch("pi_ai.provider.resolve_api_key", new=AsyncMock(return_value="sk-test")):
         await provider.stream(_model("a", ""), _context())
         await provider.stream(_model("b", "openai-responses"), _context())
 
-    assert anthropic_record == ["a"]
+    assert google_record == ["a"]
     assert responses_record == ["b"]

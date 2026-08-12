@@ -105,7 +105,6 @@ ApiKind = Literal[
     "completions",
     "responses",
     "pi-messages",
-    "anthropic-messages",
     "google-generative-ai",
     "google-vertex",
     "mistral-conversations",
@@ -294,14 +293,21 @@ class Provider:
         if request_options.get("api_key") is not None:
             request_options.setdefault("base_url", self.base_url or "")
             return request_options
-        if hasattr(self.auth, "oauth"):
+        resolver = getattr(self.auth, "resolve_auth", None)
+        result = None
+        if callable(resolver):
+            result = await resolver(
+                self._credential_store,
+                default_auth_context(),
+                request_options,
+            )
+        elif hasattr(self.auth, "oauth"):
             result = await resolve_provider_auth(
                 self,
                 self._credential_store,
                 default_auth_context(),
             )
-            if result is None:
-                raise ValueError(f"No auth configured for provider {self.id}")
+        if result is not None:
             auth = result.auth
             request_options["api_key"] = auth.get("api_key") or ""
             request_options["base_url"] = auth.get("base_url") or self.base_url or ""
@@ -317,6 +323,8 @@ class Provider:
                 merged_env.update(result.env)
                 request_options["env"] = merged_env
             return request_options
+        if hasattr(self.auth, "oauth") or callable(resolver):
+            raise ValueError(f"No auth configured for provider {self.id}")
         api_key = await resolve_api_key(self.auth, self._credential_store, self.id)
         request_options["api_key"] = api_key
         request_options["base_url"] = self.base_url or ""

@@ -82,6 +82,7 @@ from ..auth import InMemoryCredentialStore
 from ..auth.context import AuthContext, default_auth_context
 from ..auth.resolve import ModelsError, resolve_provider_auth
 from ..auth.types import AuthInteraction, AuthResult, Credential, credential_type
+from pi_telemetry import SpanOptions
 from ..provider import Provider, RefreshModelsContext
 from .models_store import (
     InMemoryModelsStore,
@@ -375,7 +376,21 @@ class Models:
 
         async def _setup():
             provider = self._require_provider(model.provider)
-            return await provider.stream(model, context, options)
+            opts = options or {}
+            telemetry = opts.get("telemetry_context")
+            if telemetry is None:
+                return await provider.stream(model, context, options)
+            return await telemetry.start_span(
+                SpanOptions(
+                    name="pi.ai.request",
+                    attributes={
+                        "pi.ai.provider": model.provider,
+                        "pi.ai.model": model.id,
+                        "pi.ai.api": model.api,
+                    },
+                ),
+                lambda _span: provider.stream(model, context, options),
+            )
 
         return lazy_stream(model, _setup)
 
@@ -417,7 +432,21 @@ class Models:
 
         async def _setup():
             provider = self._require_provider(model.provider)
-            return await provider.stream_simple(model, context, options)
+            opts = options or {}
+            telemetry = opts.get("telemetry_context")
+            if telemetry is None:
+                return await provider.stream_simple(model, context, options)
+            return await telemetry.start_span(
+                SpanOptions(
+                    name="pi.ai.request",
+                    attributes={
+                        "pi.ai.provider": model.provider,
+                        "pi.ai.model": model.id,
+                        "pi.ai.api": model.api,
+                    },
+                ),
+                lambda _span: provider.stream_simple(model, context, options),
+            )
 
         return lazy_stream(model, _setup)
 
@@ -487,12 +516,21 @@ class Models:
         provider = self._providers.get(provider_id)
         if provider is None:
             return None
-        return await resolve_provider_auth(
+        result = await resolve_provider_auth(
             provider,
             self._credentials,
             self._auth_context,
             overrides,
         )
+        if (
+            result is not None
+            and isinstance(provider_or_model, Model)
+            and provider_or_model.headers
+        ):
+            headers = dict(result.auth.get("headers") or {})
+            headers.update(provider_or_model.headers)
+            result.auth = {**result.auth, "headers": headers}
+        return result
 
     async def check_auth(
         self,
@@ -513,6 +551,15 @@ class Models:
                 return {"type": "oauth", "source": "OAuth"} if oauth is not None else None
             if ctype == "api_key":
                 return {"type": "api_key", "source": "stored credential"}
+        resolver = getattr(provider.auth, "resolve_auth", None)
+        if callable(resolver):
+            custom = await resolver(
+                self._credentials,
+                self._auth_context,
+                overrides or {},
+            )
+            if custom is not None:
+                return {"type": "api_key", "source": "custom"}
         result = await resolve_provider_auth(
             provider,
             self._credentials,
@@ -538,6 +585,7 @@ class Models:
         for provider in providers:
             if await self.check_auth(provider.id, overrides) is not None:
                 available.extend(provider.get_models())
+        available.sort(key=lambda model: (model.provider, model.id))
         return available
 
     async def login(
@@ -549,10 +597,15 @@ class Models:
         provider = self._providers.get(provider_id)
         if provider is None:
             raise ModelsError("auth", f"Unknown provider: {provider_id}")
-        oauth = getattr(getattr(provider, "auth", None), "oauth", None)
-        if oauth is None:
-            raise ModelsError("auth", f"Provider {provider_id} does not support OAuth login")
-        credential = await oauth.login(interaction)
+        auth = getattr(provider, "auth", None)
+        oauth = getattr(auth, "oauth", None)
+        login_method = getattr(auth, "login", None)
+        if oauth is not None:
+            credential = await oauth.login(interaction)
+        elif callable(login_method):
+            credential = await login_method(interaction)
+        else:
+            raise ModelsError("auth", f"Provider {provider_id} does not support login")
         await self._credentials.write(provider_id, credential)
         return credential
 

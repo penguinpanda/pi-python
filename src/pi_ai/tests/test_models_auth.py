@@ -111,3 +111,17 @@ async def test_get_available_filters_unconfigured_providers() -> None:
     available = await models.get_available()
 
     assert [model.provider for model in available] == ["configured"]
+
+
+@pytest.mark.asyncio
+async def test_get_auth_merges_model_headers() -> None:
+    models = Models(auth_context=_EnvContext({"TEST_KEY": "sk-env"}))
+    provider = _provider("p", EnvApiKeyAuth("Test", ["TEST_KEY"]))
+    model = _model("p")
+    model.headers = {"X-Model": "1"}
+    models.add_provider(provider)
+
+    result = await models.get_auth(model)
+
+    assert result is not None
+    assert result.auth["headers"] == {"X-Model": "1"}

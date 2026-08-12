@@ -2,6 +2,35 @@ from ..models import Models
 from ..providers import (
     deepseek_provider,
     faux_provider,
+    google_provider,
+    mistral_provider,
+    azure_openai_responses_provider,
+    github_copilot_provider,
+    openrouter_provider,
+    ant_ling_provider,
+    openai_codex_provider,
+    google_vertex_provider,
+    amazon_bedrock_provider,
+    baseten_provider,
+    cerebras_provider,
+    fireworks_provider,
+    groq_provider,
+    huggingface_provider,
+    moonshotai_provider,
+    moonshotai_cn_provider,
+    nvidia_provider,
+    together_provider,
+    xiaomi_provider,
+    zai_provider,
+    zai_coding_cn_provider,
+    xai_provider,
+    opencode_provider,
+    opencode_go_provider,
+    xiaomi_token_plan_ams_provider,
+    xiaomi_token_plan_cn_provider,
+    xiaomi_token_plan_sgp_provider,
+    cloudflare_ai_gateway_provider,
+    cloudflare_workers_ai_provider,
     ollama_provider,
     openai_provider,
     qwen_provider,
@@ -17,6 +46,35 @@ def create_default_models() -> Models:
     Ollama 与 Faux。
     """
     models = Models()
+    models.add_provider(google_provider())
+    models.add_provider(mistral_provider())
+    models.add_provider(azure_openai_responses_provider())
+    models.add_provider(github_copilot_provider())
+    models.add_provider(openrouter_provider())
+    models.add_provider(ant_ling_provider())
+    models.add_provider(openai_codex_provider())
+    models.add_provider(google_vertex_provider())
+    models.add_provider(amazon_bedrock_provider())
+    models.add_provider(groq_provider())
+    models.add_provider(together_provider())
+    models.add_provider(cerebras_provider())
+    models.add_provider(fireworks_provider())
+    models.add_provider(nvidia_provider())
+    models.add_provider(huggingface_provider())
+    models.add_provider(baseten_provider())
+    models.add_provider(moonshotai_provider())
+    models.add_provider(xiaomi_provider())
+    models.add_provider(zai_provider())
+    models.add_provider(xai_provider())
+    models.add_provider(moonshotai_cn_provider())
+    models.add_provider(zai_coding_cn_provider())
+    models.add_provider(opencode_provider())
+    models.add_provider(opencode_go_provider())
+    models.add_provider(xiaomi_token_plan_ams_provider())
+    models.add_provider(xiaomi_token_plan_cn_provider())
+    models.add_provider(xiaomi_token_plan_sgp_provider())
+    models.add_provider(cloudflare_workers_ai_provider())
+    models.add_provider(cloudflare_ai_gateway_provider())
     models.add_provider(openai_provider())
     models.add_provider(deepseek_provider())
     models.add_provider(qwen_provider())

@@ -46,6 +46,7 @@ Provider 不需要关心 OpenAI SDK 的数据结构，
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import Any, cast
 
 import httpx
@@ -189,6 +190,7 @@ async def chat_completions_stream(
     api_key: str,
     base_url: str,
     options: StreamOptions | None = None,
+    tool_call_id_normalizer: Callable[[str, Model, AssistantMessage], str] | None = None,
 ) -> AssistantMessageEventStream:
     """
     执行一次 Chat Completions 流式请求。
@@ -275,7 +277,9 @@ async def chat_completions_stream(
             # 图片降级 / thinking 块 / 工具调用 ID 规范化 /
             # 孤立 tool call 合成错误结果。
             transformed_messages = transform_messages(
-                context.messages, model, normalize_tool_call_id
+                context.messages,
+                model,
+                tool_call_id_normalizer or normalize_tool_call_id,
             )
 
             # 将规范化后的 SDK Message

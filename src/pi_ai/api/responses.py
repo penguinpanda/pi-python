@@ -57,7 +57,7 @@ Responses API 返回的是"事件(Event)"，
 
 import asyncio
 import json
-from typing import Any, cast
+from typing import Any, Callable, cast
 from urllib.parse import urlparse
 
 import httpx
@@ -622,6 +622,9 @@ async def responses_stream(
     api_key: str,
     base_url: str = "",
     options: StreamOptions | None = None,
+    *,
+    client_factory: Callable[..., AsyncOpenAI] | None = None,
+    request_model_id: str | None = None,
 ) -> AssistantMessageEventStream:
     """
     执行一次 Responses API
@@ -684,13 +687,22 @@ async def responses_stream(
             # 由 openai SDK 内置处理，指数退避封顶 60s。
             # （max_retry_delay_ms 暂不生效：SDK 客户端不接受该参数。）
             timeout_ms = opts.get("timeout_ms")
-            client = _create_client(
-                api_key,
-                base_url,
-                timeout=timeout_ms / 1000.0 if timeout_ms else 180.0,
-                max_retries=opts.get("max_retries", 2),
-                headers=opts.get("headers"),
-            )
+            if client_factory is not None:
+                client = client_factory(
+                    api_key,
+                    base_url,
+                    timeout=timeout_ms / 1000.0 if timeout_ms else 180.0,
+                    max_retries=opts.get("max_retries", 2),
+                    headers=opts.get("headers"),
+                )
+            else:
+                client = _create_client(
+                    api_key,
+                    base_url,
+                    timeout=timeout_ms / 1000.0 if timeout_ms else 180.0,
+                    max_retries=opts.get("max_retries", 2),
+                    headers=opts.get("headers"),
+                )
             # 跨 Provider 消息规范化。
             #
             # 图片降级 / thinking 块 / 工具调用 ID 规范化 /
@@ -736,7 +748,7 @@ async def responses_stream(
             #
             # tools。
             kwargs: dict[str, Any] = {
-                "model": model.id,
+                "model": request_model_id or model.id,
                 "input": input_items,
                 "stream": True,
                 "store": False,

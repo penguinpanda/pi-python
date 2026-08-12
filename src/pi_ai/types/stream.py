@@ -25,6 +25,8 @@ from typing import (
 
 from typing_extensions import NotRequired
 
+from pi_telemetry import TelemetryContext
+
 from .common import (
     AsyncHTTPClient,
     CacheRetention,
@@ -203,6 +205,7 @@ class StreamOptions(TypedDict, total=False):
     thinking_budget: int | None
     thinking_enabled: bool | None
     headers: dict[str, str | None]
+    telemetry_context: NotRequired[TelemetryContext]
 
     # 最大重试次数（provider 层客户端重试上限）。
     max_retries: int

@@ -1,7 +1,7 @@
 """API 提供者注册表（对齐 TS compat.ts 的 apiProviderRegistry）。
 
 把「API 协议 ID → stream / streamSimple 实现」统一注册、按需分发。
-新增 API 协议（例如 anthropic-messages、google-generative-ai）只需
+新增 API 协议（例如 google-generative-ai、mistral-conversations）只需
 注册一次即可接入所有调度入口，不再改动 provider.py 的 if/elif 分发：
 
     from pi_ai import ApiProvider, register_api_provider
@@ -137,6 +137,12 @@ def _builtin_api_providers() -> list[ApiProvider]:
     from .completions import chat_completions_stream
     from .responses import responses_stream
     from .pi_messages_lazy import pi_messages_api
+    from .google_generative_ai import google_stream, google_stream_simple
+    from .mistral_conversations import mistral_stream, mistral_stream_simple
+    from .azure_openai_responses import azure_stream, azure_stream_simple
+    from .openai_codex_responses import codex_stream, codex_stream_simple
+    from .google_vertex import vertex_stream, vertex_stream_simple
+    from .bedrock_converse_stream import bedrock_stream, bedrock_stream_simple
 
     def _completions(
         model: Model,
@@ -182,6 +188,36 @@ def _builtin_api_providers() -> list[ApiProvider]:
             api="pi-messages",
             stream=pi_messages.stream,
             streamSimple=pi_messages.streamSimple,
+        ),
+        ApiProvider(
+            api="google-generative-ai",
+            stream=google_stream,
+            streamSimple=google_stream_simple,
+        ),
+        ApiProvider(
+            api="mistral-conversations",
+            stream=mistral_stream,
+            streamSimple=mistral_stream_simple,
+        ),
+        ApiProvider(
+            api="azure-openai-responses",
+            stream=azure_stream,
+            streamSimple=azure_stream_simple,
+        ),
+        ApiProvider(
+            api="openai-codex-responses",
+            stream=codex_stream,
+            streamSimple=codex_stream_simple,
+        ),
+        ApiProvider(
+            api="google-vertex",
+            stream=vertex_stream,
+            streamSimple=vertex_stream_simple,
+        ),
+        ApiProvider(
+            api="bedrock-converse-stream",
+            stream=bedrock_stream,
+            streamSimple=bedrock_stream_simple,
         ),
     ]
 

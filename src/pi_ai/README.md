@@ -2,7 +2,9 @@
 
 统一的 LLM API，Provider 抽象模式。
 
-基于 [pi-mono/packages/ai](https://github.com/earendil-works/pi-mono) 的 TypeScript 版本复刻，默认内置 **OpenAI**、**DeepSeek**、**Qwen**、**Ollama** 与 **Faux** 五个 provider。
+基于 [pi-mono/packages/ai](https://github.com/earendil-works/pi-mono) 的 TypeScript 版本复刻，默认内置 OpenAI、DeepSeek、Qwen、Qwen Token Plan、Ollama、Google、Mistral、Azure OpenAI、GitHub Copilot、OpenRouter、Ant Ling、OpenAI Codex、Google Vertex、AWS Bedrock 与 Faux provider。
+
+另有 13 个 OpenAI 兼容 provider（Groq、Together、Cerebras、Fireworks、xAI、NVIDIA、Hugging Face、Baseten、Moonshot、Xiaomi、Z.ai 等）通过动态 `/models` 发现注册，首次刷新后自动获得模型列表。
 
 ---
 
@@ -117,6 +119,9 @@ pi-ai login openai-codex  # 或 github-copilot / openrouter；不带参数时交
 
 也可直接运行 `python -m pi_ai login openai-codex`。
 
+`Models` 也提供认证 API：`get_auth` / `check_auth` / `get_available` /
+`login` / `logout`，OAuth 凭证会经 `Provider.stream()` 自动刷新并注入请求头。
+
 ### Hello World
 
 ```python
@@ -126,7 +131,7 @@ from pi_ai import create_default_models, Context
 
 async def main():
     # 创建模型管理器
-    # 预加载 OpenAI、DeepSeek、Qwen、Ollama 和 Faux 五个 provider
+    # 预加载内置 provider（OpenAI/DeepSeek/Qwen/Ollama/Google/Mistral/Azure/GitHub Copilot/OpenRouter/Ant Ling/OpenAI Codex/Google Vertex/Faux）
     models = create_default_models()
 
     # 获取一个模型（不会发送网络请求）
@@ -250,6 +255,7 @@ msg = await stream.result()  # 等到 done/error
 | `cache_retention` | `CacheRetention` | 提示缓存保留策略（默认 `short`） |
 | `session_id` | `str` | 会话标识（用于提示缓存 key） |
 | `timeout_ms` | `int` | HTTP 请求超时 |
+| `telemetry_context` | `TelemetryContext` | 可选；存在时 `Models.stream/stream_simple` 记录 `pi.ai.request` span |
 | `on_payload` / `on_response` | `Callable` | 请求发送前 / 响应接收后回调 |
 | `metadata` / `env` | `dict` | 附加元数据 / Provider 作用域环境变量 |
 
@@ -418,6 +424,16 @@ async for event in await models.stream(model, context):
 ## API 注册表（自定义 API 协议）
 
 API 协议实现通过注册表按 `model.api` 分发（对齐 TS `apiProviderRegistry`），新增协议无需改动调度代码：
+
+- `openai-completions`（Chat Completions）
+- `openai-responses`（Responses API）
+- `pi-messages`（pi 自有 SSE 线协议）
+- `google-generative-ai`（Gemini REST SSE）
+- `mistral-conversations`（OpenAI 兼容 completions）
+- `azure-openai-responses`（Azure OpenAI Responses）
+- `openai-codex-responses`（Codex backend Responses）
+- `google-vertex`（Vertex AI REST SSE）
+- `bedrock-converse-stream`（AWS EventStream + bearer token）
 
 ```python
 from pi_ai import ApiProvider, register_api_provider
