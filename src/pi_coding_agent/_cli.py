@@ -261,6 +261,15 @@ async def _async_main(args: list[str] | None = None) -> int:
         # 全新会话
         session_manager = await create_session_manager(cwd, sessions_dir=sessions_dir)
 
+    # --name：新建会话时设置会话名（对齐 TS appendSessionInfo）。
+    is_new_session = not (parsed.session or parsed.continue_session or parsed.resume or parsed.fork)
+    if parsed.name is not None and is_new_session:
+        name = parsed.name.strip()
+        if name:
+            setter = getattr(session_manager, "set_session_name", None)
+            if setter is not None:
+                setter(name)
+
     # 解析模型（含 --models 循环列表；继续会话时优先恢复）
     is_continuing = bool(parsed.continue_session or parsed.session or parsed.resume or parsed.fork)
     try:
@@ -958,6 +967,12 @@ def _create_parser() -> argparse.ArgumentParser:
         "--session-id",
         type=str,
         help="Use exact project session ID, creating it if missing",
+    )
+    p.add_argument(
+        "--name",
+        "-n",
+        type=str,
+        help="Set session name when creating a new session",
     )
     p.add_argument(
         "--fork",
