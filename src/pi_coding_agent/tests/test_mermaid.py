@@ -87,3 +87,25 @@ def test_transformer_keeps_block_when_too_wide() -> None:
     markdown = "```mermaid\nflowchart TD\n    A --> B\n```"
     result = transformer(markdown, {"messageType": "assistant", "isStreaming": False})
     assert "```mermaid" in result
+
+
+def test_transformer_warning_path() -> None:
+    """非流式渲染带警告：保留原块 + 警告提示（含 theme_fg 着色与多条计数）。"""
+    markdown = "```mermaid\nflowchart TD\n    ???bad line???\n    A --> B\n```"
+
+    def _theme_fg(kind, text):
+        assert kind == "warning"
+        return f"[[{text}]]"
+
+    transformer = create_mermaid_markdown_transformer(
+        lambda: "final", lambda: 80, theme_fg=_theme_fg
+    )
+    result = transformer(markdown, {"messageType": "assistant", "isStreaming": False})
+    assert "```mermaid" in result  # 原块保留
+    assert "Mermaid diagram not rendered" in result
+    assert "[[" in result  # theme_fg 着色
+
+    # 流式下警告不展示（直接渲染）
+    streaming = create_mermaid_markdown_transformer(lambda: "streaming")
+    result_stream = streaming(markdown, {"messageType": "assistant", "isStreaming": True})
+    assert "Mermaid diagram not rendered" not in result_stream
