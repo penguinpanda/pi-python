@@ -7,6 +7,19 @@
 
 from .memory import InMemorySessionRepo, InMemorySessionStorage
 from .repo import JsonlSessionRepo
+from .reducer import (
+    EffectiveLaneConfiguration,
+    LaneReductionInput,
+    LaneReductionResult,
+    LaneState,
+    RecordLogCorruption,
+    RecordLogCorruptionReason,
+    RecordLogSlice,
+    TerminalFailureState,
+    ToolBatchState,
+    reduce_lane_state,
+    validate_record_log,
+)
 from .search import ScanningSessionSearch
 from .session import Session, SessionTree
 from .state import SessionState
@@ -18,9 +31,20 @@ __all__ = [
     "InMemorySessionStorage",
     "JsonlSessionRepo",
     "JsonlSessionStorage",
+    "EffectiveLaneConfiguration",
+    "LaneReductionInput",
+    "LaneReductionResult",
+    "LaneState",
+    "RecordLogCorruption",
+    "RecordLogCorruptionReason",
+    "RecordLogSlice",
     "ScanningSessionSearch",
     "Session",
     "SessionError",
     "SessionState",
     "SessionTree",
+    "TerminalFailureState",
+    "ToolBatchState",
+    "reduce_lane_state",
+    "validate_record_log",
 ]

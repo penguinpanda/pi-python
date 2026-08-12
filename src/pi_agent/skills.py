@@ -61,6 +61,30 @@ def format_skill_invocation(
     return skill_block
 
 
+def format_skills_for_system_prompt(skills: list[Any]) -> str:
+    """技能清单 XML（对齐 TS harness/system-prompt.ts formatSkillsForSystemPrompt）。"""
+    visible = [skill for skill in skills if not getattr(skill, "disable_model_invocation", False)]
+    if not visible:
+        return ""
+
+    lines = [
+        "The following skills provide specialized instructions for specific tasks.",
+        "Read the full skill file when the task matches its description.",
+        "When a skill file references a relative path, resolve it against the skill directory "
+        "(parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.",
+        "",
+        "<available_skills>",
+    ]
+    for skill in visible:
+        lines.append("  <skill>")
+        lines.append(f"    <name>{_xml_escape(str(skill.name))}</name>")
+        lines.append(f"    <description>{_xml_escape(str(skill.description))}</description>")
+        lines.append(f"    <location>{_xml_escape(str(skill.file_path))}</location>")
+        lines.append("  </skill>")
+    lines.append("</available_skills>")
+    return "\n".join(lines)
+
+
 def _parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
     """解析 YAML frontmatter（完整 YAML；非法内容抛异常，调用方转 parse_failed）。"""
     normalized = content.replace("\r\n", "\n").replace("\r", "\n")

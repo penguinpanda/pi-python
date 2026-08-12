@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -11,6 +12,7 @@ from pi_agent.skills import (
     _dirname_env_path,
     _relative_env_path,
     format_skill_invocation,
+    format_skills_for_system_prompt,
     load_sourced_skills,
     load_skills,
 )
@@ -40,6 +42,28 @@ async def test_full_yaml_frontmatter(tmp_path):
     assert loaded["name"] == "full"
     assert loaded["description"] == "Multi\nline description"
     assert loaded["disableModelInvocation"] is True
+
+
+def test_format_skills_for_system_prompt() -> None:
+    skills = [
+        SimpleNamespace(
+            name="review",
+            description="Review & summarize",
+            file_path="/tmp/skills/review/SKILL.md",
+            disable_model_invocation=False,
+        ),
+        SimpleNamespace(
+            name="hidden",
+            description="hidden",
+            file_path="/tmp/skills/hidden/SKILL.md",
+            disable_model_invocation=True,
+        ),
+    ]
+    prompt = format_skills_for_system_prompt(skills)
+    assert "<available_skills>" in prompt
+    assert "Read the full skill file when the task matches its description." in prompt
+    assert "<description>Review &amp; summarize</description>" in prompt
+    assert "hidden" not in prompt
 
 
 @pytest.mark.asyncio

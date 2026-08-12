@@ -8,6 +8,10 @@
 
 ### Added
 
+- Session v4 新增 `reducer.py`：record log 12 类 corruption 校验与
+  `reduce_lane_state()` lane 状态归约（对齐 TS `harness/reducer.ts`）
+- `pi_agent` 新增独立 `format_skills_for_system_prompt()`，对齐 TS
+  `harness/system-prompt.ts` 的 `<available_skills>` XML 格式化
 - 新增 Google Generative AI / Google Vertex / Mistral / Azure OpenAI / OpenAI Codex / AWS Bedrock 核心 API 与 provider
 - AWS Bedrock 支持 SigV4 与 bearer token；Cloudflare Workers AI / AI Gateway 自定义认证；OpenAI Codex deferred fetch/cancel
 - OpenAI 兼容 completions provider 支持动态 `/models` 发现（Groq/Together/Cerebras/Fireworks/xAI/NVIDIA/HuggingFace/Baseten/Moonshot/Xiaomi/Z.ai/OpenCode/Xiaomi Token Plan 等）

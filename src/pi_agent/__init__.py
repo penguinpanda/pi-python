@@ -104,7 +104,12 @@ from .session import (
     create_jsonl_session_store,
     rebuild_session_search_index,
 )
-from .skills import format_skill_invocation, load_sourced_skills, load_skills
+from .skills import (
+    format_skill_invocation,
+    format_skills_for_system_prompt,
+    load_sourced_skills,
+    load_skills,
+)
 from ._types import (
     AfterToolCallContext,
     AfterToolCallResult,
@@ -211,6 +216,7 @@ __all__ = [
     "load_skills",
     "load_sourced_skills",
     "format_skill_invocation",
+    "format_skills_for_system_prompt",
     "load_prompt_templates",
     "load_sourced_prompt_templates",
     "substitute_args",
