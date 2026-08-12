@@ -257,3 +257,28 @@ async def test_bash_prepends_bin_dir_to_path(tmp_path, monkeypatch):
     )
     text = result.content[0]["text"].strip()
     assert text.split(os.pathsep)[0] == str(bin_dir)
+
+
+@pytest.mark.asyncio
+async def test_bash_spawn_hook_rewrites_command_cwd_and_env(tmp_path):
+    """spawnHook 可重写 command/cwd/env（对齐 TS BashSpawnHook 语义）。"""
+    from pi_coding_agent import tools as coding_tools
+
+    other_dir = tmp_path / "other"
+    other_dir.mkdir()
+
+    def hook(ctx):
+        return {
+            "command": (
+                f'{sys.executable} -c "import os;'
+                "print(os.environ.get('PI_SPAWN','')+'|'+os.getcwd())\""
+            ),
+            "cwd": str(other_dir),
+            "env": {**ctx["env"], "PI_SPAWN": "hooked"},
+        }
+
+    tool = coding_tools.create_bash_tool(str(tmp_path), spawn_hook=hook)
+    result = await tool.execute("tc1", {"command": "ignored"})
+    text = result.content[0]["text"].strip()
+    assert text.startswith("hooked|")
+    assert text.endswith(str(other_dir))

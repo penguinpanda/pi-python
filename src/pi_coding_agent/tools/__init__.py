@@ -89,7 +89,8 @@ def create_bash_tool(
     """创建 bash 工具（复用 pi_agent 实现，绑定本地执行环境）。
 
     session_env_provider 返回注入子进程的会话环境变量（PI_SESSION_ID 等）；
-    spawn_hook(ctx) 返回额外环境变量（对齐 TS createBashTool 的 spawnHook）。
+    spawn_hook({command, cwd, env}) 返回 {command, cwd, env} 可重写任一字段
+    （对齐 TS createBashTool 的 spawnHook；仅返回额外环境变量 dict 也可）。
     """
 
     def _prepend_bin_dir_to_path(env: dict[str, str]) -> None:
@@ -107,11 +108,31 @@ def create_bash_tool(
     async def _prepare(execution, context, signal) -> None:
         _prepend_bin_dir_to_path(execution["env"])
         if spawn_hook is not None:
-            extra = spawn_hook(context)
-            if inspect.isawaitable(extra):
-                extra = await extra
-            if isinstance(extra, dict):
-                execution["env"].update(extra)
+            # 对齐 TS BashSpawnHook：返回 {command, cwd, env} 可重写任一字段；
+            # 不含这三个键的 dict 视为 env 直接合并（兼容旧调用方）。
+            hook_context = {
+                "command": execution["command"],
+                "cwd": execution["cwd"],
+                "env": dict(execution["env"]),
+            }
+            result = spawn_hook(hook_context)
+            if inspect.isawaitable(result):
+                result = await result
+            if isinstance(result, dict):
+                if any(key in result for key in ("command", "cwd", "env")):
+                    if isinstance(result.get("command"), str):
+                        execution["command"] = result["command"]
+                    if isinstance(result.get("cwd"), str):
+                        execution["cwd"] = result["cwd"]
+                    env = result.get("env")
+                    if isinstance(env, dict):
+                        execution["env"] = {
+                            key: value for key, value in env.items() if value is not None
+                        }
+                else:
+                    execution["env"].update(
+                        {key: value for key, value in result.items() if value is not None}
+                    )
 
     return _bind_env(
         _create_pi_bash_tool(
