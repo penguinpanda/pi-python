@@ -245,6 +245,28 @@ class TestFilterTools:
 
 
 @pytest.mark.asyncio
+async def test_find_and_ls_respect_abort_signal(tmp_path):
+    """find/ls 在取消信号置位时返回 aborted（对齐 TS abort 语义）。"""
+    import asyncio
+
+    (tmp_path / "a.py").write_text("x", encoding="utf-8")
+
+    find_tool = create_find_tool(str(tmp_path))
+    ls_tool = create_ls_tool(str(tmp_path))
+
+    signal = asyncio.Event()
+    signal.set()
+    find_result = await find_tool.execute("tc1", {"pattern": "*.py"}, signal=signal)
+    assert find_result.details.get("aborted") is True
+    ls_result = await ls_tool.execute("tc1", {"path": "."}, signal=signal)
+    assert ls_result.details.get("aborted") is True
+
+    # 未置位时正常工作
+    clear_signal = asyncio.Event()
+    ok_result = await find_tool.execute("tc1", {"pattern": "*.py"}, signal=clear_signal)
+    assert any("a.py" in block.get("text", "") for block in ok_result.content)
+
+
 async def test_bash_prepends_bin_dir_to_path(tmp_path, monkeypatch):
     from pi_coding_agent import tools as coding_tools
 

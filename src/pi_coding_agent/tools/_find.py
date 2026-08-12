@@ -14,6 +14,18 @@ from ._path_utils import resolve_cwd_path
 
 DEFAULT_LIMIT = 1000
 
+
+def _aborted(signal: object) -> bool:
+    return signal is not None and signal.is_set()  # type: ignore[attr-defined]
+
+
+def _aborted_result() -> AgentToolResult:
+    return AgentToolResult(
+        content=[TextContent(type="text", text="Operation aborted")],
+        details={"aborted": True},
+    )
+
+
 TOOL_SCHEMA = {
     "type": "object",
     "properties": {
@@ -44,6 +56,8 @@ def create_find_tool(cwd: str) -> AgentTool:
         signal: object = None,
         on_update: object = None,
     ) -> AgentToolResult:
+        if _aborted(signal):
+            return _aborted_result()
         pattern = params["pattern"]
         search_path_str = params.get("path", ".")
         # limit 优先（对齐 TS）；兼容旧的 max_results 字段名。
@@ -79,6 +93,8 @@ def create_find_tool(cwd: str) -> AgentTool:
             iterator = search_path.glob(pattern)
 
         for entry in iterator:
+            if _aborted(signal):
+                return _aborted_result()
             if count >= limit:
                 break
             if entry.is_file() and not _is_ignored_dir(entry):

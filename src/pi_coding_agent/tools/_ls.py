@@ -9,6 +9,7 @@ from pathlib import Path
 from pi_agent import AgentTool, AgentToolResult
 from pi_ai import TextContent
 
+from ._find import _aborted, _aborted_result
 from ._path_utils import resolve_cwd_path
 
 DEFAULT_LIMIT = 500
@@ -39,6 +40,8 @@ def create_ls_tool(cwd: str) -> AgentTool:
         signal: object = None,
         on_update: object = None,
     ) -> AgentToolResult:
+        if _aborted(signal):
+            return _aborted_result()
         target_str = params.get("path", ".")
         limit = params.get("limit") or DEFAULT_LIMIT
         limit = max(1, int(limit))
