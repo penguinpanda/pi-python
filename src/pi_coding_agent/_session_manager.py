@@ -2,6 +2,12 @@
 
 保留 `SessionManager` / `SessionInfo` / `SessionTreeNode` 名字，避免
 调用方和旧测试大改；底层完全委托给 `_session_manager_v4`。
+
+⚠ 兼容性技术债：同步门面与 v4 异步实现并存，`_run_sync` 用
+ThreadPoolExecutor + asyncio.run() 桥接，在已有事件循环内调用会阻塞并
+增加线程开销。新增调用方应直接使用 `_session_manager_v4` 的异步入口
+（`create_session_manager` / `open_session_manager` / `in_memory_session_manager` /
+`list_sessions` 等）；本门面仅用于存量同步调用方与测试，逐步迁移后移除。
 """
 
 from __future__ import annotations
@@ -62,7 +68,11 @@ def _schedule_task(coroutine: Any) -> None:
 
 
 class SessionManager:
-    """v4 会话管理器同步门面，API 对齐旧 `SessionManager`。"""
+    """v4 会话管理器同步兼容门面，API 对齐旧 `SessionManager`。
+
+    ⚠ 技术债：新增调用方请直接使用 `_session_manager_v4` 异步入口，
+    详见模块 docstring。
+    """
 
     def __init__(self, manager: Any) -> None:
         self._manager = manager

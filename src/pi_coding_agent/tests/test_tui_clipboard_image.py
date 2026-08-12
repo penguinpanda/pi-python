@@ -6,6 +6,7 @@ import io
 
 from PIL import Image
 
+from pi_agent.tools.image_pipeline import process_image_sync
 from pi_tui.clipboard_image import (
     MAX_IMAGE_DIMENSION,
     ClipboardImage,
@@ -21,21 +22,21 @@ def _make_png(width=100, height=80, mode="RGB") -> bytes:
 
 class TestProcess:
     def test_roundtrip(self):
-        processed = ClipboardImage.process(_make_png())
+        processed = ClipboardImage.process(_make_png(), process_image_sync)
         with Image.open(io.BytesIO(processed)) as image:
             assert image.format == "PNG"
             assert image.size == (100, 80)
 
     def test_resizes_large(self):
         data = _make_png(4000, 2000)
-        processed = ClipboardImage.process(data)
+        processed = ClipboardImage.process(data, process_image_sync)
         with Image.open(io.BytesIO(processed)) as image:
             width, height = image.size
             assert max(width, height) <= MAX_IMAGE_DIMENSION
             assert height <= MAX_IMAGE_DIMENSION
 
     def test_preserves_alpha(self):
-        processed = ClipboardImage.process(_make_png(mode="RGBA"))
+        processed = ClipboardImage.process(_make_png(mode="RGBA"), process_image_sync)
         with Image.open(io.BytesIO(processed)) as image:
             assert image.mode == "RGBA"
 
@@ -43,7 +44,7 @@ class TestProcess:
         import pytest
 
         with pytest.raises(Exception):  # noqa: B017 - 验证非法输入会抛异常即可
-            ClipboardImage.process(b"not an image")
+            ClipboardImage.process(b"not an image", process_image_sync)
 
 
 class TestRead:
@@ -64,7 +65,9 @@ class TestRead:
         assert await ClipboardImage.read() is None
 
     async def test_run_command_success(self):
-        result = await _run_command(["python", "-c", "print('png-bytes')"])
+        import sys
+
+        result = await _run_command([sys.executable, "-c", "print('png-bytes')"])
         assert result is not None
         assert b"png-bytes" in result
 

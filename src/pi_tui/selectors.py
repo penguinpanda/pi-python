@@ -143,15 +143,16 @@ class ModelSelector(OverlayDialog):
 
 
 class SessionPicker(CopySelectedMixin, OverlayDialog):
-    """会话恢复选择器：排序 / 过滤 / scope / 路径 / 删除 / 重命名。"""
+    """会话恢复选择器：排序 / 过滤 / scope / 路径 / 删除 / 重命名。
+
+    `model` 由调用方（pi_coding_agent）构造的 SessionPickerModel 实例注入，
+    保持 pi_tui 不反向依赖 pi_coding_agent（对齐 TS packages/tui 分层边界）。
+    """
 
     def __init__(
         self,
-        sessions: list[Any],
+        model: Any,
         *,
-        all_sessions: list[Any] | None = None,
-        current_cwd: str | None = None,
-        current_session_path: str | None = None,
         on_rename: Callable[[str, str], Any] | None = None,
         on_delete: Callable[[str], Any] | None = None,
         reload_sessions: Callable[[], Any] | None = None,
@@ -160,17 +161,7 @@ class SessionPicker(CopySelectedMixin, OverlayDialog):
         max_height: int = 12,
     ) -> None:
         super().__init__()
-        # lazy import 避免 pi_tui → pi_coding_agent 顶层依赖。
-        from pi_coding_agent.modes.interactive.session_selector import (
-            SessionPickerModel,
-        )
-
-        self._model = SessionPickerModel(
-            current_sessions=sessions,
-            all_sessions=all_sessions,
-            current_cwd=current_cwd,
-            current_session_path=current_session_path,
-        )
+        self._model = model
         self._on_rename = on_rename
         self._on_delete = on_delete
         self._reload_sessions = reload_sessions
@@ -1103,21 +1094,24 @@ class ExtensionSelector(OverlayDialog):
 
 
 class TrustSelector(OverlayDialog):
-    """项目信任选择器。"""
+    """项目信任选择器。
+
+    `options` 由调用方（pi_coding_agent）通过 get_project_trust_options 注入，
+    保持 pi_tui 不反向依赖 pi_coding_agent。
+    """
 
     def __init__(
         self,
         cwd: str,
+        options: list[dict],
         saved_decision: dict | None = None,
         project_trusted: bool = False,
     ) -> None:
         super().__init__()
-        from pi_coding_agent.trust import get_project_trust_options
-
         self._cwd = cwd
         self._saved_decision = saved_decision
         self._project_trusted = project_trusted
-        self._options = get_project_trust_options(cwd)
+        self._options = options
         self._selected = 0
         if saved_decision is not None:
             for index, option in enumerate(self._options):

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
+
+import pytest
 
 from pi_ai.auth import ApiKeyCredential
 
@@ -125,3 +128,35 @@ class TestReadStoredCredential:
 
     def test_missing_file_returns_none(self, tmp_path):
         assert read_stored_credential("deepseek", tmp_path / "nope.json") is None
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="posix file modes only")
+class TestAuthFilePermissions:
+    @staticmethod
+    def _store(tmp_path) -> AuthStorage:
+        return AuthStorage(FileAuthStorageBackend(tmp_path / "auth.json"))
+
+    async def test_write_sets_0600_on_new_file(self, tmp_path):
+        """新写入的 auth.json 权限必须为 0600（对齐 TS mode: 0o600）。"""
+        store = self._store(tmp_path)
+
+        async def _set(_current):
+            return ApiKeyCredential(key="sk-file")
+
+        await store.modify("openai", _set)
+        path = tmp_path / "auth.json"
+        assert path.exists()
+        assert (path.stat().st_mode & 0o777) == 0o600
+
+    async def test_write_converges_preexisting_loose_permissions(self, tmp_path):
+        """已存在的宽松权限文件（0644）写入后收敛为 0600（对齐 TS chmodSync）。"""
+        path = tmp_path / "auth.json"
+        path.write_text("{}", encoding="utf-8")
+        path.chmod(0o644)
+        store = self._store(tmp_path)
+
+        async def _set(_current):
+            return ApiKeyCredential(key="sk-file")
+
+        await store.modify("openai", _set)
+        assert (path.stat().st_mode & 0o777) == 0o600

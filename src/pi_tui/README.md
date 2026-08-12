@@ -269,15 +269,16 @@ theme = loader.load("my-theme")
 跨平台剪贴板图片读取 + Pillow 处理，对齐 TS `clipboard-image.ts` + `image-process.ts`：
 
 - **读取**：Windows PowerShell（`System.Windows.Forms.Clipboard`）→ macOS `osascript` → Linux `wl-paste`，失败回退 `xclip`；
-- **处理**：复用 `pi_agent.tools.image_pipeline`（EXIF 方向校正 → 缩放到 `MAX_IMAGE_DIMENSION=2000` 以内 → 转 PNG，保留 alpha）；
+- **处理**：由调用方注入图片处理函数（`pi_agent.tools.image_pipeline.process_image_sync` 契约，EXIF 方向校正 → 缩放到 `MAX_IMAGE_DIMENSION=2000` 以内 → 转 PNG，保留 alpha），保持 pi_tui 不反向依赖 pi_agent；
 - 超时 10 秒，失败 / 无图片返回 `None`，不抛异常。
 
 ```python
 import asyncio
+from pi_agent.tools.image_pipeline import process_image_sync
 from pi_tui.clipboard_image import ClipboardImage
 
 data = await ClipboardImage.read()  # PNG bytes | None
-png = ClipboardImage.process(data)  # 规范化 → PNG bytes
+png = ClipboardImage.process(data, process_image_sync)  # 规范化 → PNG bytes
 ```
 
 ---

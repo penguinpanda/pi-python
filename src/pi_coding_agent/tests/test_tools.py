@@ -6,6 +6,7 @@ grep / find / ls 为 coding-agent 特有实现。
 
 import asyncio
 import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -252,7 +253,7 @@ async def test_bash_prepends_bin_dir_to_path(tmp_path, monkeypatch):
     tool = coding_tools.create_bash_tool(str(tmp_path))
     result = await tool.execute(
         "tc1",
-        {"command": "python -c \"import os;print(os.environ.get('PATH',''))\""},
+        {"command": f"{sys.executable} -c \"import os;print(os.environ.get('PATH',''))\""},
     )
     text = result.content[0]["text"].strip()
     assert text.split(os.pathsep)[0] == str(bin_dir)

@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -213,3 +216,60 @@ async def test_fd_walker_failure_returns_empty(monkeypatch) -> None:
         _fail,
     )
     assert await _walk_directory_with_fd("/tmp", "fd", "x") == []
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="posix shell script only")
+@pytest.mark.asyncio
+async def test_fd_walker_timeout_kills_subprocess(tmp_path) -> None:
+    """卡住的 fd：超时后终止子进程并返回空结果，不冻结调用方。"""
+    pidfile = tmp_path / "fd.pid"
+    script = tmp_path / "slow_fd.sh"
+    script.write_text(f"#!/bin/sh\necho $$ > {pidfile}\nsleep 30\n", encoding="utf-8")
+    script.chmod(0o755)
+
+    started = time.monotonic()
+    entries = await _walk_directory_with_fd(str(tmp_path), str(script), "x", timeout=0.3)
+    elapsed = time.monotonic() - started
+    assert entries == []
+    assert elapsed < 5.0, f"fd walker did not time out ({elapsed:.1f}s)"
+    for _ in range(50):
+        if pidfile.exists():
+            break
+        await asyncio.sleep(0.05)
+    assert pidfile.exists()
+    pid = int(pidfile.read_text().strip())
+    await _wait_pid_dead(pid)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="posix shell script only")
+@pytest.mark.asyncio
+async def test_fd_walker_cancellation_kills_subprocess(tmp_path) -> None:
+    """上层取消（abort 旧请求）时 fd 子进程被终止，CancelledError 向上传播。"""
+    pidfile = tmp_path / "fd.pid"
+    script = tmp_path / "slow_fd.sh"
+    script.write_text(f"#!/bin/sh\necho $$ > {pidfile}\nsleep 30\n", encoding="utf-8")
+    script.chmod(0o755)
+
+    task = asyncio.create_task(_walk_directory_with_fd(str(tmp_path), str(script), "x"))
+    for _ in range(50):
+        if pidfile.exists():
+            break
+        await asyncio.sleep(0.05)
+    assert pidfile.exists()
+    pid = int(pidfile.read_text().strip())
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await _wait_pid_dead(pid)
+
+
+async def _wait_pid_dead(pid: int, timeout: float = 5.0) -> None:
+    """轮询等待 pid 退出（含 init 收割僵尸的时间）。仅 POSIX。"""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"process {pid} still alive")

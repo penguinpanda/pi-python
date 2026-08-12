@@ -94,7 +94,13 @@ def test_extension_selector_search() -> None:
 
 
 def test_trust_selector_render() -> None:
-    selector = TrustSelector("/tmp/project")
+    selector = TrustSelector(
+        "/tmp/project",
+        options=[
+            {"label": "Ask every time", "trusted": False},
+            {"label": "Trust", "trusted": True},
+        ],
+    )
     text = "\n".join(line.text() for line in selector.render(80, 20))
     assert "Project trust" in text
 

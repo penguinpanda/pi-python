@@ -49,7 +49,10 @@ def _write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(content, encoding="utf-8")
+    # auth.json 含 API key / oauth token，仅限本人读写（对齐 TS mode: 0o600 + chmodSync）。
+    tmp.chmod(0o600)
     tmp.replace(path)
+    path.chmod(0o600)
 
 
 class FileAuthStorageBackend:

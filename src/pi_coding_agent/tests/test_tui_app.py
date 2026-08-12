@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from pi_coding_agent.modes.interactive.app import PiTuiApp
-from pi_tui.components import BashExecutionEntry, MessageEntry, ToolExecutionEntry
+from pi_tui.autocomplete import AutocompleteItem, AutocompleteSuggestions
+from pi_tui.components import BashExecutionEntry, MessageEntry, PiEditor, ToolExecutionEntry
 from pi_tui.engine import FakeTerminal
 from pi_tui.selectors import ChoiceSelector
 
@@ -771,6 +772,70 @@ async def test_scroll_to_prompt_navigates_user_messages() -> None:
     await _run(app, term, actions)
 
 
+@pytest.mark.asyncio
+async def test_autocomplete_debounce_merges_rapid_triggers() -> None:
+    """连续输入：debounce 只放行最后一次请求（对齐 TS Editor debounce）。"""
+    term = FakeTerminal(size=(100, 30))
+    app = _make_app(term)
+
+    calls: list[str] = []
+
+    async def fake_get_suggestions(text, *, force=False, cursor=None):
+        calls.append(text)
+        return None
+
+    async def actions(_term, _app) -> None:
+        app._autocomplete_provider = SimpleNamespace(get_suggestions=fake_get_suggestions)
+        msg = PiEditor.AutocompleteRequested(app._editor)
+        app._editor.text = "first"
+        app.on_pi_editor_autocomplete_requested(msg)
+        await asyncio.sleep(0.02)
+        app._editor.text = "second"
+        app.on_pi_editor_autocomplete_requested(msg)
+        await asyncio.sleep(0.5)
+        assert calls == ["second"]
+
+    await _run(app, term, actions)
+
+
+@pytest.mark.asyncio
+async def test_autocomplete_inflight_request_aborted_by_next() -> None:
+    """新输入取消进行中的请求（abort），只渲染最新请求的结果。"""
+    term = FakeTerminal(size=(100, 30))
+    app = _make_app(term)
+
+    a_cancelled = asyncio.Event()
+
+    async def fake_get_suggestions(text, *, force=False, cursor=None):
+        if text == "a":
+            try:
+                await asyncio.sleep(10)
+            except asyncio.CancelledError:
+                a_cancelled.set()
+                raise
+            return AutocompleteSuggestions(
+                items=[AutocompleteItem(value="a-item")], prefix="a", kind="text"
+            )
+        await asyncio.sleep(0.05)
+        return AutocompleteSuggestions(
+            items=[AutocompleteItem(value="b-item")], prefix="b", kind="text"
+        )
+
+    async def actions(_term, _app) -> None:
+        app._autocomplete_provider = SimpleNamespace(get_suggestions=fake_get_suggestions)
+        msg = PiEditor.AutocompleteRequested(app._editor)
+        app._editor.text = "a"
+        app.on_pi_editor_autocomplete_requested(msg)
+        await asyncio.sleep(0.3)  # debounce 到期，请求 a 在飞
+        app._editor.text = "b"
+        app.on_pi_editor_autocomplete_requested(msg)
+        await asyncio.sleep(0.5)  # 请求 b 完成
+        assert a_cancelled.is_set()
+        assert app._completion_items[0]["value"] == "b-item"
+
+    await _run(app, term, actions)
+
+
 def test_user_message_has_osc133_marker() -> None:
     from pi_tui.components import MessageEntry
 
@@ -781,3 +846,87 @@ def test_user_message_has_osc133_marker() -> None:
     plain = MessageEntry("Assistant", "hello")
     plain_lines = plain.render(40, 3)
     assert "\x1b]133;A\x07" not in plain_lines[0].passthrough
+
+
+@pytest.mark.asyncio
+async def test_new_session_disposes_old_session() -> None:
+    """新建会话时旧会话被 dispose（中止运行、等待写入、关闭扩展与 manager）。"""
+    term = FakeTerminal(size=(100, 30))
+    old = _make_session()
+    old.dispose = AsyncMock()
+    new = _make_session()
+    new.session_id = "sess-2"
+    new.dispose = AsyncMock()
+
+    app = PiTuiApp(
+        old,
+        MagicMock(),
+        terminal=term,
+        theme_name="dark",
+        no_context_files=True,
+        ui_mode="regular",
+        session_factory=lambda: new,
+    )
+
+    async def actions(_term, _app) -> None:
+        await app._create_new_session()
+        assert app._session is new
+        old.dispose.assert_awaited_once()
+        new.dispose.assert_not_awaited()
+
+    await _run(app, term, actions)
+
+
+@pytest.mark.asyncio
+async def test_replace_session_shared_manager_skips_dispose() -> None:
+    """共享 manager（如 /input 重建场景）：替换会话时不 dispose 旧会话。"""
+    term = FakeTerminal(size=(100, 30))
+    old = _make_session()
+    old.dispose = AsyncMock()
+
+    shared = _make_session()
+    shared.session_manager = old.session_manager
+    app = PiTuiApp(
+        old,
+        MagicMock(),
+        terminal=term,
+        theme_name="dark",
+        no_context_files=True,
+        ui_mode="regular",
+    )
+
+    async def actions(_term, _app) -> None:
+        await app._replace_session(shared)
+        assert app._session is shared
+        old.dispose.assert_not_awaited()
+
+    await _run(app, term, actions)
+
+
+@pytest.mark.asyncio
+async def test_replace_session_disposes_old_on_different_manager() -> None:
+    """manager 不同（如 fork / resume 场景）：替换会话时 dispose 旧会话。"""
+    term = FakeTerminal(size=(100, 30))
+    old = _make_session()
+    old.dispose = AsyncMock()
+
+    separate = _make_session()
+    separate.session_manager = MagicMock()
+    separate.session_manager.get_tree.return_value = []
+    separate.session_manager.get_leaf_id.return_value = None
+    separate.session_manager.get_entries.return_value = []
+    app = PiTuiApp(
+        old,
+        MagicMock(),
+        terminal=term,
+        theme_name="dark",
+        no_context_files=True,
+        ui_mode="regular",
+    )
+
+    async def actions(_term, _app) -> None:
+        await app._replace_session(separate)
+        assert app._session is separate
+        old.dispose.assert_awaited_once()
+
+    await _run(app, term, actions)

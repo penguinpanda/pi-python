@@ -1,7 +1,8 @@
-"""SessionPicker 键盘状态与渲染测试。"""
+"""SessionPicker 键盘状态与渲染测试（依赖 coding-agent 的 SessionPickerModel）。"""
 
 from __future__ import annotations
 
+from pi_coding_agent.modes.interactive.session_selector import SessionPickerModel
 from pi_tui.engine.keys import Key
 from pi_tui.keybindings import KeybindingsManager
 from pi_tui.selectors import SessionPicker
@@ -25,12 +26,13 @@ def _picker() -> SessionPicker:
             "first_message": "other session",
         },
     ]
-    return SessionPicker(
-        sessions,
+    model = SessionPickerModel(
+        current_sessions=sessions,
         all_sessions=sessions,
         current_cwd="/tmp",
         current_session_path="/tmp/current.jsonl",
     )
+    return SessionPicker(model)
 
 
 def test_picker_scope_sort_and_path_toggles() -> None:
@@ -78,8 +80,8 @@ def test_picker_renders_rows() -> None:
 def test_picker_uses_keybindings_manager_override() -> None:
     manager = KeybindingsManager()
     manager.load_from_settings({"keybindings": {"app.session.toggleSort": "ctrl+k"}})
-    picker = SessionPicker(
-        [
+    model = SessionPickerModel(
+        current_sessions=[
             {
                 "path": "/tmp/a.jsonl",
                 "session_id": "a",
@@ -87,6 +89,9 @@ def test_picker_uses_keybindings_manager_override() -> None:
                 "modified": 1,
             }
         ],
+    )
+    picker = SessionPicker(
+        model,
         keybindings_manager=manager,
     )
     assert picker._session_key("app.session.toggleSort") == "ctrl+k"

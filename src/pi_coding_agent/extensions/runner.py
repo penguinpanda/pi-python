@@ -754,9 +754,18 @@ class ExtensionRunner:
             self._shutdown_handler()
 
     async def shutdown_all(self) -> None:
-        """卸载：分发 session_shutdown（后续可扩展 deactivate 钩子）。"""
+        """卸载：分发 session_shutdown，等待并清理后台任务。"""
         if self.has_handlers("session_shutdown"):
             await self.emit_event("session_shutdown")
+        # 等待已调度的后台任务完成（shutdown 分发期间新调度的也会被取消）。
+        tasks = list(self._background_tasks)
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        remaining = list(self._background_tasks)
+        for task in remaining:
+            task.cancel()
+        if remaining:
+            await asyncio.gather(*remaining, return_exceptions=True)
 
 
 __all__ = [

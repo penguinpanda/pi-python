@@ -26,7 +26,7 @@ from pi_tui.components import (
 )
 from pi_tui.engine import App, FakeTerminal, Terminal
 from pi_tui.engine.keys import KeyEvent
-from pi_tui.engine.widgets import Static
+from pi_tui.engine.widgets import Editor, Static
 from pi_tui.keybindings import KeybindingsManager
 from pi_tui.overlay import OverlayHandle
 from pi_tui.selectors import (
@@ -58,6 +58,11 @@ from .slash_commands import SlashContext, SlashCommandRegistry, register_builtin
 
 
 _SPINNER_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+
+# autocomplete 请求编排（对齐 TS Editor 的 debounce + AbortController + requestId）：
+# 连续输入停止 DEFAULT_AUTOCOMPLETE_DEBOUNCE_SECONDS 秒后才发起请求，
+# 期间新输入会取消旧请求与旧 fd 子进程，旧请求结果按序号丢弃。
+DEFAULT_AUTOCOMPLETE_DEBOUNCE_SECONDS = 0.15
 
 
 class _TuiAuthInteraction:
@@ -189,6 +194,10 @@ class PiTuiApp(App):
         self._completion_index = 0
         self._completion_prefix = ""
         self._completion_kind = "text"
+        # autocomplete 编排状态（debounce / abort / 请求序号）。
+        self._autocomplete_debounce_task: asyncio.Task | None = None
+        self._autocomplete_request_task: asyncio.Task | None = None
+        self._autocomplete_request_id = 0
         self._hidden_thinking_label = "Thinking"
         self._working_message = "Working"
         self._working_visible = True
@@ -330,6 +339,13 @@ class PiTuiApp(App):
         if self._unsubscribe is not None:
             self._unsubscribe()
             self._unsubscribe = None
+        # 退出时取消进行中的 autocomplete 编排任务（debounce + 请求）。
+        if self._autocomplete_debounce_task is not None:
+            self._autocomplete_debounce_task.cancel()
+            self._autocomplete_debounce_task = None
+        if self._autocomplete_request_task is not None:
+            self._autocomplete_request_task.cancel()
+            self._autocomplete_request_task = None
 
     def _bind_session(self) -> None:
         if self._unsubscribe is not None:
@@ -939,19 +955,66 @@ class PiTuiApp(App):
             self._editor.add_to_history(text)
             self._run_task(self._send_prompt(text))
 
-    async def on_pi_editor_autocomplete_requested(
+    def on_pi_editor_autocomplete_requested(
         self,
         message: PiEditor.AutocompleteRequested,
     ) -> None:
-        """Tab / 自动触发：统一走非模态内联补全（对齐 TS CombinedAutocompleteProvider）。"""
+        """Tab / 自动触发：debounce + abort + 请求序号编排后走非模态内联补全。
+
+        对齐 TS Editor：每次触发取消上一 debounce 与进行中的请求（AbortController），
+        debounce 到期后发起新请求（autocompleteRequestId），旧请求结果按序号丢弃，
+        不覆盖新输入。
+        """
         editor = message.editor
-        text = editor.text
-        cursor = self._editor_cursor(editor)
-        suggestions = await self._autocomplete_provider.get_suggestions(
-            text,
-            force=True,
-            cursor=cursor,
-        )
+        if self._autocomplete_debounce_task is not None:
+            self._autocomplete_debounce_task.cancel()
+            self._autocomplete_debounce_task = None
+        if self._autocomplete_request_task is not None:
+            self._autocomplete_request_task.cancel()
+            self._autocomplete_request_task = None
+        self._autocomplete_request_id += 1
+        request_id = self._autocomplete_request_id
+        text_snapshot = editor.text
+        cursor_snapshot = self._editor_cursor(editor)
+
+        async def _debounced() -> None:
+            await asyncio.sleep(DEFAULT_AUTOCOMPLETE_DEBOUNCE_SECONDS)
+            if request_id != self._autocomplete_request_id:
+                return
+            self._autocomplete_request_task = self._run_task(
+                self._fetch_autocomplete_suggestions(
+                    editor, text_snapshot, cursor_snapshot, request_id
+                )
+            )
+
+        self._autocomplete_debounce_task = self._run_task(_debounced())
+
+    async def _fetch_autocomplete_suggestions(
+        self,
+        editor: Editor,
+        text: str,
+        cursor: int,
+        request_id: int,
+    ) -> None:
+        try:
+            suggestions = await self._autocomplete_provider.get_suggestions(
+                text,
+                force=True,
+                cursor=cursor,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            suggestions = None
+        finally:
+            if self._autocomplete_request_task is asyncio.current_task():
+                self._autocomplete_request_task = None
+        if request_id != self._autocomplete_request_id or editor.text != text:
+            # 已有更新请求（序号前进）或编辑器内容已变：丢弃过期结果。
+            return
+        self._render_autocomplete_suggestions(suggestions)
+
+    def _render_autocomplete_suggestions(self, suggestions) -> None:
         if suggestions is None or not suggestions.items:
             self._hide_slash_completion()
             return
@@ -1331,9 +1394,14 @@ class PiTuiApp(App):
             self._notify("Trust manager not available")
             return
         cwd = self._session.cwd
+        # 信任选项由 pi_coding_agent 构造并注入（pi_tui 保持分层独立）。
+        from ...trust import get_project_trust_options
+
+        options = get_project_trust_options(cwd)
         self.push_screen(
             TrustSelector(
                 cwd,
+                options,
                 saved_decision=self._trust_manager.get_trust_entry(cwd),
                 project_trusted=self._project_trusted,
             ),
@@ -1626,7 +1694,10 @@ class PiTuiApp(App):
             self._notify("No image in clipboard")
             return
         try:
-            processed = await asyncio.to_thread(ClipboardImage.process, data)
+            # 图片处理函数由 pi_coding_agent 注入（pi_tui 不反向依赖 pi_agent）。
+            from pi_agent.tools.image_pipeline import process_image_sync
+
+            processed = await asyncio.to_thread(ClipboardImage.process, data, process_image_sync)
         except Exception as exc:
             self._notify(f"Image processing failed: {exc}")
             return
@@ -1642,6 +1713,16 @@ class PiTuiApp(App):
             return
         self._run_task(self._create_new_session())
 
+    async def _dispose_session(self, session: AgentSession) -> None:
+        """释放会话：中止运行、等待持久化写入、关闭扩展与 session manager。
+
+        对齐 TS interactive shutdown 的 runtimeHost.dispose() 语义。
+        """
+        try:
+            await session.dispose()
+        except Exception:
+            pass
+
     async def _create_new_session(self) -> None:
         try:
             factory = self._session_factory
@@ -1653,6 +1734,8 @@ class PiTuiApp(App):
         except Exception as exc:
             self._notify(f"New session failed: {exc}")
             return
+        # 旧会话与新会话使用不同的 session manager：先释放旧会话。
+        await self._dispose_session(self._session)
         self._session = new_session
         self._slash_context.session = new_session
         self._bind_session()
@@ -1776,6 +1859,11 @@ class PiTuiApp(App):
         return "Reloaded: " + "; ".join(details)
 
     async def _replace_session(self, new_session: AgentSession) -> None:
+        old = self._session
+        if old is not None and old.session_manager is not new_session.session_manager:
+            # 新旧会话共享 session manager 时不 dispose（如 /input 重建场景），
+            # 否则释放旧会话：中止运行、等待写入、关闭扩展与 manager。
+            await self._dispose_session(old)
         self._session = new_session
         self._slash_context.session = new_session
         self._bind_session()
@@ -1805,12 +1893,18 @@ class PiTuiApp(App):
             self._notify("No saved sessions")
             return
         session_path = self._session.session_manager.session_path
+        # SessionPickerModel 由 pi_coding_agent 构造并注入（pi_tui 保持分层独立）。
+        from .session_selector import SessionPickerModel
+
+        model = SessionPickerModel(
+            current_sessions=current_sessions,
+            all_sessions=all_sessions,
+            current_cwd=self._session.cwd,
+            current_session_path=str(session_path) if session_path is not None else None,
+        )
         self.push_screen(
             SessionPicker(
-                current_sessions,
-                all_sessions=all_sessions,
-                current_cwd=self._session.cwd,
-                current_session_path=str(session_path) if session_path is not None else None,
+                model,
                 on_rename=self._rename_session_from_picker,
                 on_delete=self._delete_session_from_picker,
                 reload_sessions=self._reload_picker_sessions,
@@ -1865,6 +1959,8 @@ class PiTuiApp(App):
         except Exception as exc:
             self._notify(f"Resume failed: {exc}")
             return
+        # 恢复的会话使用新的 session manager：先释放旧会话。
+        await self._dispose_session(self._session)
         self._session = new_session
         self._slash_context.session = new_session
         self._bind_session()
@@ -2007,6 +2103,14 @@ async def run_tui_mode(
         from pi_tui.terminal import drain_pending_osc_response
 
         drain_pending_osc_response()
+        # 对齐 TS interactive shutdown：退出时 dispose 当前会话（app 运行期间
+        # 可能已通过 new/resume 切换），等待 pending writes、关闭扩展与 manager。
+        current = getattr(app, "_session", None)
+        if current is not None:
+            try:
+                await current.dispose()
+            except Exception:
+                pass
     return 0
 
 

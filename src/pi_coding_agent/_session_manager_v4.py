@@ -27,7 +27,7 @@ from pi_agent.session.v4.session import Session
 from pi_agent.session.v4.jsonl_types import JsonlSessionListOptions
 from pi_agent.session.v4.types import Entry, SessionMetadata
 
-from ._session_manager import SessionInfo, SessionTreeNode, _schedule_task
+from ._session_manager import SessionInfo, SessionTreeNode
 
 
 def _default_sessions_dir() -> Path:
@@ -207,6 +207,7 @@ class V4SessionManager:
         self._labels: dict[str, str | None] = {}
         self._session_id = ""
         self._lock = asyncio.Lock()
+        self._scheduled_tasks: set[asyncio.Task] = set()
 
     # ------------------------------------------------------------------
     # 工厂
@@ -461,9 +462,9 @@ class V4SessionManager:
         return ""
 
     def set_session_name(self, name: str) -> None:
-        """同步设置会话名（异步持久化，对齐 SessionManager）。"""
+        """同步设置会话名（异步持久化，任务纳入跟踪，close 时等待）。"""
         self._name = name
-        _schedule_task(self.append_session_info(name))
+        self._schedule_tracked(self.append_session_info(name))
 
     async def append_label(self, target_id: str, label: str | None) -> str:
         await self._session.set_label(target_id, label)
@@ -471,9 +472,19 @@ class V4SessionManager:
         return target_id
 
     def set_label(self, target_id: str, label: str | None) -> None:
-        """同步设置标签（异步持久化）。"""
+        """同步设置标签（异步持久化，任务纳入跟踪，close 时等待）。"""
         self._labels[target_id] = label
-        _schedule_task(self.append_label(target_id, label))
+        self._schedule_tracked(self.append_label(target_id, label))
+
+    def _schedule_tracked(self, coroutine: Any) -> None:
+        """在运行中的事件循环里调度协程并持有句柄（close 时等待完成）。"""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        task = asyncio.create_task(coroutine)
+        self._scheduled_tasks.add(task)
+        task.add_done_callback(self._scheduled_tasks.discard)
 
     async def move_to(
         self, entry_id: str | None, summary: dict[str, Any] | None = None
@@ -772,7 +783,9 @@ class V4SessionManager:
             lock.release()
 
     async def close(self) -> None:
-        """释放底层 repo（连接池 / writer leases）。"""
+        """等待未完成的异步持久化任务，然后释放底层 repo。"""
+        if self._scheduled_tasks:
+            await asyncio.gather(*self._scheduled_tasks, return_exceptions=True)
         close = getattr(self._repo, "close", None)
         if close is not None:
             await close()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from pathlib import Path
 
 import pytest
@@ -374,7 +375,8 @@ async def test_extension_api_send_message_append_entry_set_label(tmp_path):
 
     first_entry_id = entries[0]["id"]
     api.set_label(first_entry_id, "mylabel")
-    # SessionManager.set_label 使用模块级 _schedule_task（不在 runner 任务集里）。
+    # SessionManager.set_label 通过 _schedule_tracked 调度持久化任务
+    # （由 manager 跟踪、close 时等待，不在 runner 任务集里）。
     await asyncio.sleep(0)
     assert session._session_manager.get_label(first_entry_id) == "mylabel"
     await session.dispose()
@@ -858,7 +860,7 @@ async def test_bash_tool_session_env_and_spawn_hook(tmp_path):
         "call_1",
         {
             "command": (
-                "python -c \"import os;print(os.environ.get('PI_SESSION_ID','')"
+                f"{sys.executable} -c \"import os;print(os.environ.get('PI_SESSION_ID','')"
                 "+'|'+os.environ.get('CI',''))\""
             )
         },

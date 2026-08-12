@@ -429,3 +429,50 @@ class TestThresholdCompaction:
         # 只消耗了错误响应，无摘要、无压缩条目
         assert core.call_count == 1
         assert not any(e["type"] == "compaction" for e in mgr.get_entries())
+
+
+class TestPostRunChecksOnCrash:
+    """对齐 TS runWithLifecycle：LLM 崩溃时 prompt 正常返回，后置状态机照常执行。"""
+
+    @pytest.mark.asyncio
+    async def test_prompt_swallows_crash_and_runs_post_run_checks(self, faux_env, tmp_path):
+        from unittest.mock import AsyncMock
+
+        models, _core = faux_env
+        mgr = SessionManager.in_memory(cwd=str(tmp_path))
+        session = _make_session(models, mgr, tmp_path)
+
+        async def broken_stream(model, context, options):
+            raise RuntimeError("boom")
+
+        session._agent.stream_function = broken_stream
+        check_mock = AsyncMock(side_effect=session._check_compaction)
+        retry_mock = AsyncMock(side_effect=session._retry_failed_turn)
+        session._check_compaction = check_mock
+        session._retry_failed_turn = retry_mock
+
+        try:
+            # 不再向调用方抛异常（旧行为会 raise 并跳过下方后置检查）。
+            await session.prompt("hi")
+            await session.wait_for_idle()
+        finally:
+            await session.dispose()
+
+        assert check_mock.await_count == 1
+        assert retry_mock.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_dispose_waits_for_thinking_level_persist(faux_env, tmp_path):
+    """_persist_thinking_level_change 的写入任务纳入 _pending_writes，dispose 等待其完成。"""
+    models, _core = faux_env
+    mgr = SessionManager.in_memory(cwd=str(tmp_path))
+    session = _make_session(models, mgr, tmp_path)
+
+    session._persist_thinking_level_change("high")
+    assert session._pending_writes
+    await session.dispose()
+    assert not session._pending_writes
+    # 写入已完成：会话条目里出现 thinking level 变更记录。
+    kinds = [e.get("type") for e in mgr.get_entries()]
+    assert "thinking_level_change" in kinds

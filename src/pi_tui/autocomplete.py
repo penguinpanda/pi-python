@@ -7,6 +7,7 @@ provider 签名保持 `(text: str) -> list[dict] | Awaitable[list[dict]]`；
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import shutil
 from dataclasses import dataclass
@@ -16,6 +17,10 @@ from typing import Any, Awaitable, Callable
 from .engine.fuzzy import fuzzy_filter
 
 AutocompleteProvider = Callable[[str], list[dict[str, Any]] | Awaitable[list[dict[str, Any]]]]
+
+# fd 子进程超时（秒）：慢目录 / 卡住的 fd 不得冻结 TUI；
+# 调用方可通过 _walk_directory_with_fd 的 timeout 参数覆盖。
+DEFAULT_FD_TIMEOUT_SECONDS = 5.0
 
 _PATH_DELIMITERS = frozenset((" ", "\t", '"', "'", "="))
 _FD_ARGS_BASE = (
@@ -573,27 +578,78 @@ def _scoped_display_path(display_base: str, relative_path: str) -> str:
     return f"{display_base}{relative_path}"
 
 
+def _kill_fd_process(process: asyncio.subprocess.Process | None) -> None:
+    """终止 fd 子进程（POSIX 上杀整个进程组，避免残留孙进程持管道）。"""
+    if process is None or process.returncode is not None or process.pid is None:
+        return
+    if os.name == "nt":
+        try:
+            process.kill()
+        except OSError:
+            pass
+        return
+    killpg = getattr(os, "killpg", None)
+    if killpg is not None:
+        try:
+            killpg(process.pid, 9)
+        except OSError:
+            try:
+                process.kill()
+            except OSError:
+                pass
+    else:
+        try:
+            process.kill()
+        except OSError:
+            pass
+
+
+async def _reap_fd_process(process: asyncio.subprocess.Process | None) -> None:
+    """等待已终止的 fd 子进程退出（shield：调用方可能已被取消）。"""
+    if process is None or process.returncode is not None:
+        return
+    try:
+        await asyncio.shield(process.wait())
+    except Exception:
+        pass
+
+
 async def _walk_directory_with_fd(
     base_dir: str,
     fd_path: str,
     query: str,
+    *,
+    timeout: float | None = None,
 ) -> list[tuple[str, bool]]:
     args = ["--base-directory", base_dir, *_FD_ARGS_BASE]
     if "/" in query:
         args.append("--full-path")
     if query:
         args.append(_build_fd_query(query))
+    timeout = DEFAULT_FD_TIMEOUT_SECONDS if timeout is None else timeout
+    process: asyncio.subprocess.Process | None = None
     try:
         process = await asyncio.create_subprocess_exec(
             fd_path,
             *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            start_new_session=os.name != "nt",
         )
-        stdout, _stderr = await process.communicate()
+        stdout, _stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        # 慢目录 / 卡住的 fd：终止子进程并返回空结果，避免冻结 TUI。
+        _kill_fd_process(process)
+        await _reap_fd_process(process)
+        return []
+    except asyncio.CancelledError:
+        # 上层取消（abort 旧请求）时同样终止 fd 子进程，避免叠加残留进程。
+        _kill_fd_process(process)
+        await _reap_fd_process(process)
+        raise
     except OSError:
         return []
-    if process.returncode != 0 or not stdout:
+    if process is None or process.returncode != 0 or not stdout:
         return []
     entries: list[tuple[str, bool]] = []
     for line in stdout.decode(errors="replace").splitlines():

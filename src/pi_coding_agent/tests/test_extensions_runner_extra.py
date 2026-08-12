@@ -247,3 +247,20 @@ async def test_abort_shutdown_and_shutdown_all() -> None:
     runner.shutdown()
     await runner.shutdown_all()
     assert calls == ["abort", "exit", "shutdown"]
+
+
+@pytest.mark.asyncio
+async def test_shutdown_all_waits_for_background_tasks() -> None:
+    """shutdown_all 等待已调度后台任务完成，并取消 shutdown 期间新产生的残留任务。"""
+    done = asyncio.Event()
+    runner = ExtensionRunner([])
+
+    async def _slow_background() -> None:
+        await asyncio.sleep(0.2)
+        done.set()
+
+    runner._schedule(_slow_background())
+    assert runner._background_tasks
+    await runner.shutdown_all()
+    assert done.is_set()
+    assert not runner._background_tasks

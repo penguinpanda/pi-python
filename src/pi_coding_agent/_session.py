@@ -1300,12 +1300,17 @@ class AgentSession:
         return cast(ThinkingLevel, clamp_thinking_level(self._model, level))
 
     def _persist_thinking_level_change(self, level: ModelThinkingLevel) -> None:
-        """后台持久化思考级别变更（仅在运行中的事件循环内执行）。"""
+        """后台持久化思考级别变更（仅在运行中的事件循环内执行）。
+
+        任务纳入 _pending_writes，dispose 时等待写入完成。
+        """
         try:
             asyncio.get_running_loop()
         except RuntimeError:
             return
-        asyncio.create_task(self._session_manager.append_thinking_level_change(level))
+        task = asyncio.create_task(self._session_manager.append_thinking_level_change(level))
+        self._pending_writes.add(task)
+        task.add_done_callback(self._pending_writes.discard)
 
     async def prompt(self, text: str, images: list | None = None) -> None:
         """发送用户消息，触发完整的 Agent 循环 + 工具执行。
