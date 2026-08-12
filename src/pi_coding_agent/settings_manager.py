@@ -353,6 +353,10 @@ class SettingsManager:
         """写入项目设置（未信任项目拒绝）。"""
         self._set_project(key, value)
 
+    def set_global_setting(self, key: str, value: Any) -> None:
+        """写入全局设置（对齐 TS globalSettings 键族）。"""
+        self._set_global(key, value)
+
     def _save_global(self) -> None:
         self._settings = _deep_merge_settings(self._global_settings, self._project_settings)
         snapshot = dict(self._global_settings)

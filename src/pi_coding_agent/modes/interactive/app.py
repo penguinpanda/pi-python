@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -122,6 +123,11 @@ def _theme_style(theme: Theme, bg_key: str, fg_key: str) -> Style:
 def _fg_style(theme: Theme, fg_key: str) -> Style:
     """仅前景色（对齐 TS：header/footer/status/输入框不涂背景）。"""
     return Style(color=theme.colors.get(fg_key, theme.colors["text"]))
+
+
+def _camel_to_snake(name: str) -> str:
+    """camelCase → snake_case（settings 键 ↔ 访问器名映射）。"""
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
 
 
 class PiTuiApp(App):
@@ -1530,19 +1536,81 @@ class PiTuiApp(App):
             {"key": "trustOverride", "label": "Trust override", "type": "bool"},
             {"key": "defaultProvider", "label": "Default provider", "type": "string"},
             {"key": "defaultModel", "label": "Default model", "type": "string"},
+            {"key": "defaultThinkingLevel", "label": "Default thinking level", "type": "string"},
+            {
+                "key": "transport",
+                "label": "Transport",
+                "type": "choice",
+                "choices": ["auto", "websocket", "sse", "rest"],
+            },
+            {
+                "key": "steeringMode",
+                "label": "Steering mode",
+                "type": "choice",
+                "choices": ["all", "one-at-a-time"],
+            },
+            {
+                "key": "followUpMode",
+                "label": "Follow-up mode",
+                "type": "choice",
+                "choices": ["all", "one-at-a-time"],
+            },
+            {"key": "theme", "label": "Theme", "type": "string"},
+            {"key": "retryEnabled", "label": "Retry failed turns", "type": "bool"},
+            {"key": "httpIdleTimeoutMs", "label": "HTTP idle timeout (ms)", "type": "string"},
+            {"key": "hideThinkingBlock", "label": "Hide thinking block", "type": "bool"},
+            {"key": "showCacheMissNotices", "label": "Show cache miss notices", "type": "bool"},
+            {"key": "quietStartup", "label": "Quiet startup", "type": "bool"},
+            {"key": "collapseChangelog", "label": "Collapse changelog", "type": "bool"},
         ]
         current = dict(self._settings)
         current.setdefault("autoCompaction", self._session.auto_compaction_enabled)
+        for extra in (
+            "defaultThinkingLevel",
+            "transport",
+            "steeringMode",
+            "followUpMode",
+            "theme",
+            "retryEnabled",
+            "httpIdleTimeoutMs",
+            "hideThinkingBlock",
+            "showCacheMissNotices",
+            "quietStartup",
+            "collapseChangelog",
+        ):
+            if extra not in current and self._settings_manager is not None:
+                getter = getattr(self._settings_manager, f"get_{_camel_to_snake(extra)}", None)
+                if getter is not None:
+                    try:
+                        current[extra] = getter()
+                    except Exception:
+                        pass
         self.push_screen(
             SettingsSelector(items, current, self._on_settings_change),
             callback=lambda _result: self._update_footer(),
         )
 
     def _on_settings_change(self, key: str, value) -> None:
-        """持久化设置到项目 .pi/settings.json 并应用会话侧效果。"""
+        """持久化设置并应用会话侧效果（全局键走 globalSettings，其余走项目设置）。"""
+        _GLOBAL_KEYS = {
+            "defaultThinkingLevel",
+            "transport",
+            "steeringMode",
+            "followUpMode",
+            "theme",
+            "retryEnabled",
+            "httpIdleTimeoutMs",
+            "hideThinkingBlock",
+            "showCacheMissNotices",
+            "quietStartup",
+            "collapseChangelog",
+        }
         if self._settings_manager is not None:
             try:
-                self._settings_manager.set_project_setting(key, value)
+                if key in _GLOBAL_KEYS:
+                    self._settings_manager.set_global_setting(key, value)
+                else:
+                    self._settings_manager.set_project_setting(key, value)
             except RuntimeError as exc:
                 self._notify(str(exc))
                 return
