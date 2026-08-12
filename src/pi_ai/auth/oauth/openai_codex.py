@@ -275,6 +275,9 @@ async def _wait_for_browser_code(state: str, signal: Any) -> dict | None:
                 waiter.cancel()
             if abort is not None and not abort.done():
                 abort.cancel()
+            await asyncio.gather(waiter, return_exceptions=True)
+            if abort is not None:
+                await asyncio.gather(abort, return_exceptions=True)
     finally:
         server.close()
         await server.wait_closed()
@@ -289,7 +292,14 @@ def _respond_html(writer: asyncio.StreamWriter, status: int, message: str) -> No
         f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode("ascii")
         + body
     )
-    asyncio.get_running_loop().create_task(writer.drain())
+
+    async def _finish() -> None:
+        try:
+            await writer.drain()
+        finally:
+            writer.close()
+
+    asyncio.get_running_loop().create_task(_finish())
 
 
 def _extract_code_from_pasted(value: str) -> str | None:
@@ -316,17 +326,33 @@ async def _browser_login(interaction: AuthInteraction) -> OAuthCredential:
         webbrowser.open(flow["url"])
     except Exception:
         pass
-    server_result = await _wait_for_browser_code(flow["state"], interaction.signal)
-    code = server_result["code"] if server_result else None
-    if code is None:
-        pasted = await interaction.prompt(
-            {
-                "type": "manual_code",
-                "message": "Complete login in your browser, or paste the authorization "
-                "code / redirect URL here:",
-                "placeholder": BROWSER_REDIRECT_URI,
-            }
-        )
+
+    manual_prompt: Any = {
+        "type": "manual_code",
+        "message": "Complete login in your browser, or paste the authorization "
+        "code / redirect URL here:",
+        "placeholder": BROWSER_REDIRECT_URI,
+    }
+    # 浏览器回调与手动粘贴竞争（对齐 TS：任一先完成即用，避免挂起）。
+    manual_task = asyncio.create_task(interaction.prompt(manual_prompt))
+    callback_task = asyncio.create_task(_wait_for_browser_code(flow["state"], interaction.signal))
+    done, _pending = await asyncio.wait(
+        {manual_task, callback_task}, return_when=asyncio.FIRST_COMPLETED
+    )
+    server_result = callback_task.result() if callback_task in done else None
+    if server_result is not None and server_result.get("code"):
+        manual_task.cancel()
+        await asyncio.gather(manual_task, return_exceptions=True)
+        code = server_result["code"]
+    else:
+        if callback_task in done:
+            await asyncio.gather(callback_task, return_exceptions=True)
+        else:
+            callback_task.cancel()
+            await asyncio.gather(callback_task, return_exceptions=True)
+        pasted = manual_task.result() if not manual_task.cancelled() else None
+        if pasted is None:
+            raise RuntimeError("OpenAI Codex browser login was cancelled")
         code = _extract_code_from_pasted(pasted) or pasted.strip()
     if not code:
         raise RuntimeError("OpenAI Codex browser login was cancelled")
