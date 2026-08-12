@@ -88,9 +88,6 @@ def get_tool_path(tool: str, bin_dir: str | Path | None = None) -> str | None:
     config = _TOOL_CONFIGS.get(tool)
     if config is None:
         return None
-    override = os.environ.get(f"PI_{tool.upper()}_PATH")
-    if override:
-        return override
     root = Path(bin_dir) if bin_dir is not None else _get_bin_dir()
     binary = config.binary_name + (".exe" if platform.system() == "Windows" else "")
     local = root / binary
@@ -166,10 +163,6 @@ async def _download_tool(
             binary_path.write_bytes(extracted.read_bytes())
             if plat != "win32":
                 binary_path.chmod(0o755)
-            (root / f"{binary_name}.version").write_text(
-                version + "\n",
-                encoding="utf-8",
-            )
     finally:
         archive_path.unlink(missing_ok=True)
     return str(binary_path)

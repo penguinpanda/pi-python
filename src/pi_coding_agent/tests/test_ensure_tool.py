@@ -23,13 +23,6 @@ def test_get_tool_path_falls_back_to_system(monkeypatch) -> None:
     assert _ensure_tool.get_tool_path("fd", bin_dir=Path("/nonexistent")) == "/usr/bin/fd"
 
 
-def test_get_tool_path_env_override(monkeypatch, tmp_path: Path) -> None:
-    custom = tmp_path / "custom-fd"
-    custom.write_bytes(b"#!/bin/sh\n")
-    monkeypatch.setenv("PI_FD_PATH", str(custom))
-    assert _ensure_tool.get_tool_path("fd", bin_dir=tmp_path) == str(custom)
-
-
 @pytest.mark.asyncio
 async def test_with_retry_succeeds_after_failures() -> None:
     calls = 0
@@ -88,4 +81,3 @@ async def test_download_tool_extracts_and_caches(tmp_path: Path, monkeypatch) ->
     assert result == str(tmp_path / "fd")
     assert (tmp_path / "fd").is_file()
     assert not (tmp_path / "fd-test.tar.gz").exists()
-    assert (tmp_path / "fd.version").read_text(encoding="utf-8").strip() == "1.0.0"

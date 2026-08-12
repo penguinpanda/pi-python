@@ -120,7 +120,6 @@ async def test_unified_provider_model_and_login_completion():
                     provider="faux",
                     id="faux-1",
                     name="Faux One",
-                    aliases=["alias-1"],
                 )
             ]
 
@@ -141,8 +140,7 @@ async def test_unified_provider_model_and_login_completion():
     assert model_suggestions is not None
     assert model_suggestions.items[0].value == "faux/faux-1"
     alias_suggestions = await provider.get_suggestions("/model alias-1", force=True)
-    assert alias_suggestions is not None
-    assert alias_suggestions.items[0].value == "faux/faux-1"
+    assert alias_suggestions is None or alias_suggestions.items == []
 
     login_suggestions = await provider.get_suggestions("/login faux", force=True)
     assert login_suggestions is not None
@@ -150,7 +148,7 @@ async def test_unified_provider_model_and_login_completion():
 
 
 @pytest.mark.asyncio
-async def test_model_completion_auto_derived_aliases():
+async def test_model_completion_uses_id_provider_and_name():
     registry = _Registry([_Command("model", "Select model")])
 
     class _Runtime:
@@ -160,7 +158,6 @@ async def test_model_completion_auto_derived_aliases():
                     provider="faux",
                     id="faux-1-20250101",
                     name="Faux One",
-                    aliases=[],
                 )
             ]
 

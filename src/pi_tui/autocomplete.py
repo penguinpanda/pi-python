@@ -282,12 +282,7 @@ class CombinedAutocompleteProvider:
         is_quoted_prefix: bool,
     ) -> list[AutocompleteItem]:
         if self._fd_path is None or not raw_prefix:
-            suggestions = self._get_file_suggestions(
-                ("@" if is_at_prefix else "") + raw_prefix,
-                is_at_prefix=is_at_prefix,
-                is_quoted_prefix=is_quoted_prefix,
-            )
-            return suggestions[:20]
+            return []
 
         scoped = _resolve_scoped_query(raw_prefix, self._base_path)
         base_dir = scoped["base_dir"] if scoped is not None else self._base_path

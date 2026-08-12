@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from pi_tui.autocomplete import CombinedAutocompleteProvider
@@ -214,36 +213,14 @@ def _model_description(model) -> str:
     name = getattr(model, "name", "") or ""
     if name:
         parts.append(name)
-    aliases = [alias for alias in _model_aliases(model) if alias.lower() != name.lower()]
-    if aliases:
-        parts.append(", ".join(str(alias) for alias in aliases))
     return " · ".join(parts)
 
 
-def _model_aliases(model) -> list[str]:
-    """显式 aliases + name + 去日期后缀 id 自动派生。"""
-    model_id = str(getattr(model, "id", ""))
-    name = getattr(model, "name", "") or ""
-    aliases: list[str] = []
-    seen: set[str] = set()
-    for alias in getattr(model, "aliases", None) or []:
-        text = str(alias)
-        if text and text not in seen:
-            seen.add(text)
-            aliases.append(text)
-    if name and name.lower() != model_id.lower() and name not in seen:
-        seen.add(name)
-        aliases.append(name)
-    versionless = re.sub(r"-\d{8}$", "", model_id)
-    if versionless != model_id and versionless not in seen:
-        seen.add(versionless)
-        aliases.append(versionless)
-    return aliases
-
-
 def _model_search_text(item: dict[str, Any]) -> str:
-    description = str(item.get("description", ""))
-    return f"{item['label']} {description} {item['value']}"
+    provider, separator, name = str(item.get("description", "")).partition(" · ")
+    model_id = str(item.get("label", ""))
+    suffix = f" {name}" if separator and name else ""
+    return f"{provider} {provider}/{model_id} {provider} {model_id}{suffix}"
 
 
 def _login_argument_completions(model_runtime):

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import json
 import time
 from pathlib import Path
 from typing import Any, Protocol, cast
@@ -24,10 +23,6 @@ from pi_agent._types import AgentMessage
 from pi_agent.session.v4.context import build_session_context
 from pi_agent.session.v4.memory import InMemorySessionRepo
 from pi_agent.session.v4.repo import JsonlSessionRepo
-from pi_agent.session.v4.search_index import (
-    PersistentSessionSearchIndex,
-    rebuild_v4_search_index,
-)
 from pi_agent.session.v4.session import Session
 from pi_agent.session.v4.jsonl_types import JsonlSessionListOptions
 from pi_agent.session.v4.types import Entry, SessionMetadata
@@ -145,16 +140,12 @@ async def list_sessions(
     cwd: str | None = None,
     *,
     detailed: bool = True,
-    index_path: str | Path | None = None,
-    cache_search_index: bool = True,
 ) -> list[SessionInfo]:
     """列出 v4 会话。"""
     return await V4SessionManager.list_sessions(
         directory,
         cwd,
         detailed=detailed,
-        index_path=index_path,
-        cache_search_index=cache_search_index,
     )
 
 
@@ -714,10 +705,8 @@ class V4SessionManager:
         cwd: str | None = None,
         *,
         detailed: bool = True,
-        index_path: str | Path | None = None,
-        cache_search_index: bool = True,
     ) -> list[SessionInfo]:
-        """列出会话；stale 索引会自动扫描并重建（v3 文件同样可列出）。"""
+        """列出会话；始终扫描文件（v3 文件同样可列出）。"""
         repo = JsonlSessionRepo(directory)
         options: JsonlSessionListOptions | None = {"cwd": cwd} if cwd is not None else None
         metadata = await repo.list(options)
@@ -731,16 +720,6 @@ class V4SessionManager:
                     parent_session_id=item.get("parentSessionId"),
                 )
                 for item in metadata
-            ]
-
-        index = PersistentSessionSearchIndex(index_path or (Path(directory) / "search-index.json"))
-        metadata_ids = {item["id"] for item in metadata}
-        index_map = {str(summary.metadata.get("id", "")): summary for summary in index.summaries()}
-        if index.is_populated() and metadata_ids <= set(index_map):
-            return [
-                info
-                for summary in (index_map[item["id"]] for item in metadata)
-                if (info := _session_info_from_index_summary(summary, cwd)) is not None
             ]
 
         infos: list[SessionInfo] = []
@@ -772,11 +751,6 @@ class V4SessionManager:
                 # 单个会话读取失败不应让整个列表失败；保留基础元数据。
                 info.search_text = f"{info.session_id} {info.cwd}"
             infos.append(info)
-        if cache_search_index:
-            try:
-                await rebuild_v4_search_index(repo, index)
-            except Exception:
-                pass
         return infos
 
     async def with_lock(self, fn):
@@ -853,45 +827,6 @@ def _entry_text(entry: Entry) -> str:
             if isinstance(block, dict) and block.get("type") == "text"
         )
     return ""
-
-
-def _session_info_from_index_summary(summary, cwd: str | None) -> SessionInfo | None:
-    """由 search index summary 构造 SessionInfo，避免逐个打开会话文件。"""
-    metadata = dict(summary.metadata)
-    if cwd is not None and metadata.get("cwd") != cwd:
-        return None
-    info = SessionInfo(
-        path=str(metadata.get("path", "")),
-        session_id=str(metadata.get("id", "")),
-        cwd=str(metadata.get("cwd", "")),
-        modified=float(metadata.get("modifiedAt", 0) or 0) / 1000,
-        name=summary.name,
-        parent_session_id=metadata.get("parentSessionId"),
-    )
-    texts: list[str] = []
-    user_messages: list[str] = []
-    for payload in summary.entries.values():
-        raw = str(payload.get("text", ""))
-        if raw:
-            texts.append(raw)
-        try:
-            entry = json.loads(raw)
-        except (TypeError, ValueError):
-            continue
-        if not isinstance(entry, dict):
-            continue
-        if entry.get("type") == "message":
-            info.message_count += 1
-            if _entry_is_user_message(cast(Entry, entry)):
-                user_messages.append(_entry_text(cast(Entry, entry)))
-    if user_messages:
-        info.first_message = user_messages[0]
-    parts = [info.session_id, info.cwd]
-    if info.name:
-        parts.append(info.name)
-    parts.extend(texts)
-    info.search_text = " ".join(parts)
-    return info
 
 
 __all__ = [

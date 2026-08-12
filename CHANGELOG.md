@@ -118,15 +118,18 @@
 - Session Picker 快捷键并入 `KeybindingsManager` 独立 action 命名空间，
   支持 settings `keybindings` 覆盖与禁用
 - 新增托管工具下载/缓存（`tools/_ensure_tool.py`）：fd/rg 缺失时按平台
-  从 GitHub 下载并缓存到 `~/.pi/agent/bin`，带重试与版本标记；
-  `PI_OFFLINE` 下跳过，`PI_FD_PATH` / `PI_RG_PATH` 可覆盖
-- `list_sessions` 复用 v4 search index：索引存在且未陈旧时直接读取摘要，
-  不再逐个打开会话文件；索引陈旧时自动扫描并重建 `search-index.json`
-- `Model` 新增 `aliases` 元数据字段，`/model` 补全按 id / name / aliases /
-  provider 模糊搜索，name 与去日期后缀 id 自动派生 alias
+  从 GitHub 下载并缓存到 `~/.pi/agent/bin`，带重试；`PI_OFFLINE` 下跳过
+- `/model` 补全对齐 TS：按 id / provider / name 模糊搜索，不再使用显式
+  aliases 或自动派生去日期后缀 id
 
 ### Changed
 
+- 对齐 TS 工具管理：移除 fd/rg 下载的版本标记文件与
+  `PI_FD_PATH` / `PI_RG_PATH` 外部路径覆盖；`@` 路径补全在 fd 缺失或
+  失败时返回空，不再回退 readdir
+- `list_sessions` 移除本地 JSON search index，始终扫描会话文件（对齐 TS）
+- `/model` 补全移除显式 aliases 与去日期后缀 id 自动派生，搜索字段与 TS
+  `getModelSelectorSearchText` 一致
 - 会话运行时工厂固定走 v4：移除 `PI_SESSION_FORMAT=v3` 运行时回退，旧 v3
   文件由 v4 仓库始终惰性迁移；`pi_evals` harness 与 `pi_server` 会话工厂
   迁移到 v4
@@ -208,8 +211,6 @@
   v4 usage records，`get_session_stats`（v4）反映实际 token 与成本
 - `V4SessionManager` 写入改为增量缓存更新（不再每次全量重读会话），
   大会话下避免 O(n²) 开销
-- 新增 v4 持久化会话搜索索引（`PersistentSessionSearchIndex` + 全量重建），
-  检索语义与扫描式一致但无需重读会话文件
 - deferred responses 基础层：`DeferredHandle` 类型、`split_deferred_tools`、
   Provider/Models 的 `fetch_deferred` / `cancel_deferred`（faux 参考实现）、
   `AgentSession.fetch_deferred` / `cancel_deferred` 与 `write_deferred` 记录

@@ -1799,9 +1799,8 @@ class PiTuiApp(App):
         current_sessions = await list_sessions_async(
             sessions_dir,
             cwd=self._session.cwd,
-            cache_search_index=True,
         )
-        all_sessions = await list_sessions_async(sessions_dir, cache_search_index=True)
+        all_sessions = await list_sessions_async(sessions_dir)
         if not current_sessions and not all_sessions:
             self._notify("No saved sessions")
             return
@@ -1847,9 +1846,8 @@ class PiTuiApp(App):
         current = await list_sessions_async(
             sessions_dir,
             cwd=self._session.cwd,
-            cache_search_index=True,
         )
-        all_sessions = await list_sessions_async(sessions_dir, cache_search_index=True)
+        all_sessions = await list_sessions_async(sessions_dir)
         return current, all_sessions
 
     def _on_session_selected(self, path) -> None:
