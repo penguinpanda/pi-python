@@ -96,6 +96,8 @@ async def _async_main(args: list[str] | None = None) -> int:
     effective_args = args if args is not None else sys.argv[1:]
     if effective_args and effective_args[0] in ("login", "logout", "list", "auth"):
         return await _run_auth_command(effective_args)
+    if effective_args and effective_args[0] in ("install", "remove", "update"):
+        return await _run_package_command(effective_args)
 
     parser = _create_parser()
     parsed = parser.parse_args(args)
@@ -691,6 +693,53 @@ async def _auth_print(kind: str, args: list[str]) -> int:
         return 1
     print(auth.auth["api_key"])
     return 0
+
+
+async def _run_package_command(args: list[str]) -> int:
+    """pi install / remove / update 子命令（对齐 TS handlePackageCommand 核心子集）。"""
+    from .package_manager import PackageManager
+
+    command, *rest = args
+    if "-h" in rest or "--help" in rest:
+        print(
+            {
+                "install": "Usage: pi install <source> [-l|--local]  (source: npm:name | git:url[@ref] | local dir)",
+                "remove": "Usage: pi remove <source> [-l|--local]",
+                "update": "Usage: pi update [<source>]  (re-install configured packages)",
+            }[command]
+        )
+        return 0
+
+    local = False
+    filtered = [arg for arg in rest if arg not in ("-l", "--local")]
+    local = len(filtered) != len(rest)
+    rest = filtered
+
+    if command in ("install", "remove") and not rest:
+        print(f"Error: Missing {command} source.", file=sys.stderr)
+        return 1
+
+    cwd = str(Path.cwd())
+    settings_manager = SettingsManager.create(cwd, project_trusted=False)
+    manager = PackageManager(cwd, settings_manager=settings_manager)
+    try:
+        if command == "install":
+            await manager.install_and_persist(rest[0], local=local)
+            print(f"Installed {rest[0]}")
+            return 0
+        if command == "remove":
+            removed = await manager.remove_and_persist(rest[0], local=local)
+            if not removed:
+                print(f"No matching package found for {rest[0]}", file=sys.stderr)
+                return 1
+            print(f"Removed {rest[0]}")
+            return 0
+        await manager.update(rest[0] if rest else None)
+        print("Updated packages")
+        return 0
+    except RuntimeError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
 
 
 async def _auth_list() -> int:
