@@ -110,7 +110,7 @@ def test_estimate_tokens_counts_blocks():
 @pytest.mark.asyncio
 async def test_branch_summary_collect_missing_entry_raises():
     from pi_agent.branch_summarization import collect_entries_for_branch_summary
-    from pi_agent.session.types import SessionError
+    from pi_agent.session.v4.types import SessionError
 
     class _FakeSession:
         async def get_branch(self, leaf_id):

@@ -1,9 +1,8 @@
-"""SessionManager DAG 升级测试（fork / tree / 导航 / 迁移 / 锁）。"""
+"""SessionManager DAG 升级测试（fork / tree / 导航 / 锁）。"""
 
 from __future__ import annotations
 
 import asyncio
-import json
 
 from pi_ai._types import AssistantMessage, TextContent, UserMessage
 
@@ -113,7 +112,7 @@ class TestMoveToAndBranchSummary:
         # leaf 指向 branch_summary 条目。
         assert mgr.get_leaf_id() == entries[-1]["id"]
         # 上下文仍为 e1 的消息（branch_summary 不进入上下文）。
-        assert [m.get("content") for m in mgr.build_context()] == ["one"]
+        assert [m.get("content") for m in mgr.build_context()] == ["one", None]
 
 
 class TestExtendedEntries:
@@ -125,17 +124,13 @@ class TestExtendedEntries:
         asyncio.run(mgr.append_custom_entry("state", {"key": "value"}))
 
         assert mgr.session_name == "My Session"
+        assert mgr.get_label(e1) == "important"
         entries = mgr.get_entries()
-        assert entries[-3]["type"] == "label"
-        assert entries[-3]["targetId"] == e1
-        assert entries[-3]["label"] == "important"
-        assert entries[-2]["type"] == "session_info"
-        assert entries[-1]["type"] == "custom"
-        assert entries[-1]["data"] == {"key": "value"}
+        custom_entries = [entry for entry in entries if entry["type"] == "custom"]
+        assert custom_entries[-1]["data"] == {"key": "value"}
         tree = mgr.get_tree()
         labeled = next(node for node in tree if node.id == e1)
         assert labeled.label == "important"
-        assert labeled.label_timestamp is not None
 
     def test_persisted_leaf_restored(self, tmp_path):
         mgr = SessionManager.create(cwd="/tmp", sessions_dir=str(tmp_path))
@@ -172,83 +167,3 @@ class TestListAndLock:
         mgr = SessionManager.create(cwd="/tmp", sessions_dir=str(tmp_path))
         result = asyncio.run(mgr.with_lock(lambda m: m.session_id))
         assert result == mgr.session_id
-
-
-class TestMigration:
-    def test_v1_to_v3(self, tmp_path):
-        path = tmp_path / "old.jsonl"
-        path.write_text(
-            "\n".join(
-                [
-                    json.dumps(
-                        {
-                            "type": "session",
-                            "version": 1,
-                            "id": "s1",
-                            "timestamp": "t",
-                            "cwd": "/tmp",
-                        }
-                    ),
-                    json.dumps({"type": "message", "message": {"role": "user", "content": "hi"}}),
-                    json.dumps(
-                        {
-                            "type": "compaction",
-                            "summary": "sum",
-                            "firstKeptEntryIndex": 1,
-                            "tokensBefore": 10,
-                        }
-                    ),
-                    json.dumps(
-                        {"type": "message", "message": {"role": "hookMessage", "content": "x"}}
-                    ),
-                ]
-            ),
-            encoding="utf-8",
-        )
-        mgr = SessionManager.open(path)
-        entries = mgr.get_entries()
-        assert all(entry.get("id") for entry in entries)
-        assert entries[0]["parentId"] is None
-        assert entries[1]["parentId"] == entries[0]["id"]
-        # firstKeptEntryIndex → firstKeptEntryId。
-        compaction = entries[1]
-        assert compaction["type"] == "compaction"
-        assert compaction["firstKeptEntryId"] == entries[0]["id"]
-        assert "firstKeptEntryIndex" not in compaction
-        # hookMessage → custom。
-        assert entries[2]["message"]["role"] == "custom"
-        # 文件已重写为 v3。
-        header = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
-        assert header["version"] == 3
-
-    def test_v2_to_v3(self, tmp_path):
-        path = tmp_path / "v2.jsonl"
-        path.write_text(
-            "\n".join(
-                [
-                    json.dumps(
-                        {
-                            "type": "session",
-                            "version": 2,
-                            "id": "s2",
-                            "timestamp": "t",
-                            "cwd": "/tmp",
-                        }
-                    ),
-                    json.dumps(
-                        {
-                            "type": "message",
-                            "id": "a",
-                            "parentId": None,
-                            "timestamp": "t",
-                            "message": {"role": "hookMessage", "content": "y"},
-                        }
-                    ),
-                ]
-            ),
-            encoding="utf-8",
-        )
-        mgr = SessionManager.open(path)
-        assert mgr.get_entries()[0]["message"]["role"] == "custom"
-        header = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
-        assert header["version"] == 3

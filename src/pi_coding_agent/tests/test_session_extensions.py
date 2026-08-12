@@ -360,19 +360,23 @@ async def test_extension_api_send_message_append_entry_set_label(tmp_path):
     await _drain_background(runner)
 
     entries = session._session_manager.get_entries()
-    custom_messages = [e for e in entries if e.get("type") == "custom_message"]
+    custom_messages = [
+        e
+        for e in entries
+        if e.get("type") == "message"
+        and e["message"].get("role") == "custom"
+        and e["message"].get("customType") == "note"
+    ]
     custom_entries = [e for e in entries if e.get("type") == "custom"]
-    assert custom_messages and custom_messages[-1]["customType"] == "note"
-    assert custom_messages[-1].get("details") == {"level": "warn"}
+    assert custom_messages and custom_messages[-1]["message"].get("customType") == "note"
+    assert custom_messages[-1]["message"].get("details") == {"level": "warn"}
     assert custom_entries and custom_entries[-1]["customType"] == "bookmark"
 
     first_entry_id = entries[0]["id"]
     api.set_label(first_entry_id, "mylabel")
     # SessionManager.set_label 使用模块级 _schedule_task（不在 runner 任务集里）。
     await asyncio.sleep(0)
-    labels = [e for e in session._session_manager.get_entries() if e.get("type") == "label"]
-    assert labels and labels[-1]["targetId"] == first_entry_id
-    assert labels[-1]["label"] == "mylabel"
+    assert session._session_manager.get_label(first_entry_id) == "mylabel"
     await session.dispose()
 
 
@@ -777,8 +781,14 @@ async def test_send_message_deliver_as_follow_up(tmp_path):
     await _drain_background(runner)
 
     entries = session._session_manager.get_entries()
-    custom_messages = [e for e in entries if e.get("type") == "custom_message"]
-    assert custom_messages and custom_messages[-1]["customType"] == "plan-mode-execute"
+    custom_messages = [
+        e
+        for e in entries
+        if e.get("type") == "message"
+        and e["message"].get("role") == "custom"
+        and e["message"].get("customType") == "plan-mode-execute"
+    ]
+    assert custom_messages
     assert session.pending_message_count > 0
     await session.dispose()
 

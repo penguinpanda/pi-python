@@ -37,7 +37,7 @@ def _default_sessions_dir() -> Path:
 
 
 class SessionManagerLike(Protocol):
-    """AgentSession 需要的会话管理器接口（v3 SessionManager / V4SessionManager 通用）。"""
+    """AgentSession 需要的会话管理器接口（同步门面 / V4SessionManager 通用）。"""
 
     @property
     def session_id(self) -> str: ...
@@ -148,7 +148,7 @@ async def fork_session_manager(
     session_id: str | None = None,
     sessions_dir: str | Path | None = None,
 ) -> Any:
-    """fork 会话：v3 同步 / v4 异步统一入口。"""
+    """fork 会话：同步门面 / 原生异步统一入口。"""
     result = manager.fork(
         from_entry_id,
         position=position,
@@ -167,7 +167,7 @@ async def edit_session_message(
     *,
     mode: str = "merge",
 ) -> str:
-    """编辑历史 user 消息：v3 同步 / v4 异步统一入口。"""
+    """编辑历史 user 消息：同步门面 / 原生异步统一入口。"""
     result = manager.edit_message(entry_id, new_text, mode=mode)
     if inspect.isawaitable(result):
         return await result
@@ -488,10 +488,16 @@ class V4SessionManager:
         path = self.get_branch(from_entry_id)
         if not path:
             raise ValueError(f"Entry not found: {from_entry_id}")
-        root = (
-            Path(sessions_dir) if sessions_dir else (self._sessions_root or _default_sessions_dir())
-        )
-        repo = JsonlSessionRepo(root)
+        repo: JsonlSessionRepo | InMemorySessionRepo
+        if sessions_dir is not None:
+            root = Path(sessions_dir)
+            repo = JsonlSessionRepo(root)
+        elif self._sessions_root is not None:
+            root = self._sessions_root
+            repo = JsonlSessionRepo(root)
+        else:
+            repo = self._repo
+            root = None
         session = await repo.fork(
             cast(SessionMetadata, await self._session.get_metadata()),
             cast(

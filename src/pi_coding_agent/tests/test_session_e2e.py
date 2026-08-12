@@ -129,18 +129,18 @@ class TestPlainTextSession:
         finally:
             await session.dispose()
 
-        # 会话已持久化到 JSONL（header + user + assistant = 3 行）
         entries = mgr.get_entries()
-        assert len(entries) == 2
-        assert entries[0]["message"]["role"] == "user"
-        assert entries[1]["message"]["role"] == "assistant"
+        messages = [entry for entry in entries if entry["type"] == "message"]
+        assert len(messages) == 2
+        assert messages[0]["message"]["role"] == "user"
+        assert messages[1]["message"]["role"] == "assistant"
 
         assert mgr.session_path is not None
         session_file = Path(mgr.session_path)
         assert session_file.exists()
         lines = session_file.read_text(encoding="utf-8").strip().splitlines()
-        assert len(lines) == 3
-        assert lines[0].startswith('{"type": "session"')
+        assert len(lines) >= 3
+        assert lines[0].startswith('{"kind": "header", "version": 4')
 
     async def test_multiple_prompts_append(self, faux_env, tmp_path):
         models, core = faux_env

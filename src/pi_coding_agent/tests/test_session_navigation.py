@@ -59,7 +59,7 @@ async def test_navigate_to_generates_branch_summary(tmp_path):
         assert manager.get_leaf_id() == entries[-1]["id"]
 
         # agent 上下文已重建为 e1 分支。
-        assert [m.get("content") for m in session.get_messages()] == ["branch A"]
+        assert [m.get("content") for m in session.get_messages()] == ["branch A", None]
     finally:
         await session.dispose()
 

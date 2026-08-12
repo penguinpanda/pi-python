@@ -81,7 +81,7 @@ async def _record_operation(
     kind: str,
     **kwargs,
 ) -> str | None:
-    """写入 operation record；v3 管理器无此能力时静默跳过。"""
+    """写入 operation record；管理器无此能力时静默跳过。"""
     start = getattr(manager, "start_operation", None)
     if start is None:
         return None
@@ -114,7 +114,7 @@ async def _record_usage_for_message(
     message: AgentMessage,
     entry_id: str,
 ) -> None:
-    """把 assistant 消息的 usage 写入 usage record（v3 管理器跳过）。"""
+    """把 assistant 消息的 usage 写入 usage record（无此能力时跳过）。"""
     record = getattr(manager, "record_usage", None)
     usage = message.get("usage")
     if record is None or not isinstance(usage, dict):
@@ -1680,6 +1680,12 @@ class AgentSession:
         )
         # 重建 agent 上下文（compactionSummary + 保留的近期消息）。
         self._agent.state.messages = self._session_manager.build_context()
+        if will_retry:
+            # v4 保留 tail 可能以 assistant 结尾；continue_ 要求末条非 assistant。
+            messages = self._agent.state.messages
+            while messages and messages[-1].get("role") == "assistant":
+                messages = messages[:-1]
+            self._agent.state.messages = messages
         self._emit_extension_event(
             "session_compact",
             {
@@ -1758,14 +1764,14 @@ class AgentSession:
         await _finish_recorded_operation(self._session_manager, run_id)
 
     async def recovery_state(self) -> str:
-        """当前会话恢复状态：idle / suspended / corrupt（v3 管理器恒为 idle）。"""
+        """当前会话恢复状态：idle / suspended / corrupt（无此能力时恒为 idle）。"""
         check = getattr(self._session_manager, "recovery_state", None)
         if check is None:
             return "idle"
         return await check()
 
     async def open_operations(self, limit: int = 2) -> list[dict]:
-        """当前未完成的操作记录（v3 管理器返回空）。"""
+        """当前未完成的操作记录（无此能力时返回空）。"""
         operations = getattr(self._session_manager, "open_operations", None)
         if operations is None:
             return []
