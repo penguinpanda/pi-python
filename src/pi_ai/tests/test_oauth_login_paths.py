@@ -162,6 +162,47 @@ class _FakeResponse:
         return self._body
 
 
+def test_xai_response_validation() -> None:
+    """_required_string / _positive_number / verification_uri 校验错误路径。"""
+    with pytest.raises(RuntimeError, match="device_code"):
+        xai._required_string({}, "device_code")
+    with pytest.raises(RuntimeError, match="expires_in"):
+        xai._positive_number({"expires_in": -1}, "expires_in")
+    with pytest.raises(RuntimeError, match="Untrusted verification URI"):
+        xai._validate_verification_uri("http://evil.example.com/device")
+    assert xai._validate_verification_uri("https://x.ai/device") == "https://x.ai/device"
+
+
+def test_xai_credentials_from_token_without_expiry() -> None:
+    credential = xai._credentials_from_token({"access_token": "a", "refresh_token": "r"})
+    assert credential["access"] == "a"
+    assert credential["refresh"] == "r"
+    # 默认 3600s 生命周期
+    assert credential["expires"] > 0
+
+
+@pytest.mark.asyncio
+async def test_xai_poll_error_states(monkeypatch) -> None:
+    """authorization_pending → slow_down → access_denied 状态映射。"""
+    responses = [
+        _FakeResponse(400, {"error": "authorization_pending"}),
+        _FakeResponse(400, {"error": "slow_down", "interval": 1}),
+        _FakeResponse(400, {"error": "access_denied"}),
+    ]
+
+    async def fake_post_form(url, fields, signal=None):
+        return responses.pop(0)
+
+    monkeypatch.setattr(xai, "_post_form", fake_post_form)
+    device = {
+        "device_code": "dc",
+        "expires_in_seconds": 300,
+        "interval_seconds": 0.1,
+    }
+    with pytest.raises(RuntimeError, match="denied"):
+        await xai._poll_for_tokens(device, None)
+
+
 # ---------------------------------------------------------------------------
 # Radius loopback 服务器（真实 socket）
 # ---------------------------------------------------------------------------
