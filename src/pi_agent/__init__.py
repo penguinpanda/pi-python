@@ -105,23 +105,17 @@ from .proxy import (
     stream_proxy,
 )
 from .session import (
+    InMemorySessionRepo,
     InMemorySessionStorage,
-    InMemorySessionStore,
+    JsonlSessionRepo,
     JsonlSessionStorage,
-    JsonlSessionStore,
+    ScanningSessionSearch,
+    Session,
+    SessionError,
     SessionRepo,
     SessionStorage,
-    SessionStore,
     build_session_context,
-    create_in_memory_session_repo,
-    create_in_memory_session_store,
-    create_jsonl_session_repo,
-    create_jsonl_session_store,
-    rebuild_session_search_index,
 )
-from .session.v4.search import ScanningSessionSearch
-from .session.v4.session import Session
-from .session.v4.types import SessionError
 from .skills import (
     format_skill_invocation,
     format_skills_for_system_prompt,
@@ -219,19 +213,13 @@ __all__ = [
     "Session",
     "SessionError",
     "SessionStorage",
-    "SessionStore",
     "SessionRepo",
+    "InMemorySessionRepo",
     "InMemorySessionStorage",
-    "InMemorySessionStore",
+    "JsonlSessionRepo",
     "JsonlSessionStorage",
-    "JsonlSessionStore",
     "ScanningSessionSearch",
-    "rebuild_session_search_index",
     "build_session_context",
-    "create_in_memory_session_store",
-    "create_in_memory_session_repo",
-    "create_jsonl_session_store",
-    "create_jsonl_session_repo",
     # 环境抽象
     "PythonExecutionEnv",
     "FileError",

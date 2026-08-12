@@ -22,7 +22,6 @@ from .repo import (
     get_path_to_root_or_compaction,
 )
 from .search import ScanningSessionSearch, SessionSearchSource
-from .session import _get_session_name, _get_session_stats
 from .types import (
     JsonlSessionMetadata,
     LeafEntry,

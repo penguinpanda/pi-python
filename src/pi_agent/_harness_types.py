@@ -30,7 +30,7 @@ from ._types import (
     ToolExecutionMode,
 )
 from .compaction import CompactionSettings
-from .session import Session
+from .session.v4.session import Session
 
 # ---------------------------------------------------------------------------
 # Result / 错误

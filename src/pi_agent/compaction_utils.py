@@ -14,11 +14,16 @@ from pi_ai.types import Usage
 from pi_ai.utils.estimate import ContextUsageEstimate
 
 from ._types import AgentMessage
-from .session.types import SessionTreeEntry
-from .session.types import (
+from .session.v4.context import (
+    _branch_summary_message,
+    _compaction_summary_message,
+    _custom_message,
+)
+from .session.v4.types import (
     BranchSummaryEntry,
     CompactionEntry,
-    CustomMessageEntry,
+    CustomEntry,
+    Entry,
     MessageEntry,
 )
 
@@ -153,34 +158,28 @@ def serialize_conversation(messages: list[AgentMessage]) -> str:
     return "\n\n".join(parts)
 
 
-def get_message_from_entry(entry: SessionTreeEntry) -> AgentMessage | None:
+def get_message_from_entry(entry: Entry) -> AgentMessage | None:
     """把会话条目投影为 AgentMessage（对齐 TS getMessageFromEntry）。"""
-    from .session.session import (
-        _create_branch_summary_message,
-        _create_compaction_summary_message,
-        _create_custom_message,
-    )
-
     entry_type = entry["type"]
     if entry_type == "message":
         return cast(MessageEntry, entry)["message"]
-    if entry_type == "custom_message":
-        custom_entry = cast(CustomMessageEntry, entry)
-        return _create_custom_message(
+    if entry_type == "custom":
+        custom_entry = cast(CustomEntry, entry)
+        return _custom_message(
             custom_entry["customType"],
-            custom_entry["content"],
-            custom_entry["display"],
-            custom_entry.get("details"),
+            custom_entry.get("data"),
+            True,
+            None,
             custom_entry["timestamp"],
         )
     if entry_type == "branch_summary":
         branch_entry = cast(BranchSummaryEntry, entry)
-        return _create_branch_summary_message(
+        return _branch_summary_message(
             branch_entry["summary"], branch_entry["fromId"], branch_entry["timestamp"]
         )
     if entry_type == "compaction":
         compaction_entry = cast(CompactionEntry, entry)
-        return _create_compaction_summary_message(
+        return _compaction_summary_message(
             compaction_entry["summary"],
             compaction_entry.get("tokensBefore", 0),
             compaction_entry["timestamp"],
@@ -188,7 +187,7 @@ def get_message_from_entry(entry: SessionTreeEntry) -> AgentMessage | None:
     return None
 
 
-def get_message_from_entry_for_compaction(entry: SessionTreeEntry) -> AgentMessage | None:
+def get_message_from_entry_for_compaction(entry: Entry) -> AgentMessage | None:
     if entry["type"] == "compaction":
         return None
     return get_message_from_entry(entry)
@@ -275,7 +274,7 @@ def get_assistant_usage(message: AgentMessage) -> Usage | None:
     return None
 
 
-def get_last_assistant_usage(entries: list[SessionTreeEntry]) -> Usage | None:
+def get_last_assistant_usage(entries: list[Entry]) -> Usage | None:
     for entry in reversed(entries):
         if entry["type"] == "message":
             usage = get_assistant_usage(entry["message"])

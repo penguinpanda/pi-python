@@ -25,8 +25,8 @@ from .compaction_utils import (
     get_message_from_entry_for_compaction,
     serialize_conversation,
 )
-from .session.session import build_session_context
-from .session.types import CompactionEntry, SessionTreeEntry
+from .session.v4.context import build_session_context
+from .session.v4.types import CompactionEntry, Entry
 
 
 class CompactionError(Exception):
@@ -63,7 +63,7 @@ class CutPointResult:
 
 
 def _find_valid_cut_points(
-    entries: list[SessionTreeEntry],
+    entries: list[Entry],
     start_index: int,
     end_index: int,
 ) -> list[int]:
@@ -89,7 +89,7 @@ def _find_valid_cut_points(
 
 
 def find_turn_start_index(
-    entries: list[SessionTreeEntry],
+    entries: list[Entry],
     entry_index: int,
     start_index: int,
 ) -> int:
@@ -104,7 +104,7 @@ def find_turn_start_index(
 
 
 def find_cut_point(
-    entries: list[SessionTreeEntry],
+    entries: list[Entry],
     start_index: int,
     end_index: int,
     keep_recent_tokens: int,
@@ -389,7 +389,7 @@ class CompactionPreparation:
 
 
 def prepare_compaction(
-    path_entries: list[SessionTreeEntry],
+    path_entries: list[Entry],
     settings: CompactionSettings,
 ) -> tuple[bool, Any]:
     """准备压缩；返回 (ok, preparation | None | CompactionError)。"""
@@ -470,13 +470,13 @@ def prepare_compaction(
     )
 
 
-def cast_compaction(entry: SessionTreeEntry) -> CompactionEntry:
+def cast_compaction(entry: Entry) -> CompactionEntry:
     return entry  # type: ignore[return-value]
 
 
 def _extract_file_operations(
     messages: list[AgentMessage],
-    entries: list[SessionTreeEntry],
+    entries: list[Entry],
     prev_compaction_index: int,
 ) -> dict[str, set[str]]:
     file_ops = create_file_ops()
