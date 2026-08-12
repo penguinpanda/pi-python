@@ -72,6 +72,19 @@ def test_thinking_and_oauth_selectors() -> None:
     assert "OpenAI" in text
 
 
+def test_choice_and_input_dialog_update_title() -> None:
+    """ChoiceSelector / TextInputDialog 的 update_title（倒计时文案）。"""
+    choice = ChoiceSelector("Pick", ["a", "b"])
+    choice.update_title("Pick (auto-cancel in 3s)")
+    text = "\n".join(line.text() for line in choice.render(60, 4))
+    assert "auto-cancel in 3s" in text
+
+    dialog = TextInputDialog("Name?", placeholder="")
+    dialog.update_title("Name? (auto-cancel in 2s)")
+    text = "\n".join(line.text() for line in dialog.render(60, 4))
+    assert "auto-cancel in 2s" in text
+
+
 def test_scoped_models_selector_toggle_and_save() -> None:
     models = [SimpleNamespace(provider="faux", id="faux-1")]
     selector = ScopedModelsSelector(models, selected=set())
