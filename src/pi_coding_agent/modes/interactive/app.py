@@ -702,9 +702,38 @@ class PiTuiApp(App):
 
     def _extension_markdown_transformers(self):
         runner = self._session.extension_runner
-        if runner is None:
-            return []
-        return runner.get_markdown_transformers()
+        transformers = [self._mermaid_transformer()]
+        if runner is not None:
+            transformers.extend(runner.get_markdown_transformers())
+        return transformers
+
+    def _mermaid_transformer(self):
+        """内置 mermaid 渲染 transformer（对齐 TS createMermaidMarkdownTransformer）。"""
+        from .mermaid import create_mermaid_markdown_transformer
+
+        def _mode() -> str:
+            if self._settings_manager is not None:
+                try:
+                    return self._settings_manager.get_mermaid_rendering_mode()
+                except Exception:
+                    pass
+            return "final"
+
+        def _width() -> int:
+            try:
+                return self._chat_content_width()
+            except Exception:
+                return 80
+
+        return create_mermaid_markdown_transformer(_mode, _width)
+
+    def _chat_content_width(self) -> int:
+        """聊天区可用渲染宽度（mermaid 宽度检查用）。"""
+        try:
+            terminal_width = self.terminal.size[0]
+        except Exception:
+            return 80
+        return max(40, terminal_width - 8)
 
     def _extension_tool_renderer(self, message):
         runner = self._session.extension_runner

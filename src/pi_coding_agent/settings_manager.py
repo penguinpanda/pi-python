@@ -602,6 +602,16 @@ class SettingsManager:
     def set_collapse_changelog(self, collapse: bool) -> None:
         self._set_global("collapseChangelog", bool(collapse))
 
+    def get_mermaid_rendering_mode(self) -> str:
+        """mermaid 渲染模式（off|final|streaming，对齐 TS mermaidRenderingMode）。"""
+        value = self._settings.get("mermaidRenderingMode")
+        return value if value in ("off", "final", "streaming") else "final"
+
+    def set_mermaid_rendering_mode(self, mode: str) -> None:
+        if mode not in ("off", "final", "streaming"):
+            raise ValueError(f"Invalid mermaid rendering mode: {mode}")
+        self._set_global("mermaidRenderingMode", mode)
+
     def get_last_changelog_version(self) -> str | None:
         """上次展示 changelog 的版本记录（对齐 TS lastChangelogVersion）。"""
         value = self._global_settings.get("lastChangelogVersion")
