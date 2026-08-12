@@ -24,7 +24,7 @@ def create_extension(pi: ExtensionAPI):
         from pi_agent import Agent, AgentOptions
 
         from pi_coding_agent import AgentSession
-        from pi_coding_agent._session_manager import SessionManager
+        from pi_coding_agent._session_manager_v4 import in_memory_session_manager
 
         stream_fn = ctx.session._agent.stream_function
         agent = Agent(
@@ -34,7 +34,7 @@ def create_extension(pi: ExtensionAPI):
                 stream_fn=stream_fn,
             )
         )
-        manager = SessionManager.in_memory(cwd=ctx.cwd)
+        manager = await in_memory_session_manager(ctx.cwd)
         subagent = AgentSession(
             agent=agent,
             session_manager=manager,
