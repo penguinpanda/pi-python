@@ -155,21 +155,65 @@ async def _async_main(args: list[str] | None = None) -> int:
     if parsed.list_models:
         return _print_models(runtime, provider_id=parsed.provider)
 
+    # 会话 flags 冲突校验（对齐 TS validateForkFlags / validateSessionIdFlags）
+    if parsed.fork and (
+        parsed.session or parsed.continue_session or parsed.resume or parsed.session_id
+    ):
+        print(
+            "Error: --fork cannot be combined with --session/--continue/--resume/--session-id",
+            file=sys.stderr,
+        )
+        return 1
+    if parsed.session_id and (parsed.session or parsed.continue_session or parsed.resume):
+        print(
+            "Error: --session-id cannot be combined with --session/--continue/--resume",
+            file=sys.stderr,
+        )
+        return 1
+
+    # 会话目录解析：--session-dir > PI_CODING_AGENT_SESSION_DIR > 默认目录。
+    sessions_dir: str | Path | None = parsed.session_dir or os.environ.get(
+        "PI_CODING_AGENT_SESSION_DIR"
+    )
+
     # 会话管理
     session_manager: SessionManagerLike
     if parsed.no_session:
         session_manager = await in_memory_session_manager(cwd)
+    elif parsed.fork:
+        source_path = await _resolve_fork_target(parsed.fork, sessions_dir)
+        if source_path is None:
+            print(f"Error: No session found matching '{parsed.fork}'", file=sys.stderr)
+            return 1
+        source_manager = await open_session_manager(source_path, cwd_override=cwd)
+        try:
+            session_manager = await source_manager.fork(
+                source_manager.get_leaf_id() or "",
+                sessions_dir=sessions_dir,
+            )
+        finally:
+            close = getattr(source_manager, "close", None)
+            if close is not None:
+                await close()
+    elif parsed.resume:
+        resumed = await _pick_session_to_resume(cwd, sessions_dir)
+        if resumed is None:
+            print("No session selected", file=sys.stderr)
+            return 0
+        session_manager = resumed
     elif parsed.continue_session:
         # 继续最近的会话
-        session_manager = await _find_latest_session(cwd)
+        session_manager = await _find_latest_session(cwd, sessions_dir)
+    elif parsed.session_id:
+        session_manager = await _open_or_create_session_by_id(parsed.session_id, cwd, sessions_dir)
     elif parsed.session:
         session_manager = await open_session_manager(parsed.session, cwd_override=cwd)
     else:
         # 全新会话
-        session_manager = await create_session_manager(cwd)
+        session_manager = await create_session_manager(cwd, sessions_dir=sessions_dir)
 
     # 解析模型（含 --models 循环列表；继续会话时优先恢复）
-    is_continuing = bool(parsed.continue_session or parsed.session)
+    is_continuing = bool(parsed.continue_session or parsed.session or parsed.resume or parsed.fork)
     try:
         model, scoped_models = await _resolve_initial_model(
             runtime, parsed, settings, session_manager, is_continuing
@@ -429,18 +473,21 @@ async def _async_main(args: list[str] | None = None) -> int:
         )
 
     # 运行 print 模式
-    message = parsed.message or _read_stdin() or ""
-    if not message:
+    message_parts: list[str] = list(parsed.message)
+    if not message_parts:
+        stdin_text = _read_stdin()
+        if stdin_text:
+            message_parts = [stdin_text]
+    if not message_parts:
         print(
             "Error: No input message provided. Use -p 'message' or pipe via stdin.", file=sys.stderr
         )
         return 1
 
-    # @file 注入（文本 / 图片）。
+    # @file 注入（文本 / 图片）：逐个片段处理，非 @ 片段原样保留（对齐 TS file-processor）。
     images = None
-    if message.startswith("@"):
-        texts, images = await process_at_files([message], cwd)
-        message = "\n\n".join(texts)
+    texts, images = await process_at_files(message_parts, cwd)
+    message = "\n\n".join(texts)
     if parsed.json:
         return await run_print_mode_json(session, message, images)
     return await run_print_mode(session, message, images)
@@ -630,6 +677,28 @@ def _create_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Continue the most recent session",
     )
+    p.add_argument(
+        "-r",
+        "--resume",
+        action="store_true",
+        help="Select a session to resume (interactive picker)",
+    )
+    p.add_argument(
+        "--session-id",
+        type=str,
+        help="Use exact project session ID, creating it if missing",
+    )
+    p.add_argument(
+        "--fork",
+        type=str,
+        metavar="PATH_OR_ID",
+        help="Fork specific session file or partial UUID into a new session",
+    )
+    p.add_argument(
+        "--session-dir",
+        type=str,
+        help="Directory for session storage and lookup",
+    )
     p.add_argument("--no-session", action="store_true", help="Don't persist session to disk")
 
     # 工具控制
@@ -677,8 +746,13 @@ def _create_parser() -> argparse.ArgumentParser:
     # 版本
     p.add_argument("--version", action="version", version="pi-python 0.1.0 (minimal core)")
 
-    # 位置参数：用户消息
-    p.add_argument("message", nargs="?", type=str, help="User message (optional, can use stdin)")
+    # 位置参数：用户消息（可多个；@file 注入与普通片段混合，对齐 TS args.ts）
+    p.add_argument(
+        "message",
+        nargs="*",
+        type=str,
+        help="User message fragments (optional, can use stdin); @file reads file content",
+    )
 
     return p
 
@@ -818,19 +892,78 @@ def _read_stdin() -> str | None:
         return None
 
 
-async def _find_latest_session(cwd: str) -> SessionManagerLike:
-    """在默认会话目录中查找最近修改的会话文件并打开。"""
-    sessions_dir = get_sessions_dir()
-    if not sessions_dir.exists():
+async def _find_latest_session(
+    cwd: str, sessions_dir: str | Path | None = None
+) -> SessionManagerLike:
+    """在会话目录中查找最近修改的会话文件并打开。"""
+    directory = Path(sessions_dir) if sessions_dir else get_sessions_dir()
+    if not directory.exists():
         # 无会话目录，创建新会话
-        return await create_session_manager(cwd)
+        return await create_session_manager(cwd, sessions_dir=sessions_dir)
 
-    infos = await list_sessions(sessions_dir)
+    infos = await list_sessions(directory)
     if infos:
         return await open_session_manager(infos[0].path, cwd_override=cwd)
 
     # 无会话文件，创建新会话
-    return await create_session_manager(cwd)
+    return await create_session_manager(cwd, sessions_dir=sessions_dir)
+
+
+async def _pick_session_to_resume(
+    cwd: str, sessions_dir: str | Path | None
+) -> SessionManagerLike | None:
+    """交互选择要恢复的会话（对齐 TS selectSession 的 CLI 简化版）。"""
+    directory = Path(sessions_dir) if sessions_dir else get_sessions_dir()
+    current = await list_sessions(directory, cwd=cwd)
+    if not current:
+        print("No saved sessions found", file=sys.stderr)
+        return None
+    print("Select a session to resume:")
+    for index, info in enumerate(current, start=1):
+        name = info.name or info.first_message or info.session_id[:8]
+        print(f"  {index}. {name}  ({info.path})")
+    while True:
+        raw = input("Session number (empty to cancel): ").strip()
+        if not raw:
+            return None
+        try:
+            choice = int(raw)
+        except ValueError:
+            continue
+        if 1 <= choice <= len(current):
+            break
+    return await open_session_manager(current[choice - 1].path, cwd_override=cwd)
+
+
+async def _resolve_fork_target(arg: str, sessions_dir: str | Path | None) -> str | None:
+    """--fork 目标解析：文件路径或部分 UUID（对齐 TS resolveSessionArg）。"""
+    path = Path(arg).expanduser()
+    if path.is_file():
+        return str(path)
+    directory = Path(sessions_dir) if sessions_dir else get_sessions_dir()
+    sessions = await list_sessions(directory)
+    matches = [info for info in sessions if info.session_id.startswith(arg)]
+    if len(matches) == 1:
+        return matches[0].path
+    if len(matches) > 1:
+        print(f"Error: Multiple sessions match '{arg}'", file=sys.stderr)
+    return None
+
+
+async def _open_or_create_session_by_id(
+    session_id: str, cwd: str, sessions_dir: str | Path | None
+) -> SessionManagerLike:
+    """精确 session ID 打开，缺失则新建（对齐 TS findLocalSessionByExactId → create）。"""
+    directory = Path(sessions_dir) if sessions_dir else get_sessions_dir()
+    sessions = await list_sessions(directory, cwd=cwd)
+    for info in sessions:
+        if info.session_id == session_id:
+            return await open_session_manager(info.path, cwd_override=cwd)
+    print(
+        f"Warning: No project session found with id '{session_id}'; creating a new session with that id.",
+        file=sys.stderr,
+    )
+    return await create_session_manager(cwd, sessions_dir=sessions_dir, session_id=session_id)
 
 
 if __name__ == "__main__":

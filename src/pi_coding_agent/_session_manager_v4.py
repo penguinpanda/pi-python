@@ -63,6 +63,15 @@ class SessionManagerLike(Protocol):
 
     def get_leaf_id(self) -> str | None: ...
 
+    async def fork(
+        self,
+        from_entry_id: str,
+        *,
+        position: str = "at",
+        session_id: str | None = None,
+        sessions_dir: str | Path | None = None,
+    ) -> "SessionManagerLike": ...
+
     def get_branch(self, from_id: str | None = None) -> list[Any]: ...
 
     def get_tree(self) -> list[Any]: ...
@@ -206,6 +215,7 @@ class V4SessionManager:
         self._name: str | None = None
         self._labels: dict[str, str | None] = {}
         self._session_id = ""
+        self._created_at: int | None = None
         self._lock = asyncio.Lock()
         self._scheduled_tasks: set[asyncio.Task] = set()
 
@@ -320,6 +330,21 @@ class V4SessionManager:
     # ------------------------------------------------------------------
     # 同步访问器（读内存缓存）
     # ------------------------------------------------------------------
+
+    def get_header(self) -> dict[str, Any] | None:
+        """合成 session header（对齐 TS SessionManager.getHeader）。
+
+        v4 JSONL 无 header 行，从缓存的 metadata 派生 {type, id, timestamp, cwd}。
+        """
+        if not self._session_id:
+            return None
+        header: dict[str, Any] = {
+            "type": "session",
+            "id": self._session_id,
+            "timestamp": str(self._created_at or ""),
+            "cwd": self._cwd,
+        }
+        return header
 
     def get_entries(self) -> list[Entry]:
         return list(self._entries)
@@ -804,6 +829,7 @@ class V4SessionManager:
             self._labels[entry["id"]] = await self._session.get_label(entry["id"])
         metadata = await self._session.get_metadata()
         self._session_id = metadata["id"]
+        self._created_at = metadata.get("createdAt")
 
     async def _cache_entry(self, entry_id: str) -> None:
         """写入后增量更新缓存（避免大会话每次全量刷新）。"""

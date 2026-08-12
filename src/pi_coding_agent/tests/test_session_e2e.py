@@ -271,9 +271,15 @@ class TestPrintMode:
         lines = [line for line in out.splitlines() if line.strip()]
         assert code == 0
         assert len(lines) >= 2
+        # 首条为 session header（对齐 TS getHeader），无非协议的 done 汇总事件
+        first = json.loads(lines[0])
+        assert first["type"] == "session"
+        assert first["id"]
         last = json.loads(lines[-1])
-        assert last["type"] == "done"
-        assert any(message.get("role") == "assistant" for message in last["messages"])
+        assert last["type"] == "agent_settled"
+        event_types = [json.loads(line)["type"] for line in lines]
+        assert "done" not in event_types
+        assert "message_end" in event_types
 
     async def test_json_print_mode_broken_pipe_quiet(self, faux_env, tmp_path, monkeypatch, capsys):
         """下游提前关闭管道（--json | grep -m1）→ 静默退出，不抛 traceback。"""

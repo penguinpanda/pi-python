@@ -309,3 +309,54 @@ async def test_create_runtime_persists_models_store(monkeypatch, tmp_path):
     assert isinstance(captured["models_store"], FileModelsStore)
     assert captured["models_path"] == str(tmp_path / "models.json")
     assert captured["auth_path"] == str(tmp_path / "auth.json")
+
+
+async def test_open_or_create_session_by_id(tmp_path):
+    """--session-id：精确匹配打开；缺失时以该 ID 新建。"""
+    sessions_dir = tmp_path / "sessions"
+    created = await _cli._open_or_create_session_by_id("my-session", str(tmp_path), sessions_dir)
+    assert created.session_id == "my-session"
+    await created.close()
+
+    reopened = await _cli._open_or_create_session_by_id("my-session", str(tmp_path), sessions_dir)
+    assert reopened.session_id == "my-session"
+    assert reopened.session_path is not None
+    await reopened.close()
+
+    other = await _cli._open_or_create_session_by_id("other", str(tmp_path), sessions_dir)
+    assert other.session_id == "other"
+    await other.close()
+
+
+async def test_resolve_fork_target_path_and_partial_id(tmp_path):
+    """--fork：文件路径直通；部分 UUID 唯一匹配。"""
+    sessions_dir = tmp_path / "sessions"
+    manager = await _cli.create_session_manager(
+        str(tmp_path), sessions_dir=sessions_dir, session_id="abcdef-session"
+    )
+    assert manager.session_path is not None
+    await manager.append_message({"role": "user", "content": "hi", "timestamp": 1})
+    await manager.close()
+
+    assert _cli._resolve_fork_target is not None
+    path_result = await _cli._resolve_fork_target(manager.session_path, sessions_dir)
+    assert path_result == str(manager.session_path)
+    partial = await _cli._resolve_fork_target("abcdef", sessions_dir)
+    assert partial == str(manager.session_path)
+    missing = await _cli._resolve_fork_target("zzzz-no-match", sessions_dir)
+    assert missing is None
+
+
+async def test_find_latest_session_uses_custom_session_dir(tmp_path):
+    """--session-dir：continue 在自定义目录中查找最近会话。"""
+    sessions_dir = tmp_path / "sessions"
+    sessions_dir.mkdir()
+    manager = await _cli.create_session_manager(
+        str(tmp_path), sessions_dir=sessions_dir, session_id="latest-one"
+    )
+    assert manager.session_path is not None
+    await manager.close()
+
+    reopened = await _cli._find_latest_session(str(tmp_path), sessions_dir)
+    assert reopened.session_id == "latest-one"
+    await reopened.close()
