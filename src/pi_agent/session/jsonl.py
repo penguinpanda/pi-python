@@ -52,6 +52,56 @@ def _update_label_cache(
         labels_by_id.pop(target_id, None)
 
 
+def _get_session_name(entries: list[SessionTreeEntry]) -> str | None:
+    for entry in reversed(entries):
+        if entry["type"] == "session_info":
+            name = cast(Any, entry).get("name")
+            trimmed = (name or "").strip()
+            return trimmed or None
+    return None
+
+
+def _get_session_stats(entries: list[SessionTreeEntry]) -> dict[str, Any]:
+    message_count = 0
+    cached_tokens = 0
+    uncached_tokens = 0
+    total_tokens = 0
+    cost_total = 0.0
+    for entry in entries:
+        if entry["type"] == "message":
+            message_count += 1
+        usage: Any = None
+        if entry["type"] == "message":
+            message = cast(Any, entry)["message"]
+            if message.get("role") == "assistant":
+                usage = message.get("usage")
+        elif entry["type"] in ("compaction", "branch_summary"):
+            usage = entry.get("usage")
+        if (
+            not usage
+            or not isinstance(usage.get("input"), (int, float))
+            or not isinstance(usage.get("output"), (int, float))
+            or not isinstance(usage.get("cacheRead"), (int, float))
+            or not isinstance(usage.get("cacheWrite"), (int, float))
+        ):
+            continue
+        cached_tokens += int(usage["cacheRead"])
+        uncached_tokens += int(usage["input"]) + int(usage["cacheWrite"])
+        total_tokens += int(usage.get("totalTokens") or 0) or (
+            int(usage["input"]) + int(usage["output"])
+        )
+        cost = usage.get("cost")
+        if isinstance(cost, dict):
+            cost_total += float(cost.get("total") or 0)
+    return {
+        "messageCount": message_count,
+        "cachedTokens": cached_tokens,
+        "uncachedTokens": uncached_tokens,
+        "totalTokens": total_tokens,
+        "costTotal": cost_total,
+    }
+
+
 def _build_labels_by_id(entries: list[SessionTreeEntry]) -> dict[str, str]:
     labels_by_id: dict[str, str] = {}
     for entry in entries:
