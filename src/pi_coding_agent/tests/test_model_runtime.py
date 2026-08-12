@@ -414,6 +414,7 @@ async def test_login_orchestrates_oauth_and_persists(monkeypatch, tmp_path):
     runtime = ModelRuntime.__new__(ModelRuntime)
     runtime._models = _FakeModels()
     runtime._credentials = AuthStorage.in_memory()
+    runtime._credential_operations = {}
     runtime._configured_providers = set()
     runtime._stored_providers = set()
     runtime._available = []

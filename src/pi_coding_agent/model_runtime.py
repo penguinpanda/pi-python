@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any, TypedDict, cast
+from typing import Any, Awaitable, Callable, TypedDict, cast
 
 from pi_ai import (
     AssistantMessage,
@@ -556,6 +556,8 @@ class ModelRuntime:
         # 让 Models 使用运行时凭证层（runtime API key 覆盖 + auth.json）。
         self._credentials = RuntimeCredentials(auth_store)
         self._models._credentials = self._credentials
+        # per-provider 凭证操作串行化队列（对齐 TS enqueueCredentialOperation）。
+        self._credential_operations: dict[str, asyncio.Future] = {}
         for provider in self._models.get_providers():
             provider._credential_store = cast(Any, self._credentials)
 
@@ -1108,34 +1110,68 @@ class ModelRuntime:
     def list_credentials(self):
         return self._credentials.list()
 
+    async def _enqueue_credential_operation(
+        self, provider_id: str, task: Callable[[], Awaitable[Any]]
+    ) -> Any:
+        """per-provider 凭证操作串行化（对齐 TS enqueueCredentialOperation）。
+
+        同 provider 的 login/logout/setRuntimeApiKey 按提交顺序执行，
+        前序失败不阻断后续操作。
+        """
+        previous = self._credential_operations.get(provider_id)
+        loop = asyncio.get_running_loop()
+        release: asyncio.Future = loop.create_future()
+        self._credential_operations[provider_id] = release
+        try:
+            if previous is not None:
+                try:
+                    await previous
+                except Exception:
+                    pass
+            return await task()
+        finally:
+            release.set_result(None)
+            if self._credential_operations.get(provider_id) is release:
+                self._credential_operations.pop(provider_id, None)
+
     async def set_runtime_api_key(
         self, provider_id: str, api_key: str, refresh_options: ModelsRefreshOptions | None = None
     ) -> None:
-        self._credentials.set_runtime_api_key(provider_id, api_key)
-        self._auth_checks[provider_id] = {"type": "api_key", "source": "runtime API key"}
-        self._configured_providers.add(provider_id)
-        self._stored_providers.add(provider_id)
-        self._available = [
-            model
-            for model in self._models.get_models()
-            if model.provider in self._configured_providers
-        ]
-        await self.refresh(refresh_options or ModelsRefreshOptions(allow_network=False))
+        async def _task() -> None:
+            self._credentials.set_runtime_api_key(provider_id, api_key)
+            self._auth_checks[provider_id] = {"type": "api_key", "source": "runtime API key"}
+            self._configured_providers.add(provider_id)
+            self._stored_providers.add(provider_id)
+            self._available = [
+                model
+                for model in self._models.get_models()
+                if model.provider in self._configured_providers
+            ]
+            await self.refresh(refresh_options or ModelsRefreshOptions(allow_network=False))
+
+        await self._enqueue_credential_operation(provider_id, _task)
 
     async def remove_runtime_api_key(self, provider_id: str) -> None:
-        self._credentials.remove_runtime_api_key(provider_id)
-        await self.refresh(ModelsRefreshOptions(allow_network=False))
+        async def _task() -> None:
+            self._credentials.remove_runtime_api_key(provider_id)
+            await self.refresh(ModelsRefreshOptions(allow_network=False))
+
+        await self._enqueue_credential_operation(provider_id, _task)
 
     async def logout(self, provider_id: str) -> None:
-        await self._credentials.delete(provider_id)
-        self._recompose_provider(provider_id)
-        await self.refresh(ModelsRefreshOptions(allow_network=False))
+        async def _task() -> None:
+            await self._credentials.delete(provider_id)
+            self._recompose_provider(provider_id)
+            await self.refresh(ModelsRefreshOptions(allow_network=False))
+
+        await self._enqueue_credential_operation(provider_id, _task)
 
     async def login(self, provider_id: str, interaction: Any) -> Any:
         """编排 OAuth 登录（对齐 TS ModelRuntime.login）。
 
         经 provider 的 oauth 流程登录，凭证持久化后 recompose + 无网络刷新 +
         可用性刷新；同步失败抛 CredentialSynchronizationError。
+        凭证操作按 provider 串行化。
         """
         provider = self._models.get_provider(provider_id)
         if provider is None:
@@ -1144,19 +1180,23 @@ class ModelRuntime:
         oauth = getattr(auth, "oauth", None) if auth is not None else None
         if oauth is None:
             raise ValueError(f"Provider '{provider_id}' has no OAuth flow")
-        credential = await oauth.login(interaction)
 
-        async def _store(_current):
+        async def _task() -> Any:
+            credential = await oauth.login(interaction)
+
+            async def _store(_current):
+                return credential
+
+            await self._credentials.modify(provider_id, _store)
+            try:
+                self._recompose_provider(provider_id)
+                await self.refresh(ModelsRefreshOptions(allow_network=False))
+                await self._run_availability_refresh()
+            except Exception as exc:
+                raise CredentialSynchronizationError(provider_id, "login", credential) from exc
             return credential
 
-        await self._credentials.modify(provider_id, _store)
-        try:
-            self._recompose_provider(provider_id)
-            await self.refresh(ModelsRefreshOptions(allow_network=False))
-            await self._run_availability_refresh()
-        except Exception as exc:
-            raise CredentialSynchronizationError(provider_id, "login", credential) from exc
-        return credential
+        return await self._enqueue_credential_operation(provider_id, _task)
 
     # ------------------------------------------------------------------
     # 动态刷新
