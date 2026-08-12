@@ -7,11 +7,13 @@
 from __future__ import annotations
 
 import asyncio
+import configparser
 import hashlib
 import hmac
 import json
 import struct
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import quote, urlparse
 
 from typing import Any, AsyncIterator, cast
@@ -49,6 +51,52 @@ from .simple_options import clamp_max_tokens_to_context
 
 _AsyncClient = httpx.AsyncClient
 _DEFAULT_REGION = "us-east-1"
+
+
+def _resolve_bedrock_credentials(
+    options: dict[str, Any],
+) -> tuple[str | None, str | None, str | None]:
+    """解析 AWS 凭证：显式/env > shared credentials file（默认 profile）。"""
+    env = options.get("env")
+    access_key = cast(str | None, options.get("aws_access_key_id")) or get_provider_env_value(
+        "AWS_ACCESS_KEY_ID", env
+    )
+    secret_key = cast(str | None, options.get("aws_secret_access_key")) or (
+        get_provider_env_value("AWS_SECRET_ACCESS_KEY", env)
+    )
+    session_token = cast(str | None, options.get("aws_session_token")) or (
+        get_provider_env_value("AWS_SESSION_TOKEN", env)
+    )
+    if access_key and secret_key:
+        return access_key, secret_key, session_token
+
+    profile = (
+        options.get("aws_profile")
+        or get_provider_env_value("AWS_PROFILE", env)
+        or get_provider_env_value("AWS_DEFAULT_PROFILE", env)
+        or "default"
+    )
+    raw_path = (
+        options.get("aws_shared_credentials_file")
+        or get_provider_env_value("AWS_SHARED_CREDENTIALS_FILE", env)
+        or Path.home() / ".aws" / "credentials"
+    )
+    path = Path(str(raw_path)).expanduser()
+    if not path.is_file():
+        return access_key, secret_key, session_token
+    parser = configparser.ConfigParser()
+    try:
+        parser.read(path, encoding="utf-8")
+    except configparser.Error:
+        return access_key, secret_key, session_token
+    if not parser.has_section(profile):
+        return access_key, secret_key, session_token
+    section = parser[profile]
+    return (
+        section.get("aws_access_key_id"),
+        section.get("aws_secret_access_key"),
+        section.get("aws_session_token") or session_token,
+    )
 
 
 def _sha256_hex(data: bytes) -> str:
@@ -383,19 +431,15 @@ def bedrock_converse_stream(
             if token:
                 headers["Authorization"] = f"Bearer {token}"
             else:
-                access_key = cast(str | None, opts.get("aws_access_key_id")) or (
-                    get_provider_env_value("AWS_ACCESS_KEY_ID", opts.get("env"))
-                )
-                secret_key = cast(str | None, opts.get("aws_secret_access_key")) or (
-                    get_provider_env_value("AWS_SECRET_ACCESS_KEY", opts.get("env"))
+                access_key, secret_key, session_token = _resolve_bedrock_credentials(
+                    cast(dict[str, Any], opts)
                 )
                 if not access_key or not secret_key:
                     raise RuntimeError(
-                        f"No AWS credentials or bearer token for provider: {model.provider}"
+                        f"No AWS credentials or bearer token for provider: {model.provider}. "
+                        "Set AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY, configure "
+                        "~/.aws/credentials, or pass a bearer token."
                     )
-                session_token = cast(str | None, opts.get("aws_session_token")) or (
-                    get_provider_env_value("AWS_SESSION_TOKEN", opts.get("env"))
-                )
                 sig_headers = _aws_sigv4_headers(
                     method="POST",
                     url=endpoint,

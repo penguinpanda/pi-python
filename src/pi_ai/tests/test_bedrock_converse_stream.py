@@ -11,7 +11,11 @@ import pytest
 
 from pi_ai.api import bedrock_converse_stream
 from pi_ai.api.api_provider_registry import get_api_provider
-from pi_ai.api.bedrock_converse_stream import _aws_sigv4_headers, parse_eventstream_messages
+from pi_ai.api.bedrock_converse_stream import (
+    _aws_sigv4_headers,
+    _resolve_bedrock_credentials,
+    parse_eventstream_messages,
+)
 from pi_ai._types import Context, Model
 
 
@@ -67,6 +71,23 @@ def test_aws_sigv4_headers() -> None:
     assert headers["x-amz-content-sha256"] == (
         "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
     )
+
+
+def test_resolve_bedrock_credentials_from_shared_file(tmp_path) -> None:
+    credentials = tmp_path / "credentials"
+    credentials.write_text(
+        "[default]\n"
+        "aws_access_key_id = AKID\n"
+        "aws_secret_access_key = SECRET\n"
+        "aws_session_token = TOKEN\n",
+        encoding="utf-8",
+    )
+    access_key, secret_key, session_token = _resolve_bedrock_credentials(
+        {"aws_shared_credentials_file": str(credentials)}
+    )
+    assert access_key == "AKID"
+    assert secret_key == "SECRET"
+    assert session_token == "TOKEN"
 
 
 @pytest.mark.asyncio

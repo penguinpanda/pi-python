@@ -28,6 +28,9 @@
   （`zstandard` level 3，transport 层按 `content-encoding: zstd` 压缩）
 - OpenAI Codex websocket transport 接入 `responses_stream` 处理管线
   （`responses_websockets=2026-02-06`，transport=websocket/websocket-cached/auto）
+- AWS Bedrock 支持 shared credentials file 回退
+  （`~/.aws/credentials` / `AWS_SHARED_CREDENTIALS_FILE`，含 profile/session token）
+- Azure OpenAI Responses 测试补齐真实 Responses 流事件解析（text/usage/completed）
 - 新增 `scripts/check.py` 与 pre-commit 配置，本地一键复现 CI 的 ruff/mypy/pytest 检查
 - 交互模式支持 `!cmd` / `!!cmd` 本地 shell 命令：`!` 执行并进入 LLM 上下文，`!!` 执行但不进上下文，输出流式渲染
 - 引入 ruff（lint + format）与 mypy 配置及依赖

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -50,3 +51,50 @@ async def test_azure_stream_builds_client_and_deployment(monkeypatch) -> None:
     assert captured["azure_endpoint"] == "https://res.openai.azure.com"
     assert captured["azure_deployment"] == "deploy1"
     assert captured["api_version"] == "v1"
+
+
+@pytest.mark.asyncio
+async def test_azure_stream_parses_responses_events(monkeypatch) -> None:
+    events = [
+        SimpleNamespace(type="response.output_text.delta", delta="Hello"),
+        SimpleNamespace(
+            type="response.completed",
+            response=SimpleNamespace(
+                output=[],
+                output_text="Hello",
+                usage=SimpleNamespace(
+                    input_tokens=3,
+                    output_tokens=2,
+                    total_tokens=5,
+                    input_tokens_details=None,
+                    output_tokens_details=None,
+                ),
+            ),
+        ),
+    ]
+
+    class _FakeResponses:
+        async def create(self, **kwargs):  # type: ignore[no-untyped-def]
+            async def _stream():
+                for event in events:
+                    yield event
+
+            return _stream()
+
+    class _FakeClient:
+        responses = _FakeResponses()
+
+    monkeypatch.setattr(
+        azure_openai_responses,
+        "AsyncAzureOpenAI",
+        lambda **kwargs: _FakeClient(),
+    )
+    monkeypatch.setenv("AZURE_OPENAI_BASE_URL", "https://res.openai.azure.com")
+    stream = await azure_openai_responses.azure_stream(_model(), _context(), {"api_key": "k"})
+    result_events = [event async for event in stream]
+    message = result_events[-1]["message"]
+
+    assert message["content"][0]["type"] == "text"
+    assert message["content"][0]["text"] == "Hello"
+    assert message["usage"]["input"] == 3
+    assert message["usage"]["output"] == 2
