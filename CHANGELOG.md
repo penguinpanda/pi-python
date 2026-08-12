@@ -86,6 +86,7 @@
 
 ### Changed
 
+- Azure OpenAI Responses 默认 `apiVersion` 对齐 TS `v1`（`AZURE_OPENAI_API_VERSION` 可覆盖）
 - `AgentHarness` 公开 API  legacy（0.84.0 之前）：`models: Models` + `session: Session`
   必填并移除 `stream_fn`；新增 `request_shutdown()` / `wait_for_shutdown()`、
   compaction/branch-summary `retry` 与 retry 事件、`before_provider_payload` /

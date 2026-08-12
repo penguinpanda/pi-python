@@ -19,7 +19,7 @@ from ..utils._event_stream import AssistantMessageEventStream
 from ..utils.provider_env import get_provider_env_value
 from .responses import responses_stream
 
-_DEFAULT_API_VERSION = "2024-10-21"
+_DEFAULT_API_VERSION = "v1"
 
 
 def _azure_root(base_url: str) -> str:
