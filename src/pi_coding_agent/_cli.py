@@ -39,7 +39,7 @@ from ._session_manager_v4 import (
     list_sessions,
     open_session_manager,
 )
-from .auth_storage import AuthStorage
+from .auth_storage import AuthStorage, migrate_auth_to_auth_json
 from .compaction import compaction_settings_from_config
 from .model_resolver import (
     ScopedModel,
@@ -102,6 +102,9 @@ async def _async_main(args: list[str] | None = None) -> int:
 
     # 补齐 ~/.pi/agent 约定目录（sessions/prompts/skills/extensions/themes/tools/bin）。
     ensure_agent_dirs()
+
+    # 一次性迁移：oauth.json / settings.json apiKeys → auth.json（对齐 TS）。
+    migrate_auth_to_auth_json()
 
     # --help / --version 已在 argparse 中处理
 

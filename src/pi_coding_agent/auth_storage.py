@@ -272,6 +272,66 @@ def read_stored_credential(
     return _from_raw(raw) if isinstance(raw, dict) else None
 
 
+def migrate_auth_to_auth_json() -> list[str]:
+    """一次性迁移 oauth.json 与 settings.json apiKeys → auth.json（对齐 TS
+    migrateAuthToAuthJson）。
+
+    oauth.json 凭证包成 {"type": "oauth", ...}；settings.json 的 apiKeys
+    包成 {"type": "api_key", "key": ...}；oauth.json 改名 .migrated；
+    auth.json 以 0600 写入。返回迁移的 provider 列表。
+    """
+    agent_dir = get_agent_dir()
+    auth_path = agent_dir / "auth.json"
+    oauth_path = agent_dir / "oauth.json"
+    settings_path = agent_dir / "settings.json"
+
+    if auth_path.exists():
+        return []
+
+    migrated: dict[str, Any] = {}
+    providers: list[str] = []
+
+    if oauth_path.exists():
+        try:
+            oauth = json.loads(oauth_path.read_text(encoding="utf-8"))
+            if isinstance(oauth, dict):
+                for provider, cred in oauth.items():
+                    if isinstance(cred, dict):
+                        migrated[provider] = {"type": "oauth", **cred}
+                        providers.append(provider)
+            oauth_path.rename(oauth_path.with_name("oauth.json.migrated"))
+        except (OSError, ValueError):
+            pass
+
+    if settings_path.exists():
+        try:
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+            if isinstance(settings, dict):
+                api_keys = settings.get("apiKeys")
+                if isinstance(api_keys, dict):
+                    for provider, key in api_keys.items():
+                        if provider not in migrated and isinstance(key, str):
+                            migrated[provider] = {"type": "api_key", "key": key}
+                            providers.append(provider)
+                    settings.pop("apiKeys", None)
+                    settings_path.write_text(
+                        json.dumps(settings, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+        except (OSError, ValueError):
+            pass
+
+    if migrated:
+        auth_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = auth_path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(migrated, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.chmod(0o600)
+        tmp.replace(auth_path)
+        auth_path.chmod(0o600)
+
+    return providers
+
+
 __all__ = [
     "LockResult",
     "AuthStorageBackend",
@@ -279,4 +339,5 @@ __all__ = [
     "InMemoryAuthStorageBackend",
     "AuthStorage",
     "read_stored_credential",
+    "migrate_auth_to_auth_json",
 ]

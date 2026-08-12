@@ -74,6 +74,7 @@ class App:
         self.osc_background: tuple[int, int, int] | None = None
         self.color_scheme: str | None = None
         self._kitty_protocol_active = False
+        self.terminal_cell_size: tuple[int, int] | None = None
         self.open_url: Any | None = None
         self.clear_on_shrink = os.environ.get("PI_CLEAR_ON_SHRINK", "") in ("1", "true", "yes")
         self._regular_prev_lines: list[Line] = []
@@ -949,6 +950,32 @@ class App:
     def on_tick(self) -> None:
         pass
 
+    # 终端 cell 尺寸（CSI 16t 查询响应，仅图像渲染使用；对齐 TS queryCellSize）。
+    _CELL_SIZE_RESPONSE = re.compile(rb"\x1b\[6;(\d+);(\d+)t")
+
+    def _query_cell_size(self) -> None:
+        """支持图像时查询终端 cell 像素尺寸（CSI 16 t，响应 CSI 6;h;w t）。"""
+        try:
+            from ..terminal_image import detect_capabilities
+
+            if not detect_capabilities():
+                return
+        except Exception:
+            return
+        try:
+            self.terminal.write("\x1b[16t")
+        except Exception:
+            pass
+
+    def _consume_cell_size_response(self, data: bytes) -> bytes | None:
+        """消费 CSI 6;h;w t 响应并记录尺寸，不阻塞其它输入；返回剩余数据。"""
+        match = self._CELL_SIZE_RESPONSE.search(data)
+        if match is None:
+            return None
+        self.terminal_cell_size = (int(match.group(2)), int(match.group(1)))
+        remaining = data[: match.start()] + data[match.end() :]
+        return remaining or None
+
     async def _read_loop(self) -> None:
         while self._running:
             chunk = await self.terminal.read_chunk()
@@ -958,6 +985,12 @@ class App:
             if not chunk:
                 # 空块（select 超时）：短暂休眠，避免忙轮询。
                 await asyncio.sleep(0.05)
+                continue
+            # 终端 cell 尺寸响应不当作按键输入。
+            remaining = self._consume_cell_size_response(chunk)
+            if remaining is not None:
+                chunk = remaining
+            if not chunk:
                 continue
             for event in self._parser.feed(chunk):
                 await self._events.put(event)
@@ -987,6 +1020,7 @@ class App:
         self._buffer.resize(*self.terminal.size)
         self.on_mount()
         self.request_render()
+        self._query_cell_size()
         read_task = asyncio.create_task(self._read_loop())
         try:
             while self._running:

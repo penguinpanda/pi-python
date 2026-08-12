@@ -13,8 +13,38 @@ from pi_ai.auth import ApiKeyCredential
 from pi_coding_agent.auth_storage import (
     AuthStorage,
     FileAuthStorageBackend,
+    migrate_auth_to_auth_json,
     read_stored_credential,
 )
+
+
+def test_migrate_auth_to_auth_json(tmp_path, monkeypatch):
+    """oauth.json + settings.json apiKeys → auth.json（0600）；oauth.json 改名 .migrated。"""
+    monkeypatch.setenv("PI_CODING_AGENT_DIR", str(tmp_path))
+    (tmp_path / "oauth.json").write_text(
+        json.dumps({"github": {"token": "gho_x", "account": "me"}}), encoding="utf-8"
+    )
+    (tmp_path / "settings.json").write_text(
+        json.dumps({"apiKeys": {"openai": "sk-abc", "deepseek": "sk-def"}, "other": 1}),
+        encoding="utf-8",
+    )
+
+    providers = migrate_auth_to_auth_json()
+
+    assert set(providers) == {"github", "openai", "deepseek"}
+    auth = json.loads((tmp_path / "auth.json").read_text(encoding="utf-8"))
+    assert auth["github"] == {"type": "oauth", "token": "gho_x", "account": "me"}
+    assert auth["openai"] == {"type": "api_key", "key": "sk-abc"}
+    assert auth["deepseek"] == {"type": "api_key", "key": "sk-def"}
+    assert (tmp_path / "auth.json").stat().st_mode & 0o777 == 0o600
+    assert not (tmp_path / "oauth.json").exists()
+    assert (tmp_path / "oauth.json.migrated").exists()
+    settings = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
+    assert "apiKeys" not in settings
+    assert settings["other"] == 1
+
+    # 已存在 auth.json 时跳过
+    assert migrate_auth_to_auth_json() == []
 
 
 class TestInMemoryAuthStorage:
