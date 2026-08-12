@@ -599,6 +599,7 @@ class AgentHarnessOptions(Generic[TContext]):
     steering_mode: QueueMode = "one-at-a-time"
     follow_up_mode: QueueMode = "one-at-a-time"
     retry: RetryPolicy | None = None
+    telemetry_context: Any = None
 
 
 __all__ = [

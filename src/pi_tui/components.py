@@ -16,6 +16,7 @@ from pi_tui.engine.widgets import (
     Message,
     ScrollView,
     Static,
+    TruncatedText,
     Vertical,
     Widget,
 )
@@ -923,5 +924,6 @@ __all__ = [
     "PiEditorVim",
     "PiStatusBar",
     "PiFooter",
+    "TruncatedText",
     "message_to_entries",
 ]

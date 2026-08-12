@@ -19,8 +19,13 @@ class RecordedSpan:
 
 
 class InMemoryTelemetrySpan:
-    def __init__(self, record: RecordedSpan) -> None:
+    def __init__(
+        self,
+        record: RecordedSpan,
+        on_span: Callable[[RecordedSpan], None] | None = None,
+    ) -> None:
         self._record = record
+        self._on_span = on_span
 
     def add_event(self, name: str, attributes: SpanAttributes | None = None) -> None:
         self._record.events.append((name, attributes or {}))
@@ -37,8 +42,10 @@ class InMemoryTelemetrySpan:
         callback: Callable[[TelemetrySpan], Awaitable[T]],
     ) -> T:
         child = RecordedSpan(name=options.name, attributes=dict(options.attributes or {}))
+        if self._on_span is not None:
+            self._on_span(child)
         self._record.events.append(("span", {"name": options.name}))
-        return await callback(InMemoryTelemetrySpan(child))
+        return await callback(InMemoryTelemetrySpan(child, self._on_span))
 
 
 class InMemoryTelemetryContext:
@@ -52,7 +59,7 @@ class InMemoryTelemetryContext:
     ) -> T:
         record = RecordedSpan(name=options.name, attributes=dict(options.attributes or {}))
         self.spans.append(record)
-        return await callback(InMemoryTelemetrySpan(record))
+        return await callback(InMemoryTelemetrySpan(record, self.spans.append))
 
 
 __all__ = ["RecordedSpan", "InMemoryTelemetrySpan", "InMemoryTelemetryContext"]

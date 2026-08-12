@@ -27,6 +27,7 @@ from pi_ai.types import (
     UserMessage,
     now_ms,
 )
+from pi_telemetry import NOOP_TELEMETRY_CONTEXT, SpanOptions, TelemetryContext
 
 from ._agent_loop import run_agent_loop
 from ._messages import convert_to_llm
@@ -274,6 +275,7 @@ class AgentHarness(Generic[TContext]):
             else AgentHarnessStreamOptions()
         )
         self._retry_policy: RetryPolicy | None = options.retry
+        self._telemetry: TelemetryContext = options.telemetry_context or NOOP_TELEMETRY_CONTEXT
 
         # 工具注册表 + 激活列表
         self._tools: dict[str, AgentTool] = {}
@@ -979,19 +981,29 @@ class AgentHarness(Generic[TContext]):
         images: list[ImageContent] | None = None,
     ) -> AssistantMessage:
         """发送用户消息，运行完整 agent loop。返回最后一条 assistant 消息。"""
-        self._assert_not_shut_down()
-        if self._phase != "idle":
-            raise AgentHarnessError("busy", "AgentHarness is busy")
-        self._phase = "turn"
-        abort_event, finish = self._start_operation()
-        try:
-            turn_state = await self._create_turn_state()
-            return await self._execute_turn(turn_state, text, abort_event, images)
-        except BaseException as error:
-            self._phase = "idle"
-            raise _normalize_harness_error(error, "unknown") from error
-        finally:
-            finish()
+
+        async def _impl() -> AssistantMessage:
+            self._assert_not_shut_down()
+            if self._phase != "idle":
+                raise AgentHarnessError("busy", "AgentHarness is busy")
+            self._phase = "turn"
+            abort_event, finish = self._start_operation()
+            try:
+                turn_state = await self._create_turn_state()
+                return await self._execute_turn(turn_state, text, abort_event, images)
+            except BaseException as error:
+                self._phase = "idle"
+                raise _normalize_harness_error(error, "unknown") from error
+            finally:
+                finish()
+
+        return await self._telemetry.start_span(
+            SpanOptions(
+                name="pi.harness.prompt",
+                attributes={"pi.agent.model": self._model.id},
+            ),
+            lambda _span: _impl(),
+        )
 
     async def skill(
         self,
@@ -999,29 +1011,36 @@ class AgentHarness(Generic[TContext]):
         additional_instructions: str | None = None,
     ) -> AssistantMessage:
         """以技能调用方式运行一轮。"""
-        self._assert_not_shut_down()
-        if self._phase != "idle":
-            raise AgentHarnessError("busy", "AgentHarness is busy")
-        self._phase = "turn"
-        abort_event, finish = self._start_operation()
-        try:
-            turn_state = await self._create_turn_state()
-            skill = next(
-                (s for s in (turn_state.resources.skills or []) if s.name == name),
-                None,
-            )
-            if skill is None:
-                raise AgentHarnessError("invalid_argument", f"Unknown skill: {name}")
-            return await self._execute_turn(
-                turn_state,
-                _format_skill_invocation(skill, additional_instructions),
-                abort_event,
-            )
-        except BaseException as error:
-            self._phase = "idle"
-            raise _normalize_harness_error(error, "unknown") from error
-        finally:
-            finish()
+
+        async def _impl() -> AssistantMessage:
+            self._assert_not_shut_down()
+            if self._phase != "idle":
+                raise AgentHarnessError("busy", "AgentHarness is busy")
+            self._phase = "turn"
+            abort_event, finish = self._start_operation()
+            try:
+                turn_state = await self._create_turn_state()
+                skill = next(
+                    (s for s in (turn_state.resources.skills or []) if s.name == name),
+                    None,
+                )
+                if skill is None:
+                    raise AgentHarnessError("invalid_argument", f"Unknown skill: {name}")
+                return await self._execute_turn(
+                    turn_state,
+                    _format_skill_invocation(skill, additional_instructions),
+                    abort_event,
+                )
+            except BaseException as error:
+                self._phase = "idle"
+                raise _normalize_harness_error(error, "unknown") from error
+            finally:
+                finish()
+
+        return await self._telemetry.start_span(
+            SpanOptions(name="pi.harness.skill", attributes={"pi.agent.skill": name}),
+            lambda _span: _impl(),
+        )
 
     async def prompt_from_template(
         self,
@@ -1029,29 +1048,39 @@ class AgentHarness(Generic[TContext]):
         args: list[str] | None = None,
     ) -> AssistantMessage:
         """以提示模板调用方式运行一轮。"""
-        self._assert_not_shut_down()
-        if self._phase != "idle":
-            raise AgentHarnessError("busy", "AgentHarness is busy")
-        self._phase = "turn"
-        abort_event, finish = self._start_operation()
-        try:
-            turn_state = await self._create_turn_state()
-            template = next(
-                (t for t in (turn_state.resources.prompt_templates or []) if t.name == name),
-                None,
-            )
-            if template is None:
-                raise AgentHarnessError("invalid_argument", f"Unknown prompt template: {name}")
-            return await self._execute_turn(
-                turn_state,
-                _format_template_invocation(template.content, args or []),
-                abort_event,
-            )
-        except BaseException as error:
-            self._phase = "idle"
-            raise _normalize_harness_error(error, "unknown") from error
-        finally:
-            finish()
+
+        async def _impl() -> AssistantMessage:
+            self._assert_not_shut_down()
+            if self._phase != "idle":
+                raise AgentHarnessError("busy", "AgentHarness is busy")
+            self._phase = "turn"
+            abort_event, finish = self._start_operation()
+            try:
+                turn_state = await self._create_turn_state()
+                template = next(
+                    (t for t in (turn_state.resources.prompt_templates or []) if t.name == name),
+                    None,
+                )
+                if template is None:
+                    raise AgentHarnessError("invalid_argument", f"Unknown prompt template: {name}")
+                return await self._execute_turn(
+                    turn_state,
+                    _format_template_invocation(template.content, args or []),
+                    abort_event,
+                )
+            except BaseException as error:
+                self._phase = "idle"
+                raise _normalize_harness_error(error, "unknown") from error
+            finally:
+                finish()
+
+        return await self._telemetry.start_span(
+            SpanOptions(
+                name="pi.harness.prompt_template",
+                attributes={"pi.agent.template": name},
+            ),
+            lambda _span: _impl(),
+        )
 
     async def steer(
         self,
@@ -1099,6 +1128,13 @@ class AgentHarness(Generic[TContext]):
             self._pending_message_writes.append(message)
 
     async def compact(self, custom_instructions: str | None = None) -> CompactResult:
+        """上下文压缩（telemetry span 包裹）。"""
+        return await self._telemetry.start_span(
+            SpanOptions(name="pi.harness.compact"),
+            lambda _span: self._compact_impl(custom_instructions),
+        )
+
+    async def _compact_impl(self, custom_instructions: str | None = None) -> CompactResult:
         """上下文压缩：prepare → hook → LLM 摘要 → 写入 compaction 条目。"""
         self._assert_not_shut_down()
         if self._phase != "idle":
@@ -1186,6 +1222,20 @@ class AgentHarness(Generic[TContext]):
             finish()
 
     async def navigate_tree(
+        self,
+        target_id: str,
+        options: NavigateOptions | None = None,
+    ) -> NavigateTreeResult:
+        """分支导航（telemetry span 包裹）。"""
+        return await self._telemetry.start_span(
+            SpanOptions(
+                name="pi.harness.navigate_tree",
+                attributes={"pi.agent.target": target_id},
+            ),
+            lambda _span: self._navigate_tree_impl(target_id, options),
+        )
+
+    async def _navigate_tree_impl(
         self,
         target_id: str,
         options: NavigateOptions | None = None,

@@ -42,3 +42,17 @@ async def test_in_memory_records_span_events_and_status() -> None:
     assert record.attributes == {"trace": "t1", "model": "deepseek"}
     assert record.events == [("started", {})]
     assert record.status is not None and record.status.status == "ok"
+
+
+@pytest.mark.asyncio
+async def test_in_memory_records_nested_span() -> None:
+    context = InMemoryTelemetryContext()
+
+    async def outer(span) -> None:  # type: ignore[no-untyped-def]
+        await span.start_span(
+            SpanOptions(name="child"),
+            lambda _child: _noop_result(),
+        )
+
+    await context.start_span(SpanOptions(name="parent"), outer)
+    assert [span.name for span in context.spans] == ["parent", "child"]

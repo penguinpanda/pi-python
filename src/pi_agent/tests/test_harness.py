@@ -10,6 +10,7 @@ from pi_ai import Models, RetryPolicy
 from pi_ai.provider import create_provider
 from pi_ai.types import Model, TextContent, UserMessage
 from pi_ai.providers.faux import FauxCore, faux_assistant_message, faux_provider, faux_tool_call
+from pi_telemetry import InMemoryTelemetryContext
 
 from pi_agent import Session
 from pi_agent._harness_types import (
@@ -33,6 +34,19 @@ from pi_agent._harness_types import (
 from pi_agent.session import InMemorySessionStorage
 from pi_agent._harness import AgentHarness
 from pi_agent._types import AgentTool, AgentToolResult, StreamFn
+
+
+@pytest.mark.asyncio
+async def test_prompt_records_telemetry_span() -> None:
+    telemetry = InMemoryTelemetryContext()
+    harness = AgentHarness(
+        _make_options(
+            stream_fn=_make_stream_fn([_text_response("ok")]),
+            telemetry_context=telemetry,
+        )
+    )
+    await harness.prompt("hi")
+    assert any(span.name == "pi.harness.prompt" for span in telemetry.spans)
 
 
 # ============================================================================
