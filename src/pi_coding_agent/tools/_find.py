@@ -12,7 +12,7 @@ from pi_ai import TextContent
 from ._grep import _is_ignored_dir
 from ._path_utils import resolve_cwd_path
 
-DEFAULT_MAX_RESULTS = 200
+DEFAULT_LIMIT = 1000
 
 TOOL_SCHEMA = {
     "type": "object",
@@ -25,9 +25,9 @@ TOOL_SCHEMA = {
             "type": "string",
             "description": "Directory to search in (relative to cwd, defaults to cwd)",
         },
-        "max_results": {
+        "limit": {
             "type": "integer",
-            "description": f"Maximum number of results (default: {DEFAULT_MAX_RESULTS})",
+            "description": f"Maximum number of results (default: {DEFAULT_LIMIT})",
         },
     },
     "required": ["pattern"],
@@ -46,7 +46,9 @@ def create_find_tool(cwd: str) -> AgentTool:
     ) -> AgentToolResult:
         pattern = params["pattern"]
         search_path_str = params.get("path", ".")
-        max_results = params.get("max_results", DEFAULT_MAX_RESULTS)
+        # limit 优先（对齐 TS）；兼容旧的 max_results 字段名。
+        limit = params.get("limit") or params.get("max_results") or DEFAULT_LIMIT
+        limit = max(1, int(limit))
 
         try:
             search_path = resolve_cwd_path(base, search_path_str)
@@ -77,7 +79,7 @@ def create_find_tool(cwd: str) -> AgentTool:
             iterator = search_path.glob(pattern)
 
         for entry in iterator:
-            if count >= max_results:
+            if count >= limit:
                 break
             if entry.is_file() and not _is_ignored_dir(entry):
                 rel_path = entry.relative_to(base) if entry.is_relative_to(base) else entry
@@ -90,13 +92,17 @@ def create_find_tool(cwd: str) -> AgentTool:
                 details={"matches": 0},
             )
 
+        result_limit_reached = count >= limit
         output = f"Found {count} file(s):\n" + "\n".join(sorted(results))
-        if count >= max_results:
-            output += f"\n[Results truncated at {max_results}]"
+        if result_limit_reached:
+            output += f"\n[Truncated: {limit} results limit]"
 
         return AgentToolResult(
             content=[TextContent(type="text", text=output)],
-            details={"matches": count, "truncated": count >= max_results},
+            details={
+                "matches": count,
+                "resultLimitReached": limit if result_limit_reached else None,
+            },
         )
 
     return AgentTool(

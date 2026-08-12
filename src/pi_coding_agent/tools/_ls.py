@@ -11,12 +11,18 @@ from pi_ai import TextContent
 
 from ._path_utils import resolve_cwd_path
 
+DEFAULT_LIMIT = 500
+
 TOOL_SCHEMA = {
     "type": "object",
     "properties": {
         "path": {
             "type": "string",
             "description": "Directory to list (relative to cwd, defaults to cwd)",
+        },
+        "limit": {
+            "type": "integer",
+            "description": f"Maximum number of entries to return (default: {DEFAULT_LIMIT})",
         },
     },
     "required": [],
@@ -34,6 +40,8 @@ def create_ls_tool(cwd: str) -> AgentTool:
         on_update: object = None,
     ) -> AgentToolResult:
         target_str = params.get("path", ".")
+        limit = params.get("limit") or DEFAULT_LIMIT
+        limit = max(1, int(limit))
 
         try:
             target = resolve_cwd_path(base, target_str)
@@ -64,6 +72,8 @@ def create_ls_tool(cwd: str) -> AgentTool:
                 details={},
             )
 
+        entry_limit_reached = len(entries) > limit
+        entries = entries[:limit]
         lines = []
         for entry in entries:
             lines.append(_format_entry(entry, base))
@@ -76,9 +86,14 @@ def create_ls_tool(cwd: str) -> AgentTool:
 
         rel = target.relative_to(base) if target.is_relative_to(base) else target
         output = f"Contents of {rel}/:\n" + "\n".join(lines)
+        if entry_limit_reached:
+            output += f"\n[Truncated: {limit} entries limit]"
         return AgentToolResult(
             content=[TextContent(type="text", text=output)],
-            details={"count": len(lines)},
+            details={
+                "count": len(lines),
+                "entryLimitReached": limit if entry_limit_reached else None,
+            },
         )
 
     return AgentTool(
