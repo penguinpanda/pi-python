@@ -360,3 +360,49 @@ async def test_find_latest_session_uses_custom_session_dir(tmp_path):
     reopened = await _cli._find_latest_session(str(tmp_path), sessions_dir)
     assert reopened.session_id == "latest-one"
     await reopened.close()
+
+
+async def test_auth_print_api_key_and_min_expiry(monkeypatch, capsys):
+    """auth print-api-key 打印解析后的凭证；--min-expiry 只支持 bearer token。"""
+    from types import SimpleNamespace
+
+    captured: dict = {}
+
+    class _FakeModel:
+        provider = "fake"
+
+    class _FakeRuntime:
+        async def get_auth(self, model, overrides=None):
+            captured["overrides"] = overrides
+            from pi_ai.auth.types import AuthResult
+
+            return AuthResult(auth={"api_key": "sk-printed"})
+
+    async def _fake_create_runtime():
+        return _FakeRuntime()
+
+    monkeypatch.setattr(_cli, "_create_runtime", _fake_create_runtime)
+    monkeypatch.setattr(
+        _cli,
+        "resolve_cli_model",
+        lambda **kw: SimpleNamespace(
+            model=_FakeModel(), thinking_level=None, warning=None, error=None
+        ),
+    )
+
+    code = await _cli._auth_print("api_key", ["--model", "m", "--provider", "fake"])
+    assert code == 0
+    assert capsys.readouterr().out.strip() == "sk-printed"
+
+    # bearer token 支持 --min-expiry
+    code = await _cli._auth_print("bearer_token", ["--model", "m", "--min-expiry", "30m"])
+    assert code == 0
+    assert captured["overrides"] == {"min_oauth_validity_ms": 1_800_000}
+
+    # api_key 不支持 --min-expiry
+    code = await _cli._auth_print("api_key", ["--model", "m", "--min-expiry", "30m"])
+    assert code == 1
+
+    # 缺 --model 报错
+    code = await _cli._auth_print("api_key", [])
+    assert code == 1

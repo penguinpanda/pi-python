@@ -11,9 +11,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import re
 import signal
 import sys
 from pathlib import Path
+from typing import Any
 
 from pi_agent import Agent, AgentOptions
 from pi_agent import set_default_stream_fn as set_agent_stream_fn
@@ -42,6 +44,7 @@ from .compaction import compaction_settings_from_config
 from .model_resolver import (
     ScopedModel,
     find_initial_model,
+    resolve_cli_model,
     resolve_model_scope,
     restore_model_from_session,
 )
@@ -88,10 +91,10 @@ def main(args: list[str] | None = None) -> int:
 
 async def _async_main(args: list[str] | None = None) -> int:
     """CLI 异步主入口。"""
-    # OAuth 子命令：pi-python login / logout / list（在 argparse 之前拦截，
-    # 避免 "login" 被当作位置参数 message 解析）。
+    # OAuth 子命令：pi-python login / logout / list / auth print-*（在 argparse
+    # 之前拦截，避免 "login" 被当作位置参数 message 解析）。
     effective_args = args if args is not None else sys.argv[1:]
-    if effective_args and effective_args[0] in ("login", "logout", "list"):
+    if effective_args and effective_args[0] in ("login", "logout", "list", "auth"):
         return await _run_auth_command(effective_args)
 
     parser = _create_parser()
@@ -604,8 +607,87 @@ async def _run_auth_command(args: list[str]) -> int:
     if command == "logout":
         provider_id = args[1] if len(args) > 1 else None
         return await _auth_logout(provider_id)
+    if command == "auth":
+        if len(args) > 1 and args[1] in ("print-api-key", "print-bearer-token"):
+            return await _auth_print(args[1], args[2:])
+        print(
+            'Unknown auth command. Use "pi auth print-api-key" or "pi auth print-bearer-token".',
+            file=sys.stderr,
+        )
+        return 1
     print(f"Unknown auth command: {command}", file=sys.stderr)
     return 1
+
+
+async def _auth_print(kind: str, args: list[str]) -> int:
+    """pi auth print-api-key / print-bearer-token：单行打印解析后的凭证。
+
+    对齐 TS cli/credential-print.ts：解析 --provider/--model/--min-expiry，
+    经 ModelRuntime.getAuth 刷新并打印凭证（bearer token 默认 30 分钟最小有效期）。
+    """
+    provider: str | None = None
+    model: str | None = None
+    min_expiry_ms: int | None = None
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg == "--provider" and index + 1 < len(args):
+            provider = args[index + 1]
+            index += 2
+        elif arg == "--model" and index + 1 < len(args):
+            model = args[index + 1]
+            index += 2
+        elif arg == "--min-expiry":
+            if kind != "bearer_token":
+                print(
+                    "Error: --min-expiry is only supported by print-bearer-token", file=sys.stderr
+                )
+                return 1
+            if index + 1 >= len(args):
+                print("Error: --min-expiry must use a duration such as 30m or 1h", file=sys.stderr)
+                return 1
+            match = re.match(r"^(\d+)(ms|s|m|h)$", args[index + 1])
+            if not match:
+                print("Error: --min-expiry must use a duration such as 30m or 1h", file=sys.stderr)
+                return 1
+            min_expiry_ms = (
+                int(match.group(1))
+                * {
+                    "ms": 1,
+                    "s": 1000,
+                    "m": 60_000,
+                    "h": 3_600_000,
+                }[match.group(2)]
+            )
+            index += 2
+        else:
+            print(f"Error: Unknown argument '{arg}'", file=sys.stderr)
+            return 1
+
+    if not model:
+        print("Error: Credential printing requires --model <model>", file=sys.stderr)
+        return 1
+
+    runtime = await _create_runtime()
+    resolved = resolve_cli_model(cli_provider=provider, cli_model=model, model_runtime=runtime)
+    if resolved.model is None or resolved.error:
+        print(
+            f"Error: {resolved.error or 'Unable to resolve the requested provider/model'}",
+            file=sys.stderr,
+        )
+        return 1
+    target_model = resolved.model
+
+    overrides: Any = {"min_oauth_validity_ms": min_expiry_ms} if min_expiry_ms is not None else None
+    auth = await runtime.get_auth(target_model, overrides=overrides)
+    if auth is None or not auth.auth.get("api_key"):
+        print(
+            f"Error: No credential configured for provider '{target_model.provider}'",
+            file=sys.stderr,
+        )
+        return 1
+    print(auth.auth["api_key"])
+    return 0
 
 
 async def _auth_list() -> int:
