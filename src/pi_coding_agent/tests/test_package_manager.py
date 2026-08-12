@@ -65,6 +65,51 @@ def test_parse_source_rejects_unsafe_inputs() -> None:
 
 
 @pytest.mark.asyncio
+async def test_git_install_clones_local_repo(tmp_path) -> None:
+    """git 源真实 clone（本地仓库，无网络）。"""
+    import subprocess
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    repo = tmp_path / "upstream"
+    repo.mkdir()
+    (repo / "main.py").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "init"],
+        cwd=repo,
+        check=True,
+    )
+
+    settings = _FakeSettings({}, {})
+    manager = _manager(tmp_path, settings)
+    await manager.install_and_persist(f"git:{repo}", local=False)
+
+    installed = manager._installed_path(f"git:{repo}", "user")
+    assert (installed / "main.py").exists()
+    assert settings.get_global_settings()["packages"] == [f"git:{repo}"]
+
+
+@pytest.mark.asyncio
+async def test_install_missing_local_path_raises(tmp_path) -> None:
+    manager = _manager(tmp_path)
+    with pytest.raises(RuntimeError):
+        await manager.install(str(tmp_path / "does-not-exist"), local=False)
+
+
+@pytest.mark.asyncio
+async def test_install_single_file_copy(tmp_path) -> None:
+    """local 源为单文件时复制到包目录。"""
+    source = tmp_path / "tool.py"
+    source.write_text("print(1)", encoding="utf-8")
+    manager = _manager(tmp_path)
+    await manager.install(str(source), local=False)
+    installed = manager._installed_path(str(source), "user")
+    assert (installed / "tool.py").exists()
+
+
+@pytest.mark.asyncio
 async def test_git_clone_uses_double_dash_separator(tmp_path, monkeypatch) -> None:
     """以 - 开头的 git URL 不当作选项（-- 分隔注入回归）。"""
     import pi_coding_agent.package_manager as pm
