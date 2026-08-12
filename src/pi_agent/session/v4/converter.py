@@ -1,6 +1,6 @@
 """v3 → v4 会话惰性迁移（对齐 `session-v4-migration-plan.md` M2）。
 
-读取 v3 JSONL（`pi_agent/session/jsonl.py`），转换为 v4 mutation 序列并
+读取 v3 JSONL（`pi_agent/session/v4/v3_reader.py`），转换为 v4 mutation 序列并
 原子写回同一路径；原文件保留为 `<path>.bak`，转换失败不触碰原文件。
 """
 
@@ -13,16 +13,16 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
-from ..jsonl import JsonlSessionStorage as V3JsonlSessionStorage
-from ..types import (
+from .v3_reader import (
     BranchSummaryEntry as V3BranchSummaryEntry,
     CompactionEntry as V3CompactionEntry,
     CustomEntry as V3CustomEntry,
     CustomMessageEntry as V3CustomMessageEntry,
+    JsonlSessionStorage as V3JsonlSessionStorage,
     LabelEntry as V3LabelEntry,
     MessageEntry as V3MessageEntry,
-    SessionInfoEntry as V3SessionInfoEntry,
     SessionError as V3SessionError,
+    SessionInfoEntry as V3SessionInfoEntry,
     SessionTreeEntry as V3SessionTreeEntry,
 )
 from .codec import encode_header, encode_mutation, invalid_file

@@ -144,14 +144,14 @@ class Session:
         return await self._storage.get_stats()
 
     async def get_session_stats(self) -> SessionStats:
-        """v3 兼容别名。"""
+        """兼容别名。"""
         return await self.get_stats()
 
     async def get_name(self) -> str | None:
         return await self._storage.get_name()
 
     async def get_session_name(self) -> str | None:
-        """v3 兼容别名。"""
+        """兼容别名。"""
         return await self.get_name()
 
     async def set_name(self, name: str) -> None:
@@ -211,7 +211,7 @@ class Session:
         return await self.append_custom_entry_to_lane("main", custom_type, data)
 
     async def get_branch(self, from_id: str | None = None) -> list[Entry]:
-        """根到节点（默认 leaf）的路径，oldest-first（v3 兼容入口）。"""
+        """根到节点（默认 leaf）的路径，oldest-first（兼容入口）。"""
         start = from_id
         if start is None:
             start = await self.get_leaf_id()
@@ -227,7 +227,7 @@ class Session:
     async def build_context(
         self, options: SessionContextBuildOptions | None = None
     ) -> SessionContext:
-        """把当前分支投影为 LLM 就绪上下文（v3 兼容入口）。"""
+        """把当前分支投影为 LLM 就绪上下文（兼容入口）。"""
         return build_session_context(await self.get_branch(), options)
 
     async def append_thinking_level_change(self, thinking_level: str) -> str:
@@ -327,12 +327,12 @@ class Session:
         return entry["id"]
 
     async def append_label(self, target_id: str, label: str | None) -> str:
-        """v3 兼容入口：label 在 v4 中是 fact，返回 target_id。"""
+        """兼容入口：label 在 v4 中是 fact，返回 target_id。"""
         await self.set_label(target_id, label)
         return target_id
 
     async def append_session_name(self, name: str) -> str:
-        """v3 兼容入口：会话名在 v4 中是 fact。"""
+        """兼容入口：会话名在 v4 中是 fact。"""
         sanitized = " ".join(str(name).splitlines()).strip()
         await self.set_name(sanitized)
         return ""
@@ -340,7 +340,7 @@ class Session:
     async def move_to(
         self, entry_id: str | None, summary: dict[str, Any] | None = None
     ) -> str | None:
-        """移动 main lane 到指定条目，可选附带 branch_summary（v3 兼容入口）。"""
+        """移动 main lane 到指定条目，可选附带 branch_summary（兼容入口）。"""
         if entry_id is not None and await self.get_entry(entry_id) is None:
             raise SessionError("not_found", f"Entry not found: {entry_id}")
         await self.move_lane("main", entry_id)

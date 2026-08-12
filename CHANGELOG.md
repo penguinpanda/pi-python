@@ -106,6 +106,9 @@
 - 会话运行时工厂固定走 v4：移除 `PI_SESSION_FORMAT=v3` 运行时回退，旧 v3
   文件由 v4 仓库始终惰性迁移；`pi_evals` harness 与 `pi_server` 会话工厂
   迁移到 v4
+- 移除旧 v3 会话实现（`session.py` / `memory.py` / `repo.py` / `search.py` /
+  `types.py` / `jsonl.py`）；v3 读取器收拢为 `pi_agent.session.v4.v3_reader`，
+  仅用于惰性迁移
 - Azure OpenAI Responses 默认 `apiVersion` 对齐 TS `v1`（`AZURE_OPENAI_API_VERSION` 可覆盖）
 - `AgentHarness` 公开 API  legacy（0.84.0 之前）：`models: Models` + `session: Session`
   必填并移除 `stream_fn`；新增 `request_shutdown()` / `wait_for_shutdown()`、
