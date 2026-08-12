@@ -19,11 +19,30 @@ from typing import Any, Awaitable, Callable, cast
 
 from pi_ai.models.models_store import model_to_dict
 from pi_ai.types.common import ModelThinkingLevel
+from pi_ai.types.content import ImageContent
 
 from .._session import AgentSession
 from ..model_runtime import ModelRuntime
 from .jsonl import serialize_json_line
 from .rpc_types import error_response, success_response
+
+
+def _parse_images(raw: Any) -> list[ImageContent] | None:
+    """解析 RPC images 字段 → ImageContent 列表（对齐 TS ImageContent[] 直传）。"""
+    if not isinstance(raw, list) or not raw:
+        return None
+    images: list[ImageContent] = []
+    for item in raw:
+        if isinstance(item, dict) and item.get("type") == "image":
+            images.append(
+                ImageContent(
+                    type="image",
+                    url=item.get("url"),
+                    data=item.get("data"),
+                    mime_type=item.get("mime_type"),
+                )
+            )
+    return images or None
 
 
 def _content_text(content) -> str:
@@ -409,10 +428,11 @@ class RpcMessageHandler:
         message = cmd.get("message")
         if not isinstance(message, str) or not message.strip():
             return error_response(command_id, "prompt", "Message is required")
+        images = _parse_images(cmd.get("images"))
 
         async def _run() -> None:
             try:
-                await self.session.prompt(message)
+                await self.session.prompt(message, images or None)
             except Exception:
                 pass  # 失败通过事件流呈现（stop_reason=error）
 
@@ -425,14 +445,16 @@ class RpcMessageHandler:
         message = cmd.get("message")
         if not isinstance(message, str) or not message.strip():
             return error_response(command_id, "steer", "Message is required")
-        self.session.steer(message)
+        images = _parse_images(cmd.get("images"))
+        self.session.steer(message, images)
         return success_response(command_id, "steer")
 
     async def _handle_follow_up(self, cmd: dict, command_id: str | None) -> dict:
         message = cmd.get("message")
         if not isinstance(message, str) or not message.strip():
             return error_response(command_id, "follow_up", "Message is required")
-        self.session.follow_up(message)
+        images = _parse_images(cmd.get("images"))
+        self.session.follow_up(message, images)
         return success_response(command_id, "follow_up")
 
     async def _handle_abort(self, _cmd: dict, command_id: str | None) -> dict:
@@ -881,6 +903,30 @@ async def run_rpc_mode(
 
     rebind()
 
+    # 扩展错误通知（对齐 TS rpc-mode.ts extension_error 输出）。
+    extension_error_unsub: Callable[[], None] | None = None
+
+    def rebind_extension_errors() -> None:
+        nonlocal extension_error_unsub
+        if extension_error_unsub is not None:
+            extension_error_unsub()
+            extension_error_unsub = None
+        runner = handler.session.extension_runner
+        if runner is None:
+            return
+        extension_error_unsub = runner.on_error(
+            lambda err: output(
+                {
+                    "type": "extension_error",
+                    "extensionPath": err.extension_path,
+                    "event": err.event,
+                    "error": err.error,
+                }
+            )
+        )
+
+    rebind_extension_errors()
+
     async def handle_line(line: str) -> None:
         if not line.strip():
             return
@@ -907,6 +953,7 @@ async def run_rpc_mode(
         # new_session 替换会话后重新绑定事件转发。
         if session is not handler.session:
             rebind()
+            rebind_extension_errors()
 
     writer_task = asyncio.create_task(_writer_loop())
     try:
@@ -927,6 +974,8 @@ async def run_rpc_mode(
             await asyncio.gather(*list(handler._prompt_tasks), return_exceptions=True)
         if unsubscribe is not None:
             unsubscribe()
+        if extension_error_unsub is not None:
+            extension_error_unsub()
         for created in list(handler.created_sessions):
             try:
                 await created.dispose()

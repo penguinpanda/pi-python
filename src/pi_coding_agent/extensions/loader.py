@@ -166,13 +166,27 @@ class ExtensionLoader:
             )
         return extension, None
 
-    async def load(self, explicit_paths: list[str] | None = None) -> LoadExtensionsResult:
-        """发现并加载全部扩展，返回结果（错误不中断其它扩展）。"""
+    async def load(
+        self, explicit_paths: list[str] | None = None, *, discover: bool = True
+    ) -> LoadExtensionsResult:
+        """发现并加载全部扩展，返回结果（错误不中断其它扩展）。
+
+        discover=False 时跳过项目/全局发现，只加载显式路径（对齐 TS --no-extensions）。
+        """
         runtime = ExtensionRuntime()
         event_bus = EventBus()
         extensions: list[Extension] = []
         errors: list[ExtensionError] = []
-        for path in self.discover_all(explicit_paths):
+        if discover:
+            paths = self.discover_all(explicit_paths)
+        else:
+            paths = [Path(p) for p in (explicit_paths or [])]
+        seen: set[str] = set()
+        for path in paths:
+            resolved = str(path.resolve())
+            if resolved in seen:
+                continue
+            seen.add(resolved)
             extension, error = await self.load_extension(path, runtime, event_bus)
             if error is not None:
                 errors.append(error)

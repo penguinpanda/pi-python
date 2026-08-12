@@ -821,10 +821,13 @@ async def _stream_assistant_response(
     # 2. convertToLlm（必须）
     llm_messages = config.convert_to_llm(agent_messages)
 
-    # 3. get_api_key（可选）
+    # 3. get_api_key（可选，支持同步 / 异步回调，对齐 TS Promise<string|undefined>）
     api_key: str | None = None
     if config.get_api_key is not None:
-        api_key = config.get_api_key(config.model.provider)
+        raw_key = config.get_api_key(config.model.provider)
+        if asyncio.iscoroutine(raw_key):
+            raw_key = await raw_key
+        api_key = raw_key
 
     # 4. 构建 LLM context
     from pi_ai import Context as LlmContext

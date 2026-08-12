@@ -94,6 +94,10 @@ async def _load_template_from_file(
         diagnostics.append(PromptTemplateDiagnostic("parse_failed", str(error), file_path))
         return None, diagnostics
     description = frontmatter.get("description")
+    if not isinstance(description, str) or not description:
+        # 对齐 TS：frontmatter 缺 description 时取正文首行（截 60 字符）。
+        first_line = next((line.strip() for line in body.split("\n") if line.strip()), "")
+        description = first_line[:60] + ("..." if len(first_line) > 60 else "")
     name = frontmatter.get("name")
     if not isinstance(name, str) or not name:
         base = _basename(file_path)
@@ -101,7 +105,7 @@ async def _load_template_from_file(
     return {
         "name": name,
         "content": body,
-        "description": description if isinstance(description, str) else None,
+        "description": description,
     }, diagnostics
 
 

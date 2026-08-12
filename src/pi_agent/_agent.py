@@ -300,6 +300,11 @@ class Agent:
         if self._abort is not None:
             self._abort.set()
 
+    @property
+    def signal(self) -> asyncio.Event | None:
+        """当前运行的中止信号（无运行时为 None；对齐 TS Agent.signal）。"""
+        return self._abort
+
     def subscribe(
         self,
         listener: AgentListener,

@@ -304,17 +304,22 @@ def _to_google_contents(context: Context, model: Any) -> list[dict[str, Any]]:
     return contents
 
 
-def _to_google_tools(context: Context) -> list[dict[str, Any]] | None:
+def _to_google_tools(context: Context, use_parameters: bool = False) -> list[dict[str, Any]] | None:
     if not context.tools:
         return None
-    declarations = [
-        {
+    # 对齐 TS convertTools：默认 parametersJsonSchema（完整 JSON Schema），
+    # use_parameters=True 时使用 legacy parameters（OpenAPI 3.03）。
+    declarations = []
+    for tool in context.tools:
+        declaration: dict[str, Any] = {
             "name": tool.name,
             "description": tool.description,
-            "parameters": tool.input_schema,
         }
-        for tool in context.tools
-    ]
+        if use_parameters:
+            declaration["parameters"] = tool.input_schema
+        else:
+            declaration["parametersJsonSchema"] = tool.input_schema
+        declarations.append(declaration)
     return [{"functionDeclarations": declarations}]
 
 

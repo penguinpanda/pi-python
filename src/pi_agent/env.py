@@ -210,6 +210,10 @@ class FileSystem(Protocol):
 
     async def remove(self, path: str, options: dict[str, Any] | None = None) -> Result: ...
 
+    async def rename_file(
+        self, source_path: str, destination_path: str, signal: asyncio.Event | None = None
+    ) -> Result: ...
+
     async def create_temp_dir(
         self, prefix: str = "tmp-", signal: asyncio.Event | None = None
     ) -> Result: ...
@@ -485,6 +489,21 @@ class PythonExecutionEnv:
             return (True, None)
         except BaseException as error:
             return (False, to_file_error(error, resolved))
+
+    async def rename_file(
+        self, source_path: str, destination_path: str, signal: asyncio.Event | None = None
+    ) -> Result:
+        """原子重命名文件（对齐 TS env/nodejs.ts renameFile）。"""
+        aborted = self._aborted(signal)
+        if aborted:
+            return aborted
+        source = self._resolve_path(source_path)
+        destination = self._resolve_path(destination_path)
+        try:
+            await asyncio.to_thread(Path(source).replace, Path(destination))
+            return (True, None)
+        except BaseException as error:
+            return (False, to_file_error(error, source))
 
     async def create_temp_dir(
         self, prefix: str = "tmp-", signal: asyncio.Event | None = None

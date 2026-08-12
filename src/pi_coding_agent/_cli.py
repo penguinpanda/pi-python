@@ -151,9 +151,43 @@ async def _async_main(args: list[str] | None = None) -> int:
     runtime = await _create_runtime()
     set_agent_stream_fn(runtime.stream)
 
-    # --list-models: 列出所有可用模型后直接退出（支持 --provider 过滤）
-    if parsed.list_models:
-        return _print_models(runtime, provider_id=parsed.provider)
+    # --api-key：运行时 API key 覆盖（对齐 TS main.ts setRuntimeApiKey）。
+    if parsed.api_key:
+        if not parsed.provider:
+            print(
+                "Error: --api-key requires a provider via --provider",
+                file=sys.stderr,
+            )
+            return 1
+        await runtime.set_runtime_api_key(parsed.provider, parsed.api_key)
+
+    # --list-models: 列出所有可用模型后直接退出（支持 --provider 过滤与模糊搜索）
+    if parsed.list_models is not None:
+        return _print_models(
+            runtime, provider_id=parsed.provider, search=parsed.list_models or None
+        )
+
+    # --export: 导出会话 HTML 后退出（对齐 TS main.ts --export <in> [out]）
+    if parsed.export:
+        try:
+            from .export_html import export_session_to_html
+
+            export_manager = await open_session_manager(parsed.export)
+            try:
+                out_path = parsed.message[0] if parsed.message else None
+                result = export_session_to_html(
+                    export_manager,
+                    out_path or str(Path(parsed.export).with_suffix(".html")),
+                )
+                print(f"Exported to: {result}")
+                return 0
+            finally:
+                close = getattr(export_manager, "close", None)
+                if close is not None:
+                    await close()
+        except Exception as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
 
     # 会话 flags 冲突校验（对齐 TS validateForkFlags / validateSessionIdFlags）
     if parsed.fork and (
@@ -333,7 +367,10 @@ async def _async_main(args: list[str] | None = None) -> int:
         project_dir=project_extensions_dir,
         cwd=cwd,
     )
-    extension_result = await extension_loader.load(explicit_paths=parsed.extensions)
+    extension_result = await extension_loader.load(
+        explicit_paths=parsed.extensions,
+        discover=not parsed.no_extensions,
+    )
     for error in extension_result.errors:
         message = error.error.replace("\n", " ")
         print(f"Warning: {message} ({error.extension_path})", file=sys.stderr)
@@ -409,6 +446,8 @@ async def _async_main(args: list[str] | None = None) -> int:
     session = build_session(session_manager, model, scoped_models)
     if preset is not None and isinstance(preset.get("thinking"), str):
         session.set_thinking_level(preset["thinking"])
+    if parsed.thinking:
+        session.set_thinking_level(parsed.thinking)
 
     async def session_factory() -> AgentSession:
         fresh_manager = await create_session_manager(cwd)
@@ -470,6 +509,7 @@ async def _async_main(args: list[str] | None = None) -> int:
             needs_trust_decision=needs_trust_decision,
             no_context_files=parsed.no_context_files,
             startup_resources=startup_resources,
+            ui_mode=parsed.tui_mode or None,
         )
 
     # 运行 print 模式
@@ -662,7 +702,13 @@ def _create_parser() -> argparse.ArgumentParser:
         type=str,
         help="Comma-separated model scope list for cycling (e.g., 'deepseek-v4-flash,openai/gpt-5-chat-latest')",
     )
-    p.add_argument("--list-models", action="store_true", help="List all available models and exit")
+    p.add_argument(
+        "--list-models",
+        nargs="?",
+        const="",
+        type=str,
+        help="List all available models and exit (optional fuzzy-search argument)",
+    )
 
     # 系统提示
     p.add_argument("--system-prompt", type=str, help="Override system prompt")
@@ -737,6 +783,26 @@ def _create_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable prompt template discovery",
     )
+    p.add_argument("--api-key", type=str, help="Runtime API key override for the resolved provider")
+    p.add_argument("--thinking", type=str, help="Thinking level for the session")
+    p.add_argument(
+        "--no-extensions",
+        "-ne",
+        action="store_true",
+        help="Disable extension discovery (explicit -e paths still load)",
+    )
+    p.add_argument(
+        "--tui-mode",
+        choices=["regular", "fullscreen"],
+        default=None,
+        help="TUI render mode",
+    )
+    p.add_argument(
+        "--export",
+        type=str,
+        metavar="SESSION_FILE",
+        help="Export a session to standalone HTML and exit (output path via message arg)",
+    )
     p.add_argument(
         "--preset",
         type=str,
@@ -793,10 +859,13 @@ def _allow_model_network() -> bool:
     return os.environ.get("PI_OFFLINE", "").lower() not in ("1", "true", "yes")
 
 
-def _print_models(runtime: ModelRuntime, provider_id: str | None = None) -> int:
+def _print_models(
+    runtime: ModelRuntime, provider_id: str | None = None, search: str | None = None
+) -> int:
     """列出 Provider 及其模型与能力。
 
     provider_id 非空时只列该 Provider；不存在则返回 1。
+    search 非空时按模型 ID/名称模糊过滤（对齐 TS --list-models [search]）。
 
     Returns:
         0: 成功；1: provider 不存在
@@ -810,9 +879,15 @@ def _print_models(runtime: ModelRuntime, provider_id: str | None = None) -> int:
     else:
         providers = runtime.get_providers()
 
+    search_lower = search.strip().lower() if search else None
     for provider in providers:
+        models = provider.get_models()
+        if search_lower:
+            models = [
+                m for m in models if search_lower in m.id.lower() or search_lower in m.name.lower()
+            ]
         print(f"{provider.name} ({provider.id}):")
-        for m in provider.get_models():
+        for m in models:
             labels: list[str] = []
             if m.reasoning:
                 labels.append("thinking")

@@ -35,7 +35,7 @@ from pi_agent import (
 )
 from pi_agent._agent import _default_convert_to_llm as _agent_default_convert_to_llm
 from pi_agent.shell_output import execute_shell_with_capture
-from pi_ai import AssistantMessage, DeferredHandle, Model, Usage, UserMessage, now_ms
+from pi_ai import AssistantMessage, DeferredHandle, Model, TextContent, Usage, UserMessage, now_ms
 from pi_ai.api._shared import empty_usage
 from pi_ai.types.common import ModelThinkingLevel, ThinkingLevel
 from pi_ai.utils.estimate import calculate_context_tokens
@@ -730,13 +730,19 @@ class AgentSession:
         self._agent.state.system_prompt = prompt
         return prompt
 
-    def steer(self, text: str) -> None:
-        """入队一条 steering 消息（Agent 运行中注入）。"""
-        self._agent.steer(UserMessage(role="user", content=text, timestamp=now_ms()))
+    def steer(self, text: str, images: list | None = None) -> None:
+        """入队一条 steering 消息（Agent 运行中注入；images 附到消息内容）。"""
+        content: list = [TextContent(type="text", text=text)]
+        if images:
+            content.extend(images)
+        self._agent.steer(UserMessage(role="user", content=content, timestamp=now_ms()))
 
-    def follow_up(self, text: str) -> None:
+    def follow_up(self, text: str, images: list | None = None) -> None:
         """入队一条 follow-up 消息（Agent 即将停止时继续）。"""
-        self._agent.follow_up(UserMessage(role="user", content=text, timestamp=now_ms()))
+        content: list = [TextContent(type="text", text=text)]
+        if images:
+            content.extend(images)
+        self._agent.follow_up(UserMessage(role="user", content=content, timestamp=now_ms()))
 
     def get_last_assistant_text(self) -> str | None:
         """返回最后一条 assistant 消息的纯文本。"""

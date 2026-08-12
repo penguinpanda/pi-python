@@ -16,7 +16,7 @@ pi_ai.types.model — 模型元数据（Model）与成本。
 
 from dataclasses import dataclass, field
 
-from typing import Literal, TypeAlias
+from typing import Any, Literal, TypeAlias
 
 from .compat import ModelCompat
 from .common import ThinkingLevelMap
@@ -90,6 +90,9 @@ class Model:
     compat: ModelCompat | None = None  # 各 API 的兼容配置
     thinking_level_map: ThinkingLevelMap | None = None  # pi 思考级别 -> provider 值映射
     reasoning: bool = False  # 是否支持推理（Thinking）
+    # 模型默认采样参数（对齐 TS Model.samplingParams）：每请求 sampling_params
+    # 逐键覆盖。如 {"top_p": 0.9, "repetition_penalty": 1.1}。
+    sampling_params: dict[str, Any] = field(default_factory=dict)
     deprecated: bool = False  # 已下架/停售标记（保留以兼容旧会话）
 
 

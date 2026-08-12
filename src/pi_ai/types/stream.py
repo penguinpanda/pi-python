@@ -216,6 +216,10 @@ class StreamOptions(TypedDict, total=False):
     # 交由上层重试逻辑处理。
     max_retry_delay_ms: int
 
+    # 每请求采样参数（对齐 TS StreamOptions.samplingParams）：逐键覆盖
+    # Model.samplingParams，由各 API 实现翻译为协议字段（top_p / min_p 等）。
+    sampling_params: NotRequired[dict[str, Any]]
+
     # 可选的中止信号（asyncio.Event）。
     #
     # 支持流式中止的 Provider（例如 Faux Provider）
