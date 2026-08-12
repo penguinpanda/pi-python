@@ -7,6 +7,7 @@ import inspect
 import json
 import os
 import re
+import signal
 import sys
 import time
 from pathlib import Path
@@ -2256,6 +2257,39 @@ class PiTuiApp(App):
     # ------------------------------------------------------------------
     # 内部
     # ------------------------------------------------------------------
+
+    def action_suspend(self) -> None:
+        """Ctrl+Z 挂起到后台（对齐 TS handleCtrlZ；POSIX only）。"""
+        if sys.platform == "win32":
+            self._notify("Suspend to background is not supported on Windows")
+            return
+        loop = asyncio.get_running_loop()
+
+        def _ignore_sigint(_signum, _frame) -> None:
+            pass
+
+        def _on_resume() -> None:
+            # SIGCONT：恢复终端并重绘。
+            try:
+                loop.remove_signal_handler(signal.SIGCONT)
+            except ValueError:
+                pass
+            signal.signal(signal.SIGINT, signal.default_int_handler)
+            loop.create_task(self._restore_after_suspend())
+
+        async def _suspend() -> None:
+            # 退出 raw/alt-screen 后挂起进程；挂起期间忽略 SIGINT
+            # （避免后台进程被 Ctrl+C 杀掉），SIGCONT 时恢复。
+            await self.terminal.exit(alt_screen=(self.ui_mode == "fullscreen"))
+            signal.signal(signal.SIGINT, _ignore_sigint)
+            loop.add_signal_handler(signal.SIGCONT, _on_resume)
+            os.kill(os.getpid(), signal.SIGTSTP)
+
+        self._run_task(_suspend())
+
+    async def _restore_after_suspend(self) -> None:
+        await self.terminal.enter(alt_screen=(self.ui_mode == "fullscreen"))
+        self.request_render()
 
     async def _handle_event(self, event: KeyEvent) -> None:
         was_resize = event.type == "resize"

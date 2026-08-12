@@ -47,8 +47,8 @@ class TestKeybindingsManager:
 
     def test_load_from_settings_ignores_unknown(self):
         manager = KeybindingsManager()
-        manager.load_from_settings({"keybindings": {"app.nope": "ctrl+z"}})
-        assert manager.resolve("ctrl+z") is None
+        manager.load_from_settings({"keybindings": {"app.nope": "ctrl+f9"}})
+        assert manager.resolve("ctrl+f9") is None
 
     def test_all_bindings_actions(self):
         manager = KeybindingsManager()

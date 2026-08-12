@@ -7,6 +7,7 @@ settings.json 的 `keybindings` 节覆盖（单键字符串 / 多键数组 / Non
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from typing import Any
 
@@ -70,6 +71,12 @@ DEFAULT_APP_KEYBINDINGS: dict[str, Keybinding] = {
     ),
     "app.session.new": Keybinding(
         "ctrl+n", "app.session.new", "new_session", "Start a new session"
+    ),
+    "app.suspend": Keybinding(
+        "" if sys.platform == "win32" else "ctrl+z",
+        "app.suspend",
+        "suspend",
+        "Suspend to background",
     ),
     "app.session.resume": Keybinding(
         "ctrl+r", "app.session.resume", "resume_session", "Resume a session"
