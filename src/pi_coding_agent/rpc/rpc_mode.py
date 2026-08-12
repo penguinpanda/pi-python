@@ -667,24 +667,46 @@ class RpcMessageHandler:
         command = cmd.get("command")
         if not isinstance(command, str) or not command.strip():
             return error_response(command_id, "bash", "Command is required")
+        exclude_from_context = bool(cmd.get("excludeFromContext"))
         try:
-            from pi_agent import PythonExecutionEnv, ShellExecOptions
+            # 扩展 user_bash 事件（对齐 TS emitUserBash）：扩展可返回 result 直接采用。
+            runner = self.session.extension_runner
+            if runner is not None:
+                event_results = await runner.emit_event(
+                    "user_bash",
+                    {
+                        "command": command,
+                        "excludeFromContext": exclude_from_context,
+                        "cwd": self.session.cwd,
+                    },
+                )
+                for candidate in reversed(event_results):
+                    if isinstance(candidate, dict) and candidate.get("result") is not None:
+                        extension_result = candidate["result"]
+                        self.session.record_bash_result(
+                            command,
+                            extension_result,
+                            exclude_from_context=exclude_from_context,
+                        )
+                        return success_response(command_id, "bash", extension_result)
 
-            env = PythonExecutionEnv(cwd=self.session.cwd)
-            ok, result = await env.exec(command, ShellExecOptions(timeout=120))
-            if not ok:
-                return error_response(command_id, "bash", str(result))
+            # 经 session 执行（对齐 TS session.executeBash：记录历史并进入上下文）。
+            result = await self.session.execute_bash(
+                command,
+                exclude_from_context=exclude_from_context,
+                timeout=120,
+            )
+            return success_response(
+                command_id,
+                "bash",
+                {
+                    "output": result.output,
+                    "exit_code": result.exit_code,
+                    "canceled": result.cancelled,
+                },
+            )
         except Exception as exc:
             return error_response(command_id, "bash", str(exc))
-        return success_response(
-            command_id,
-            "bash",
-            {
-                "output": (cast(Any, result).stdout or "") + (cast(Any, result).stderr or ""),
-                "exit_code": cast(Any, result).exit_code,
-                "canceled": False,
-            },
-        )
 
     async def _handle_abort_bash(self, _cmd: dict, command_id: str | None) -> dict:
         # 当前 bash 同步执行（无跟踪进程），no-op 成功。

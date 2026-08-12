@@ -729,3 +729,34 @@ async def test_new_session_parent_session_fork(tmp_path, monkeypatch):
     assert received[0].session_id != parent.session_id
     metadata = await received[0]._session.get_metadata()
     assert metadata.get("parentSessionId") == parent.session_id
+
+
+@pytest.mark.asyncio
+async def test_bash_command_uses_session_and_exclude_from_context(tmp_path):
+    """RPC bash 经 session.executeBash 执行并透传 excludeFromContext。"""
+    from types import SimpleNamespace
+
+    runtime = _make_runtime()
+    handler = _make_handler(runtime, tmp_path)
+    calls: list = []
+
+    class _FakeSession:
+        cwd = str(tmp_path)
+        extension_runner = None
+
+        async def execute_bash(self, command, on_chunk=None, *, exclude_from_context=False, **kw):
+            calls.append((command, exclude_from_context))
+            return SimpleNamespace(
+                output="out", exit_code=0, cancelled=False, truncated=False, full_output_path=None
+            )
+
+        def record_bash_result(self, command, result, *, exclude_from_context=False):
+            calls.append(("record", command, exclude_from_context))
+
+    handler.session = _FakeSession()
+    response = await handler.handle_command(
+        {"type": "bash", "command": "echo hi", "excludeFromContext": True}
+    )
+    assert response["success"] is True
+    assert response["data"]["output"] == "out"
+    assert ("echo hi", True) in calls
