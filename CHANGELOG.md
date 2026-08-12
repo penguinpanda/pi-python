@@ -165,6 +165,14 @@
   `mermaidRenderingMode` 设置
 - SDK 导出 `AgentSessionRuntime`（session/cwd/diagnostics 访问器 +
   `set_rebind_session`）
+- 差距审查后续批次：`pi list` 路由到包列表（auth 列表移至 `pi auth list`）、
+  `pi config` 只读视图、`pi update --models` 目录刷新、CLI `--name` 会话命名、
+  `--mode text/json` TS 命名别名；RPC prompt preflight 语义（提交成功才发
+  success，失败发 error，对齐 TS preflightResult）
+- OAuth loopback 安全/资源修复：每次登录独立回调状态与幂等关闭（OpenRouter）、
+  回调与手动粘贴并行竞争（Codex/OpenRouter/Radius，浏览器不可达不再挂起）、
+  state 校验、回调响应连接回收；包管理命令注入防护（npm/git `--` 分隔、
+  空源与路径逃逸拒绝、子进程超时）；远程目录 404/501 清空动态模型
 
 ### Changed
 
