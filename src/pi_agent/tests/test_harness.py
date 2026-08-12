@@ -31,9 +31,9 @@ from pi_agent._harness_types import (
     ToolCallResult,
     ToolResultPatch,
 )
-from pi_agent.session import InMemorySessionStorage
 from pi_agent._harness import AgentHarness
 from pi_agent._types import AgentTool, AgentToolResult, StreamFn
+from pi_agent.session.v4.memory import InMemorySessionRepo
 
 
 @pytest.mark.asyncio
@@ -90,7 +90,12 @@ def _make_models(*, responses: list | None = None, stream_fn=None) -> Models:
 
 
 def _make_session() -> Session:
-    return Session(InMemorySessionStorage())
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    repo = InMemorySessionRepo()
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(asyncio.run, repo.create({})).result()
 
 
 def _make_options(
@@ -626,7 +631,7 @@ class TestHarnessCompactNavigate:
         assert "## Goal" in result.summary
         entries = await harness._session.get_branch()
         assert entries[-1]["type"] == "compaction"
-        assert entries[-1].get("fromHook") is False
+        assert "fromHook" not in entries[-1]
         context = await harness._session.build_context()
         assert context["messages"][0]["role"] == "compactionSummary"
         assert compact_events and compact_events[-1]["from_hook"] is False
@@ -651,7 +656,7 @@ class TestHarnessCompactNavigate:
         entries = await harness._session.get_branch()
         assert entries[-1]["type"] == "compaction"
         assert entries[-1]["summary"] == "from hook"
-        assert entries[-1].get("fromHook") is True
+        assert "fromHook" not in entries[-1]
         assert compact_events and compact_events[-1]["from_hook"] is True
 
     @pytest.mark.asyncio
@@ -701,7 +706,7 @@ class TestHarnessCompactNavigate:
         assert result.cancelled is False
         assert result.summary_entry is not None
         assert result.summary_entry["type"] == "branch_summary"
-        assert result.summary_entry.get("fromHook") is False
+        assert "fromHook" not in result.summary_entry
         context = await harness._session.build_context()
         roles = [m.get("role") for m in context["messages"]]
         assert "branchSummary" in roles
@@ -733,7 +738,7 @@ class TestHarnessCompactNavigate:
         assert result.cancelled is False
         assert result.summary_entry is not None
         assert result.summary_entry["summary"] == "hook summary"
-        assert result.summary_entry.get("fromHook") is True
+        assert "fromHook" not in result.summary_entry
         context = await harness._session.build_context()
         assert any(m.get("role") == "branchSummary" for m in context["messages"])
 

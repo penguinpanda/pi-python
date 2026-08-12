@@ -109,9 +109,6 @@ from .session import (
     InMemorySessionStore,
     JsonlSessionStorage,
     JsonlSessionStore,
-    ScanningSessionSearch,
-    Session,
-    SessionError,
     SessionRepo,
     SessionStorage,
     SessionStore,
@@ -122,6 +119,9 @@ from .session import (
     create_jsonl_session_store,
     rebuild_session_search_index,
 )
+from .session.v4.search import ScanningSessionSearch
+from .session.v4.session import Session
+from .session.v4.types import SessionError
 from .skills import (
     format_skill_invocation,
     format_skills_for_system_prompt,

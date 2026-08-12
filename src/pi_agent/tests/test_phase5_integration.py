@@ -22,7 +22,8 @@ from pi_agent import (
     create_read_tool,
 )
 from pi_agent.compaction import DEFAULT_COMPACTION_SETTINGS, prepare_compaction
-from pi_agent.session import InMemorySessionStorage, create_jsonl_session_store
+from pi_agent.session.v4.memory import InMemorySessionRepo
+from pi_agent.session.v4.repo import JsonlSessionRepo
 
 
 def _make_model() -> Model:
@@ -54,7 +55,12 @@ def _make_models(*, responses: list | None = None, stream_fn=None) -> Models:
 
 
 def _make_session() -> Session:
-    return Session(InMemorySessionStorage())
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    repo = InMemorySessionRepo()
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(asyncio.run, repo.create({})).result()
 
 
 def _make_options(
@@ -205,8 +211,7 @@ class TestHarnessToolsIntegration:
 class TestCompactionCutPoint:
     @pytest.mark.asyncio
     async def test_split_turn_cut_point(self):
-        storage = InMemorySessionStorage()
-        session = Session(storage)
+        session = await InMemorySessionRepo().create({})
         # 大文本使估算 token 超过 keep_recent_tokens → 切割点落在历史中间
         for index in range(30):
             await session.append_message({"role": "user", "content": f"q{index}"})
@@ -226,14 +231,14 @@ class TestCompactionCutPoint:
 class TestJsonlPersistence:
     @pytest.mark.asyncio
     async def test_label_and_name_persist_across_reopen(self, tmp_path):
-        store = create_jsonl_session_store(str(tmp_path))
-        metadata = await store.create({"cwd": "/project"})
-        session = Session(await store.open(metadata))
+        repo = JsonlSessionRepo(str(tmp_path))
+        session = await repo.create({"cwd": "/project"})
+        metadata = await session.get_metadata()
         entry_id = await session.append_message({"role": "user", "content": "hello"})
         await session.append_label(entry_id, "important")
         await session.append_session_name("my project")
 
-        reopened = Session(await store.open(metadata))
+        reopened = await repo.open(metadata)
         assert await reopened.get_label(entry_id) == "important"
         assert await reopened.get_session_name() == "my project"
 

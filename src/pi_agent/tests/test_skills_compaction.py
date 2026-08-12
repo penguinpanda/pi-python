@@ -19,7 +19,11 @@ from pi_agent import (
     substitute_args,
 )
 from pi_agent.compaction import DEFAULT_COMPACTION_SETTINGS, compact
-from pi_agent.session import InMemorySessionStorage, Session
+from pi_agent.session.v4.memory import InMemorySessionRepo
+
+
+async def _make_v4_session():
+    return await InMemorySessionRepo().create({})
 
 
 def _make_model() -> Model:
@@ -134,8 +138,7 @@ class TestCompaction:
 
     @pytest.mark.asyncio
     async def test_prepare_compaction_small_history(self):
-        storage = InMemorySessionStorage()
-        session = Session(storage)
+        session = await _make_v4_session()
         await session.append_message(_user_message("q1"))
         await session.append_message(_assistant_with_usage("a1"))
         entries = await session.get_branch()
@@ -149,8 +152,7 @@ class TestCompaction:
 
     @pytest.mark.asyncio
     async def test_compact_generates_summary(self):
-        storage = InMemorySessionStorage()
-        session = Session(storage)
+        session = await _make_v4_session()
         await session.append_message(_user_message("Help me build a calculator"))
         await session.append_message(_assistant_with_usage("I built the calculator."))
         entries = await session.get_branch()
@@ -173,8 +175,7 @@ class TestCompaction:
 class TestBranchSummarization:
     @pytest.mark.asyncio
     async def test_collect_entries_and_generate(self):
-        storage = InMemorySessionStorage()
-        session = Session(storage)
+        session = await _make_v4_session()
         a_id = await session.append_message(_user_message("start"))
         await session.append_message(_assistant_with_usage("explore"))
         b_id = await session.append_message(_user_message("branch question"))
