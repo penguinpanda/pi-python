@@ -1076,8 +1076,19 @@ async def _create_runtime() -> ModelRuntime:
     """
     from pi_ai import create_default_models
     from pi_ai.models.models_store import FileModelsStore
+    from pi_coding_agent.remote_catalog_provider import with_remote_catalog
 
     providers = create_default_models().get_providers()
+    # 给内置静态 provider 叠加 pi.dev 远程目录 overlay（对齐 TS withRemoteCatalog）。
+    catalog_base_url = os.environ.get("PI_MODEL_CATALOG_BASE_URL", "")
+    for index, provider in enumerate(providers):
+        if getattr(provider, "refresh_models", None) is not None:
+            # 已有动态刷新逻辑的 provider（radius/cloudflare/ollama 等）跳过 overlay。
+            continue
+        providers[index] = with_remote_catalog(
+            provider,
+            catalog_base_url or "https://pi.dev",
+        )
     runtime = await ModelRuntime.create(
         providers=providers,
         auth_path=str(get_agent_dir() / "auth.json"),
