@@ -14,7 +14,7 @@ from pi_ai import Model, Models
 from pi_ai.providers.faux import faux_assistant_message, faux_provider
 
 from pi_coding_agent._session import AgentSession
-from pi_coding_agent._session_manager import SessionManager
+from pi_coding_agent._session_manager_v4 import in_memory_session_manager
 from pi_coding_agent.auth_storage import AuthStorage
 from pi_coding_agent.model_runtime import ModelRuntime
 from pi_protocol.framing import decode_frame, encode_frame, parse_server_message
@@ -40,7 +40,7 @@ def _runtime():
 
 
 def _session_factory(runtime):
-    def factory(cwd):
+    async def factory(cwd):
         model = runtime.get_model("faux", "faux-1")
         assert model is not None
         agent = Agent(
@@ -52,7 +52,7 @@ def _session_factory(runtime):
         )
         return AgentSession(
             agent=agent,
-            session_manager=SessionManager.in_memory(cwd=cwd),
+            session_manager=await in_memory_session_manager(cwd),
             cwd=cwd,
             model=model,
             model_runtime=runtime,
@@ -217,10 +217,10 @@ async def test_stdio_server_subprocess(tmp_path):
         "from pi_coding_agent.model_runtime import ModelRuntime\n"
         "from pi_agent import Agent, AgentOptions\n"
         "from pi_coding_agent._session import AgentSession\n"
-        "from pi_coding_agent._session_manager import SessionManager\n"
+        "from pi_coding_agent._session_manager_v4 import in_memory_session_manager\n"
         "from pi_server.handler import PiServer\n"
         "from pi_server.serve import run_stdio_server\n"
-        "def factory(cwd):\n"
+        "async def factory(cwd):\n"
         "    store = AuthStorage.in_memory()\n"
         "    models = Models(credentials=store)\n"
         "    core = faux_provider()\n"
@@ -229,7 +229,8 @@ async def test_stdio_server_subprocess(tmp_path):
         "    runtime = ModelRuntime(models, store)\n"
         "    model = runtime.get_model('faux', 'faux-1')\n"
         "    agent = Agent(AgentOptions(system_prompt='x', model=model, stream_fn=runtime.stream))\n"
-        "    return AgentSession(agent=agent, session_manager=SessionManager.in_memory(cwd=cwd), cwd=cwd, model=model, model_runtime=runtime)\n"
+        "    manager = await in_memory_session_manager(cwd)\n"
+        "    return AgentSession(agent=agent, session_manager=manager, cwd=cwd, model=model, model_runtime=runtime)\n"
         "async def main():\n"
         "    server = PiServer(session_factory=factory)\n"
         "    return await run_stdio_server(server)\n"

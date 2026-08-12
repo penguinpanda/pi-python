@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import time
 import uuid
 from typing import Any, Callable, Literal, cast
@@ -408,7 +409,8 @@ class PiServer:
     async def _cmd_create(self, command: CreateCommand):
         cwd = command.cwd or "."
         if self._session_factory is not None:
-            session = self._session_factory(cwd)
+            result = self._session_factory(cwd)
+            session = await result if inspect.isawaitable(result) else result
         else:
             session = await self._create_default_session(cwd)
         server_session = ServerSession(session, attached=True)
