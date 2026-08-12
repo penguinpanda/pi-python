@@ -161,10 +161,20 @@ def radius_provider(
 ) -> Provider:
     """Radius 网关 provider（对齐 TS radiusProvider）。"""
     normalized = normalize_radius_gateway_url(gateway)
+    from pi_ai.auth.oauth.radius import create_radius_oauth
+
+    class _RadiusAuth:
+        oauth = create_radius_oauth(normalized)
+        display_name = "Radius API key"
+        env_vars = ["RADIUS_API_KEY"]
+
+        def resolve(self, credential=None):  # type: ignore[no-untyped-def]
+            return EnvApiKeyAuth(self.display_name, self.env_vars).resolve(credential)
+
     return create_provider(
         id=provider_id,
         name=name,
-        auth=EnvApiKeyAuth(name, ["RADIUS_API_KEY"]),
+        auth=_RadiusAuth(),  # type: ignore[arg-type]
         models=[],
         api_kind="pi-messages",
         fetch_models=lambda context: _fetch_radius_models(provider_id, normalized, context),
