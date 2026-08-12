@@ -298,10 +298,18 @@ class TestAgentSettled:
         agent = Agent(AgentOptions(model=_make_model(), stream_fn=broken_stream_fn))
         agent.subscribe(lambda e, signal: events.append(e["type"]))
 
-        with pytest.raises(RuntimeError):
-            await agent.prompt("Hi")
+        # 对齐 TS runWithLifecycle：crash 被捕获并正常结束（不向调用方抛异常），
+        # settled 与合成 agent_end 照常发出，error_message 记录在 state，
+        # 且 state 末条为 error assistant 消息（下游 retry/compaction 可识别）。
+        await agent.prompt("Hi")
 
+        assert "agent_end" in events
         assert events[-1] == "agent_settled"
+        assert agent.state.error_message == "boom"
+        tail = agent.state.messages[-1]
+        assert tail.get("role") == "assistant"
+        assert tail.get("stop_reason") == "error"
+        assert tail.get("error_message") == "boom"
 
 
 class TestAgentMutualExclusion:

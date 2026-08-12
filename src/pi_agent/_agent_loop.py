@@ -284,6 +284,7 @@ from pi_ai.utils.retry import (
     RetryPolicy,
     retry_assistant_call,
 )
+from pi_ai.utils._background import track_background_task
 from pi_ai.utils._event_stream import EventStream
 from pi_ai.utils.validation import ValidationError, validate_arguments
 
@@ -426,8 +427,11 @@ async def run_agent_loop(
             stream_fn,
             new_messages=new_messages,
             first_turn=True,
+            shared_messages=messages,
         )
     except asyncio.CancelledError:
+        # messages 为共享列表：循环内追加的最新消息（含 aborted assistant
+        # 消息，由 _stream_assistant_response 回填）都在其中。
         await emit({"type": "agent_end", "messages": messages})
         raise
 
@@ -467,8 +471,10 @@ async def run_agent_loop_continue(
             stream_fn,
             new_messages=[],
             first_turn=True,
+            shared_messages=messages,
         )
     except asyncio.CancelledError:
+        # messages 为共享列表：循环内追加的最新消息都在其中。
         await emit({"type": "agent_end", "messages": messages})
         raise
 
@@ -507,7 +513,7 @@ def agent_loop(
         else:
             stream.end(messages)
 
-    asyncio.create_task(_run())
+    track_background_task(_run())
     return stream
 
 
@@ -542,7 +548,7 @@ def agent_loop_continue(
         else:
             stream.end(messages)
 
-    asyncio.create_task(_run())
+    track_background_task(_run())
     return stream
 
 
@@ -568,6 +574,7 @@ async def _run_loop(
     *,
     new_messages: list[AgentMessage] | None = None,
     first_turn: bool = True,
+    shared_messages: list[AgentMessage] | None = None,
 ) -> list[AgentMessage]:
     """双重嵌套循环（agent-loop.ts runLoop）。
 
@@ -583,8 +590,13 @@ async def _run_loop(
     3. 无更多工具调用且 steering / follow-up 队列均为空
     """
 
-    # 不直接使用 context.messages（Agent Loop 纯函数思想，避免外部引用被修改）
-    messages: list[AgentMessage] = list(context.messages)
+    # 默认复制 context.messages（Agent Loop 纯函数思想，避免外部引用被修改）；
+    # 传入 shared_messages 时使用该列表对象本身（run_agent_loop 传入其局部
+    # messages 副本），使取消时 agent_end 能携带循环内追加的最新消息
+    # （含 aborted assistant 消息，由 _stream_assistant_response 回填）。
+    messages: list[AgentMessage] = (
+        shared_messages if shared_messages is not None else list(context.messages)
+    )
     tools = list(context.tools) if context.tools else []
     loop_new_messages: list[AgentMessage] = list(new_messages) if new_messages is not None else []
     current_model = config.model
@@ -625,7 +637,7 @@ async def _run_loop(
 
             # -- 流式获取助手回复 --
             assistant_msg = await _stream_assistant_response(
-                turn_context, config, emit, signal, stream_fn
+                turn_context, config, emit, signal, stream_fn, aborted_sink=messages
             )
             messages.append(assistant_msg)
             loop_new_messages.append(assistant_msg)
@@ -711,7 +723,12 @@ async def _run_loop(
                     _update = cast(AgentLoopTurnUpdate, update)
                     if _update.context is not None:
                         context = _update.context
-                        messages = list(context.messages)
+                        if shared_messages is not None:
+                            # 保持共享引用，确保取消时 agent_end 仍携带最新消息。
+                            messages = shared_messages
+                            messages[:] = list(context.messages)
+                        else:
+                            messages = list(context.messages)
                         tools = list(context.tools) if context.tools else []
                     if _update.model is not None:
                         current_model = _update.model
@@ -759,6 +776,7 @@ async def _stream_assistant_response(
     emit: AgentEventSink,
     signal: asyncio.Event | None,
     stream_fn: StreamFn,
+    aborted_sink: list[AgentMessage] | None = None,
 ) -> AssistantMessage:
     """
     负责一次 LLM 推理过程。
@@ -938,10 +956,14 @@ async def _stream_assistant_response(
             final_stop_reason = "aborted"
             final_error_message = "Aborted"
             result = _finalize()
+            if aborted_sink is not None:
+                aborted_sink.append(result)
             await emit({"type": "message_end", "message": result})
             raise
-        except Exception:
+        except Exception as exc:
             # 意外异常：补发 error 的 message_end（保持现状）后向上传播。
+            final_stop_reason = "error"
+            final_error_message = str(exc)
             result = _finalize()
             await emit({"type": "message_end", "message": result})
             raise
@@ -1269,33 +1291,33 @@ async def _execute_tool_call(
         }
     )
 
-    try:
-        pending_updates: list[asyncio.Task] = []
+    pending_updates: list[asyncio.Task] = []
 
-        def _on_update(partial: AgentToolResult) -> None:
-            # 同步回调：调度 tool_execution_update 事件，执行后统一等待，
-            # 保证 update 事件先于 tool_execution_end 发出。
-            try:
-                asyncio.get_running_loop()
-            except RuntimeError:
-                return
+    def _on_update(partial: AgentToolResult) -> None:
+        # 同步回调：调度 tool_execution_update 事件，执行后统一等待，
+        # 保证 update 事件先于 tool_execution_end 发出。
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return
 
-            async def _emit_update() -> None:
-                await emit(
-                    cast(
-                        AgentEvent,
-                        {
-                            "type": "tool_execution_update",
-                            "tool_call_id": tc_id,
-                            "tool_name": tc_name,
-                            "args": args,
-                            "result": partial,
-                        },
-                    )
+        async def _emit_update() -> None:
+            await emit(
+                cast(
+                    AgentEvent,
+                    {
+                        "type": "tool_execution_update",
+                        "tool_call_id": tc_id,
+                        "tool_name": tc_name,
+                        "args": args,
+                        "result": partial,
+                    },
                 )
+            )
 
-            pending_updates.append(asyncio.create_task(_emit_update()))
+        pending_updates.append(asyncio.create_task(_emit_update()))
 
+    try:
         result = await tool_def.execute(tc_id, args, signal, _on_update)
         if pending_updates:
             await asyncio.gather(*pending_updates)
@@ -1310,6 +1332,10 @@ async def _execute_tool_call(
             if after_val is not None:
                 result = after_val
     except Exception as exc:
+        # 对齐 TS executePreparedToolCall：execute 抛错时也要等待已调度的
+        # update 事件任务，避免泄漏/乱序；update 自身异常不影响返回 execute 错误。
+        if pending_updates:
+            await asyncio.gather(*pending_updates, return_exceptions=True)
         return _ExecutedToolOutcome(
             prepared.tc,
             args,

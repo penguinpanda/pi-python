@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 
 import pytest
 
@@ -482,7 +483,7 @@ class TestSessionEnvInjection:
         if not await _shell_available(env):
             pytest.skip("No bash shell available")
         result = await env.exec(
-            "python -c \"import os;print(os.environ.get('PI_SESSION_ID',''))\"",
+            f"{sys.executable} -c \"import os;print(os.environ.get('PI_SESSION_ID',''))\"",
             ShellExecOptions(unset_env=["PI_SESSION_ID"]),
         )
         assert result[0] is True
@@ -496,7 +497,7 @@ class TestSessionEnvInjection:
         if not await _shell_available(env):
             pytest.skip("No bash shell available")
         command = (
-            "python -c \"import os;print(os.environ.get('PI_SESSION_ID','')"
+            f"{sys.executable} -c \"import os;print(os.environ.get('PI_SESSION_ID','')"
             "+'|'+os.environ.get('PI_PROVIDER',''))\""
         )
         tool = create_bash_tool(BashToolOptions(expose_session_environment=False))
@@ -511,7 +512,7 @@ class TestSessionEnvInjection:
         if not await _shell_available(env):
             pytest.skip("No bash shell available")
         command = (
-            "python -c \"import os;print(os.environ.get('PI_SESSION_ID','')"
+            f"{sys.executable} -c \"import os;print(os.environ.get('PI_SESSION_ID','')"
             "+'|'+os.environ.get('PI_PROVIDER',''))\""
         )
         tool = create_bash_tool(

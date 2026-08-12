@@ -279,8 +279,54 @@ class TestToolCallLoop:
         assert len(tool_end) == 1
         assert tool_end[0]["is_error"] is True
 
+    @pytest.mark.asyncio
+    async def test_update_events_gathered_on_execute_error(self):
+        """execute 先回调 on_update 再抛错：update 事件仍先于 tool_execution_end 发出。"""
 
-class TestToolArgumentValidation:
+        async def _failing_execute(tool_call_id, params, signal=None, on_update=None):
+            if on_update is not None:
+                on_update(AgentToolResult(content=[TextContent(type="text", text="partial")]))
+            await asyncio.sleep(0)
+            raise RuntimeError("tool failed after update")
+
+        tool = AgentTool(
+            name="bad_tool",
+            description="Updates then fails",
+            input_schema={"type": "object", "properties": {}},
+            label="bad_tool",
+            execute=_failing_execute,
+        )
+
+        prompts = [UserMessage(role="user", content="Use bad_tool")]
+        context = AgentContext(
+            system_prompt="test",
+            messages=[],
+            tools=[tool],
+        )
+
+        tc_final = _make_llm_tool_response("bad_tool", {})
+        text_final = _make_llm_text_response("ok")
+        stream_fn = _make_counting_stream_fn([tc_final, text_final])
+
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+        )
+
+        result, events = await _collect_events(prompts, context, config, stream_fn)
+
+        update_events = _find_events(events, "tool_execution_update")
+        assert len(update_events) == 1
+        tool_end = _find_events(events, "tool_execution_end")
+        assert len(tool_end) == 1
+        assert tool_end[0]["is_error"] is True
+        # update 事件必须已发出且先于 tool_execution_end（不丢失、不乱序）
+        event_types = [e["type"] for e in events]
+        assert event_types.index("tool_execution_update") < event_types.index("tool_execution_end")
+        # 错误结果仍回给 LLM，后续文本回复正常完成
+        roles = [m.get("role") for m in result]
+        assert "toolResult" in roles
+
     """工具参数 schema 校验（_execute_tool_calls 阶段1）。"""
 
     @pytest.mark.asyncio
@@ -591,6 +637,55 @@ class TestCancellation:
                 signal=signal,
                 stream_fn=stream_fn,
             )
+
+    @pytest.mark.asyncio
+    async def test_agent_end_includes_aborted_assistant_on_cancel(self):
+        """流式中断时 agent_end.messages 应包含 aborted assistant 消息。"""
+        prompts = [UserMessage(role="user", content="Hi")]
+        context = AgentContext(system_prompt="test", messages=[])
+
+        # 慢速 faux 流：给测试足够时间在流进行中取消。
+        core = faux_provider(tokens_per_second=2, token_size=1)
+        core.set_responses([faux_assistant_message("Hello world")])
+        stream_fn = core.stream
+
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+        )
+
+        events: list[AgentEvent] = []
+        update_seen = asyncio.Event()
+
+        async def _emit(evt: AgentEvent) -> None:
+            events.append(evt)
+            if evt["type"] == "message_update":
+                update_seen.set()
+
+        task = asyncio.create_task(
+            run_agent_loop(
+                prompts=prompts,
+                context=context,
+                config=config,
+                emit=_emit,
+                signal=None,
+                stream_fn=stream_fn,
+            )
+        )
+        await asyncio.wait_for(update_seen.wait(), timeout=10)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        agent_end = _find_events(events, "agent_end")
+        assert len(agent_end) == 1
+        roles = [m.get("role") for m in agent_end[0]["messages"]]
+        assert roles == ["user", "assistant"]
+        aborted = agent_end[0]["messages"][-1]
+        assert aborted.get("stop_reason") == "aborted"
+        # message_end（aborted）先于 agent_end 发出
+        event_types = [e["type"] for e in events]
+        assert event_types.index("message_end") < event_types.index("agent_end")
 
 
 class TestLLMError:

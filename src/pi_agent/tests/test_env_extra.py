@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -22,6 +25,18 @@ from pi_agent.env import (
 
 def _env(tmp_path: Path) -> PythonExecutionEnv:
     return PythonExecutionEnv(str(tmp_path))
+
+
+async def _wait_pid_dead(pid: int, timeout: float = 5.0) -> None:
+    """轮询等待 pid 退出（含 init 收割僵尸的时间）。仅 POSIX。"""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"process {pid} still alive")
 
 
 def test_result_helpers_and_error_mapping(tmp_path: Path) -> None:
@@ -106,7 +121,51 @@ async def test_exec_stdout_callback_error(tmp_path: Path) -> None:
 
     result = await env.exec("echo hi", ShellExecOptions(on_stdout=fail_callback))
     assert result[0] is False
-    assert result[1].code == "unknown"
+    assert result[1].code == "callback_error"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="posix process-group kill only")
+@pytest.mark.asyncio
+async def test_exec_callback_error_kills_process_promptly(tmp_path: Path) -> None:
+    """callback 抛错时 exec 应立即杀子进程并返回，而不是等命令自然结束。"""
+    env = _env(tmp_path)
+    pidfile = tmp_path / "pid.txt"
+
+    def fail_callback(_chunk: str) -> None:
+        raise RuntimeError("callback boom")
+
+    started = time.monotonic()
+    result = await env.exec(
+        f"sleep 8 & echo $! > {pidfile}; echo marker; wait",
+        ShellExecOptions(on_stdout=fail_callback),
+    )
+    elapsed = time.monotonic() - started
+    assert result[0] is False
+    assert result[1].code == "callback_error"
+    assert elapsed < 4.0, f"exec waited for command to finish naturally ({elapsed:.1f}s)"
+    pid = int(pidfile.read_text().strip())
+    await _wait_pid_dead(pid)
+    assert env._active_processes == set()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="posix process-group kill only")
+@pytest.mark.asyncio
+async def test_exec_cancellation_kills_process(tmp_path: Path) -> None:
+    """外层任务被取消时 exec 必须杀子进程树并清理 _active_processes。"""
+    env = _env(tmp_path)
+    pidfile = tmp_path / "pid.txt"
+    task = asyncio.create_task(env.exec(f"sleep 8 & echo $! > {pidfile}; wait"))
+    for _ in range(100):
+        if pidfile.exists():
+            break
+        await asyncio.sleep(0.05)
+    assert pidfile.exists(), "shell did not start"
+    pid = int(pidfile.read_text().strip())
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await _wait_pid_dead(pid)
+    assert env._active_processes == set()
 
 
 @pytest.mark.asyncio

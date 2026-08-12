@@ -425,15 +425,10 @@ class Agent:
         except asyncio.CancelledError:
             # abort 触发，agent_end 事件已在 loop 中发出
             pass
-        except Exception:
-            # 意外异常 → 合成 agent_end
-            await self._process_event(
-                {
-                    "type": "agent_end",
-                    "messages": list(self._state._messages),
-                }
-            )
-            raise
+        except Exception as exc:
+            # 对齐 TS agent.ts runWithLifecycle：捕获所有错误并正常结束，
+            # 让调用方（session）继续执行 compaction / retry 后置状态机。
+            await self._emit_failure_agent_end(exc)
         finally:
             self._state.is_streaming = False
             self._active = False
@@ -465,20 +460,52 @@ class Agent:
             )
         except asyncio.CancelledError:
             pass
-        except Exception:
-            await self._process_event(
-                {
-                    "type": "agent_end",
-                    "messages": list(self._state._messages),
-                }
-            )
-            raise
+        except Exception as exc:
+            # 对齐 TS runWithLifecycle：捕获所有错误并正常结束，
+            # 让调用方继续执行 compaction / retry 后置状态机。
+            await self._emit_failure_agent_end(exc)
         finally:
             self._state.is_streaming = False
             self._active = False
             self._abort = None
             await self._process_event({"type": "agent_settled"})
             self._settled.set()
+
+    async def _emit_failure_agent_end(self, exc: BaseException) -> None:
+        """异常路径收尾：合成 error assistant 消息并发出 agent_end。
+
+        对齐 TS agent.ts handleRunFailure 的 failure message：当 state 末条
+        消息不是 error 响应时（异常发生在 loop 管线之外，如 steering / 事件
+        桥接），补发一条 error assistant 消息，让下游 compaction / retry
+        状态机识别本轮以错误结束，而非把崩溃误判为正常结束。
+        """
+        self._state.error_message = str(exc)
+        messages = self._state._messages
+        last = messages[-1] if messages else None
+        has_error_tail = (
+            last is not None
+            and last.get("role") == "assistant"
+            and last.get("stop_reason") == "error"
+        )
+        if not has_error_tail:
+            model = self._state.model
+            error_msg: AssistantMessage = {
+                "role": "assistant",
+                "content": [],
+                "api": model.api if model is not None else "",
+                "provider": model.provider if model is not None else "",
+                "model": model.id if model is not None else "",
+                "timestamp": now_ms(),
+                "stop_reason": "error",
+                "error_message": str(exc),
+            }
+            await self._process_event({"type": "message_end", "message": error_msg})
+        await self._process_event(
+            {
+                "type": "agent_end",
+                "messages": list(self._state._messages),
+            }
+        )
 
     # ------------------------------------------------------------------
     # 内部：桥接

@@ -596,15 +596,6 @@ class PythonExecutionEnv:
         timed_out = False
         callback_error: ExecutionError | None = None
 
-        def _on_stdout(chunk: str) -> None:
-            try:
-                if options.on_stdout:
-                    options.on_stdout(chunk)
-            except BaseException as error:
-                nonlocal callback_error
-                callback_error = to_execution_error(error)
-                raise
-
         creationflags = 0
         start_new_session = os.name != "nt"
         if os.name == "nt":
@@ -663,6 +654,22 @@ class PythonExecutionEnv:
                         except BaseException:
                             pass
 
+        def _on_stdout(chunk: str) -> None:
+            try:
+                if options.on_stdout:
+                    options.on_stdout(chunk)
+            except BaseException as error:
+                nonlocal callback_error
+                callback_error = (
+                    error
+                    if isinstance(error, ExecutionError)
+                    else ExecutionError("callback_error", str(error), error)
+                )
+                # 对齐 TS nodejs.ts 的 onAbort：callback 异常时立即终止子进程，
+                # 避免 exec 一直等到命令自然结束。
+                asyncio.get_running_loop().create_task(_kill_tree())
+                raise
+
         abort_waiter: asyncio.Task | None = None
         abort_signal = options.abort_signal
         if abort_signal is not None:
@@ -698,13 +705,20 @@ class PythonExecutionEnv:
                     exit_code = None
             else:
                 exit_code = await process.wait()
+        except asyncio.CancelledError:
+            # 外层任务被取消时必须终止子进程，否则会遗留孤儿进程，
+            # 且后续 cleanup() 无法回收（进程已从 _active_processes 丢弃）。
+            await _kill_tree()
+            raise
         finally:
-            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+            # shield 保证在任务已被取消时收尾逻辑（join reader、cancel abort
+            # waiter、移除进程句柄）仍然执行。
+            await asyncio.shield(asyncio.gather(stdout_task, stderr_task, return_exceptions=True))
             if abort_waiter is not None:
                 abort_waiter.cancel()
                 try:
-                    await abort_waiter
-                except (asyncio.CancelledError, BaseException):
+                    await asyncio.shield(abort_waiter)
+                except BaseException:
                     pass
             self._active_processes.discard(process)
 
