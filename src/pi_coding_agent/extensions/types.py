@@ -275,17 +275,41 @@ class Extension:
 
 
 class ExtensionRuntime:
-    """共享运行时：flag 值与动作实现（注册期为存根，绑定后替换）。"""
+    """共享运行时：flag 值与动作实现（注册期为存根，绑定后替换）。
+
+    generation/invalidate/assert_active 实现 stale-runtime 保护
+    （对齐 TS types.ts assertActive / runner.invalidate）：会话替换或 reload
+    后，被扩展捕获的旧 ctx 继续使用会抛错。
+    """
+
+    _STALE_RUNTIME_MESSAGE = (
+        "This extension ctx is stale after session replacement or reload. "
+        "Do not use a captured pi or command ctx after ctx.new_session(), "
+        "ctx.fork(), ctx.switch_session(), or ctx.reload()."
+    )
 
     def __init__(self) -> None:
         self.flag_values: dict[str, bool | str | None] = {}
         self._actions: dict[str, Callable] = {}
+        self._generation = 0
+        self._stale_message: str | None = None
 
     def set_action(self, name: str, fn: Callable) -> None:
         self._actions[name] = fn
 
     def get_action(self, name: str):
         return self._actions.get(name)
+
+    def invalidate(self, message: str | None = None) -> None:
+        """会话替换 / reload 后调用：使此前创建的 ctx 过期（对齐 TS invalidate）。"""
+        if self._stale_message is None:
+            self._stale_message = message or self._STALE_RUNTIME_MESSAGE
+        self._generation += 1
+
+    def assert_active(self, generation: int) -> None:
+        """ctx 创建时代与当前不一致时抛错（对齐 TS assertActive）。"""
+        if generation != self._generation:
+            raise RuntimeError(self._stale_message or self._STALE_RUNTIME_MESSAGE)
 
 
 def _not_initialized(action: str) -> Callable:

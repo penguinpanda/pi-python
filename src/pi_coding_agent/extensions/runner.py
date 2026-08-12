@@ -43,45 +43,61 @@ class _ModelRegistryAdapter:
 
 
 class ExtensionContext:
-    """事件处理器收到的上下文（值在访问时实时解析）。"""
+    """事件处理器收到的上下文（值在访问时实时解析）。
+
+    stale-runtime 保护（对齐 TS）：创建时记录 runtime generation，
+    会话替换 / reload（runtime.invalidate）后继续使用被捕获的旧 ctx 会抛错。
+    """
 
     def __init__(self, runner: "ExtensionRunner") -> None:
         self._runner = runner
+        self._generation = runner.runtime._generation
+
+    def _assert_active(self) -> None:
+        self._runner.runtime.assert_active(self._generation)
 
     @property
     def ui(self):
+        self._assert_active()
         return self._runner.ui_context
 
     @property
     def mode(self) -> str:
+        self._assert_active()
         return self._runner.mode
 
     @property
     def cwd(self) -> str:
+        self._assert_active()
         return self._runner.cwd
 
     @property
     def session(self):
+        self._assert_active()
         return self._runner.session
 
     @property
     def session_manager(self):
         """会话树管理器（对齐 TS ctx.sessionManager）。"""
+        self._assert_active()
         session = self._runner.session
         return session.session_manager if session is not None else None
 
     @property
     def signal(self):
         """当前 turn 的中止信号（无运行 turn 时为 None）。"""
+        self._assert_active()
         session = self._runner.session
         return getattr(session, "_abort", None) if session is not None else None
 
     @property
     def model(self):
+        self._assert_active()
         return self._runner.session.model if self._runner.session is not None else None
 
     @property
     def thinking_level(self):
+        self._assert_active()
         if self._runner.session is None:
             return None
         return self._runner.session.thinking_level
@@ -89,41 +105,51 @@ class ExtensionContext:
     @property
     def scoped_models(self):
         """--models 循环列表（对齐 TS ctx.scopedModels）。"""
+        self._assert_active()
         session = self._runner.session
         return list(session.scoped_models) if session is not None else []
 
     def is_project_trusted(self) -> bool:
         """当前项目是否被信任（未解析时返回 False）。"""
+        self._assert_active()
         session = self._runner.session
         return bool(session.project_trusted) if session is not None else False
 
     def is_idle(self) -> bool:
+        self._assert_active()
         return not (self._runner.session is not None and self._runner.session.is_streaming)
 
     @property
     def has_ui(self) -> bool:
         """是否运行在有 UI 的上下文（TUI / RPC）；print 模式为 False。"""
+        self._assert_active()
         return self._runner.mode != "print"
 
     @property
     def model_registry(self) -> _ModelRegistryAdapter:
         """模型注册表（find / complete），供扩展自选摘要模型等使用。"""
+        self._assert_active()
         return _ModelRegistryAdapter(self._runner.model_runtime)
 
     def has_pending_messages(self) -> bool:
+        self._assert_active()
         return bool(self._runner.session is not None and self._runner.session.pending_message_count)
 
     def abort(self) -> None:
+        self._assert_active()
         self._runner.abort()
 
     def shutdown(self) -> None:
+        self._assert_active()
         self._runner.shutdown()
 
     async def compact(self) -> None:
+        self._assert_active()
         if self._runner.session is not None:
             await self._runner.session.compact()
 
     def get_system_prompt(self) -> str:
+        self._assert_active()
         session = self._runner.session
         if session is None:
             return ""
@@ -131,6 +157,7 @@ class ExtensionContext:
 
     def get_system_prompt_options(self) -> dict:
         """当前系统提示构建相关选项（对齐 TS getSystemPromptOptions 的最小集）。"""
+        self._assert_active()
         session = self._runner.session
         if session is None:
             return {}
@@ -147,6 +174,7 @@ class ExtensionContext:
         以最后一条带 usage 的 assistant 消息为基准，加上其后的消息估算；
         完全没有 usage 数据时返回 None。
         """
+        self._assert_active()
         session = self._runner.session
         if session is None:
             return None
@@ -539,7 +567,10 @@ class ExtensionRunner:
             raise NotImplementedError(f"Command action '{name}' is not available in this mode")
         result = handler(*args)
         if inspect.isawaitable(result):
-            return await result
+            result = await result
+        # 会话替换 / reload 后使旧 ctx 过期（对齐 TS runner.invalidate）。
+        if name in ("new_session", "fork", "switch_session", "reload"):
+            self.runtime.invalidate()
         return result
 
     # ------------------------------------------------------------------

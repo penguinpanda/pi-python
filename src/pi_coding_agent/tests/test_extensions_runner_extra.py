@@ -264,3 +264,29 @@ async def test_shutdown_all_waits_for_background_tasks() -> None:
     await runner.shutdown_all()
     assert done.is_set()
     assert not runner._background_tasks
+
+
+@pytest.mark.asyncio
+async def test_stale_runtime_protection_after_new_session() -> None:
+    """会话替换后，被捕获的旧 ctx 继续使用会抛错（对齐 TS assertActive/invalidate）。"""
+    runner = ExtensionRunner([])
+    handler_calls: list = []
+
+    async def fake_new_session(options):
+        handler_calls.append(options)
+        return None
+
+    runner.bind(command_handlers={"new_session": fake_new_session})
+    captured = runner.create_command_context()
+
+    # invalidate 前：正常使用
+    assert captured.has_ui is False
+
+    await captured.new_session({})
+    assert handler_calls == [{}]
+
+    # invalidate 后：旧 ctx 抛错；新 ctx 可用
+    with pytest.raises(RuntimeError, match="stale after session replacement"):
+        _ = captured.cwd
+    fresh = runner.create_command_context()
+    assert fresh.cwd == runner.cwd
