@@ -233,13 +233,126 @@ def test_tool_call_ids_emitted_for_gemini3() -> None:
             },
         ],
     )
-    contents = _to_google_contents(context, "gemini-3-pro")
+    contents = _to_google_contents(
+        context, Model(id="gemini-3-pro", provider="google", api="google-generative-ai")
+    )
     assistant_parts = contents[1]["parts"]
     assert assistant_parts[0]["functionCall"]["id"] == "call-1_with_space_"
     function_response = contents[2]["parts"][0]["functionResponse"]
     assert function_response["id"] == "call-1_with_space_"
 
     # gemini 2.5：不携带 id
-    contents_legacy = _to_google_contents(context, "gemini-2.5-flash")
+    contents_legacy = _to_google_contents(
+        context, Model(id="gemini-2.5-flash", provider="google", api="google-generative-ai")
+    )
     assert "id" not in contents_legacy[1]["parts"][0]["functionCall"]
     assert "id" not in contents_legacy[2]["parts"][0]["functionResponse"]
+
+
+@pytest.mark.asyncio
+async def test_google_request_retries_on_429(monkeypatch) -> None:
+    """429（带 retry-after）在 maxRetries 内指数退避重试后成功（对齐 retryGoogleRequest）。"""
+    attempts: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(1)
+        if len(attempts) < 3:
+            return httpx.Response(429, headers={"retry-after-ms": "10"})
+        return httpx.Response(200, text=_text_sse(), headers={"content-type": "text/event-stream"})
+
+    monkeypatch.setattr(
+        google_generative_ai,
+        "_AsyncClient",
+        lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(handler), **kwargs),
+    )
+    stream = google_generative_ai.google_generative_ai_stream(
+        _model(),
+        _context(),
+        "sk-test",
+        "https://generativelanguage.googleapis.com/v1beta",
+        {"maxRetries": 2, "maxRetryDelayMs": 1000},
+    )
+    events = [event async for event in stream]
+    assert events[-1]["type"] == "done"
+    assert len(attempts) == 3
+
+
+@pytest.mark.asyncio
+async def test_google_request_no_retry_without_max_retries(monkeypatch) -> None:
+    """默认 maxRetries=0：429 不重试，直接 error 事件。"""
+    attempts: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(1)
+        return httpx.Response(429, headers={"retry-after-ms": "10"})
+
+    monkeypatch.setattr(
+        google_generative_ai,
+        "_AsyncClient",
+        lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(handler), **kwargs),
+    )
+    stream = google_generative_ai.google_generative_ai_stream(
+        _model(), _context(), "sk-test", "https://generativelanguage.googleapis.com/v1beta"
+    )
+    events = [event async for event in stream]
+    assert events[-1]["type"] == "error"
+    assert len(attempts) == 1
+
+
+def test_thought_signature_echo_and_thought_true() -> None:
+    """同 provider/model：thinking 带 thought:true 且回显签名；空块带签名保留。"""
+    from pi_ai.api.google_generative_ai import _to_google_contents
+
+    signature = "c2lnbmF0dXJlLXNpZ25hdHVyZQ=="  # "signature-signature" base64
+    context = Context(
+        system_prompt="sys",
+        messages=[
+            {"role": "user", "content": "hi"},
+            {
+                "role": "assistant",
+                "provider": "google",
+                "model": "gemini-3-pro",
+                "content": [
+                    {
+                        "type": "thinking",
+                        "thinking": "reasoning here",
+                        "thinking_signature": signature,
+                    },
+                    {"type": "text", "text": "", "text_signature": signature},
+                    {"type": "text", "text": "answer"},
+                ],
+            },
+        ],
+    )
+    contents = _to_google_contents(
+        context, Model(id="gemini-3-pro", provider="google", api="google-generative-ai")
+    )
+    parts = contents[1]["parts"]
+    assert parts[0] == {"thought": True, "text": "reasoning here", "thoughtSignature": signature}
+    # 空文本块带签名时保留并回显
+    assert parts[1] == {"text": "", "thoughtSignature": signature}
+    assert parts[2] == {"text": "answer"}
+
+    # 跨 provider/model：签名丢弃，thinking 转纯文本
+    context_cross = Context(
+        system_prompt="sys",
+        messages=[
+            {"role": "user", "content": "hi"},
+            {
+                "role": "assistant",
+                "provider": "openai",
+                "model": "gpt-x",
+                "content": [
+                    {
+                        "type": "thinking",
+                        "thinking": "other reasoning",
+                        "thinking_signature": signature,
+                    },
+                ],
+            },
+        ],
+    )
+    contents_cross = _to_google_contents(
+        context_cross, Model(id="gemini-3-pro", provider="google", api="google-generative-ai")
+    )
+    assert contents_cross[1]["parts"] == [{"text": "other reasoning"}]

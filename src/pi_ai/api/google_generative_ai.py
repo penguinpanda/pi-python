@@ -40,6 +40,7 @@ from ..types import (
 from ..utils._background import track_background_task
 from ..utils._event_stream import AssistantMessageEventStream
 from ..utils.cost import calculate_cost
+from ..utils.provider_retry import retry_provider_request
 from ..utils.sanitize_unicode import sanitize_surrogates
 from .constrained_sampling import resolve_json_schema_strict_sampling
 from ._shared import build_error_message, empty_usage
@@ -185,7 +186,23 @@ def _normalize_tool_call_id(tool_call_id: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]", "_", tool_call_id)[:64]
 
 
-def _to_google_contents(context: Context, model_id: str) -> list[dict[str, Any]]:
+def _is_valid_thought_signature(signature: str | None) -> bool:
+    """合法 base64 签名校验（对齐 TS isValidThoughtSignature）。"""
+    if not signature or len(signature) % 4 != 0:
+        return False
+    return bool(re.match(r"^[A-Za-z0-9+/]+={0,2}$", signature))
+
+
+def _resolve_thought_signature(is_same_provider_and_model: bool, signature: Any) -> str | None:
+    """仅同 provider/model 且 base64 合法时保留签名（对齐 TS resolveThoughtSignature）。"""
+    if not is_same_provider_and_model or not isinstance(signature, str):
+        return None
+    return signature if _is_valid_thought_signature(signature) else None
+
+
+def _to_google_contents(context: Context, model: Any) -> list[dict[str, Any]]:
+    model_id: str = model.id if hasattr(model, "id") else str(model)
+    model_provider: str | None = getattr(model, "provider", None)
     include_id = _requires_tool_call_id(model_id)
     contents: list[dict[str, Any]] = []
     for msg in context.messages:
@@ -213,22 +230,62 @@ def _to_google_contents(context: Context, model_id: str) -> list[dict[str, Any]]
                 contents.append({"role": "user", "parts": user_parts})
         elif role == "assistant":
             assistant_msg = cast(Any, msg)
+            # 仅同 provider/model 保留思考签名（对齐 TS convertMessages）。
+            is_same_provider_and_model = (
+                assistant_msg.get("provider") == model_provider
+                and assistant_msg.get("model") == model_id
+            )
             assistant_parts: list[dict[str, Any]] = []
             for block in assistant_msg.get("content") or []:
-                if block["type"] == "text":
-                    assistant_parts.append({"text": sanitize_surrogates(block["text"])})
-                elif block["type"] == "thinking":
-                    assistant_parts.append(
-                        {"text": sanitize_surrogates(block.get("thinking") or "")}
+                block_type = block.get("type")
+                if block_type == "text":
+                    thought_signature = _resolve_thought_signature(
+                        is_same_provider_and_model, block.get("text_signature")
                     )
-                elif block["type"] == "toolCall":
-                    function_call: dict[str, Any] = {
+                    text = block.get("text") or ""
+                    # 空文本块仅在携带签名时保留（Gemini 要求回显签名，
+                    # 否则思考链中断、任务中途停止）。
+                    if not text.strip() and not thought_signature:
+                        continue
+                    part: dict[str, Any] = {"text": sanitize_surrogates(text)}
+                    if thought_signature:
+                        part["thoughtSignature"] = thought_signature
+                    assistant_parts.append(part)
+                elif block_type == "thinking":
+                    thinking = block.get("thinking") or ""
+                    if is_same_provider_and_model:
+                        thought_signature = _resolve_thought_signature(
+                            is_same_provider_and_model,
+                            block.get("thinking_signature"),
+                        )
+                        if not thinking.strip() and not thought_signature:
+                            continue
+                        thinking_part: dict[str, Any] = {
+                            "thought": True,
+                            "text": sanitize_surrogates(thinking),
+                        }
+                        if thought_signature:
+                            thinking_part["thoughtSignature"] = thought_signature
+                    else:
+                        # 跨 provider/model：签名不可用，思考转纯文本（不带标签）。
+                        if not thinking.strip():
+                            continue
+                        thinking_part = {"text": sanitize_surrogates(thinking)}
+                    assistant_parts.append(thinking_part)
+                elif block_type == "toolCall":
+                    thought_signature = _resolve_thought_signature(
+                        is_same_provider_and_model, block.get("thought_signature")
+                    )
+                    function_call = {
                         "name": block["name"],
                         "args": block.get("arguments") or {},
                     }
                     if include_id and block.get("id"):
                         function_call["id"] = _normalize_tool_call_id(block["id"])
-                    assistant_parts.append({"functionCall": function_call})
+                    tool_part: dict[str, Any] = {"functionCall": function_call}
+                    if thought_signature:
+                        tool_part["thoughtSignature"] = thought_signature
+                    assistant_parts.append(tool_part)
             if assistant_parts:
                 contents.append({"role": "model", "parts": assistant_parts})
         elif role == "toolResult":
@@ -289,7 +346,7 @@ def google_generative_ai_stream(
 ) -> AssistantMessageEventStream:
     stream = AssistantMessageEventStream()
     opts = options or {}
-    contents = _to_google_contents(context, model.id)
+    contents = _to_google_contents(context, model)
     tools = _to_google_tools(context)
 
     config: dict[str, Any] = {}
@@ -404,127 +461,159 @@ def google_generative_ai_stream(
                     headers[name] = value
 
             timeout_ms = opts.get("timeout_ms") or 120000
-            async with _AsyncClient(timeout=timeout_ms / 1000) as client:
-                async with client.stream("POST", url, headers=headers, json=payload) as response:
-                    if not response.is_success:
-                        body = (await response.aread()).decode("utf-8", errors="replace")
-                        raise RuntimeError(f"Gemini API error ({response.status_code}): {body}")
-                    stream.push(StartEvent(type="start", partial=_partial()))
-                    async for chunk in read_google_sse(response.aiter_bytes()):
-                        response_id = response_id or chunk.get("responseId")
-                        candidate = (chunk.get("candidates") or [{}])[0]
-                        if candidate.get("finishReason"):
-                            stop_reason = _map_stop_reason(candidate["finishReason"])
-                        usage_metadata = chunk.get("usageMetadata") or {}
-                        if usage_metadata:
-                            usage = empty_usage()
-                            cached = int(usage_metadata.get("cachedContentTokenCount") or 0)
-                            usage["input"] = (
-                                int(usage_metadata.get("promptTokenCount") or 0) - cached
-                            )
-                            usage["output"] = int(
-                                usage_metadata.get("candidatesTokenCount") or 0
-                            ) + int(usage_metadata.get("thoughtsTokenCount") or 0)
-                            usage["cache_read"] = cached
-                            usage["reasoning"] = int(usage_metadata.get("thoughtsTokenCount") or 0)
-                            usage["total_tokens"] = int(usage_metadata.get("totalTokenCount") or 0)
-                            calculate_cost(model, usage)
-                        for part in (candidate.get("content") or {}).get("parts") or []:
-                            if "text" in part:
-                                is_thinking = bool(part.get("thought"))
-                                if is_thinking:
-                                    if current_kind != "thinking":
-                                        _end_current_block()
-                                        current_kind = "thinking"
-                                        content_blocks.append(
-                                            ThinkingContent(
-                                                type="thinking",
-                                                thinking="",
-                                                thinking_signature=part.get("thoughtSignature"),
-                                            )
-                                        )
-                                        current_index = len(content_blocks) - 1
-                                        stream.push(
-                                            ThinkingStartEvent(
-                                                type="thinking_start",
-                                                content_index=current_index,
-                                                partial=_partial(),
-                                            )
-                                        )
-                                    index = cast(int, current_index)
-                                    thinking_block = cast(ThinkingContent, content_blocks[index])
-                                    text = part["text"]
-                                    thinking_block["thinking"] += text
-                                    stream.push(
-                                        ThinkingDeltaEvent(
-                                            type="thinking_delta",
-                                            content_index=index,
-                                            delta=text,
-                                            partial=_partial(),
-                                        )
-                                    )
-                                else:
-                                    if current_kind != "text":
-                                        _end_current_block()
-                                        current_kind = "text"
-                                        content_blocks.append(TextContent(type="text", text=""))
-                                        current_index = len(content_blocks) - 1
-                                        stream.push(
-                                            TextStartEvent(
-                                                type="text_start",
-                                                content_index=current_index,
-                                                partial=_partial(),
-                                            )
-                                        )
-                                    index = cast(int, current_index)
-                                    text_block = cast(TextContent, content_blocks[index])
-                                    text = part["text"]
-                                    text_block["text"] += text
-                                    stream.push(
-                                        TextDeltaEvent(
-                                            type="text_delta",
-                                            content_index=index,
-                                            delta=text,
-                                            partial=_partial(),
-                                        )
-                                    )
-                            if "functionCall" in part:
+
+            class _GoogleApiError(RuntimeError):
+                """携带 status/headers 的 Google API 错误（retry_provider_request 判定用）。"""
+
+                def __init__(self, status_code: int, headers: Any, message: str) -> None:
+                    super().__init__(message)
+                    self.status = status_code
+                    self.headers = headers
+
+            async def _open_stream():
+                client = _AsyncClient(timeout=timeout_ms / 1000)
+                try:
+                    response = await client.send(
+                        client.build_request("POST", url, headers=headers, json=payload),
+                        stream=True,
+                    )
+                except BaseException:
+                    await client.aclose()
+                    raise
+                if not response.is_success:
+                    body = (await response.aread()).decode("utf-8", errors="replace")
+                    await client.aclose()
+                    raise _GoogleApiError(
+                        response.status_code,
+                        dict(response.headers),
+                        f"Gemini API error ({response.status_code}): {body}",
+                    )
+                return client, response
+
+            # 对齐 TS retryGoogleRequest：408/409/429/5xx 指数退避重试（可中断）。
+            max_retries = opts.get("maxRetries")
+            client, response = await retry_provider_request(
+                _open_stream,
+                max_retries=int(max_retries) if isinstance(max_retries, (int, float)) else 0,
+                max_retry_delay_ms=cast(int | None, opts.get("maxRetryDelayMs")),
+                signal=opts.get("signal"),
+            )
+            stream.push(StartEvent(type="start", partial=_partial()))
+            async for chunk in read_google_sse(response.aiter_bytes()):
+                response_id = response_id or chunk.get("responseId")
+                candidate = (chunk.get("candidates") or [{}])[0]
+                if candidate.get("finishReason"):
+                    stop_reason = _map_stop_reason(candidate["finishReason"])
+                usage_metadata = chunk.get("usageMetadata") or {}
+                if usage_metadata:
+                    usage = empty_usage()
+                    cached = int(usage_metadata.get("cachedContentTokenCount") or 0)
+                    usage["input"] = int(usage_metadata.get("promptTokenCount") or 0) - cached
+                    usage["output"] = int(usage_metadata.get("candidatesTokenCount") or 0) + int(
+                        usage_metadata.get("thoughtsTokenCount") or 0
+                    )
+                    usage["cache_read"] = cached
+                    usage["reasoning"] = int(usage_metadata.get("thoughtsTokenCount") or 0)
+                    usage["total_tokens"] = int(usage_metadata.get("totalTokenCount") or 0)
+                    calculate_cost(model, usage)
+                for part in (candidate.get("content") or {}).get("parts") or []:
+                    if "text" in part:
+                        is_thinking = bool(part.get("thought"))
+                        if is_thinking:
+                            if current_kind != "thinking":
                                 _end_current_block()
-                                call = part["functionCall"]
-                                tool_block = ToolCall(
-                                    type="toolCall",
-                                    id=call.get("id") or f"{call.get('name') or 'tool'}_{now_ms()}",
-                                    name=call.get("name") or "",
-                                    raw_arguments=json.dumps(call.get("args") or {}),
-                                    arguments=call.get("args") or {},
+                                current_kind = "thinking"
+                                content_blocks.append(
+                                    ThinkingContent(
+                                        type="thinking",
+                                        thinking="",
+                                        thinking_signature=part.get("thoughtSignature"),
+                                    )
                                 )
-                                content_blocks.append(tool_block)
                                 current_index = len(content_blocks) - 1
-                                current_kind = "toolCall"
-                                has_tool_call = True
                                 stream.push(
-                                    ToolCallStartEvent(
-                                        type="toolcall_start",
+                                    ThinkingStartEvent(
+                                        type="thinking_start",
                                         content_index=current_index,
                                         partial=_partial(),
                                     )
                                 )
+                            index = cast(int, current_index)
+                            thinking_block = cast(ThinkingContent, content_blocks[index])
+                            text = part["text"]
+                            thinking_block["thinking"] += text
+                            stream.push(
+                                ThinkingDeltaEvent(
+                                    type="thinking_delta",
+                                    content_index=index,
+                                    delta=text,
+                                    partial=_partial(),
+                                )
+                            )
+                        else:
+                            if current_kind != "text":
+                                _end_current_block()
+                                current_kind = "text"
+                                content_blocks.append(TextContent(type="text", text=""))
+                                current_index = len(content_blocks) - 1
                                 stream.push(
-                                    ToolCallDeltaEvent(
-                                        type="toolcall_delta",
+                                    TextStartEvent(
+                                        type="text_start",
                                         content_index=current_index,
-                                        delta=tool_block["raw_arguments"],
                                         partial=_partial(),
                                     )
                                 )
-                                stream.push(
-                                    ToolCallEndEvent(
-                                        type="toolcall_end",
-                                        content_index=current_index,
-                                        tool_call=tool_block,
-                                        partial=_partial(),
-                                    )
+                            index = cast(int, current_index)
+                            text_block = cast(TextContent, content_blocks[index])
+                            text = part["text"]
+                            text_block["text"] += text
+                            stream.push(
+                                TextDeltaEvent(
+                                    type="text_delta",
+                                    content_index=index,
+                                    delta=text,
+                                    partial=_partial(),
                                 )
+                            )
+                    if "functionCall" in part:
+                        _end_current_block()
+                        call = part["functionCall"]
+                        tool_block = ToolCall(
+                            type="toolCall",
+                            id=call.get("id") or f"{call.get('name') or 'tool'}_{now_ms()}",
+                            name=call.get("name") or "",
+                            raw_arguments=json.dumps(call.get("args") or {}),
+                            arguments=call.get("args") or {},
+                        )
+                        content_blocks.append(tool_block)
+                        current_index = len(content_blocks) - 1
+                        current_kind = "toolCall"
+                        has_tool_call = True
+                        stream.push(
+                            ToolCallStartEvent(
+                                type="toolcall_start",
+                                content_index=current_index,
+                                partial=_partial(),
+                            )
+                        )
+                        stream.push(
+                            ToolCallDeltaEvent(
+                                type="toolcall_delta",
+                                content_index=current_index,
+                                delta=tool_block["raw_arguments"],
+                                partial=_partial(),
+                            )
+                        )
+                        stream.push(
+                            ToolCallEndEvent(
+                                type="toolcall_end",
+                                content_index=current_index,
+                                tool_call=tool_block,
+                                partial=_partial(),
+                            )
+                        )
+            await response.aclose()
+            await client.aclose()
 
             _end_current_block()
             if has_tool_call and stop_reason != "error":
