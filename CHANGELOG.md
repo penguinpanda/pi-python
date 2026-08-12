@@ -118,11 +118,12 @@
 - Session Picker 快捷键并入 `KeybindingsManager` 独立 action 命名空间，
   支持 settings `keybindings` 覆盖与禁用
 - 新增托管工具下载/缓存（`tools/_ensure_tool.py`）：fd/rg 缺失时按平台
-  从 GitHub 下载并缓存到 `~/.pi/agent/bin`，`PI_OFFLINE` 下跳过
+  从 GitHub 下载并缓存到 `~/.pi/agent/bin`，带重试与版本标记；
+  `PI_OFFLINE` 下跳过，`PI_FD_PATH` / `PI_RG_PATH` 可覆盖
 - `list_sessions` 复用 v4 search index：索引存在且未陈旧时直接读取摘要，
-  不再逐个打开会话文件；首次扫描后可写入 `search-index.json` 缓存
+  不再逐个打开会话文件；索引陈旧时自动扫描并重建 `search-index.json`
 - `Model` 新增 `aliases` 元数据字段，`/model` 补全按 id / name / aliases /
-  provider 模糊搜索
+  provider 模糊搜索，name 与去日期后缀 id 自动派生 alias
 
 ### Changed
 

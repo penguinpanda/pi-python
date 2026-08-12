@@ -150,6 +150,36 @@ async def test_unified_provider_model_and_login_completion():
 
 
 @pytest.mark.asyncio
+async def test_model_completion_auto_derived_aliases():
+    registry = _Registry([_Command("model", "Select model")])
+
+    class _Runtime:
+        def get_available_snapshot(self):
+            return [
+                SimpleNamespace(
+                    provider="faux",
+                    id="faux-1-20250101",
+                    name="Faux One",
+                    aliases=[],
+                )
+            ]
+
+    session = SimpleNamespace(scoped_models=[])
+    provider = create_interactive_autocomplete_provider(
+        slash_registry=registry,
+        model_runtime=_Runtime(),
+        session=session,
+        base_path="/tmp",
+    )
+    by_name = await provider.get_suggestions("/model faux one", force=True)
+    assert by_name is not None
+    assert by_name.items[0].value == "faux/faux-1-20250101"
+    by_versionless = await provider.get_suggestions("/model faux-1", force=True)
+    assert by_versionless is not None
+    assert by_versionless.items[0].value == "faux/faux-1-20250101"
+
+
+@pytest.mark.asyncio
 async def test_unified_provider_skips_skills_when_disabled():
     registry = _Registry([_Command("new")])
     skill_loader = SimpleNamespace(

@@ -146,7 +146,7 @@ async def list_sessions(
     *,
     detailed: bool = True,
     index_path: str | Path | None = None,
-    cache_search_index: bool = False,
+    cache_search_index: bool = True,
 ) -> list[SessionInfo]:
     """列出 v4 会话。"""
     return await V4SessionManager.list_sessions(
@@ -715,9 +715,9 @@ class V4SessionManager:
         *,
         detailed: bool = True,
         index_path: str | Path | None = None,
-        cache_search_index: bool = False,
+        cache_search_index: bool = True,
     ) -> list[SessionInfo]:
-        """列出会话（v4 元数据；v3 文件同样可列出）。"""
+        """列出会话；stale 索引会自动扫描并重建（v3 文件同样可列出）。"""
         repo = JsonlSessionRepo(directory)
         options: JsonlSessionListOptions | None = {"cwd": cwd} if cwd is not None else None
         metadata = await repo.list(options)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import platform
 import shutil
@@ -10,7 +11,7 @@ import tempfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Awaitable, Callable, TypeVar
 
 import httpx
 
@@ -18,6 +19,9 @@ from .._config import get_bin_dir as _get_bin_dir
 
 _NETWORK_TIMEOUT_MS = 10_000
 _DOWNLOAD_TIMEOUT_MS = 120_000
+_RETRY_ATTEMPTS = 3
+_RETRY_BACKOFF_SECONDS = (0.5, 1.0, 2.0)
+_T = TypeVar("_T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +88,9 @@ def get_tool_path(tool: str, bin_dir: str | Path | None = None) -> str | None:
     config = _TOOL_CONFIGS.get(tool)
     if config is None:
         return None
+    override = os.environ.get(f"PI_{tool.upper()}_PATH")
+    if override:
+        return override
     root = Path(bin_dir) if bin_dir is not None else _get_bin_dir()
     binary = config.binary_name + (".exe" if platform.system() == "Windows" else "")
     local = root / binary
@@ -159,29 +166,55 @@ async def _download_tool(
             binary_path.write_bytes(extracted.read_bytes())
             if plat != "win32":
                 binary_path.chmod(0o755)
+            (root / f"{binary_name}.version").write_text(
+                version + "\n",
+                encoding="utf-8",
+            )
     finally:
         archive_path.unlink(missing_ok=True)
     return str(binary_path)
 
 
 async def _latest_version(repo: str) -> str:
-    async with httpx.AsyncClient(timeout=_NETWORK_TIMEOUT_MS / 1000) as client:
-        response = await client.get(
-            f"https://api.github.com/repos/{repo}/releases/latest",
-            headers={"User-Agent": "pi-python-coding-agent"},
-        )
-        response.raise_for_status()
-        tag = str(response.json().get("tag_name", ""))
-    return tag[1:] if tag.startswith("v") else tag
+    async def fetch() -> str:
+        async with httpx.AsyncClient(timeout=_NETWORK_TIMEOUT_MS / 1000) as client:
+            response = await client.get(
+                f"https://api.github.com/repos/{repo}/releases/latest",
+                headers={"User-Agent": "pi-python-coding-agent"},
+            )
+            response.raise_for_status()
+            tag = str(response.json().get("tag_name", ""))
+        return tag[1:] if tag.startswith("v") else tag
+
+    return await _with_retry(fetch)
 
 
 async def _download_file(url: str, dest: Path) -> None:
-    async with httpx.AsyncClient(timeout=_DOWNLOAD_TIMEOUT_MS / 1000) as client:
-        async with client.stream("GET", url, follow_redirects=True) as response:
-            response.raise_for_status()
-            with dest.open("wb") as handle:
-                async for chunk in response.aiter_bytes():
-                    handle.write(chunk)
+    async def fetch() -> None:
+        async with httpx.AsyncClient(timeout=_DOWNLOAD_TIMEOUT_MS / 1000) as client:
+            async with client.stream("GET", url, follow_redirects=True) as response:
+                response.raise_for_status()
+                with dest.open("wb") as handle:
+                    async for chunk in response.aiter_bytes():
+                        handle.write(chunk)
+
+    await _with_retry(fetch)
+
+
+async def _with_retry(
+    fn: Callable[[], Awaitable[_T]],
+    attempts: int = _RETRY_ATTEMPTS,
+) -> _T:
+    last_error: Exception | None = None
+    for index in range(attempts):
+        try:
+            return await fn()
+        except Exception as exc:
+            last_error = exc
+            if index < len(_RETRY_BACKOFF_SECONDS):
+                await asyncio.sleep(_RETRY_BACKOFF_SECONDS[index])
+    assert last_error is not None
+    raise last_error
 
 
 def _extract_archive(archive_path: Path, dest_dir: Path) -> None:

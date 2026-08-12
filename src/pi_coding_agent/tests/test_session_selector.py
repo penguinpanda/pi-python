@@ -209,3 +209,48 @@ async def test_list_sessions_reuses_search_index(
     assert infos[0].name == "task"
     assert infos[0].first_message == "search me"
     assert "search me" in infos[0].search_text
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_rebuilds_stale_index(tmp_path: Path, monkeypatch) -> None:
+    from pi_ai.types import UserMessage
+
+    from pi_coding_agent._session_manager_v4 import (
+        create_session_manager,
+        list_sessions,
+    )
+
+    sessions_dir = tmp_path / "sessions"
+    first = await create_session_manager(
+        str(tmp_path),
+        sessions_dir=str(sessions_dir),
+        session_id="first",
+    )
+    await first.append_message(UserMessage(role="user", content="first"))
+    close = getattr(first, "close", None)
+    if close is not None:
+        await close()
+    await list_sessions(sessions_dir)
+
+    second = await create_session_manager(
+        str(tmp_path),
+        sessions_dir=str(sessions_dir),
+        session_id="second",
+    )
+    await second.append_message(UserMessage(role="user", content="second"))
+    close = getattr(second, "close", None)
+    if close is not None:
+        await close()
+
+    infos = await list_sessions(sessions_dir)
+    assert {info.session_id for info in infos} == {"first", "second"}
+
+    def fail_open(_self, _metadata):
+        raise AssertionError("list_sessions should use the rebuilt search index")
+
+    monkeypatch.setattr(
+        "pi_coding_agent._session_manager_v4.JsonlSessionRepo.open",
+        fail_open,
+    )
+    cached = await list_sessions(sessions_dir)
+    assert {info.session_id for info in cached} == {"first", "second"}
