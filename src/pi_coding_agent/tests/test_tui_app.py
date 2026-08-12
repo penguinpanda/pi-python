@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -83,6 +84,7 @@ async def test_app_mounts_and_renders() -> None:
 async def test_typing_and_submit_calls_prompt() -> None:
     term = FakeTerminal(size=(100, 30))
     session = _make_session()
+    session.expand_prompt.side_effect = lambda text: text
     app = _make_app(term, session)
 
     async def actions(_term, _app) -> None:
@@ -111,6 +113,59 @@ async def test_slash_autocomplete_inline_and_submit() -> None:
         await asyncio.sleep(0.2)
         assert _app._editor.text == "/model "
         assert _app._editor.completion_active is False
+
+    await _run(app, term, actions)
+
+
+@pytest.mark.asyncio
+async def test_slash_name_submit_calls_session() -> None:
+    term = FakeTerminal(size=(100, 30))
+    session = _make_session()
+    session.expand_prompt.side_effect = lambda text: text
+    app = _make_app(term, session)
+
+    async def actions(_term, _app) -> None:
+        term.feed_text("/name mytask")
+        await asyncio.sleep(0.3)
+        if _app._editor.completion_active:
+            term.feed(b"\x1b")
+            await asyncio.sleep(0.1)
+        term.feed(b"\r")
+        await asyncio.sleep(0.2)
+        session.set_session_name.assert_called_once_with("mytask")
+
+    await _run(app, term, actions)
+
+
+@pytest.mark.asyncio
+async def test_completion_navigate_and_hide() -> None:
+    term = FakeTerminal(size=(100, 30))
+    app = _make_app(term)
+
+    async def actions(_term, _app) -> None:
+        term.feed_text("/mo")
+        await asyncio.sleep(0.2)
+        assert _app._completion_items
+        _app.on_pi_editor_completion_navigate_requested(SimpleNamespace(delta=1))
+        assert _app._completion_index == 1
+        _app.on_pi_editor_completion_hide_requested(SimpleNamespace())
+        assert _app._editor.completion_active is False
+
+    await _run(app, term, actions)
+
+
+@pytest.mark.asyncio
+async def test_non_slash_submit_calls_prompt() -> None:
+    term = FakeTerminal(size=(100, 30))
+    session = _make_session()
+    app = _make_app(term, session)
+
+    async def actions(_term, _app) -> None:
+        term.feed_text("hello")
+        await asyncio.sleep(0.1)
+        term.feed(b"\r")
+        await asyncio.sleep(0.2)
+        session.prompt.assert_called_once_with("hello")
 
     await _run(app, term, actions)
 

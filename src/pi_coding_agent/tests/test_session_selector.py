@@ -19,6 +19,7 @@ from pi_coding_agent.modes.interactive.session_selector import (
     match_session,
     parse_search_query,
     rename_session_file,
+    session_search_text,
 )
 
 
@@ -125,6 +126,49 @@ def test_picker_cannot_delete_current_session() -> None:
     assert model.is_selected_current is True
 
 
+def test_picker_empty_rows_helpers() -> None:
+    model = SessionPickerModel(current_sessions=[])
+    assert model.selected_node is None
+    assert model.selected_path is None
+    model.move_selection(1)
+    model.page_selection(1)
+    model.set_query("x")
+    assert model.rows == []
+
+
+def test_picker_remove_path_refreshes_both_scopes() -> None:
+    current = [_session("a"), _session("b")]
+    model = SessionPickerModel(
+        current_sessions=current,
+        all_sessions=current,
+        current_session_path="/tmp/a.jsonl",
+    )
+    model.remove_path("/tmp/b.jsonl")
+    assert [row.session.session_id for row in model.rows] == ["a"]
+    assert [session.session_id for session in model.all_sessions] == ["a"]
+
+
+def test_parse_search_query_errors_and_unclosed_quote() -> None:
+    assert parse_search_query("re:").error == "Empty regex"
+    assert parse_search_query("re:[").error is not None
+    unclosed = parse_search_query('"phrase tail')
+    assert unclosed.mode == "tokens"
+    assert any(kind == "fuzzy" for kind, _value in unclosed.tokens)
+
+
+def test_match_session_no_tokens_and_search_text_fallback() -> None:
+    session = SessionInfo(
+        path="/tmp/a.jsonl",
+        session_id="a",
+        cwd="/tmp",
+        modified=1,
+        name="task",
+        first_message="hello",
+    )
+    assert match_session(session, parse_search_query("")).matches
+    assert "task" in session_search_text(session)
+
+
 @pytest.mark.asyncio
 async def test_delete_session_file_falls_back_to_unlink(
     tmp_path: Path,
@@ -140,6 +184,41 @@ async def test_delete_session_file_falls_back_to_unlink(
     assert result.ok is True
     assert result.method == "unlink"
     assert not path.exists()
+
+
+@pytest.mark.asyncio
+async def test_delete_session_file_trash_failure_falls_back_to_unlink(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    from pi_coding_agent.modes.interactive import session_selector
+
+    class _Process:
+        returncode = 1
+
+        async def communicate(self):
+            return b"", b"trash failed"
+
+    async def fake_exec(_cmd, *args, **kwargs):
+        return _Process()
+
+    monkeypatch.setattr(session_selector.shutil, "which", lambda name: "/usr/bin/trash")
+    monkeypatch.setattr(session_selector.asyncio, "create_subprocess_exec", fake_exec)
+    path = tmp_path / "session.jsonl"
+    path.write_text("{}", encoding="utf-8")
+    result = await session_selector.delete_session_file(str(path))
+    assert result.ok is True
+    assert result.method == "unlink"
+
+
+@pytest.mark.asyncio
+async def test_rename_empty_and_missing_session() -> None:
+    result = await rename_session_file("/tmp/x.jsonl", "   ")
+    assert result.ok is False
+    assert "cannot be empty" in result.error
+
+    missing = await rename_session_file("/nonexistent/session.jsonl", "task")
+    assert missing.ok is False
 
 
 @pytest.mark.asyncio

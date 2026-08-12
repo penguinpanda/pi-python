@@ -437,7 +437,10 @@ async def rename_session_file(session_path: str, name: str) -> RenameResult:
     next_name = name.strip()
     if not next_name:
         return RenameResult(ok=False, error="Session name cannot be empty")
-    manager = await open_session_manager(session_path)
+    try:
+        manager = await open_session_manager(session_path)
+    except Exception as exc:
+        return RenameResult(ok=False, error=str(exc))
     try:
         await manager.append_session_info(next_name)
     except Exception as exc:

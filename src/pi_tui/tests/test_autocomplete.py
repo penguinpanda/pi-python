@@ -8,6 +8,11 @@ from types import SimpleNamespace
 import pytest
 
 from pi_tui.autocomplete import CombinedAutocompleteProvider
+from pi_tui.autocomplete import (
+    _build_completion_value,
+    _extract_at_prefix,
+    _walk_directory_with_fd,
+)
 
 
 @pytest.mark.asyncio
@@ -167,3 +172,44 @@ async def test_extension_provider_fallback(tmp_path) -> None:
     suggestions = await provider.get_suggestions("hello")
     assert suggestions is not None
     assert suggestions.items[0].value == "ext:item"
+
+
+def test_path_prefix_helpers() -> None:
+    assert _extract_at_prefix("hello @foo") == "@foo"
+    assert _extract_at_prefix('@"foo bar') == '@"foo bar'
+    assert _extract_at_prefix("plain") is None
+    provider = CombinedAutocompleteProvider(base_path="/tmp")
+    assert provider._extract_path_prefix("src/foo", force=False) == "src/foo"
+    assert provider._extract_path_prefix("plain", force=True) == "plain"
+    assert provider._extract_path_prefix("plain", force=False) is None
+
+
+def test_build_completion_value_quoting() -> None:
+    assert (
+        _build_completion_value(
+            "a/b", is_directory=True, is_at_prefix=False, is_quoted_prefix=False
+        )
+        == "a/b"
+    )
+    assert (
+        _build_completion_value(
+            "my docs", is_directory=False, is_at_prefix=True, is_quoted_prefix=False
+        )
+        == '@"my docs"'
+    )
+    assert (
+        _build_completion_value("a", is_directory=False, is_at_prefix=True, is_quoted_prefix=True)
+        == '@"a"'
+    )
+
+
+@pytest.mark.asyncio
+async def test_fd_walker_failure_returns_empty(monkeypatch) -> None:
+    async def _fail(*args, **kwargs):
+        raise OSError("fd missing")
+
+    monkeypatch.setattr(
+        "pi_tui.autocomplete.asyncio.create_subprocess_exec",
+        _fail,
+    )
+    assert await _walk_directory_with_fd("/tmp", "fd", "x") == []
