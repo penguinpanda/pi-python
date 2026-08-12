@@ -257,3 +257,35 @@ def test_ui_mode_setting(tmp_path) -> None:
     assert manager.get_ui_mode() == "regular"
     manager.set_ui_mode("fullscreen")
     assert manager.get_ui_mode() == "fullscreen"
+
+
+def test_provider_retry_and_branch_summary_settings(tmp_path):
+    """retry.provider / branchSummary / thinkingBudgets / websocket 键访问器。"""
+    from pi_coding_agent.settings_manager import SettingsManager
+
+    mgr = SettingsManager.create(tmp_path, tmp_path / "agent-dir")
+    mgr._set_global("retry", {"provider": {"maxRetries": 1, "maxRetryDelayMs": 3000}})
+    mgr._set_global("branchSummary", {"reserveTokens": 8192, "skipPrompt": True})
+    mgr._set_global("thinkingBudgets", {"high": 32000})
+    mgr._set_global("websocketConnectTimeoutMs", 5000)
+    mgr._save_global()
+
+    retry = mgr.get_provider_retry_settings()
+    assert retry == {"timeoutMs": None, "maxRetries": 1, "maxRetryDelayMs": 3000}
+    assert mgr.get_branch_summary_settings() == {"reserveTokens": 8192, "skipPrompt": True}
+    assert mgr.get_thinking_budgets() == {"high": 32000}
+    assert mgr.get_web_socket_connect_timeout_ms() == 5000
+
+    # 持久化后可跨实例恢复
+    fresh = SettingsManager.create(tmp_path, tmp_path / "agent-dir")
+    assert fresh.get_provider_retry_settings()["maxRetryDelayMs"] == 3000
+    assert fresh.get_branch_summary_settings() == {"reserveTokens": 8192, "skipPrompt": True}
+    assert fresh.get_thinking_budgets() == {"high": 32000}
+    assert fresh.get_web_socket_connect_timeout_ms() == 5000
+
+    # 空实例：全部默认
+    empty = SettingsManager.create(tmp_path / "empty", tmp_path / "empty-agent-dir")
+    assert empty.get_provider_retry_settings()["maxRetryDelayMs"] == 60000
+    assert empty.get_branch_summary_settings() == {"reserveTokens": 16384, "skipPrompt": False}
+    assert empty.get_thinking_budgets() is None
+    assert empty.get_web_socket_connect_timeout_ms() is None

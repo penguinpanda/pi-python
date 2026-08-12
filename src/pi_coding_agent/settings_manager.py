@@ -488,6 +488,36 @@ class SettingsManager:
             "baseDelayMs": retry.get("baseDelayMs", 2000),
         }
 
+    def get_provider_retry_settings(self) -> dict:
+        """Provider 层请求重试设置（对齐 TS getProviderRetrySettings）。"""
+        retry = self._settings.get("retry") or {}
+        provider = retry.get("provider") or {}
+        return {
+            "timeoutMs": provider.get("timeoutMs"),
+            "maxRetries": provider.get("maxRetries"),
+            "maxRetryDelayMs": provider.get("maxRetryDelayMs", 60000),
+        }
+
+    def get_web_socket_connect_timeout_ms(self) -> int | None:
+        """WebSocket 连接超时（毫秒）；0 表示禁用（对齐 TS getWebSocketConnectTimeoutMs）。"""
+        value = self._settings.get("websocketConnectTimeoutMs")
+        if isinstance(value, (int, float)) and value >= 0:
+            return int(value)
+        return None
+
+    def get_branch_summary_settings(self) -> dict:
+        """分支摘要设置（对齐 TS getBranchSummarySettings）。"""
+        branch_summary = self._settings.get("branchSummary") or {}
+        return {
+            "reserveTokens": branch_summary.get("reserveTokens", 16384),
+            "skipPrompt": branch_summary.get("skipPrompt", False),
+        }
+
+    def get_thinking_budgets(self) -> dict | None:
+        """自定义思考等级 token 预算（对齐 TS getThinkingBudgets）。"""
+        value = self._settings.get("thinkingBudgets")
+        return value if isinstance(value, dict) else None
+
     def get_retry_enabled(self) -> bool:
         return bool(self.get_retry_settings()["enabled"])
 
