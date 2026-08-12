@@ -622,6 +622,7 @@ class TreeSelector(CopySelectedMixin, OverlayDialog):
         leaf_id: str | None = None,
         filter_mode: str = "default",
         show_label_timestamps: bool = False,
+        on_label_edit=None,
     ) -> None:
         super().__init__()
         self._filter_mode = filter_mode if filter_mode in TREE_FILTER_MODES else "default"
@@ -630,6 +631,7 @@ class TreeSelector(CopySelectedMixin, OverlayDialog):
         self._leaf_id = leaf_id
         self._selected_index = 0
         self._folded: set[str] = set()
+        self._on_label_edit = on_label_edit
         self._all_rows = _flatten_tree(
             self._tree,
             self._leaf_id,
@@ -792,6 +794,13 @@ class TreeSelector(CopySelectedMixin, OverlayDialog):
             )
             self._apply_filter()
             self.refresh()
+            return True
+        if name == "shift+l":
+            # 编辑当前节点 label（对齐 TS app.tree.editLabel）。
+            if 0 <= self._selected_index < len(self._rows):
+                row = self._rows[self._selected_index]
+                if self._on_label_edit is not None:
+                    self._on_label_edit(row[3], row[4].label)
             return True
         return False
 

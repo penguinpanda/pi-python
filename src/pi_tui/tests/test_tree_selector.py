@@ -115,6 +115,15 @@ def test_tree_selector_fold_and_unfold() -> None:
     assert len(selector._rows) == 2
 
 
+def test_tree_selector_label_edit() -> None:
+    """shift+l 触发 on_label_edit(entry_id, label)（对齐 TS app.tree.editLabel）。"""
+    edited: list = []
+    root = _node({"type": "message", "role": "user"}, label="old", node_id="root")
+    selector = TreeSelector([root], on_label_edit=lambda eid, lbl: edited.append((eid, lbl)))
+    assert selector.handle_key(_key("shift+l")) is True
+    assert edited == [("root", "old")]
+
+
 def test_tree_selector_fold_renders_marker() -> None:
     root = _node(
         {"type": "message", "role": "user"},

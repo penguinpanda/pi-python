@@ -1463,9 +1463,33 @@ class PiTuiApp(App):
             self._notify("(empty session)")
             return
         self.push_screen(
-            TreeSelector(tree, leaf_id=manager.get_leaf_id()),
+            TreeSelector(
+                tree,
+                leaf_id=manager.get_leaf_id(),
+                on_label_edit=self._on_tree_label_edit,
+            ),
             callback=self._on_tree_selected,
         )
+
+    def _on_tree_label_edit(self, entry_id: str, current_label: str | None) -> None:
+        """shift+l：编辑树节点 label（对齐 TS onLabelEdit → setLabel）。"""
+        from pi_tui.selectors import TextInputDialog
+
+        self.push_screen(
+            TextInputDialog(
+                f"Label for {entry_id[:8]}...",
+                value=current_label or "",
+            ),
+            callback=lambda value: self._apply_tree_label(entry_id, value),
+        )
+
+    def _apply_tree_label(self, entry_id: str, value: str | None) -> None:
+        if value is None:
+            return
+        manager = self._session.session_manager
+        label = value.strip() or None
+        manager.set_label(entry_id, label)
+        self._notify(f"Label {'cleared' if label is None else 'set'}: {entry_id[:8]}")
 
     def _on_tree_selected(self, entry_id) -> None:
         if entry_id is None:
