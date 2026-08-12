@@ -14,6 +14,8 @@ from pi_ai.api.api_provider_registry import get_api_provider
 from pi_ai.api.bedrock_converse_stream import (
     _aws_sigv4_headers,
     _resolve_bedrock_credentials,
+    _to_bedrock_messages,
+    _build_thinking_fields,
     parse_eventstream_messages,
 )
 from pi_ai._types import Context, Model
@@ -43,6 +45,89 @@ def _frame(payload: dict, event_type: str) -> bytes:
     )
     total = 16 + len(header) + len(body)
     return struct.pack(">II", total, len(header)) + b"\0\0\0\0" + header + body + b"\0\0\0\0"
+
+
+def test_tool_results_merged_and_images_converted() -> None:
+    """连续 toolResult 合并为单条 user 消息；image 内容转换为 Bedrock 格式。"""
+    context = Context(
+        messages=[
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "toolCall",
+                        "id": "tc-1",
+                        "name": "bash",
+                        "arguments": {"command": "ls"},
+                    }
+                ],
+            },
+            {
+                "role": "toolResult",
+                "tool_call_id": "tc-1",
+                "content": [{"type": "text", "text": "ok"}],
+            },
+            {
+                "role": "toolResult",
+                "tool_call_id": "tc-1",
+                "content": [
+                    {
+                        "type": "image",
+                        "mime_type": "image/png",
+                        "data": b"\x89PNG",
+                    }
+                ],
+            },
+        ]
+    )
+    messages = _to_bedrock_messages(context)
+    assert len(messages) == 2
+    tool_message = messages[1]
+    assert tool_message["role"] == "user"
+    blocks = tool_message["content"]
+    assert len(blocks) == 2
+    assert blocks[0]["toolResult"]["content"] == [{"text": "ok"}]
+    assert blocks[1]["toolResult"]["content"][0]["image"] == {
+        "format": "png",
+        "source": {"bytes": b"\x89PNG"},
+    }
+
+
+def test_empty_tool_result_uses_placeholder() -> None:
+    context = Context(
+        messages=[
+            {"role": "toolResult", "tool_call_id": "tc-1", "content": []},
+        ]
+    )
+    messages = _to_bedrock_messages(context)
+    assert messages[0]["content"][0]["toolResult"]["content"] == [{"text": "<empty>"}]
+
+
+def test_thinking_fields() -> None:
+    model = Model(
+        id="anthropic.claude-sonnet-4-20250514",
+        provider="amazon-bedrock",
+        api="bedrock-converse-stream",
+        reasoning=True,
+    )
+    assert _build_thinking_fields(model, {"reasoning": "high"}) == {
+        "thinking": {"type": "enabled", "budget_tokens": 16384}
+    }
+    assert _build_thinking_fields(model, {"reasoning": "max"}) == {
+        "thinking": {"type": "enabled", "budget_tokens": 16384}
+    }
+    assert (
+        _build_thinking_fields(
+            model, {"reasoning": "medium", "thinking_budgets": {"medium": 4000}}
+        )["thinking"]["budget_tokens"]
+        == 4000
+    )
+    assert (
+        _build_thinking_fields(
+            Model(id="m", provider="p", api="a", reasoning=False), {"reasoning": "high"}
+        )
+        is None
+    )
 
 
 def test_bedrock_api_registered() -> None:

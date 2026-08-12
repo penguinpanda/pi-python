@@ -228,7 +228,9 @@ async def read_bedrock_events(
 
 def _to_bedrock_messages(context: Context) -> list[dict[str, Any]]:
     messages: list[dict[str, Any]] = []
-    for msg in context.messages:
+    i = 0
+    while i < len(context.messages):
+        msg = context.messages[i]
         role = msg["role"]
         if role == "user":
             content = cast(Any, msg["content"])
@@ -274,24 +276,47 @@ def _to_bedrock_messages(context: Context) -> list[dict[str, Any]]:
             if assistant_blocks:
                 messages.append({"role": "assistant", "content": assistant_blocks})
         elif role == "toolResult":
-            tool_msg = cast(Any, msg)
-            text = "".join(
-                block.get("text") or "" for block in tool_msg["content"] if block["type"] == "text"
-            )
-            messages.append(
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "toolResult": {
-                                "toolUseId": tool_msg["tool_call_id"],
-                                "content": [{"text": text}],
-                                "status": "error" if tool_msg.get("is_error") else "success",
+            # Bedrock 要求所有 tool results 合并进同一条 user 消息（对齐 TS）。
+            tool_results: list[dict[str, Any]] = []
+            j = i
+            while j < len(context.messages) and context.messages[j]["role"] == "toolResult":
+                tool_msg = cast(Any, context.messages[j])
+                content_blocks: list[dict[str, Any]] = []
+                for block in tool_msg["content"]:
+                    if block["type"] == "image" and block.get("data"):
+                        fmt = {
+                            "image/png": "png",
+                            "image/jpeg": "jpeg",
+                            "image/gif": "gif",
+                            "image/webp": "webp",
+                        }.get(block.get("mime_type") or "image/png", "png")
+                        content_blocks.append(
+                            {
+                                "image": {
+                                    "format": fmt,
+                                    "source": {"bytes": block["data"]},
+                                }
                             }
+                        )
+                    elif block["type"] == "text":
+                        text = (block.get("text") or "").strip()
+                        if text:
+                            content_blocks.append({"text": text})
+                if not content_blocks:
+                    content_blocks.append({"text": "<empty>"})
+                tool_results.append(
+                    {
+                        "toolResult": {
+                            "toolUseId": tool_msg["tool_call_id"],
+                            "content": content_blocks,
+                            "status": "error" if tool_msg.get("is_error") else "success",
                         }
-                    ],
-                }
-            )
+                    }
+                )
+                j += 1
+            messages.append({"role": "user", "content": tool_results})
+            i = j - 1
+        i += 1
     return messages
 
 
@@ -330,6 +355,38 @@ def _update_usage(model: Model, usage: Usage, metadata: dict[str, Any]) -> None:
     calculate_cost(model, usage)
 
 
+def _build_thinking_fields(model: Model, opts: dict[str, Any]) -> dict[str, Any] | None:
+    """Bedrock Claude 思考配置（对齐 TS buildAdditionalModelRequestFields）。
+
+    budget 型 Claude：thinking.type=enabled + budget_tokens；
+    thinking_display 控制返回方式（默认 summarized，GovCloud 忽略）。
+    """
+    reasoning = opts.get("reasoning")
+    if not reasoning or not model.reasoning:
+        return None
+    defaults: dict[str, int] = {
+        "minimal": 1024,
+        "low": 2048,
+        "medium": 8192,
+        "high": 16384,
+        "xhigh": 16384,  # budget 型 Claude 把扩展级别钳到 high
+        "max": 16384,
+    }
+    level = "high" if reasoning in ("xhigh", "max") else reasoning
+    budgets = cast(dict[str, Any], opts.get("thinking_budgets") or {})
+    budget = int(budgets.get(level) or defaults.get(reasoning, 0))
+    fields: dict[str, Any] = {
+        "thinking": {
+            "type": "enabled",
+            "budget_tokens": budget,
+        }
+    }
+    display = opts.get("thinking_display")
+    if isinstance(display, str):
+        fields["thinking"]["display"] = display
+    return fields
+
+
 def bedrock_converse_stream(
     model: Model,
     context: Context,
@@ -349,6 +406,9 @@ def bedrock_converse_stream(
         "messages": messages,
         "inferenceConfig": {"maxTokens": clamp_max_tokens_to_context(model, context, max_tokens)},
     }
+    thinking_fields = _build_thinking_fields(model, cast(dict[str, Any], opts))
+    if thinking_fields is not None:
+        payload["additionalModelRequestFields"] = thinking_fields
     temperature = opts.get("temperature")
     if temperature is not None:
         payload["inferenceConfig"]["temperature"] = temperature
