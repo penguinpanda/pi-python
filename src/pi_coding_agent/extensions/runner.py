@@ -221,34 +221,57 @@ class ExtensionCommandContext(ExtensionContext):
         return False
 
     async def new_session(self, options: dict | None = None):
+        options = options or {}
         if await self._cancel_requested(
             "session_before_switch",
             {"position": "before", "targetSessionFile": None},
         ):
             return None
-        return await self._runner._command_action("new_session", options or {})
+        result = await self._runner._command_action("new_session", options)
+        await self._run_with_session(options)
+        return result
 
     async def fork(self, entry_id: str, options: dict | None = None):
+        options = options or {}
         if await self._cancel_requested(
             "session_before_fork",
             {"position": "before", "entryId": entry_id},
         ):
             return None
-        return await self._runner._command_action("fork", entry_id, options or {})
+        result = await self._runner._command_action("fork", entry_id, options)
+        await self._run_with_session(options)
+        return result
 
     async def navigate_tree(self, target_id: str, options: dict | None = None):
         return await self._runner._command_action("navigate_tree", target_id, options or {})
 
     async def switch_session(self, session_path: str, options: dict | None = None):
+        options = options or {}
         if await self._cancel_requested(
             "session_before_switch",
             {"position": "at", "targetSessionFile": session_path},
         ):
             return None
-        return await self._runner._command_action("switch_session", session_path, options or {})
+        result = await self._runner._command_action("switch_session", session_path, options)
+        await self._run_with_session(options)
+        return result
 
     async def reload(self) -> None:
         await self._runner._command_action("reload")
+
+    async def _run_with_session(self, options: dict) -> None:
+        """会话替换后执行 withSession 回调（对齐 TS ReplacedSessionContext）。
+
+        回调收到绑定到新会话的全新 command ctx（runtime 已 invalidate，
+        新 ctx 是当前 generation，可直接使用）。
+        """
+        with_session = options.get("withSession")
+        if not callable(with_session):
+            return
+        fresh = self._runner.create_command_context()
+        raw = with_session(fresh)
+        if inspect.isawaitable(raw):
+            await raw
 
 
 # ---------------------------------------------------------------------------

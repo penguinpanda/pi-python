@@ -324,3 +324,28 @@ async def test_compact_options_callbacks() -> None:
         await asyncio.sleep(0.01)
     assert session.calls == ["keep it short"]
     assert completed == [{"ok": True}]
+
+
+@pytest.mark.asyncio
+async def test_new_session_with_session_callback() -> None:
+    """new_session options.withSession：替换后回调收到绑定新会话的 ctx。"""
+    runner = ExtensionRunner([])
+    seen: list = []
+
+    async def fake_new_session(options):
+        return {"cancelled": False}
+
+    runner.bind(command_handlers={"new_session": fake_new_session})
+    captured = runner.create_command_context()
+
+    async def _with_session(ctx):
+        seen.append(ctx)
+
+    result = await captured.new_session({"withSession": _with_session})
+    assert result == {"cancelled": False}
+    assert len(seen) == 1
+    # 回调 ctx 是当前 generation（invalidate 后的新 ctx），可正常使用
+    assert seen[0].cwd == runner.cwd
+    # 旧 ctx 已失效
+    with pytest.raises(RuntimeError, match="stale after session replacement"):
+        _ = captured.cwd
