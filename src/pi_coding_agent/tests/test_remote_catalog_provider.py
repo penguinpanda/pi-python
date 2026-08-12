@@ -53,6 +53,82 @@ def test_parse_catalog_list_and_map_forms() -> None:
 
 
 @pytest.mark.asyncio
+async def test_remote_catalog_404_clears_dynamic_models(monkeypatch) -> None:
+    """404/501：动态模型清空，合并结果中下线模型消失。"""
+    import pi_coding_agent.remote_catalog_provider as mod
+    from pi_ai.models.models_store import InMemoryModelsStore, provider_models_store
+
+    provider = _provider()
+    overlaid = with_remote_catalog(provider, "https://cat.example.com")
+    store = provider_models_store(InMemoryModelsStore(), provider.id)
+    # 先放入缓存目录
+    await store.write(
+        ModelsStoreEntry(
+            models=[Model(id="gpt-stale", provider="openai", api="responses")],
+            checked_at=int(time.time() * 1000) - 5 * 60 * 60 * 1000,
+            last_modified=1,
+            etag='"v1"',
+        )
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404)
+
+    monkeypatch.setattr(
+        mod,
+        "_client_factory",
+        lambda *a, **kw: httpx.AsyncClient(*a, transport=httpx.MockTransport(handler), **kw),
+    )
+    context = RefreshModelsContext(store=store, allow_network=True, force=True)
+    await overlaid.refresh_models(context)
+
+    # 动态模型被清空（缓存内容不再返回）
+    assert [m.id for m in overlaid.get_models()] == ["gpt-base"]
+    entry = await store.read()
+    assert entry is not None
+    assert entry.models == []
+    assert entry.last_modified == 0
+
+
+@pytest.mark.asyncio
+async def test_remote_catalog_transient_failure_keeps_etag(monkeypatch) -> None:
+    """瞬时失败：保留 etag 与缓存正文，抛错供上层记录。"""
+    import pi_coding_agent.remote_catalog_provider as mod
+    from pi_ai.models.models_store import InMemoryModelsStore, provider_models_store
+
+    provider = _provider()
+    overlaid = with_remote_catalog(provider, "https://cat.example.com")
+    store = provider_models_store(InMemoryModelsStore(), provider.id)
+    await store.write(
+        ModelsStoreEntry(
+            models=[Model(id="gpt-cached", provider="openai", api="responses")],
+            checked_at=int(time.time() * 1000) - 5 * 60 * 60 * 1000,
+            last_modified=1,
+            etag='"v1"',
+        )
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500)
+
+    monkeypatch.setattr(
+        mod,
+        "_client_factory",
+        lambda *a, **kw: httpx.AsyncClient(*a, transport=httpx.MockTransport(handler), **kw),
+    )
+    context = RefreshModelsContext(store=store, allow_network=True, force=True)
+    with pytest.raises(RuntimeError):
+        await overlaid.refresh_models(context)
+
+    entry = await store.read()
+    assert entry is not None
+    assert entry.etag == '"v1"'  # 校验器保留，下次重验
+    assert [m.id for m in entry.models] == ["gpt-cached"]
+    # 缓存恢复的 overlay 仍可用
+    assert "gpt-cached" in [m.id for m in overlaid.get_models()]
+
+
+@pytest.mark.asyncio
 async def test_remote_catalog_refresh_and_304_window(monkeypatch) -> None:
     import pi_coding_agent.remote_catalog_provider as mod
     from pi_ai.models.models_store import provider_models_store
