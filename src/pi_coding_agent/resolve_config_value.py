@@ -2,19 +2,21 @@
 
 用于 models.json / auth.json 中的 API Key、header 等值：
 
-- `!command`       执行命令并取 stdout（进程内缓存；无 shell 解释，不支持管道/重定向）；
+- `!command`       经系统 shell 执行并取 stdout（进程内缓存；支持管道/重定向，
+                  对齐 TS executeCommandUncached）；
 - `$ENV_VAR` / `${ENV_VAR}`  引用环境变量（可出现在任意位置）；
 - `$$` / `$!`      转义字面量 `$` / `!`（非命令值）；
 - 其它             原样作为字面量。
 
 任何引用缺失时解析结果为 None（调用方决定是否报错）。
+配置来源应视为可信输入，命令受执行环境权限约束。
 """
 
 from __future__ import annotations
 
 import os
 import re
-import shlex
+import shutil
 import subprocess
 from typing import TypedDict
 
@@ -161,21 +163,25 @@ def is_config_value_configured(config: str, env: dict[str, str] | None = None) -
 def _execute_command_uncached(command_config: str) -> str | None:
     """执行 `!command` 并返回 stdout（去首尾空白）。
 
-    参数经 shlex 拆分后直接执行，不经过 shell，
-    因此 `|`、`&&`、`;` 等 shell 元字符不会被解释，
-    避免配置值被当作任意 shell 脚本执行（命令注入边界）。
-    配置来源仍应视为可信输入，命令受执行环境权限约束。
+    对齐 TS executeCommandUncached：经系统 shell 执行，`|`、`&&`、`;` 等
+    shell 元字符会被解释（与 TS 行为一致；配置来源应视为可信输入）。
+    Windows 上优先 Git bash（对齐 TS getShellConfig），否则回退默认 shell。
     """
     command = command_config[1:]
-    parts = shlex.split(command, posix=(os.name != "nt"))
-    if not parts:
-        return None
+    shell_path: str | None = None
+    use_shell = True
+    if os.name == "nt":
+        bash = shutil.which("bash")
+        if bash:
+            shell_path = bash
     try:
         result = subprocess.run(
-            parts,
+            command,
             capture_output=True,
             text=True,
             timeout=10,
+            shell=use_shell,
+            executable=shell_path,
         )
     except (OSError, subprocess.SubprocessError):
         return None

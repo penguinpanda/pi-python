@@ -1,9 +1,12 @@
 """
-grep 工具 — 搜索文件内容（正则匹配）。
+grep 工具 — 搜索文件内容（正则匹配，对齐 TS core/tools/grep.ts schema）。
+
+schema 与 TS 一致：pattern / path / glob / ignoreCase / literal / context / limit。
 """
 
 from __future__ import annotations
 
+import asyncio
 import re
 from pathlib import Path
 
@@ -12,26 +15,39 @@ from pi_ai import TextContent
 
 from ._path_utils import resolve_cwd_path
 
-DEFAULT_MAX_RESULTS = 100
+DEFAULT_LIMIT = 100
+GREP_MAX_LINE_LENGTH = 1000
 
 TOOL_SCHEMA = {
     "type": "object",
     "properties": {
         "pattern": {
             "type": "string",
-            "description": "The regular expression pattern to search for",
+            "description": "Search pattern (regex or literal string)",
         },
         "path": {
             "type": "string",
-            "description": "File or directory to search in (relative to cwd, defaults to cwd)",
+            "description": "Directory or file to search (default: current directory)",
         },
-        "include": {
+        "glob": {
             "type": "string",
-            "description": "File glob pattern to include (e.g., '*.py')",
+            "description": "Filter files by glob pattern, e.g. '*.ts' or '**/*.spec.ts'",
         },
-        "max_results": {
+        "ignoreCase": {
+            "type": "boolean",
+            "description": "Case-insensitive search (default: false)",
+        },
+        "literal": {
+            "type": "boolean",
+            "description": "Treat pattern as literal string instead of regex (default: false)",
+        },
+        "context": {
             "type": "integer",
-            "description": f"Maximum number of results to return (default: {DEFAULT_MAX_RESULTS})",
+            "description": "Number of lines to show before and after each match (default: 0)",
+        },
+        "limit": {
+            "type": "integer",
+            "description": f"Maximum number of matches to return (default: {DEFAULT_LIMIT})",
         },
     },
     "required": ["pattern"],
@@ -45,13 +61,25 @@ def create_grep_tool(cwd: str) -> AgentTool:
     async def execute(
         tool_call_id: str,
         params: dict,
-        signal: object = None,
+        signal: asyncio.Event | None = None,
         on_update: object = None,
     ) -> AgentToolResult:
         pattern = params["pattern"]
         search_path = params.get("path", ".")
-        include_glob = params.get("include")
-        max_results = params.get("max_results", DEFAULT_MAX_RESULTS)
+        # glob 优先（对齐 TS）；兼容旧的 include 字段名。
+        glob_pattern = params.get("glob") or params.get("include")
+        ignore_case = bool(params.get("ignoreCase"))
+        literal = bool(params.get("literal"))
+        context = params.get("context") or 0
+        limit = params.get("limit") or params.get("max_results") or DEFAULT_LIMIT
+        limit = max(1, int(limit))
+        context = max(0, int(context))
+
+        if signal is not None and signal.is_set():
+            return AgentToolResult(
+                content=[TextContent(type="text", text="Operation aborted")],
+                details={"aborted": True},
+            )
 
         try:
             target = resolve_cwd_path(base, search_path)
@@ -62,41 +90,56 @@ def create_grep_tool(cwd: str) -> AgentTool:
             )
 
         try:
-            regex = re.compile(pattern)
+            if literal:
+                regex = re.compile(re.escape(pattern), re.IGNORECASE if ignore_case else 0)
+            else:
+                regex = re.compile(pattern, re.IGNORECASE if ignore_case else 0)
         except re.error as e:
             return AgentToolResult(
                 content=[TextContent(type="text", text=f"Error: Invalid regex pattern: {e}")],
                 details={},
             )
 
-        results: list[str] = []
-        count = 0
-
         try:
-            files = _collect_files(target, include_glob)
+            files = _collect_files(target, glob_pattern)
         except PermissionError:
             return AgentToolResult(
                 content=[TextContent(type="text", text=f"Error: Permission denied: {search_path}")],
                 details={},
             )
 
+        results: list[str] = []
+        count = 0
+        is_directory = target.is_dir()
+
         for file_path in files:
-            if count >= max_results:
+            if signal is not None and signal.is_set():
+                break
+            if count >= limit:
                 break
             try:
                 content = file_path.read_text(encoding="utf-8", errors="replace")
             except (PermissionError, UnicodeDecodeError, IsADirectoryError):
                 continue
 
-            for line_no, line in enumerate(content.splitlines(), 1):
-                if count >= max_results:
+            lines = content.splitlines()
+            for line_no, line in enumerate(lines, 1):
+                if signal is not None and signal.is_set():
                     break
-                if regex.search(line):
-                    rel_path = (
-                        file_path.relative_to(base) if file_path.is_relative_to(base) else file_path
-                    )
-                    results.append(f"{rel_path}:{line_no}:{line}")
-                    count += 1
+                if count >= limit:
+                    break
+                if not regex.search(line):
+                    continue
+                rel_path = _format_path(file_path, target, is_directory)
+                results.append(f"{rel_path}:{line_no}:{_truncate_line(line)}")
+                count += 1
+                # context 行（前后 N 行，以 `-` 分隔，对齐 TS rg --context 输出）。
+                for ctx_no in range(
+                    max(1, line_no - context), min(len(lines), line_no + context) + 1
+                ):
+                    if ctx_no == line_no:
+                        continue
+                    results.append(f"{rel_path}:{ctx_no}-{_truncate_line(lines[ctx_no - 1])}")
 
         if not results:
             return AgentToolResult(
@@ -104,27 +147,45 @@ def create_grep_tool(cwd: str) -> AgentTool:
                 details={"matches": 0},
             )
 
+        match_limit_reached = count >= limit
         output = f"Found {count} match(es):\n" + "\n".join(results)
-        if count >= max_results:
-            output += f"\n[Results truncated at {max_results}]"
+        if match_limit_reached:
+            output += f"\n[Truncated: {limit} matches limit]"
 
         return AgentToolResult(
             content=[TextContent(type="text", text=output)],
-            details={"matches": count, "truncated": count >= max_results},
+            details={
+                "matches": count,
+                "matchLimitReached": limit if match_limit_reached else None,
+            },
         )
 
     return AgentTool(
         name="grep",
         prompt_snippet="Search file contents for patterns (respects .gitignore)",
         description=(
-            "Search for a regex pattern in files under the working directory. "
+            "Search file contents for a pattern under the working directory. "
             "Returns matching lines with file paths and line numbers. "
+            "Output is truncated to 100 matches. "
             "Never search from the filesystem root (e.g. grep -r /) or scan the whole disk."
         ),
         input_schema=TOOL_SCHEMA,
         label="Grep",
         execute=execute,
     )
+
+
+def _format_path(file_path: Path, search_root: Path, is_directory: bool) -> str:
+    """对齐 TS formatPath：目录搜索时相对路径，否则文件名。"""
+    if is_directory and file_path.is_relative_to(search_root):
+        return file_path.relative_to(search_root).as_posix()
+    return file_path.name
+
+
+def _truncate_line(line: str) -> str:
+    if len(line) <= GREP_MAX_LINE_LENGTH:
+        return line
+    return line[:GREP_MAX_LINE_LENGTH] + "…"
 
 
 def _collect_files(target: Path, include_glob: str | None) -> list[Path]:

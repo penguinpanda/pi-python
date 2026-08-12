@@ -57,6 +57,16 @@ class TestResolveConfigValue:
         command = "!cmd /c echo hello" if os.name == "nt" else "!echo hello"
         assert resolve_config_value(command) == "hello"
 
+    def test_command_value_supports_shell_pipeline(self):
+        """!command 经系统 shell 执行：管道/重定向生效（对齐 TS execSync）。"""
+        import os
+
+        clear_config_value_cache()
+        if os.name == "nt":
+            assert resolve_config_value("!cmd /c echo hello | findstr hello") == "hello"
+        else:
+            assert resolve_config_value("!echo hello | tr a-z A-Z") == "HELLO"
+
     def test_env_var_names(self):
         assert get_config_value_env_var_names("a-$FOO-b-${BAR}") == ["FOO", "BAR"]
         assert get_config_value_env_var_names("!cmd") == []
