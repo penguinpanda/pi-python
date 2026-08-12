@@ -8,10 +8,7 @@ import httpx
 import pytest
 
 from pi_ai.auth.oauth import openrouter
-from pi_ai.auth.oauth.openrouter import (
-    _start_loopback_callback,
-    _wait_for_callback_credential,
-)
+from pi_ai.auth.oauth.openrouter import _start_loopback_callback
 
 
 class _Interaction:
@@ -41,29 +38,52 @@ async def test_loopback_callback_exchanges_credential(monkeypatch) -> None:
 
     monkeypatch.setattr(openrouter, "exchange_authorization_code", fake_exchange)
 
-    callback_url = await _start_loopback_callback("verifier-x", asyncio.Event())
+    callback_url, wait_for_callback, stop = await _start_loopback_callback(
+        "verifier-x", "state-x", asyncio.Event()
+    )
     assert callback_url is not None
     assert "/oauth/callback" in callback_url
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            response = await client.get(f"{callback_url}?code=abc123&state=state-x")
+        assert response.status_code == 200
+        assert b"Signed in to OpenRouter" in response.content
 
-    async with httpx.AsyncClient(timeout=5) as client:
-        response = await client.get(f"{callback_url}?code=abc123&state=st")
-    assert response.status_code == 200
-    assert b"Signed in to OpenRouter" in response.content
-
-    credential = await _wait_for_callback_credential()
-    assert credential is not None
-    assert credential["access"] == "or-key"
-    assert captured == {"code": "abc123", "verifier": "verifier-x"}
+        credential = await wait_for_callback()
+        assert credential is not None
+        assert credential["access"] == "or-key"
+        assert captured == {"code": "abc123", "verifier": "verifier-x"}
+    finally:
+        await stop()
 
 
 @pytest.mark.asyncio
-async def test_loopback_callback_error_path(monkeypatch) -> None:
-    callback_url = await _start_loopback_callback("verifier-x", asyncio.Event())
+async def test_loopback_callback_error_and_state_mismatch(monkeypatch) -> None:
+    callback_url, wait_for_callback, stop = await _start_loopback_callback(
+        "verifier-x", "state-x", asyncio.Event()
+    )
     assert callback_url is not None
+    try:
+        # state 不匹配 → 400，不结束等待
+        async with httpx.AsyncClient(timeout=5) as client:
+            response = await client.get(f"{callback_url}?code=zzz&state=WRONG")
+        assert response.status_code == 400
 
-    async with httpx.AsyncClient(timeout=5) as client:
-        response = await client.get(f"{callback_url}?error=access_denied")
-    assert response.status_code == 400
+        # error 路径 → 400 且结束等待（凭证 None）
+        async with httpx.AsyncClient(timeout=5) as client:
+            response = await client.get(f"{callback_url}?error=access_denied&state=state-x")
+        assert response.status_code == 400
+        assert await asyncio.wait_for(wait_for_callback(), timeout=5) is None
+    finally:
+        await stop()
 
-    credential = await _wait_for_callback_credential()
-    assert credential is None
+
+@pytest.mark.asyncio
+async def test_stop_releases_server_without_callback() -> None:
+    """无回调时 stop 幂等关闭服务器（资源泄漏回归）。"""
+    callback_url, _wait, stop = await _start_loopback_callback(
+        "verifier-x", "state-x", asyncio.Event()
+    )
+    assert callback_url is not None
+    await stop()
+    await stop()  # 幂等

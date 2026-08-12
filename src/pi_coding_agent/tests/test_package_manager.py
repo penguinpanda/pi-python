@@ -49,6 +49,44 @@ def test_parse_source() -> None:
     assert (local.type, local.name) == ("local", "my-dir")
 
 
+def test_parse_source_rejects_unsafe_inputs() -> None:
+    """空源 / 路径逃逸包名拒绝（rmtree/命令注入回归）。"""
+    with pytest.raises(ValueError):
+        parse_source("")
+    with pytest.raises(ValueError):
+        parse_source("npm:")
+    with pytest.raises(ValueError):
+        parse_source("git:")
+    from pi_coding_agent.package_manager import _assert_safe_package_name
+
+    for bad in (".", "..", "a/b", "a\\b", "a..b"):
+        with pytest.raises(ValueError):
+            _assert_safe_package_name(bad)
+
+
+@pytest.mark.asyncio
+async def test_git_clone_uses_double_dash_separator(tmp_path, monkeypatch) -> None:
+    """以 - 开头的 git URL 不当作选项（-- 分隔注入回归）。"""
+    import pi_coding_agent.package_manager as pm
+
+    source_dir = tmp_path / "src-ext"
+    source_dir.mkdir()
+    settings = _FakeSettings({}, {})
+    manager = _manager(tmp_path, settings)
+    manager.settings_manager = settings
+
+    captured: dict = {}
+
+    async def fake_run(*args, cwd=None):
+        captured["args"] = args
+
+    monkeypatch.setattr(pm.PackageManager, "_run", fake_run)
+    await manager.install("git:--upload-pack=/bin/sh", local=False)
+    args = captured["args"]
+    assert "--" in args
+    assert args[args.index("--") + 1] == "--upload-pack=/bin/sh"
+
+
 @pytest.mark.asyncio
 async def test_install_local_dir_and_persist(tmp_path) -> None:
     source_dir = tmp_path / "src-ext"

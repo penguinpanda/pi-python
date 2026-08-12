@@ -143,6 +143,7 @@ async def _wait_for_browser_code(state: str, signal: Any) -> str | None:
         for task in tasks:
             if not task.done():
                 task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
     finally:
         server.close()
         await server.wait_closed()
@@ -188,16 +189,32 @@ async def _login(interaction: AuthInteraction, gateway: str = "") -> OAuthCreden
         webbrowser.open(url)
     except Exception:
         pass
-    code = await _wait_for_browser_code(state, interaction.signal)
-    if code is None:
-        pasted = await interaction.prompt(
-            {
-                "type": "manual_code",
-                "message": "Complete login in your browser, or paste the authorization "
-                "code / redirect URL here:",
-                "placeholder": REDIRECT_URI,
-            }
-        )
+
+    manual_prompt: Any = {
+        "type": "manual_code",
+        "message": "Complete login in your browser, or paste the authorization "
+        "code / redirect URL here:",
+        "placeholder": REDIRECT_URI,
+    }
+    # 浏览器回调与手动粘贴竞争（对齐 TS：任一先完成即用，避免挂起）。
+    manual_task = asyncio.create_task(interaction.prompt(manual_prompt))
+    callback_task = asyncio.create_task(_wait_for_browser_code(state, interaction.signal))
+    done, _pending = await asyncio.wait(
+        {manual_task, callback_task}, return_when=asyncio.FIRST_COMPLETED
+    )
+    if callback_task in done and callback_task.result():
+        manual_task.cancel()
+        await asyncio.gather(manual_task, return_exceptions=True)
+        code = callback_task.result()
+    else:
+        if callback_task in done:
+            await asyncio.gather(callback_task, return_exceptions=True)
+        else:
+            callback_task.cancel()
+            await asyncio.gather(callback_task, return_exceptions=True)
+        pasted = manual_task.result() if not manual_task.cancelled() else None
+        if pasted is None:
+            raise RuntimeError("Radius OAuth login was cancelled")
         parsed = urllib.parse.urlparse(pasted.strip())
         if parsed.scheme:
             code = urllib.parse.parse_qs(parsed.query).get("code", [None])[0]

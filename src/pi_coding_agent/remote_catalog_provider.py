@@ -133,13 +133,12 @@ def with_remote_catalog(
                 )
             return
         if response.status_code in (404, 501):
-            base = stored or ModelsStoreEntry(
-                models=[], checked_at=None, last_modified=None, etag=None
-            )
+            # 目录下线：动态模型清空，合并结果中下线模型消失（对齐 TS 语义）。
+            overlaid._dynamic_models = []
             if context.store is not None:
                 await context.store.write(
                     ModelsStoreEntry(
-                        models=list(base.models),
+                        models=[],
                         checked_at=checked_at,
                         last_modified=0,
                         etag=None,
@@ -161,10 +160,7 @@ def with_remote_catalog(
                 f"Model catalog request failed for {provider.id}: {response.status_code}"
             )
 
-        try:
-            refreshed = _parse_catalog(provider.id, response.json())
-        except ValueError:
-            refreshed = _parse_catalog(provider.id, response.json())
+        refreshed = _parse_catalog(provider.id, response.json())
         last_modified_raw = response.headers.get("last-modified")
         last_modified = 0
         if last_modified_raw:

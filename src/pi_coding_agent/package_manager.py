@@ -38,17 +38,35 @@ class ConfiguredPackage:
 def parse_source(source: str) -> ParsedSource:
     """解析安装源（对齐 TS parseSource 核心形式）。"""
     value = source.strip()
+    if not value:
+        raise ValueError("Invalid install source: empty")
     if value.startswith("npm:"):
-        return ParsedSource(type="npm", name=value[4:].strip(), spec=value)
+        name = value[4:].strip()
+        if not name:
+            raise ValueError("Invalid install source: empty npm package name")
+        return ParsedSource(type="npm", name=name, spec=value)
     if value.startswith("git:"):
         rest = value[4:].strip()
+        if not rest:
+            raise ValueError("Invalid install source: empty git URL")
         ref = ""
         if "@" in rest:
             url, ref = rest.rsplit("@", 1)
             rest = url
         name = rest.rstrip("/").split("/")[-1].replace(".git", "")
+        if not name:
+            raise ValueError(f"Invalid install source: {value}")
         return ParsedSource(type="git", name=name, spec=rest, ref=ref)
-    return ParsedSource(type="local", name=Path(value).name, spec=value)
+    name = Path(value).name
+    if not name:
+        raise ValueError(f"Invalid install source: {value}")
+    return ParsedSource(type="local", name=name, spec=value)
+
+
+def _assert_safe_package_name(name: str) -> None:
+    """包名不得为路径分隔/上级目录（防止 rmtree/写入逃逸 packages 目录）。"""
+    if not name or name in (".", "..") or "/" in name or "\\" in name or ".." in name:
+        raise ValueError(f"Invalid package name: {name}")
 
 
 class PackageManager:
@@ -119,7 +137,12 @@ class PackageManager:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
-        _stdout, _ = await process.communicate()
+        try:
+            _stdout, _ = await asyncio.wait_for(process.communicate(), timeout=10 * 60)
+        except asyncio.TimeoutError as exc:
+            process.kill()
+            await process.communicate()
+            raise RuntimeError(f"Command timed out ({args[0]})") from exc
         if process.returncode != 0:
             raise RuntimeError(f"Command failed ({args[0]}): exit {process.returncode}")
 
@@ -131,6 +154,7 @@ class PackageManager:
         scope = "project" if local else "user"
         self._assert_project_trusted(scope)
         parsed = parse_source(source)
+        _assert_safe_package_name(parsed.name)
         destination = self._installed_path(source, scope)
         if destination.exists():
             shutil.rmtree(destination)
@@ -140,7 +164,8 @@ class PackageManager:
             staging = destination.with_name(destination.name + ".staging")
             if staging.exists():
                 shutil.rmtree(staging)
-            await self._run("npm", "install", "--prefix", str(staging), parsed.name)
+            # "--" 分隔：以 "-" 开头的包名不会被当作 npm 选项。
+            await self._run("npm", "install", "--prefix", str(staging), "--", parsed.name)
             node_modules = staging / "node_modules" / parsed.name
             if node_modules.exists():
                 shutil.copytree(node_modules, destination)
@@ -151,7 +176,8 @@ class PackageManager:
             args = ["git", "clone", "--depth", "1"]
             if parsed.ref:
                 args += ["--branch", parsed.ref]
-            args += [parsed.spec, str(destination)]
+            # "--" 分隔：以 "-" 开头的 URL 不会被当作 git 选项。
+            args += ["--", parsed.spec, str(destination)]
             await self._run(*args)
         elif parsed.type == "local":
             source_path = Path(parsed.spec).expanduser().resolve()

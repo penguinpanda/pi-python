@@ -11,7 +11,7 @@ import urllib.parse
 import uuid
 import webbrowser
 
-from typing import Any, cast
+from typing import Any, Awaitable, Callable, Coroutine, cast
 
 import httpx
 
@@ -75,7 +75,9 @@ async def exchange_authorization_code(code: str, verifier: str) -> OAuthCredenti
 async def _login(interaction: AuthInteraction) -> OAuthCredential:
     verifier, challenge = generate_pkce()
     state = uuid.uuid4().hex
-    callback_url = await _start_loopback_callback(verifier, interaction.signal)
+    callback_url, wait_for_callback, stop_server = await _start_loopback_callback(
+        verifier, state, interaction.signal
+    )
     if callback_url is None:
         callback_url = FALLBACK_CALLBACK_URL
     query = urllib.parse.urlencode(
@@ -109,29 +111,32 @@ async def _login(interaction: AuthInteraction) -> OAuthCredential:
         ),
         "placeholder": callback_url,
     }
-    if callback_url != FALLBACK_CALLBACK_URL:
-        # 浏览器回调与手动粘贴竞争（对齐 TS：任一先完成即用）。
-        manual_task = asyncio.create_task(interaction.prompt(manual_prompt))
-        callback_task = asyncio.create_task(_wait_for_callback_credential())
-        done, _pending = await asyncio.wait(
-            {manual_task, callback_task}, return_when=asyncio.FIRST_COMPLETED
-        )
-        if callback_task in done and callback_task.result() is not None:
-            manual_task.cancel()
-            return cast(OAuthCredential, callback_task.result())
-        manual_task.cancel()
-        if callback_task in done and callback_task.result() is None:
-            # 回调服务器失败且 manual 也完成：走 manual 结果。
-            pass
-        elif callback_task not in done:
-            callback_task.cancel()
-        manual = manual_task.result() if not manual_task.cancelled() else None
-        if manual is None and callback_task in done:
-            manual = None
-        if manual is None:
-            raise RuntimeError("OpenRouter login cancelled")
-    else:
-        manual = await interaction.prompt(manual_prompt)
+    manual: str | None = None
+    try:
+        if callback_url != FALLBACK_CALLBACK_URL:
+            # 浏览器回调与手动粘贴竞争（对齐 TS：任一先完成即用）。
+            manual_task = asyncio.create_task(interaction.prompt(manual_prompt))
+            callback_task = asyncio.create_task(wait_for_callback())
+            done, _pending = await asyncio.wait(
+                {manual_task, callback_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if callback_task in done and callback_task.result() is not None:
+                manual_task.cancel()
+                await asyncio.gather(manual_task, return_exceptions=True)
+                return cast(OAuthCredential, callback_task.result())
+            # manual 先完成（或回调失败/取消）：关闭 server 并回收任务。
+            if callback_task in done:
+                await asyncio.gather(callback_task, return_exceptions=True)
+            else:
+                callback_task.cancel()
+                await asyncio.gather(callback_task, return_exceptions=True)
+            manual = manual_task.result() if not manual_task.cancelled() else None
+        else:
+            manual = await interaction.prompt(manual_prompt)
+    finally:
+        await stop_server()
+    if not manual:
+        raise RuntimeError("OpenRouter login cancelled")
 
     code = _parse_authorization_input(manual)
     if not code:
@@ -140,19 +145,23 @@ async def _login(interaction: AuthInteraction) -> OAuthCredential:
     return await exchange_authorization_code(code, verifier)
 
 
-_callback_credential: OAuthCredential | None = None
-_callback_done: asyncio.Event = asyncio.Event()
-_callback_server: asyncio.AbstractServer | None = None
+async def _start_loopback_callback(
+    verifier: str, state: str, signal: Any
+) -> tuple[
+    str | None,
+    Callable[[], Coroutine[Any, Any, OAuthCredential | None]],
+    Callable[[], Awaitable[None]],
+]:
+    """一次性 loopback 回调服务器（对齐 TS startCallbackServer）。
 
-
-async def _start_loopback_callback(verifier: str, signal: Any) -> str | None:
-    """一次性 loopback 回调服务器（对齐 TS startCallbackServer）。"""
-    global _callback_credential, _callback_done, _callback_server
-    _callback_credential = None
-    _callback_done = asyncio.Event()
+    返回 (callback_url, stop)：每次登录独立的 event/凭证，无共享全局；
+    stop 幂等关闭服务器并回收后台任务。
+    """
+    done_event = asyncio.Event()
+    credential_holder: dict = {"value": None}
+    waiter_task: asyncio.Task | None = None
 
     async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        global _callback_credential
         request_line = await reader.readline()
         parts = request_line.decode("utf-8", "replace").split()
         path = parts[1] if len(parts) > 1 else "/"
@@ -161,13 +170,16 @@ async def _start_loopback_callback(verifier: str, signal: Any) -> str | None:
             await _respond_openrouter(writer, 404, "OAuth callback route not found.")
             return
         query = urllib.parse.parse_qs(parsed.query)
+        if query.get("state", [""])[0] != state:
+            await _respond_openrouter(writer, 400, "OAuth state mismatch.")
+            return
         error = query.get("error", [None])[0]
         if error:
             description = query.get("error_description", [error])[0]
             await _respond_openrouter(
                 writer, 400, f"OpenRouter authorization was denied: {description}"
             )
-            _callback_done.set()
+            done_event.set()
             return
         code = query.get("code", [None])[0]
         if not code:
@@ -177,44 +189,55 @@ async def _start_loopback_callback(verifier: str, signal: Any) -> str | None:
             credential = await exchange_authorization_code(code, verifier)
         except Exception as exc:
             await _respond_openrouter(writer, 500, f"Token exchange failed: {exc}")
-            _callback_done.set()
+            done_event.set()
             return
         await _respond_openrouter(
             writer, 200, "Signed in to OpenRouter. You may now close this page."
         )
-        _callback_credential = credential
-        _callback_done.set()
+        credential_holder["value"] = credential
+        done_event.set()
 
     try:
         server = await asyncio.start_server(_handle, CALLBACK_HOST, 0)
     except OSError:
-        return None
-    _callback_server = server
+        return None, _noop, _noop
 
     async def _close_when_done() -> None:
-        waiter = asyncio.create_task(_callback_done.wait())
+        waiter = asyncio.create_task(done_event.wait())
         abort = asyncio.create_task(signal.wait()) if signal is not None else None
         tasks = {waiter} | ({abort} if abort is not None else set())
         await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in tasks:
             if not task.done():
                 task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         server.close()
         await server.wait_closed()
 
-    asyncio.get_running_loop().create_task(_close_when_done())
+    waiter_task = asyncio.create_task(_close_when_done())
+
+    async def _stop() -> None:
+        done_event.set()
+        if waiter_task is not None:
+            if not waiter_task.done():
+                try:
+                    await asyncio.wait_for(asyncio.shield(waiter_task), timeout=5)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    waiter_task.cancel()
+            await asyncio.gather(waiter_task, return_exceptions=True)
+
     port = server.sockets[0].getsockname()[1]  # type: ignore[union-attr]
-    return f"http://{CALLBACK_HOST}:{port}{CALLBACK_PATH}"
+    callback_url = f"http://{CALLBACK_HOST}:{port}{CALLBACK_PATH}"
+
+    async def _wait_for_callback() -> OAuthCredential | None:
+        await done_event.wait()
+        return credential_holder["value"]
+
+    return callback_url, _wait_for_callback, _stop
 
 
-async def _wait_for_callback_credential() -> OAuthCredential | None:
-    """等待浏览器回调完成交换（无响应时返回 None，走手动粘贴）。"""
-    global _callback_credential, _callback_done
-    try:
-        await asyncio.wait_for(_callback_done.wait(), timeout=120)
-    except asyncio.TimeoutError:
-        return None
-    return _callback_credential
+async def _noop() -> None:
+    return None
 
 
 async def _respond_openrouter(writer: asyncio.StreamWriter, status: int, message: str) -> None:
