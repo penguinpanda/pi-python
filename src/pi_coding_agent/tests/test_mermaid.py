@@ -49,6 +49,44 @@ def test_unsupported_type_returns_none() -> None:
     assert render_mermaid("gantt\n    section S\n") is None
 
 
+def test_flowchart_bt_reverses_rows() -> None:
+    art = render_mermaid("flowchart BT\n    A --> B\n")
+    assert art is not None
+    # BT：行序反转——根节点 A 位于输出尾部、B 位于头部
+    text = "\n".join(art.plain)
+    assert text.index("B") < text.index("A")
+
+
+def test_flowchart_shapes_diamond_and_round() -> None:
+    art = render_mermaid("flowchart TD\n    A{a} --> B(b)\n")
+    assert art is not None
+    text = "\n".join(art.plain)
+    assert "◄" in text  # diamond 形状
+    assert "╭" in text  # round 形状
+
+
+def test_sequence_note_and_loop_lines_skipped() -> None:
+    art = render_mermaid(
+        "sequenceDiagram\n"
+        "    participant A as Alice\n"
+        "    note over A: thinking\n"
+        "    loop every 5s\n"
+        "        A->>A: tick\n"
+        "    end\n"
+    )
+    assert art is not None
+    text = "\n".join(art.plain)
+    assert "Alice" in text
+    assert "tick" in text
+    assert "thinking" not in text  # note 跳过（简化渲染器）
+
+
+def test_sequence_missing_participants_returns_empty() -> None:
+    art = render_mermaid("sequenceDiagram\n    note over X: nothing\n")
+    assert art is not None
+    assert art.plain == []
+
+
 def test_transformer_final_mode_replaces_block() -> None:
     transformer = create_mermaid_markdown_transformer(lambda: "final")
     markdown = "before\n\n```mermaid\nflowchart TD\n    A --> B\n```\n\nafter"
