@@ -23,8 +23,23 @@ _DEFAULT_API_VERSION = "v1"
 
 
 def _azure_root(base_url: str) -> str:
-    parsed = urlparse(base_url)
-    return urlunparse((parsed.scheme, parsed.netloc, "", "", "", ""))
+    """归一化 Azure base URL（对齐 TS normalizeAzureBaseUrl）。
+
+    Azure 主机（*.openai.azure.com / *.cognitiveservices.azure.com /
+    *.ai.azure.com）强制 /openai/v1 基础路径，SDK 才能正确拼接
+    /deployments/<model>/...；非 Azure 主机（模拟器/localhost）保留原路径。
+    """
+    parsed = urlparse(base_url.rstrip("/"))
+    host = parsed.hostname or ""
+    is_azure_host = (
+        host.endswith(".openai.azure.com")
+        or host.endswith(".cognitiveservices.azure.com")
+        or host.endswith(".ai.azure.com")
+    )
+    path = parsed.path.rstrip("/")
+    if is_azure_host and path in ("", "/", "/openai", "/openai/v1/responses"):
+        path = "/openai/v1"
+    return urlunparse((parsed.scheme, parsed.netloc, path, "", "", ""))
 
 
 def _resolve_endpoint(model: Model, options: dict[str, Any]) -> str:

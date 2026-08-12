@@ -104,13 +104,14 @@ async def test_copy_no_last_text() -> None:
 async def test_hotkeys_lists_bindings() -> None:
     manager = SimpleNamespace(
         all_bindings=lambda: [
-            SimpleNamespace(key="ctrl+k", description="Copy"),
+            SimpleNamespace(key="ctrl+k", action_id="app.tools.copy", description="Copy"),
         ]
     )
     message = await _run("/hotkeys", SlashContext(keybindings_manager=manager))
     assert message is not None
     assert "ctrl+k" in message
     assert "Copy" in message
+    assert "**App**" in message
 
 
 async def test_oauth_opens_selector_and_usage() -> None:

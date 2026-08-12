@@ -287,9 +287,34 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
 
     async def _hotkeys(context: SlashContext, _args: str) -> str:
         manager = context.keybindings_manager
-        lines = ["Keybindings:"]
-        for binding in manager.all_bindings():
-            lines.append(f"  {binding.key:<16} {binding.description}")
+        lines = ["## Keybindings", ""]
+        # 按 action_id 前缀分组（对齐 TS handleHotkeysCommand 的分组表格）。
+        groups: list[tuple[str, str]] = [
+            ("Navigation / editing", "tui."),
+            ("App", "app."),
+            ("Messages / model", "app.message"),
+            ("Tools", "app.tools"),
+            ("Session", "app.session"),
+            ("Other", ""),
+        ]
+        bindings = manager.all_bindings()
+        used: set[int] = set()
+        for title, prefix in groups:
+            matched = [
+                b for b in bindings if (prefix and b.action_id.startswith(prefix)) or (not prefix)
+            ]
+            # 避免其它分组重复匹配（Other 分组收尾）。
+            matched = [b for b in matched if id(b) not in used]
+            for b in matched:
+                used.add(id(b))
+            if not matched:
+                continue
+            lines.append(f"**{title}**")
+            lines.append("| Key | Action |")
+            lines.append("|-----|--------|")
+            for binding in sorted(matched, key=lambda b: b.key):
+                lines.append(f"| `{binding.key}` | {binding.description} |")
+            lines.append("")
         return "\n".join(lines)
 
     async def _session(context: SlashContext, _args: str) -> str:
