@@ -21,10 +21,8 @@ from ..types import (
     Usage,
     now_ms,
 )
+from ..utils._background import track_background_task
 from ..utils._event_stream import AssistantMessageEventStream
-
-# 持有后台任务引用，避免被 GC 静默取消。
-_BACKGROUND_TASKS: set[asyncio.Task] = set()
 
 
 def _empty_usage() -> Usage:
@@ -84,9 +82,7 @@ def lazy_stream(
             outer.push({"type": "error", "reason": "error", "error": message})
             outer.end(message)
 
-    task = asyncio.create_task(_run())
-    _BACKGROUND_TASKS.add(task)
-    task.add_done_callback(_BACKGROUND_TASKS.discard)
+    track_background_task(_run())
     return outer
 
 

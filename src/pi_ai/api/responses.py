@@ -63,6 +63,7 @@ from urllib.parse import urlparse
 import httpx
 from openai import AsyncOpenAI
 
+from ..utils._background import track_background_task
 from ..utils._event_stream import AssistantMessageEventStream
 from ..utils.cost import calculate_cost
 from ..types import (
@@ -1263,5 +1264,5 @@ async def responses_stream(
             stream.push({"type": "error", "reason": "error", "error": err_msg})
             # stream.end(err_msg)
 
-    asyncio.create_task(_run())
+    track_background_task(_run())
     return stream

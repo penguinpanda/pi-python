@@ -52,6 +52,7 @@ from typing import Any, cast
 import httpx
 from openai import AsyncOpenAI
 
+from ..utils._background import track_background_task
 from ..utils._event_stream import AssistantMessageEventStream
 from ..utils.cost import calculate_cost
 from ..types import (
@@ -636,7 +637,7 @@ async def chat_completions_stream(
     # 不等待完成，
     #
     # 立即返回 EventStream。
-    asyncio.create_task(_run())
+    track_background_task(_run())
 
     return stream
 

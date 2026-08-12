@@ -24,6 +24,7 @@ from ..types import (
     Usage,
     now_ms,
 )
+from ..utils._background import track_background_task
 from ..utils._event_stream import AssistantMessageEventStream
 from ..utils.diagnostics import append_assistant_message_diagnostic
 from ..utils.json_parse import parse_streaming_json
@@ -444,13 +445,8 @@ def stream(
             )
             outer.end(_create_error_message(model, exc, aborted))
 
-    task = asyncio.create_task(_run())
-    _run_tasks.add(task)
-    task.add_done_callback(_run_tasks.discard)
+    track_background_task(_run())
     return outer
-
-
-_run_tasks: set[asyncio.Task] = set()
 
 
 def streamSimple(

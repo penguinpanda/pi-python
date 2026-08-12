@@ -37,6 +37,7 @@ from ..types import (
     Usage,
     now_ms,
 )
+from ..utils._background import track_background_task
 from ..utils._event_stream import AssistantMessageEventStream
 from ..utils.cost import calculate_cost
 from .constrained_sampling import resolve_json_schema_strict_sampling
@@ -523,7 +524,7 @@ def google_generative_ai_stream(
             err_msg = build_error_message(model, exc)
             stream.push({"type": "error", "reason": "error", "error": err_msg})
 
-    asyncio.create_task(_run())
+    track_background_task(_run())
     return stream
 
 

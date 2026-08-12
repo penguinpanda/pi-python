@@ -1,6 +1,7 @@
 """凭证存储（InMemory / File）测试。"""
 
 import asyncio
+import sys
 
 import pytest
 
@@ -84,3 +85,15 @@ async def test_file_store_corrupt(tmp_path):
     store = FileCredentialStore(path)
     assert await store.read("p") is None
     assert await store.list() == []
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="posix file modes only")
+@pytest.mark.asyncio
+async def test_file_store_writes_0600(tmp_path):
+    """凭证文件写入后权限必须为 0600（对齐 TS chmodSync）。"""
+    path = tmp_path / "auth.json"
+    path.write_text("{}", encoding="utf-8")
+    path.chmod(0o644)  # 预置宽松权限，验证写入后收敛
+    store = FileCredentialStore(path)
+    await store.write("openai", ApiKeyCredential(key="sk-file"))
+    assert (path.stat().st_mode & 0o777) == 0o600

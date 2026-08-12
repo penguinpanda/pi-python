@@ -44,6 +44,7 @@ import math
 import time
 from typing import Any, Awaitable, Callable, Sequence, cast
 
+from ..utils._background import track_background_task
 from ..utils._event_stream import AssistantMessageEventStream
 from ..types import (
     AssistantMessage,
@@ -633,7 +634,7 @@ class FauxCore:
                 stream.push(ErrorEvent(type="error", reason="error", error=error_msg))
                 stream.end(error_msg)
 
-        asyncio.create_task(_run())
+        track_background_task(_run())
         return stream
 
 

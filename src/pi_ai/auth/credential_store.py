@@ -105,7 +105,10 @@ class FileCredentialStore:
         tmp = self._path.with_suffix(self._path.suffix + ".tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+        # 凭证文件仅限本人读写（对齐 TS chmodSync(0o600)）。
+        tmp.chmod(0o600)
         tmp.replace(self._path)
+        self._path.chmod(0o600)
 
     async def read(self, provider_id: str) -> Credential | None:
         raw = self._load().get(provider_id)
