@@ -143,10 +143,26 @@ class ExtensionContext:
         self._assert_active()
         self._runner.shutdown()
 
-    async def compact(self) -> None:
+    async def compact(self, options: dict | None = None) -> None:
+        """触发压缩（对齐 TS compact(options)：不等待完成，onComplete/onError 回调）。"""
         self._assert_active()
-        if self._runner.session is not None:
-            await self._runner.session.compact()
+        options = options or {}
+        custom_instructions = options.get("customInstructions")
+        on_complete = options.get("onComplete")
+        on_error = options.get("onError")
+
+        async def _run() -> None:
+            try:
+                result = None
+                if self._runner.session is not None:
+                    result = await self._runner.session.compact(custom_instructions)
+                if callable(on_complete):
+                    on_complete(result)
+            except Exception as exc:
+                if callable(on_error):
+                    on_error(exc)
+
+        self._runner._schedule(_run())
 
     def get_system_prompt(self) -> str:
         self._assert_active()

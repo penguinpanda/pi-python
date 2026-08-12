@@ -290,3 +290,37 @@ async def test_stale_runtime_protection_after_new_session() -> None:
         _ = captured.cwd
     fresh = runner.create_command_context()
     assert fresh.cwd == runner.cwd
+
+
+@pytest.mark.asyncio
+async def test_compact_options_callbacks() -> None:
+    """compact(options)：customInstructions 透传，onComplete/onError 回调触发。"""
+    runner = ExtensionRunner([])
+
+    class _FakeSession:
+        def __init__(self) -> None:
+            self.calls: list = []
+
+        async def compact(self, custom_instructions=None):
+            self.calls.append(custom_instructions)
+            return {"ok": True}
+
+    session = _FakeSession()
+    runner.session = session
+    completed: list = []
+
+    ctx = runner.create_context()
+    await ctx.compact(
+        {
+            "customInstructions": "keep it short",
+            "onComplete": lambda result: completed.append(result),
+            "onError": lambda error: completed.append(("error", error)),
+        }
+    )
+    # fire-and-forget：等待调度任务完成
+    for _ in range(50):
+        if completed:
+            break
+        await asyncio.sleep(0.01)
+    assert session.calls == ["keep it short"]
+    assert completed == [{"ok": True}]
