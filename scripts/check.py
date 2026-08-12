@@ -25,6 +25,7 @@ SRC_DIRS = [
     "src/pi_storage",
     "src/pi_server",
     "src/pi_evals",
+    "src/pi_telemetry",
 ]
 
 STEPS: list[tuple[str, list[str]]] = [
@@ -41,6 +42,12 @@ STEPS: list[tuple[str, list[str]]] = [
             "--cov=pi_ai",
             "--cov=pi_agent",
             "--cov=pi_coding_agent",
+            "--cov=pi_tui",
+            "--cov=pi_protocol",
+            "--cov=pi_storage",
+            "--cov=pi_server",
+            "--cov=pi_evals",
+            "--cov=pi_telemetry",
             "--cov-report=term-missing",
         ],
     ),

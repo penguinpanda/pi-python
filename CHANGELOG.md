@@ -33,6 +33,8 @@
 - Azure OpenAI Responses 测试补齐真实 Responses 流事件解析（text/usage/completed）
 - 移植 TS 内置 `llama.cpp` 扩展：注册 OpenAI 兼容 provider 与 `/llama` 命令，
   CLI 启动时自动加载（完整下载/加载 UI 保持 TS 独有）
+- `scripts/check.py` 覆盖率扩展到全部 9 个 src 包（含 `pi_telemetry`）
+- 新增 `sdk-options.md`：`create_agent_session` 完整选项、作用与选择流程说明
 - 新增 `scripts/check.py` 与 pre-commit 配置，本地一键复现 CI 的 ruff/mypy/pytest 检查
 - 交互模式支持 `!cmd` / `!!cmd` 本地 shell 命令：`!` 执行并进入 LLM 上下文，`!!` 执行但不进上下文，输出流式渲染
 - 引入 ruff（lint + format）与 mypy 配置及依赖

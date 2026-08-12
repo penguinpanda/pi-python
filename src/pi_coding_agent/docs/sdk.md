@@ -130,6 +130,8 @@ extensions = result.extensions_result
 `session_start_event`；未显式传 `model` 时会从已有会话、设置默认模型或
 可用模型中恢复/选择。
 
+完整选项与作用见 [sdk-options.md](sdk-options.md)。
+
 ## 未移植（TS SDK 独有）
 
 - `AgentSessionRuntime` 类本身（选项集已由 `create_agent_session` 对齐）
