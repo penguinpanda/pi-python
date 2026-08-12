@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 
 from typing import Any, AsyncIterator, cast
 
@@ -28,6 +29,7 @@ from ..types import (
     ThinkingDeltaEvent,
     ThinkingEndEvent,
     ThinkingStartEvent,
+    Tool,
     ToolCall,
     ToolCallDeltaEvent,
     ToolCallEndEvent,
@@ -37,11 +39,96 @@ from ..types import (
 )
 from ..utils._event_stream import AssistantMessageEventStream
 from ..utils.cost import calculate_cost
+from .constrained_sampling import resolve_json_schema_strict_sampling
 from ._shared import build_error_message, empty_usage
 from .simple_options import clamp_max_tokens_to_context
 
 _AsyncClient = httpx.AsyncClient
 _DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+
+
+def _get_gemini_major_version(model_id: str) -> int | None:
+    match = re.match(r"^gemini(?:-live)?-(\d+)", model_id.lower())
+    return int(match.group(1)) if match is not None else None
+
+
+def _supports_google_strict_tool_sampling(model_id: str) -> bool:
+    version = _get_gemini_major_version(model_id)
+    return version is not None and version >= 3
+
+
+def _map_tool_choice(tool_choice: str) -> str:
+    return {
+        "auto": "AUTO",
+        "none": "NONE",
+        "any": "ANY",
+    }.get(tool_choice, "AUTO")
+
+
+def _resolve_google_function_calling_mode(
+    tools: list[Tool],
+    tool_choice: str | None,
+    supports_strict: bool,
+) -> str | None:
+    use_strict = any(
+        resolve_json_schema_strict_sampling(tool, supports_strict) is True for tool in tools
+    )
+    if tool_choice in ("none", "any"):
+        return _map_tool_choice(tool_choice)
+    if use_strict:
+        return "VALIDATED"
+    return _map_tool_choice(tool_choice) if tool_choice else None
+
+
+def _is_gemma4_model(model_id: str) -> bool:
+    return re.search(r"gemma-?4", model_id.lower()) is not None
+
+
+def _is_gemini3_pro_model(model_id: str) -> bool:
+    return re.match(r"gemini-3(?:\.\d+)?-pro", model_id.lower()) is not None
+
+
+def _is_gemini3_flash_model(model_id: str) -> bool:
+    lower = model_id.lower()
+    return re.match(r"gemini-3(?:\.\d+)?-flash", lower) is not None or lower in (
+        "gemini-flash-latest",
+        "gemini-flash-lite-latest",
+    )
+
+
+def _google_disabled_thinking_config(model: Model) -> dict[str, Any]:
+    if _is_gemini3_pro_model(model.id):
+        return {"thinkingLevel": "LOW"}
+    if _is_gemini3_flash_model(model.id):
+        return {"thinkingLevel": "MINIMAL"}
+    if _is_gemma4_model(model.id):
+        return {"thinkingLevel": "MINIMAL"}
+    return {"thinkingBudget": 0}
+
+
+def _google_thinking_level(model: Model, effort: str) -> str:
+    if _is_gemini3_pro_model(model.id):
+        return "LOW" if effort in ("minimal", "low") else "HIGH"
+    if _is_gemma4_model(model.id):
+        return "MINIMAL" if effort in ("minimal", "low") else "HIGH"
+    return {
+        "minimal": "MINIMAL",
+        "low": "LOW",
+        "medium": "MEDIUM",
+        "high": "HIGH",
+    }.get(effort, "HIGH")
+
+
+def _get_google_budget(model: Model, effort: str, budgets: dict[str, int] | None) -> int:
+    if budgets is not None and budgets.get(effort) is not None:
+        return int(budgets[effort])
+    if "2.5-pro" in model.id:
+        return {"minimal": 128, "low": 2048, "medium": 8192, "high": 32768}[effort]
+    if "2.5-flash-lite" in model.id:
+        return {"minimal": 512, "low": 2048, "medium": 8192, "high": 24576}[effort]
+    if "2.5-flash" in model.id:
+        return {"minimal": 128, "low": 2048, "medium": 8192, "high": 24576}[effort]
+    return -1
 
 
 async def read_google_sse(
@@ -184,10 +271,31 @@ def google_generative_ai_stream(
     if requested is not None:
         config["maxOutputTokens"] = clamp_max_tokens_to_context(model, context, requested)
     reasoning = opts.get("reasoning")
-    if opts.get("thinking_enabled") or (reasoning is not None and reasoning != "off"):
-        config["thinkingConfig"] = {"includeThoughts": True}
+    thinking_enabled = opts.get("thinking_enabled")
+    if thinking_enabled or (reasoning is not None and reasoning != "off"):
+        thinking_config: dict[str, Any] = {"includeThoughts": True}
+        effort = "high" if reasoning in (None, "off", "xhigh", "max") else str(reasoning)
+        if (
+            _is_gemini3_pro_model(model.id)
+            or _is_gemini3_flash_model(model.id)
+            or _is_gemma4_model(model.id)
+        ):
+            thinking_config["thinkingLevel"] = _google_thinking_level(model, effort)
+        else:
+            budget_value = opts.get("thinking_budget")
+            if budget_value is not None:
+                thinking_config["thinkingBudget"] = int(budget_value)
+            else:
+                budget = _get_google_budget(
+                    model,
+                    effort,
+                    cast(dict[str, int] | None, opts.get("thinking_budgets")),
+                )
+                if budget >= 0:
+                    thinking_config["thinkingBudget"] = budget
+        config["thinkingConfig"] = thinking_config
     elif model.reasoning:
-        config["thinkingConfig"] = {"thinkingBudget": 0}
+        config["thinkingConfig"] = _google_disabled_thinking_config(model)
 
     payload: dict[str, Any] = {
         "contents": contents,
@@ -197,6 +305,13 @@ def google_generative_ai_stream(
         payload["systemInstruction"] = {"parts": [{"text": context.system_prompt}]}
     if tools:
         payload["tools"] = tools
+        mode = _resolve_google_function_calling_mode(
+            context.tools or [],
+            cast(str | None, opts.get("tool_choice")),
+            _supports_google_strict_tool_sampling(model.id),
+        )
+        if mode is not None:
+            payload["toolConfig"] = {"functionCallingConfig": {"mode": mode}}
 
     async def _run() -> None:
         content_blocks: list[ContentBlock] = []

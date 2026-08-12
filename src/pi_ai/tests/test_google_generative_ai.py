@@ -8,6 +8,7 @@ import httpx
 import pytest
 
 from pi_ai.api import google_generative_ai
+from pi_ai.api.google_generative_ai import _supports_google_strict_tool_sampling
 from pi_ai._types import Context, Model, Tool
 
 
@@ -90,3 +91,103 @@ async def test_google_tool_stream(monkeypatch) -> None:
     assert tool["name"] == "read"
     assert tool["arguments"] == {"path": "a.txt"}
     assert message["stop_reason"] == "tool_call"
+
+
+def test_google_strict_tool_sampling_detection() -> None:
+    assert _supports_google_strict_tool_sampling("gemini-2.5-flash") is False
+    assert _supports_google_strict_tool_sampling("gemini-3-pro") is True
+    assert _supports_google_strict_tool_sampling("gemini-3.1-flash") is True
+
+
+@pytest.mark.asyncio
+async def test_google_strict_tool_validated_mode(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(200, text=_text_sse(), headers={"content-type": "text/event-stream"})
+
+    monkeypatch.setattr(
+        google_generative_ai,
+        "_AsyncClient",
+        lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(handler), **kwargs),
+    )
+    model = Model(id="gemini-3-pro", provider="google", api="google-generative-ai", reasoning=True)
+    context = Context(
+        messages=[{"role": "user", "content": "hi", "timestamp": 0}],
+        tools=[
+            Tool(
+                name="read",
+                description="Read a file",
+                input_schema={"type": "object"},
+                constrained_sampling={"type": "json_schema", "strict": "prefer"},
+            )
+        ],
+    )
+    stream = google_generative_ai.google_generative_ai_stream(
+        model, context, "sk-test", "https://generativelanguage.googleapis.com/v1beta"
+    )
+    _ = [event async for event in stream]
+
+    payload = captured["payload"]
+    assert payload["toolConfig"] == {"functionCallingConfig": {"mode": "VALIDATED"}}
+
+
+@pytest.mark.asyncio
+async def test_google_advanced_thinking_config(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(200, text=_text_sse(), headers={"content-type": "text/event-stream"})
+
+    monkeypatch.setattr(
+        google_generative_ai,
+        "_AsyncClient",
+        lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(handler), **kwargs),
+    )
+    model = Model(id="gemini-3-pro", provider="google", api="google-generative-ai", reasoning=True)
+    context = Context(messages=[{"role": "user", "content": "hi", "timestamp": 0}])
+    stream = google_generative_ai.google_generative_ai_stream(
+        model,
+        context,
+        "sk-test",
+        "https://generativelanguage.googleapis.com/v1beta",
+        {"reasoning": "high"},
+    )
+    _ = [event async for event in stream]
+
+    thinking_config = captured["payload"]["generationConfig"]["thinkingConfig"]
+    assert thinking_config["includeThoughts"] is True
+    assert thinking_config["thinkingLevel"] == "HIGH"
+
+
+@pytest.mark.asyncio
+async def test_google_thinking_budget(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(200, text=_text_sse(), headers={"content-type": "text/event-stream"})
+
+    monkeypatch.setattr(
+        google_generative_ai,
+        "_AsyncClient",
+        lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(handler), **kwargs),
+    )
+    model = Model(
+        id="gemini-2.5-pro", provider="google", api="google-generative-ai", reasoning=True
+    )
+    context = Context(messages=[{"role": "user", "content": "hi", "timestamp": 0}])
+    stream = google_generative_ai.google_generative_ai_stream(
+        model,
+        context,
+        "sk-test",
+        "https://generativelanguage.googleapis.com/v1beta",
+        {"reasoning": "medium"},
+    )
+    _ = [event async for event in stream]
+
+    thinking_config = captured["payload"]["generationConfig"]["thinkingConfig"]
+    assert thinking_config["includeThoughts"] is True
+    assert thinking_config["thinkingBudget"] == 8192
