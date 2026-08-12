@@ -31,6 +31,8 @@
 - AWS Bedrock 支持 shared credentials file 回退
   （`~/.aws/credentials` / `AWS_SHARED_CREDENTIALS_FILE`，含 profile/session token）
 - Azure OpenAI Responses 测试补齐真实 Responses 流事件解析（text/usage/completed）
+- 移植 TS 内置 `llama.cpp` 扩展：注册 OpenAI 兼容 provider 与 `/llama` 命令，
+  CLI 启动时自动加载（完整下载/加载 UI 保持 TS 独有）
 - 新增 `scripts/check.py` 与 pre-commit 配置，本地一键复现 CI 的 ruff/mypy/pytest 检查
 - 交互模式支持 `!cmd` / `!!cmd` 本地 shell 命令：`!` 执行并进入 LLM 上下文，`!!` 执行但不进上下文，输出流式渲染
 - 引入 ruff（lint + format）与 mypy 配置及依赖

@@ -21,7 +21,8 @@ from pi_ai import Model
 from pi_ai.auth.oauth import builtin_oauth_providers
 
 from ._config import ensure_agent_dirs, get_agent_dir, get_sessions_dir
-from .extensions import ExtensionLoader, ExtensionRunner
+from .extensions import Extension, ExtensionAPI, ExtensionLoader, ExtensionRunner
+from .extensions.builtin_llama import create_extension as create_llama_extension
 from ._print_mode import run_print_mode, run_print_mode_json
 from .file_processor import process_at_files
 from .first_time_setup import run_first_time_setup
@@ -272,6 +273,14 @@ async def _async_main(args: list[str] | None = None) -> int:
     for error in extension_result.errors:
         message = error.error.replace("\n", " ")
         print(f"Warning: {message} ({error.extension_path})", file=sys.stderr)
+    builtin_llama = Extension(
+        path="<builtin>/llama",
+        resolved_path="<builtin>/llama",
+        source="builtin",
+        hidden=True,
+    )
+    create_llama_extension(ExtensionAPI(builtin_llama, extension_result.runtime, cwd=cwd))
+    extension_result.extensions.append(builtin_llama)
     extension_runner = ExtensionRunner(
         extension_result.extensions,
         runtime=extension_result.runtime,
