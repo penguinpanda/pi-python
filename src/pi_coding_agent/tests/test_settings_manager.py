@@ -251,6 +251,41 @@ class TestStorageAbstractions:
 
 
 def test_ui_mode_setting(tmp_path) -> None:
+    manager = SettingsManager.create(tmp_path, tmp_path / "agent-dir")
+    manager.set_global_setting("uiMode", "regular")
+    assert manager.as_dict()["uiMode"] == "regular"
+
+
+def test_tui_display_settings(tmp_path) -> None:
+    """mermaidRenderingMode / collapseChangelog / lastChangelogVersion 读写与默认。"""
+    manager = SettingsManager.create(tmp_path, tmp_path / "agent-dir")
+    # 默认值
+    assert manager.get_mermaid_rendering_mode() == "final"
+    assert manager.get_collapse_changelog() is False
+    assert manager.get_last_changelog_version() is None
+
+    manager.set_mermaid_rendering_mode("streaming")
+    manager.set_collapse_changelog(True)
+    manager.set_last_changelog_version("0.1.0")
+    assert manager.get_mermaid_rendering_mode() == "streaming"
+    assert manager.get_collapse_changelog() is True
+    assert manager.get_last_changelog_version() == "0.1.0"
+
+    # 非法 mermaid 模式拒绝
+    try:
+        manager.set_mermaid_rendering_mode("bogus")
+        raise AssertionError("expected ValueError")
+    except ValueError:
+        pass
+
+    # 持久化后可跨实例恢复
+    fresh = SettingsManager.create(tmp_path, tmp_path / "agent-dir")
+    assert fresh.get_mermaid_rendering_mode() == "streaming"
+    assert fresh.get_collapse_changelog() is True
+    assert fresh.get_last_changelog_version() == "0.1.0"
+
+
+def test_ui_mode_in_memory():
     manager = SettingsManager.in_memory({}, project_trusted=True)
     assert manager.get_ui_mode() == "regular"
     manager.set_ui_mode("regular")
