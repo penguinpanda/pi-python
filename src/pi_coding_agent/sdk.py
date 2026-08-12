@@ -1,0 +1,291 @@
+"""SDK 入口：create_agent_session（对齐 TS packages/coding-agent/src/core/sdk.ts）。"""
+
+from __future__ import annotations
+
+import inspect
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Literal, cast
+
+from pi_ai import Model
+from pi_ai.models.models_store import FileModelsStore, InMemoryModelsStore
+from pi_ai.types.common import ModelThinkingLevel, ThinkingLevel
+from pi_ai.utils.retry import RetryPolicy
+from pi_agent import Agent, AgentOptions, AgentTool, AgentToolResult
+from pi_agent.compaction import CompactionSettings
+
+from ._session import AgentSession
+from ._session_manager_v4 import SessionManagerLike, in_memory_session_manager
+from .extensions import ExtensionRunner, ToolDefinition
+from .model_resolver import ScopedModel, find_initial_model
+from .model_runtime import ModelRuntime
+from .model_utils import DEFAULT_THINKING_LEVEL, clamp_thinking_level
+from .prompt_templates import PromptTemplateLoader
+from .resource_loader import DefaultResourceLoader, ResourceLoadResult
+from .settings_manager import SettingsManager
+from .skills import SkillLoader
+from .tools import create_all_tools
+
+
+@dataclass(slots=True)
+class CreateAgentSessionOptions:
+    """create_agent_session 选项，对齐 TS CreateAgentSessionOptions。"""
+
+    cwd: str = "."
+    agent_dir: str | None = None
+    model: Model | None = None
+    thinking_level: ModelThinkingLevel | None = None
+    system_prompt: str | None = None
+    session_manager: SessionManagerLike | None = None
+    settings_manager: SettingsManager | None = None
+    model_runtime: ModelRuntime | None = None
+    resource_loader: DefaultResourceLoader | None = None
+    tools: list[str] | None = None
+    exclude_tools: list[str] | None = None
+    no_tools: Literal["all", "builtin"] | None = None
+    custom_tools: list[ToolDefinition | AgentTool] | None = None
+    scoped_models: list[ScopedModel] | None = None
+    turn_retry_policy: RetryPolicy | None = None
+    compaction_settings: CompactionSettings | None = None
+    skill_loader: SkillLoader | None = None
+    template_loader: PromptTemplateLoader | None = None
+    extension_runner: ExtensionRunner | None = None
+    system_prompt_builder: Any = None
+    extension_state: dict | None = None
+    session_start_event: dict | None = None
+
+
+@dataclass(slots=True)
+class CreateAgentSessionResult:
+    """create_agent_session 的结果。"""
+
+    session: AgentSession
+    extensions_result: ResourceLoadResult
+    model_fallback_message: str | None = None
+
+
+def _entry_thinking_level(branch: list[Any]) -> str | None:
+    """从会话分支取最后一条 thinking_level_change。"""
+    for entry in reversed(branch):
+        if isinstance(entry, dict) and entry.get("type") == "thinking_level_change":
+            value = entry.get("thinkingLevel") or entry.get("thinking_level")
+            return str(value) if value is not None else None
+    return None
+
+
+def _as_agent_tool(tool: ToolDefinition | AgentTool) -> AgentTool:
+    """把 ToolDefinition 归一化为 AgentTool（AgentTool 原样返回）。"""
+    if isinstance(tool, AgentTool):
+        return tool
+    original = tool.execute
+
+    async def execute(tool_call_id, params, signal=None, on_update=None, context=None):
+        raw = original(tool_call_id, params, signal, on_update, context)
+        if inspect.isawaitable(raw):
+            raw = await raw
+        if isinstance(raw, AgentToolResult):
+            return raw
+        if isinstance(raw, dict):
+            return AgentToolResult(
+                content=raw.get("content") or [],
+                details=raw.get("details"),
+                terminate=raw.get("terminate"),
+                usage=raw.get("usage"),
+            )
+        if raw is None:
+            return AgentToolResult(content=[])
+        return AgentToolResult(content=[{"type": "text", "text": str(raw)}])
+
+    return AgentTool(
+        name=tool.name,
+        label=tool.label or tool.name,
+        description=tool.description,
+        input_schema=tool.parameters or {"type": "object", "properties": {}},
+        prompt_snippet=tool.prompt_snippet or None,
+        prompt_guidelines=tool.prompt_guidelines,
+        execution_mode=cast(Any, tool.execution_mode),
+        execute=execute,
+    )
+
+
+async def create_agent_session(
+    options: CreateAgentSessionOptions | None = None,
+) -> CreateAgentSessionResult:
+    """创建一个 AgentSession；未传 model 时从会话/设置/可用模型中选择。"""
+    opts = options or CreateAgentSessionOptions()
+    cwd = str(Path(opts.cwd).expanduser().resolve())
+    agent_dir = str(Path(opts.agent_dir).expanduser().resolve()) if opts.agent_dir else None
+
+    settings_manager = opts.settings_manager or SettingsManager.create(cwd, agent_dir)
+    runtime = opts.model_runtime
+    if runtime is None:
+        from pi_ai import create_default_models
+
+        providers = create_default_models().get_providers()
+        runtime = await ModelRuntime.create(
+            providers=providers,
+            auth_path=str(Path(agent_dir) / "auth.json") if agent_dir else None,
+            models_path=str(Path(agent_dir) / "models.json") if agent_dir else None,
+            models_store=(
+                FileModelsStore(Path(agent_dir) / "models-store.json")
+                if agent_dir
+                else InMemoryModelsStore()
+            ),
+            allow_model_network=False,
+        )
+
+    resource_loader = opts.resource_loader or DefaultResourceLoader(
+        cwd,
+        agent_dir,
+        settings_manager=settings_manager,
+    )
+    if opts.resource_loader is None:
+        await resource_loader.reload()
+
+    session_manager = opts.session_manager or await in_memory_session_manager(cwd)
+    existing_messages = session_manager.build_context()
+    has_existing_session = bool(existing_messages)
+
+    model = opts.model
+    model_fallback_message: str | None = None
+    if model is None and has_existing_session:
+        saved = session_manager.get_last_model_change()
+        if saved is not None:
+            restored = runtime.get_model(saved[0], saved[1])
+            if restored is not None and runtime.has_configured_auth(restored.provider):
+                model = restored
+            else:
+                model_fallback_message = f"Could not restore model {saved[0]}/{saved[1]}"
+
+    if model is None:
+        settings_thinking = settings_manager.get_default_thinking_level()
+        initial = await find_initial_model(
+            cli_provider=None,
+            cli_model=None,
+            scoped_models=opts.scoped_models or [],
+            is_continuing=has_existing_session,
+            default_provider=settings_manager.get_default_provider(),
+            default_model_id=settings_manager.get_default_model(),
+            default_thinking_level=cast(
+                ThinkingLevel | None,
+                settings_thinking if settings_thinking != "off" else None,
+            ),
+            model_runtime=runtime,
+        )
+        model = initial.model
+        if model is None:
+            raise ValueError(
+                model_fallback_message or "create_agent_session could not find an available model"
+            )
+        if model_fallback_message is not None:
+            model_fallback_message += f". Using {model.provider}/{model.id}"
+
+    branch = session_manager.get_branch()
+    if opts.thinking_level is not None:
+        raw_thinking_level: ModelThinkingLevel = opts.thinking_level
+    elif has_existing_session:
+        restored_thinking = _entry_thinking_level(branch)
+        raw_thinking_level = cast(
+            ModelThinkingLevel,
+            restored_thinking
+            or settings_manager.get_default_thinking_level()
+            or DEFAULT_THINKING_LEVEL,
+        )
+    else:
+        raw_thinking_level = cast(
+            ModelThinkingLevel,
+            settings_manager.get_default_thinking_level() or DEFAULT_THINKING_LEVEL,
+        )
+    thinking_level = clamp_thinking_level(model, raw_thinking_level)
+
+    default_tools = create_all_tools(cwd)
+    if opts.tools is not None:
+        selected_tool_names = list(opts.tools)
+    elif opts.no_tools in ("all", "builtin"):
+        selected_tool_names = []
+    else:
+        selected_tool_names = [tool.name for tool in default_tools]
+    excluded = set(opts.exclude_tools or [])
+    selected_tool_names = [name for name in selected_tool_names if name not in excluded]
+    builtin_by_name = {tool.name: tool for tool in default_tools}
+    tools_override = [
+        builtin_by_name[name] for name in selected_tool_names if name in builtin_by_name
+    ]
+    tools_override.extend(_as_agent_tool(tool) for tool in opts.custom_tools or [])
+
+    extension_runner = opts.extension_runner
+    if extension_runner is None:
+        extension_runner = ExtensionRunner(
+            resource_loader.get_extensions(),
+            runtime=resource_loader.get_extension_runtime(),
+            cwd=cwd,
+            model_runtime=runtime,
+        )
+        await extension_runner.discover_resources()
+
+    skill_loader = opts.skill_loader or resource_loader.get_skill_loader()
+    template_loader = opts.template_loader or resource_loader.get_template_loader()
+    default_system_prompt = (
+        opts.system_prompt or resource_loader.get_system_prompt() or "You are a helpful assistant."
+    )
+
+    def system_prompt_builder() -> str:
+        if opts.system_prompt_builder is not None:
+            return str(opts.system_prompt_builder())
+        return opts.system_prompt or resource_loader.get_system_prompt() or default_system_prompt
+
+    extension_state = opts.extension_state
+    if extension_state is None:
+        extension_state = {"runner": None, "active_tools": list(tools_override)}
+    extension_state.setdefault("active_tools", list(tools_override))
+
+    if has_existing_session and _entry_thinking_level(branch) is None:
+        await session_manager.append_thinking_level_change(thinking_level)
+    elif not has_existing_session:
+        await session_manager.append_model_change(model.provider, model.id)
+        await session_manager.append_thinking_level_change(thinking_level)
+
+    agent = Agent(
+        AgentOptions(
+            system_prompt=system_prompt_builder(),
+            model=model,
+            thinking_level=thinking_level,
+            tools=tools_override,
+            stream_fn=runtime.stream,
+            session_id=session_manager.session_id,
+            steering_mode=cast(Any, settings_manager.get_steering_mode()),
+            follow_up_mode=cast(Any, settings_manager.get_follow_up_mode()),
+            transport=cast(Any, settings_manager.get_transport()),
+            retry_policy=opts.turn_retry_policy,
+        )
+    )
+
+    session = AgentSession(
+        agent=agent,
+        session_manager=session_manager,
+        cwd=cwd,
+        model=model,
+        tools_override=tools_override,
+        turn_retry_policy=opts.turn_retry_policy,
+        compaction_settings=opts.compaction_settings,
+        model_runtime=runtime,
+        scoped_models=opts.scoped_models,
+        skill_loader=skill_loader,
+        template_loader=template_loader,
+        extension_runner=extension_runner,
+        system_prompt_builder=system_prompt_builder,
+        extension_state=extension_state,
+        session_start_event=opts.session_start_event,
+    )
+    return CreateAgentSessionResult(
+        session=session,
+        extensions_result=resource_loader.get_result(),
+        model_fallback_message=model_fallback_message,
+    )
+
+
+__all__ = [
+    "CreateAgentSessionOptions",
+    "CreateAgentSessionResult",
+    "create_agent_session",
+]

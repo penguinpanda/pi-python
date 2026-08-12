@@ -185,6 +185,8 @@ class AgentSession:
         extension_state: dict | None = None,
         # 未信任项目时拦截高风险工具（bash/write/edit；默认关闭，对齐 TS 不限制工具）。
         restrict_untrusted_tools: bool = False,
+        # 会话启动事件附加元数据（对齐 TS SessionStartEvent）。
+        session_start_event: dict | None = None,
     ):
         self._agent = agent
         # 编码代理使用完整消息转换器（bashExecution/compactionSummary/custom 等
@@ -203,6 +205,7 @@ class AgentSession:
         self._extension_tool_names: set[str] = set()
         self._system_prompt_builder = system_prompt_builder
         self._restrict_untrusted_tools = restrict_untrusted_tools
+        self._session_start_event = dict(session_start_event or {})
         if extension_runner is not None:
             extension_runner.bind_session(self)
         self._listeners: list[Callable[[dict[Any, Any]], None]] = []
@@ -267,6 +270,7 @@ class AgentSession:
                 "session_id": self.session_id,
                 "cwd": self._cwd,
                 "is_continuing": bool(existing_messages),
+                **self._session_start_event,
             },
         )
 

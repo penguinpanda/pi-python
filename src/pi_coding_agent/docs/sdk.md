@@ -107,7 +107,30 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
+## SDK 入口
+
+`create_agent_session(options)` 对齐 TS `CreateAgentSessionOptions`：
+
+```python
+from pi_coding_agent import CreateAgentSessionOptions, create_agent_session
+
+result = await create_agent_session(
+    CreateAgentSessionOptions(
+        cwd=".",
+        tools=["read", "bash"],
+        exclude_tools=["write"],
+    )
+)
+session = result.session
+extensions = result.extensions_result
+```
+
+支持 `agent_dir` / `settings_manager` / `resource_loader` / `model_runtime` /
+`session_manager` / `scoped_models` / `no_tools` / `custom_tools` /
+`session_start_event`；未显式传 `model` 时会从已有会话、设置默认模型或
+可用模型中恢复/选择。
+
 ## 未移植（TS SDK 独有）
 
-- `createAgentSessionRuntime` / `AgentSessionRuntime` 的完整选项集
+- `AgentSessionRuntime` 类本身（选项集已由 `create_agent_session` 对齐）
 - 包安装（`pi install` 等）与 OAuth 之外的完整 CLI 子命令

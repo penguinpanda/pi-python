@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from pi_tui.theme import BUILTIN_THEMES, Theme, ThemeError, ThemeLoader
 
@@ -30,6 +31,7 @@ class ResourceLoadResult:
     skills: list[Skill] = field(default_factory=list)
     prompts: list[PromptTemplate] = field(default_factory=list)
     extensions: list = field(default_factory=list)
+    extension_runtime: Any = None
     themes: list[Theme] = field(default_factory=list)
     context_files: list[dict] = field(default_factory=list)
     system_prompt: str | None = None
@@ -176,6 +178,7 @@ class DefaultResourceLoader:
             skills=skill_result.skills,
             prompts=templates,
             extensions=extension_result.extensions,
+            extension_runtime=extension_result.runtime,
             themes=themes,
             context_files=context_files,
             diagnostics=diagnostics,
@@ -208,6 +211,19 @@ class DefaultResourceLoader:
 
     def get_extensions(self) -> list:
         return list(self._result.extensions)
+
+    def get_extension_runtime(self):
+        """扩展加载时共享的 ExtensionRuntime（flag/action 注册上下文）。"""
+        return self._result.extension_runtime
+
+    def get_skill_loader(self) -> SkillLoader:
+        return self._skill_loader
+
+    def get_template_loader(self) -> PromptTemplateLoader:
+        return self._template_loader
+
+    def get_settings_manager(self) -> SettingsManager:
+        return self._settings_manager
 
     def get_themes(self) -> list[Theme]:
         return list(self._result.themes)
