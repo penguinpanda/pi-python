@@ -36,6 +36,7 @@ dependencies = [
     "google-auth>=2.56.3",
     "requests>=2.34.2",
     "zstandard>=0.25.0",
+    "websockets>=16.1.1",
 ]
 
 [project.scripts]

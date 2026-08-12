@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -12,9 +13,12 @@ from pi_ai import Models, create_default_models
 from pi_ai.api import openai_codex_responses
 from pi_ai.api.api_provider_registry import get_api_provider
 from pi_ai.api.openai_codex_responses import (
+    _CodexWebSocketClient,
+    _CodexWebSocketEvents,
     _CodexZstdTransport,
     codex_cancel_deferred,
     codex_fetch_deferred,
+    _resolve_codex_websocket_url,
 )
 from pi_ai._types import Context, Model
 from pi_ai.providers.openai_codex import openai_codex_provider
@@ -98,6 +102,131 @@ async def test_codex_zstd_transport_compresses_request_body() -> None:
 
     decompressed = zstandard.ZstdDecompressor().decompress(captured["content"])
     assert decompressed == b'{"model":"gpt-5.4"}'
+
+
+def test_codex_websocket_url() -> None:
+    assert (
+        _resolve_codex_websocket_url("https://chatgpt.com/backend-api")
+        == "wss://chatgpt.com/backend-api/codex/responses"
+    )
+
+
+@pytest.mark.asyncio
+async def test_codex_websocket_event_stream(monkeypatch) -> None:
+    sent: list[str] = []
+    closed: list[bool] = []
+
+    class _FakeConn:
+        def __init__(self) -> None:
+            self._messages = iter(
+                [
+                    {"type": "response.output_text.delta", "delta": "hi"},
+                    {
+                        "type": "response.completed",
+                        "response": {
+                            "output_text": "hi",
+                            "usage": {
+                                "input_tokens": 1,
+                                "output_tokens": 1,
+                                "total_tokens": 2,
+                            },
+                        },
+                    },
+                ]
+            )
+
+        async def send(self, data: str) -> None:
+            sent.append(data)
+
+        async def recv(self) -> str:
+            return json.dumps(next(self._messages))
+
+        async def close(self) -> None:
+            closed.append(True)
+
+    async def fake_connect(*args, **kwargs):  # type: ignore[no-untyped-def]
+        return _FakeConn()
+
+    monkeypatch.setattr("websockets.connect", fake_connect)
+    events = _CodexWebSocketEvents(
+        url="wss://example.com/codex/responses",
+        headers={"Authorization": "Bearer k"},
+        body={"model": "gpt-5.4"},
+        options={},
+    )
+    first = await events.__anext__()
+    second = await events.__anext__()
+
+    assert first.type == "response.output_text.delta"
+    assert first.delta == "hi"
+    assert second.type == "response.completed"
+    assert closed == [True]
+    sent_payload = json.loads(sent[0])
+    assert sent_payload["type"] == "response.create"
+    assert sent_payload["model"] == "gpt-5.4"
+
+
+@pytest.mark.asyncio
+async def test_codex_stream_uses_websocket_factory() -> None:
+    fake_responses = AsyncMock(return_value=AssistantMessageEventStream())
+    with patch("pi_ai.api.openai_codex_responses.responses_stream", new=fake_responses):
+        await openai_codex_responses.codex_stream(
+            _model(),
+            _context(),
+            {"api_key": "k", "transport": "websocket"},
+        )
+
+    factory = fake_responses.call_args.kwargs["client_factory"]
+    client = factory("k", "", timeout=1.0, max_retries=0, headers=None)
+    assert isinstance(client, _CodexWebSocketClient)
+
+
+@pytest.mark.asyncio
+async def test_codex_websocket_stream_integration(monkeypatch) -> None:
+    class _FakeConn:
+        def __init__(self) -> None:
+            self._messages = iter(
+                [
+                    {"type": "response.output_text.delta", "delta": "Hello"},
+                    {
+                        "type": "response.completed",
+                        "response": {
+                            "output_text": "Hello",
+                            "usage": {
+                                "input_tokens": 1,
+                                "output_tokens": 1,
+                                "total_tokens": 2,
+                            },
+                        },
+                    },
+                ]
+            )
+
+        async def send(self, data: str) -> None:
+            pass
+
+        async def recv(self) -> str:
+            return json.dumps(next(self._messages))
+
+        async def close(self) -> None:
+            pass
+
+    async def fake_connect(*args, **kwargs):  # type: ignore[no-untyped-def]
+        return _FakeConn()
+
+    monkeypatch.setattr("websockets.connect", fake_connect)
+    stream = await openai_codex_responses.openai_codex_responses_stream(
+        _model(),
+        _context(),
+        "k",
+        "",
+        {"transport": "websocket", "api_key": "k"},
+    )
+    events = [event async for event in stream]
+    message = events[-1]["message"]
+    assert message["content"][0]["type"] == "text"
+    assert message["content"][0]["text"] == "Hello"
+    assert message["stop_reason"] == "stop"
 
 
 @pytest.mark.asyncio
