@@ -191,3 +191,55 @@ async def test_google_thinking_budget(monkeypatch) -> None:
     thinking_config = captured["payload"]["generationConfig"]["thinkingConfig"]
     assert thinking_config["includeThoughts"] is True
     assert thinking_config["thinkingBudget"] == 8192
+
+
+def test_requires_tool_call_id_matrix() -> None:
+    """requiresToolCallId：claude-* / gpt-oss-* / gemini 3+ 需要显式工具调用 ID。"""
+    from pi_ai.api.google_generative_ai import _requires_tool_call_id
+
+    assert _requires_tool_call_id("claude-3-7-sonnet") is True
+    assert _requires_tool_call_id("gpt-oss-120b") is True
+    assert _requires_tool_call_id("gemini-3-pro") is True
+    assert _requires_tool_call_id("gemini-2.5-flash") is False
+    assert _requires_tool_call_id("gemini-flash") is False
+
+
+def test_tool_call_ids_emitted_for_gemini3() -> None:
+    """Gemini 3+：functionCall/functionResponse 携带归一化 id（对齐 TS convertMessages）。"""
+    from pi_ai.api.google_generative_ai import _to_google_contents
+
+    context = Context(
+        system_prompt="sys",
+        messages=[
+            {"role": "user", "content": "hi"},
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "toolCall",
+                        "id": "call-1 with space!",
+                        "name": "read",
+                        "arguments": {"path": "a.txt"},
+                    }
+                ],
+            },
+            {
+                "role": "toolResult",
+                "tool_call_id": "call-1 with space!",
+                "tool_name": "read",
+                "content": [{"type": "text", "text": "ok"}],
+                "is_error": False,
+                "timestamp": 1,
+            },
+        ],
+    )
+    contents = _to_google_contents(context, "gemini-3-pro")
+    assistant_parts = contents[1]["parts"]
+    assert assistant_parts[0]["functionCall"]["id"] == "call-1_with_space_"
+    function_response = contents[2]["parts"][0]["functionResponse"]
+    assert function_response["id"] == "call-1_with_space_"
+
+    # gemini 2.5：不携带 id
+    contents_legacy = _to_google_contents(context, "gemini-2.5-flash")
+    assert "id" not in contents_legacy[1]["parts"][0]["functionCall"]
+    assert "id" not in contents_legacy[2]["parts"][0]["functionResponse"]

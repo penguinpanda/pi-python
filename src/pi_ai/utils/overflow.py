@@ -141,9 +141,26 @@ def get_overflow_patterns() -> list[re.Pattern[str]]:
     return list(OVERFLOW_PATTERNS)
 
 
+def is_recoverable_length(message: AssistantMessage, desired_max_output: int) -> bool:
+    """长度截断是否可恢复（对齐 TS utils/overflow.ts isRecoverableLength）。
+
+    当 stop_reason == "length" 且实际输出 token 数低于调用方/模型的预期上限时，
+    响应可能是上下文压力或 provider 侧截断所致，调用方可以做一次有界的
+    compact-and-retry。`desired_max_output` 必须为上下文压缩前的原始上限。
+    """
+    usage = message.get("usage")
+    output = usage.get("output", 0) if isinstance(usage, dict) else 0
+    return (
+        message.get("stop_reason") == "length"
+        and desired_max_output > 0
+        and output < desired_max_output
+    )
+
+
 __all__ = [
     "NON_OVERFLOW_PATTERNS",
     "OVERFLOW_PATTERNS",
     "get_overflow_patterns",
     "is_context_overflow",
+    "is_recoverable_length",
 ]

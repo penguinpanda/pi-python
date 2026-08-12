@@ -40,6 +40,7 @@ from ..types import (
 from ..utils._background import track_background_task
 from ..utils._event_stream import AssistantMessageEventStream
 from ..utils.cost import calculate_cost
+from ..utils.sanitize_unicode import sanitize_surrogates
 from .constrained_sampling import resolve_json_schema_strict_sampling
 from ._shared import build_error_message, empty_usage
 from .simple_options import clamp_max_tokens_to_context
@@ -158,7 +159,34 @@ def _extract_data(raw: str) -> str | None:
     return None
 
 
-def _to_google_contents(context: Context) -> list[dict[str, Any]]:
+def _gemini_major_version(model_id: str) -> int | None:
+    match = re.match(r"^gemini(?:-live)?-(\d+)", model_id.lower())
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def _requires_tool_call_id(model_id: str) -> bool:
+    """Google API 网关模型需要显式工具调用 ID（对齐 TS google-shared.ts requiresToolCallId）。
+
+    Gemini 3+ / Claude-on-Vertex / gpt-oss 模型要求在 functionCall/functionResponse
+    中携带 id，否则工具调用被拒。
+    """
+    gemini_major = _gemini_major_version(model_id)
+    return (
+        model_id.startswith("claude-")
+        or model_id.startswith("gpt-oss-")
+        or (gemini_major is not None and gemini_major >= 3)
+    )
+
+
+def _normalize_tool_call_id(tool_call_id: str) -> str:
+    """归一化工具调用 ID（对齐 TS normalizeToolCallId：仅保留 [A-Za-z0-9_-]，截 64 字符）。"""
+    return re.sub(r"[^a-zA-Z0-9_-]", "_", tool_call_id)[:64]
+
+
+def _to_google_contents(context: Context, model_id: str) -> list[dict[str, Any]]:
+    include_id = _requires_tool_call_id(model_id)
     contents: list[dict[str, Any]] = []
     for msg in context.messages:
         role = msg["role"]
@@ -166,12 +194,12 @@ def _to_google_contents(context: Context) -> list[dict[str, Any]]:
             content = cast(Any, msg["content"])
             user_parts: list[dict[str, Any]]
             if isinstance(content, str):
-                user_parts = [{"text": content}]
+                user_parts = [{"text": sanitize_surrogates(content)}]
             else:
                 user_parts = []
                 for block in content:
                     if block["type"] == "text":
-                        user_parts.append({"text": block["text"]})
+                        user_parts.append({"text": sanitize_surrogates(block["text"])})
                     elif block["type"] == "image" and block.get("data"):
                         user_parts.append(
                             {
@@ -188,18 +216,19 @@ def _to_google_contents(context: Context) -> list[dict[str, Any]]:
             assistant_parts: list[dict[str, Any]] = []
             for block in assistant_msg.get("content") or []:
                 if block["type"] == "text":
-                    assistant_parts.append({"text": block["text"]})
+                    assistant_parts.append({"text": sanitize_surrogates(block["text"])})
                 elif block["type"] == "thinking":
-                    assistant_parts.append({"text": block.get("thinking") or ""})
-                elif block["type"] == "toolCall":
                     assistant_parts.append(
-                        {
-                            "functionCall": {
-                                "name": block["name"],
-                                "args": block.get("arguments") or {},
-                            }
-                        }
+                        {"text": sanitize_surrogates(block.get("thinking") or "")}
                     )
+                elif block["type"] == "toolCall":
+                    function_call: dict[str, Any] = {
+                        "name": block["name"],
+                        "args": block.get("arguments") or {},
+                    }
+                    if include_id and block.get("id"):
+                        function_call["id"] = _normalize_tool_call_id(block["id"])
+                    assistant_parts.append({"functionCall": function_call})
             if assistant_parts:
                 contents.append({"role": "model", "parts": assistant_parts})
         elif role == "toolResult":
@@ -207,14 +236,13 @@ def _to_google_contents(context: Context) -> list[dict[str, Any]]:
             text = "".join(
                 block.get("text") or "" for block in tool_msg["content"] if block["type"] == "text"
             )
-            tool_parts = [
-                {
-                    "functionResponse": {
-                        "name": tool_msg["tool_name"],
-                        "response": {"error" if tool_msg.get("is_error") else "output": text},
-                    }
-                }
-            ]
+            function_response: dict[str, Any] = {
+                "name": tool_msg["tool_name"],
+                "response": {"error" if tool_msg.get("is_error") else "output": text},
+            }
+            if include_id and tool_msg.get("tool_call_id"):
+                function_response["id"] = _normalize_tool_call_id(tool_msg["tool_call_id"])
+            tool_parts = [{"functionResponse": function_response}]
             contents.append({"role": "user", "parts": tool_parts})
     return contents
 
@@ -261,7 +289,7 @@ def google_generative_ai_stream(
 ) -> AssistantMessageEventStream:
     stream = AssistantMessageEventStream()
     opts = options or {}
-    contents = _to_google_contents(context)
+    contents = _to_google_contents(context, model.id)
     tools = _to_google_tools(context)
 
     config: dict[str, Any] = {}

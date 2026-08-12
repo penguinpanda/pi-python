@@ -23,7 +23,9 @@ from .overflow import (
     OVERFLOW_PATTERNS,
     get_overflow_patterns,
     is_context_overflow,
+    is_recoverable_length,
 )
+from .sanitize_unicode import sanitize_surrogates
 from .retry import (
     RetryCallbacks,
     RetryPolicy,
@@ -86,7 +88,10 @@ __all__ = [
     "estimate_text_tokens",
     "estimate_tools_tokens",
     "is_context_overflow",
+    "is_recoverable_length",
     "get_overflow_patterns",
     "OVERFLOW_PATTERNS",
     "NON_OVERFLOW_PATTERNS",
+    # Unicode 代理清洗
+    "sanitize_surrogates",
 ]
