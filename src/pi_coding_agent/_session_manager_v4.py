@@ -452,6 +452,7 @@ class V4SessionManager:
             first_kept_entry_id=first_kept_entry_id,
             tokens_before=tokens_before,
             details=details,
+            usage=(details or {}).get("usage"),
         )
         await self._cache_entry(entry_id)
         return entry_id
@@ -693,6 +694,47 @@ class V4SessionManager:
 
     async def get_session_stats(self) -> dict[str, Any]:
         return cast(dict[str, Any], await self._session.get_stats())
+
+    def get_usage_cost_breakdown(self) -> list[dict[str, Any]]:
+        """按 provider/model 分组的 usage 汇总（对齐 TS getUsageCostBreakdown）。
+
+        assistant 消息按 provider/responseModel 归组；toolResult 与
+        compaction/branch_summary 归入 Tools/summaries。无归属的
+        usage 条目不计入分组（只体现在会话总量）。
+        """
+        totals: dict[str, dict[str, float]] = {}
+
+        def _add(key: str, usage: dict[str, Any]) -> None:
+            bucket = totals.setdefault(key, {"cost": 0.0, "tokens": 0.0})
+            cost = usage.get("cost") or {}
+            bucket["cost"] += float(cost.get("total", 0) or 0)
+            bucket["tokens"] += float(
+                (usage.get("input", 0) or 0)
+                + (usage.get("output", 0) or 0)
+                + (usage.get("cache_read", 0) or 0)
+                + (usage.get("cache_write", 0) or 0)
+            )
+
+        for entry in self._entries:
+            entry_type = entry.get("type")
+            message = entry.get("message")
+            if entry_type == "message" and isinstance(message, dict):
+                role = message.get("role")
+                usage = message.get("usage")
+                if role == "assistant" and isinstance(usage, dict):
+                    provider = message.get("provider") or "?"
+                    model = message.get("responseModel") or message.get("model") or "?"
+                    _add(f"{provider}/{model}", usage)
+                elif role == "toolResult" and isinstance(usage, dict):
+                    _add("Tools/summaries", usage)
+            elif entry_type in ("compaction", "branch_summary"):
+                usage = entry.get("usage")
+                if isinstance(usage, dict):
+                    _add("Tools/summaries", usage)
+        return [
+            {"key": key, "cost": round(bucket["cost"], 6), "tokens": int(bucket["tokens"])}
+            for key, bucket in sorted(totals.items(), key=lambda item: -item[1]["cost"])
+        ]
 
     # ------------------------------------------------------------------
     # 其他

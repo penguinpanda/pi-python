@@ -138,6 +138,55 @@ class TestV4SessionManager:
         )
 
     @pytest.mark.asyncio
+    async def test_usage_cost_breakdown(self, tmp_path):
+        """assistant usage 按 provider/model 分组；toolResult/compaction 归 Tools/summaries。"""
+        cwd = str(tmp_path / "project")
+        manager = await V4SessionManager.create(
+            cwd,
+            sessions_dir=str(tmp_path / "sessions"),
+            session_id="v4-usage",
+        )
+        usage_usage = {
+            "input": 100,
+            "output": 50,
+            "cache_read": 10,
+            "cache_write": 5,
+            "cost": {"total": 0.0125},
+        }
+        assistant = _assistant_message("answer")
+        assistant["usage"] = usage_usage
+        await manager.append_message(assistant)
+        tool_result = {
+            "role": "toolResult",
+            "content": "done",
+            "usage": {
+                "input": 20,
+                "output": 2,
+                "cost": {"total": 0.001},
+            },
+            "timestamp": 3,
+        }
+        await manager.append_message(tool_result)
+        await manager.append_compaction(
+            "summary",
+            "unused",
+            100,
+            details={
+                "usage": {
+                    "input": 30,
+                    "output": 3,
+                    "cost": {"total": 0.002},
+                }
+            },
+        )
+
+        breakdown = {row["key"]: row for row in manager.get_usage_cost_breakdown()}
+        assert breakdown["deepseek/deepseek-v4-flash"]["cost"] == 0.0125
+        assert breakdown["deepseek/deepseek-v4-flash"]["tokens"] == 165
+        assert breakdown["Tools/summaries"]["cost"] == 0.003
+        assert breakdown["Tools/summaries"]["tokens"] == 55
+
+    @pytest.mark.asyncio
     async def test_open_v3_file_lazily_converts(self, tmp_path):
         cwd = str(tmp_path / "project")
         filepath = tmp_path / "v3.jsonl"

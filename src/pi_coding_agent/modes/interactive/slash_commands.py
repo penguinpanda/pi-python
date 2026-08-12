@@ -55,6 +55,7 @@ class SlashContext:
         rebuild_session=None,
         reload_all: Callable[[], Any] | None = None,
         trust_manager=None,
+        session_manager=None,
     ) -> None:
         self.session = session
         self.model_runtime = model_runtime
@@ -81,6 +82,7 @@ class SlashContext:
         self.reload_all = reload_all
         # 项目信任管理器（/trust 用；TUI 注入）。
         self.trust_manager = trust_manager
+        self.session_manager = session_manager
 
     def notify(self, message: str) -> None:
         self._notify(message)
@@ -340,6 +342,15 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
                 f"({cache_stats.get('missedTokens', 0)} tokens, "
                 f"${cache_stats.get('missedCost', 0):.6f})"
             )
+        # usage 按 provider/model 分组（对齐 TS handleSessionCommand 的
+        # getUsageCostBreakdown）。
+        manager = context.session_manager
+        if manager is not None:
+            breakdown = manager.get_usage_cost_breakdown()
+            if breakdown:
+                lines.append("\nCost breakdown:")
+                for row in breakdown:
+                    lines.append(f"  {row['key']}: ${row['cost']:.6f} ({row['tokens']} tokens)")
         return "\n".join(lines)
 
     async def _reload(context: SlashContext, _args: str) -> str:

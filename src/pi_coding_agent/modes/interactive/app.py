@@ -268,6 +268,7 @@ class PiTuiApp(App):
             auth_interaction=_TuiAuthInteraction(self),
             reload_all=self._reload_all,
             trust_manager=trust_manager,
+            session_manager=getattr(self._session, "session_manager", None),
         )
         self._slash_context.rebuild_session = self._apply_rebuilt_session
         self._autocomplete_provider = self._build_autocomplete_provider()

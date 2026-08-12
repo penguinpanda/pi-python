@@ -741,8 +741,14 @@ class TextInputDialog(OverlayDialog):
         self._value = value
         self._input = Input(value=value, placeholder=placeholder)
         self._body = Vertical()
-        self._body.mount(Label(self._message, height=1))
+        self._title_label = Label(self._message, height=1)
+        self._body.mount(self._title_label)
         self._body.mount(self._input)
+
+    def update_title(self, title: str) -> None:
+        """更新标题（倒计时提示等动态文案）。"""
+        self._message = title
+        self._title_label.update(title)
 
     def handle_key(self, key: Key) -> bool:
         if self._input.handle_key(key):
@@ -781,8 +787,14 @@ class ChoiceSelector(CopySelectedMixin, OverlayDialog):
             on_cancelled=lambda: self.dismiss(None),
         )
         self._body = Vertical()
-        self._body.mount(Label(title, height=1))
+        self._title_label = Label(title, height=1)
+        self._body.mount(self._title_label)
         self._body.mount(self._list)
+
+    def update_title(self, title: str) -> None:
+        """更新标题（倒计时提示等动态文案）。"""
+        self._title = title
+        self._title_label.update(title)
 
     def _on_selected(self, item: SelectItem | None) -> None:
         if item is None:

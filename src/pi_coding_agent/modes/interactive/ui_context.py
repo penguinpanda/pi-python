@@ -118,13 +118,37 @@ class TuiUIContext:
             if not future.done():
                 future.set_result(value)
 
-        self._app.push_screen(ChoiceSelector(title, list(options)), callback=_callback)
+        selector = ChoiceSelector(title, list(options))
+        self._app.push_screen(selector, callback=_callback)
+        countdown_task = self._start_countdown(selector, title, timeout)
         try:
             if timeout is None:
                 return await future
             return await asyncio.wait_for(future, timeout)
         except asyncio.TimeoutError:
             return None
+        finally:
+            if countdown_task is not None:
+                countdown_task.cancel()
+
+    def _start_countdown(self, dialog, title: str, timeout: float | None):
+        """可见倒计时（对齐 TS CountdownTimer：对话框内显示 auto-cancel in Xs）。"""
+        import math
+        import time as time_mod
+
+        if timeout is None:
+            return None
+        deadline = time_mod.monotonic() + timeout
+
+        async def _countdown() -> None:
+            while True:
+                remaining = max(0.0, deadline - time_mod.monotonic())
+                dialog.update_title(f"{title}  (auto-cancel in {math.ceil(remaining)}s)")
+                if remaining <= 0:
+                    return
+                await asyncio.sleep(1)
+
+        return asyncio.create_task(_countdown())
 
     async def confirm(self, title: str, message: str, timeout: float | None = None) -> bool:
         choice = await self.select(f"{title}\n\n{message}", ["Yes", "No"], timeout=timeout)
@@ -143,16 +167,18 @@ class TuiUIContext:
             if not future.done():
                 future.set_result(value)
 
-        self._app.push_screen(
-            TextInputDialog(title, placeholder or ""),
-            callback=_callback,
-        )
+        dialog = TextInputDialog(title, placeholder or "")
+        self._app.push_screen(dialog, callback=_callback)
+        countdown_task = self._start_countdown(dialog, title, timeout)
         try:
             if timeout is None:
                 return await future
             return await asyncio.wait_for(future, timeout)
         except asyncio.TimeoutError:
             return None
+        finally:
+            if countdown_task is not None:
+                countdown_task.cancel()
 
     def notify(self, message: str, notify_type: str | None = None) -> None:
         self._app._set_status(message)
