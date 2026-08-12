@@ -629,11 +629,13 @@ class TreeSelector(CopySelectedMixin, OverlayDialog):
         self._tree = tree
         self._leaf_id = leaf_id
         self._selected_index = 0
+        self._folded: set[str] = set()
         self._all_rows = _flatten_tree(
             self._tree,
             self._leaf_id,
             show_label_timestamps=self._show_label_timestamps,
         )
+        self._id_to_node: dict[str, Any] = {row[3]: row[4] for row in self._all_rows}
         self._rows: list[tuple[int, str, str, str, Any]] = []
         self._node_ids: list[str] = []
         self._apply_filter()
@@ -658,11 +660,87 @@ class TreeSelector(CopySelectedMixin, OverlayDialog):
         return f"Session tree{suffix} (Enter: navigate, Esc: close, f: filter, t: label time)"
 
     def _apply_filter(self) -> None:
-        self._rows = [
-            row for row in self._all_rows if node_passes_tree_filter(row[4], self._filter_mode)
-        ]
+        rows = [row for row in self._all_rows if node_passes_tree_filter(row[4], self._filter_mode)]
+        if self._folded:
+            # 折叠节点后代不显示（对齐 TS foldedNodes 过滤）。
+            rows = [row for row in rows if not self._has_folded_ancestor(row[4])]
+        self._rows = rows
         self._node_ids = [row[3] for row in self._rows]
         self._selected_index = 0
+
+    def _has_folded_ancestor(self, node: Any) -> bool:
+        """节点是否位于某个已折叠节点之下（parent_id 链）。"""
+        current = node
+        seen: set[str] = set()
+        while current is not None:
+            parent_id = getattr(current, "parent_id", None)
+            if parent_id in self._folded:
+                return True
+            if parent_id is None or parent_id in seen:
+                return False
+            seen.add(parent_id)
+            current = self._id_to_node.get(parent_id)
+        return False
+
+    def _is_foldable(self, node_id: str) -> bool:
+        """节点是否有（未被过滤掉的）子行。"""
+        depths = [row[0] for row in self._all_rows if row[3] == node_id]
+        if not depths:
+            return False
+        depth = depths[0]
+        for row in self._all_rows:
+            if row[0] > depth and self._has_ancestor_in_tree(row[4], node_id):
+                if node_passes_tree_filter(row[4], self._filter_mode):
+                    return True
+        return False
+
+    def _has_ancestor_in_tree(self, node: Any, ancestor_id: str) -> bool:
+        """node 是否在 ancestor_id 之下（不含自身）。"""
+        current = node
+        seen: set[str] = set()
+        while current is not None:
+            parent_id = getattr(current, "parent_id", None)
+            if parent_id == ancestor_id:
+                return True
+            if parent_id is None or parent_id in seen:
+                return False
+            seen.add(parent_id)
+            current = self._id_to_node.get(parent_id)
+        return False
+
+    def _fold_or_jump_up(self) -> None:
+        if not self._rows:
+            return
+        current = self._node_ids[self._selected_index]
+        if self._is_foldable(current) and current not in self._folded:
+            self._folded.add(current)
+            self._apply_filter()
+            self.refresh()
+            return
+        # 无折叠：跳到分支段起点（向上最近的更浅行）。
+        depth = self._rows[self._selected_index][0]
+        for index in range(self._selected_index - 1, -1, -1):
+            if self._rows[index][0] < depth:
+                self._selected_index = index
+                break
+        self.refresh()
+
+    def _unfold_or_jump_down(self) -> None:
+        if not self._rows:
+            return
+        current = self._node_ids[self._selected_index]
+        if current in self._folded:
+            self._folded.discard(current)
+            self._apply_filter()
+            self.refresh()
+            return
+        # 无展开：跳到下一个分支段起点（向下最近的更浅行）。
+        depth = self._rows[self._selected_index][0]
+        for index in range(self._selected_index + 1, len(self._rows)):
+            if self._rows[index][0] <= depth:
+                self._selected_index = index
+                break
+        self.refresh()
 
     def _selected_copy_text(self) -> str:
         if 0 <= self._selected_index < len(self._rows):
@@ -680,6 +758,14 @@ class TreeSelector(CopySelectedMixin, OverlayDialog):
             if self._rows:
                 self._selected_index = (self._selected_index + 1) % len(self._rows)
             self.refresh()
+            return True
+        if name in ("ctrl+left", "alt+left"):
+            # 折叠或跳到分支段起点（对齐 TS app.tree.foldOrUp）。
+            self._fold_or_jump_up()
+            return True
+        if name in ("ctrl+right", "alt+right"):
+            # 展开或跳到下一个分支段起点（对齐 TS app.tree.unfoldOrDown）。
+            self._unfold_or_jump_down()
             return True
         if name == "enter":
             if 0 <= self._selected_index < len(self._node_ids):
@@ -713,7 +799,11 @@ class TreeSelector(CopySelectedMixin, OverlayDialog):
         lines: list[Line] = [line_from_text(self._title(), width)]
         visible = min(height - 1, len(self._rows))
         for index in range(visible):
-            depth, connector, label, _node_id, _node = self._rows[index]
+            depth, connector, label, node_id, _node = self._rows[index]
+            if node_id in self._folded:
+                label = f"⊞ {label}"
+            elif self._is_foldable(node_id):
+                label = f"⊟ {label}"
             indent = "  " * depth
             prefix = f"{indent}{connector} " if connector else indent
             text = f"{prefix}{label}"

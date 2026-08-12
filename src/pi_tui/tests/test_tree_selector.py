@@ -89,6 +89,51 @@ def test_tree_selector_filter_cycles() -> None:
     assert selector.filter_mode == "user-only"
 
 
+def test_tree_selector_fold_and_unfold() -> None:
+    """ctrl+left 折叠分支（隐藏后代），ctrl+right 展开。"""
+    root = _node(
+        {"type": "message", "role": "user"},
+        node_id="root",
+        children=[
+            SessionTreeNode(
+                id="child",
+                parent_id="root",
+                entry={"type": "message", "role": "user"},
+                children=[],
+            )
+        ],
+    )
+    selector = TreeSelector([root])
+    assert len(selector._rows) == 2
+
+    selector.handle_key(_key("ctrl+left"))
+    assert selector._folded == {"root"}
+    assert [row[3] for row in selector._rows] == ["root"]
+
+    selector.handle_key(_key("ctrl+right"))
+    assert selector._folded == set()
+    assert len(selector._rows) == 2
+
+
+def test_tree_selector_fold_renders_marker() -> None:
+    root = _node(
+        {"type": "message", "role": "user"},
+        node_id="root",
+        children=[
+            SessionTreeNode(
+                id="child",
+                parent_id="root",
+                entry={"type": "message", "role": "user"},
+                children=[],
+            )
+        ],
+    )
+    selector = TreeSelector([root])
+    selector.handle_key(_key("ctrl+left"))
+    lines = selector.render(80, 4)
+    assert any("⊞" in line.text() for line in lines)
+
+
 def test_tree_selector_toggles_label_timestamps() -> None:
     selector = TreeSelector([_node({"type": "message"})])
     assert selector.show_label_timestamps is False
