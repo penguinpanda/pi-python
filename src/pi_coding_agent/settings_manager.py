@@ -591,6 +591,22 @@ class SettingsManager:
     def set_quiet_startup(self, quiet: bool) -> None:
         self._set_global("quietStartup", bool(quiet))
 
+    def get_collapse_changelog(self) -> bool:
+        """压缩 changelog 显示（对齐 TS collapseChangelog，默认 False）。"""
+        return bool(self._settings.get("collapseChangelog", False))
+
+    def set_collapse_changelog(self, collapse: bool) -> None:
+        self._set_global("collapseChangelog", bool(collapse))
+
+    def get_last_changelog_version(self) -> str | None:
+        """上次展示 changelog 的版本记录（对齐 TS lastChangelogVersion）。"""
+        value = self._global_settings.get("lastChangelogVersion")
+        return value if isinstance(value, str) and value else None
+
+    def set_last_changelog_version(self, version: str) -> None:
+        self._set_global("lastChangelogVersion", version)
+        self._save_global()
+
     def get_default_project_trust(self) -> str:
         value = self._global_settings.get("defaultProjectTrust")
         return value if value in ("always", "never", "ask") else "ask"

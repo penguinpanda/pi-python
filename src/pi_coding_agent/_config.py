@@ -119,6 +119,21 @@ def get_package_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
+def get_changelog_path() -> Path | None:
+    """CHANGELOG.md 路径（对齐 TS getChangelogPath）。
+
+    优先包根目录，仓库内开发时回退到仓库根；两者都不存在返回 None。
+    """
+    candidates = [
+        get_package_dir() / "CHANGELOG.md",
+        Path(__file__).resolve().parents[2] / "CHANGELOG.md",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def get_readme_path() -> Path:
     """pi 包自带 README.md 路径（对齐 TS getReadmePath）。"""
     return get_package_dir() / "README.md"

@@ -188,6 +188,8 @@ def message_to_entries(
         return [("Compaction summary", message.get("summary", ""))]
     if role == "branchSummary":
         return [("Branch summary", message.get("summary", ""))]
+    if role == "changelog":
+        return [("What's New", message.get("content", ""))]
     if role == "skillInvocation":
         return [("Skill", message.get("content", ""))]
     if role == "bashExecution":

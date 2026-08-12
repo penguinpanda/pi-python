@@ -327,6 +327,7 @@ class PiTuiApp(App):
         self._update_footer()
         self._editor.focus()
         self._show_startup_resources_hint()
+        self._show_startup_changelog_if_needed()
         self._run_task(self._ensure_fd_for_autocomplete())
         # 启动时对未定信任项目提示（对齐 TS 启动 trust 选择器）。
         if self._needs_trust_decision:
@@ -930,6 +931,53 @@ class PiTuiApp(App):
         entries = self._chat.query(MessageEntry)
         if entries:
             self._chat.scroll_to_widget(entries[-1])
+
+    def _show_startup_changelog_if_needed(self) -> None:
+        """启动时显示 changelog（对齐 TS getChangelogForDisplay + showStartupNoticesIfNeeded）。
+
+        - 恢复的会话（已有消息）跳过；
+        - fresh install（无 lastChangelogVersion 记录）只记录版本、不显示；
+        - 检测到比记录更新的版本时显示并更新记录；
+        - collapseChangelog 时显示一行版本提示。
+        """
+        import re
+
+        from ..._config import get_changelog_path
+
+        if self._session.get_messages():
+            return
+        if self._settings_manager is None:
+            return
+        changelog_path = get_changelog_path()
+        if changelog_path is None:
+            return
+        try:
+            markdown = changelog_path.read_text(encoding="utf-8")
+        except OSError:
+            return
+        if not markdown.strip():
+            return
+
+        version_match = re.search(r"##\s+\[?(\d+\.\d+\.\d+)\]?", markdown)
+        current_version = version_match.group(1) if version_match else "0.0.0"
+
+        last_version = self._settings_manager.get_last_changelog_version()
+        if last_version is None:
+            # fresh install：只记录版本，不显示（对齐 TS）。
+            self._settings_manager.set_last_changelog_version(current_version)
+            return
+        if last_version == current_version:
+            return
+
+        collapse = self._settings_manager.get_collapse_changelog()
+        if collapse:
+            content = f"Updated to v{current_version}. Use /changelog to view full changelog."
+        else:
+            content = markdown.strip()
+        self._settings_manager.set_last_changelog_version(current_version)
+        self._chat.add_message_agent(
+            cast(dict[str, Any], {"role": "changelog", "content": content})
+        )
 
     def _show_startup_resources_hint(self) -> None:
         """启动提示：已加载资源汇总。"""
