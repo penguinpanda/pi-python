@@ -91,12 +91,12 @@ def main(args: list[str] | None = None) -> int:
 
 async def _async_main(args: list[str] | None = None) -> int:
     """CLI 异步主入口。"""
-    # OAuth 子命令：pi-python login / logout / list / auth print-*（在 argparse
+    # OAuth 子命令：pi-python login / logout / auth print-*（在 argparse
     # 之前拦截，避免 "login" 被当作位置参数 message 解析）。
     effective_args = args if args is not None else sys.argv[1:]
-    if effective_args and effective_args[0] in ("login", "logout", "list", "auth"):
+    if effective_args and effective_args[0] in ("login", "logout", "auth"):
         return await _run_auth_command(effective_args)
-    if effective_args and effective_args[0] in ("install", "remove", "update"):
+    if effective_args and effective_args[0] in ("install", "remove", "update", "list"):
         return await _run_package_command(effective_args)
 
     parser = _create_parser()
@@ -613,10 +613,13 @@ async def _run_auth_command(args: list[str]) -> int:
         provider_id = args[1] if len(args) > 1 else None
         return await _auth_logout(provider_id)
     if command == "auth":
+        if len(args) > 1 and args[1] == "list":
+            return await _auth_list()
         if len(args) > 1 and args[1] in ("print-api-key", "print-bearer-token"):
             return await _auth_print(args[1], args[2:])
         print(
-            'Unknown auth command. Use "pi auth print-api-key" or "pi auth print-bearer-token".',
+            'Unknown auth command. Use "pi auth list", "pi auth print-api-key" '
+            'or "pi auth print-bearer-token".',
             file=sys.stderr,
         )
         return 1
@@ -706,6 +709,7 @@ async def _run_package_command(args: list[str]) -> int:
                 "install": "Usage: pi install <source> [-l|--local]  (source: npm:name | git:url[@ref] | local dir)",
                 "remove": "Usage: pi remove <source> [-l|--local]",
                 "update": "Usage: pi update [<source>]  (re-install configured packages)",
+                "list": "Usage: pi list  (list configured packages)",
             }[command]
         )
         return 0
@@ -734,10 +738,32 @@ async def _run_package_command(args: list[str]) -> int:
                 return 1
             print(f"Removed {rest[0]}")
             return 0
+        if command == "list":
+            packages = manager.list_configured_packages()
+            if not packages:
+                print("No packages installed.")
+                return 0
+            user_packages = [p for p in packages if p.scope == "user"]
+            project_packages = [p for p in packages if p.scope == "project"]
+            if user_packages:
+                print("User packages:")
+                for pkg in user_packages:
+                    print(f"  {pkg.source}")
+                    if pkg.installed_path:
+                        print(f"    {pkg.installed_path}")
+            if project_packages:
+                if user_packages:
+                    print()
+                print("Project packages:")
+                for pkg in project_packages:
+                    print(f"  {pkg.source}")
+                    if pkg.installed_path:
+                        print(f"    {pkg.installed_path}")
+            return 0
         await manager.update(rest[0] if rest else None)
         print("Updated packages")
         return 0
-    except RuntimeError as exc:
+    except (RuntimeError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
