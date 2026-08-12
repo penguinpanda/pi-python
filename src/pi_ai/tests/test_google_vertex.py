@@ -36,3 +36,25 @@ def test_resolve_vertex_options_builds_endpoint(monkeypatch) -> None:
         "https://asia-east1-aiplatform.googleapis.com/v1/projects/demo-project"
         "/locations/asia-east1/publishers/google"
     )
+
+
+def test_resolve_vertex_options_falls_back_to_adc(monkeypatch) -> None:
+    from pi_ai.api.google_vertex import _resolve_vertex_options
+
+    monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
+    monkeypatch.delenv("GCP_PROJECT", raising=False)
+    monkeypatch.setattr(
+        "pi_ai.api.google_vertex._resolve_adc_credentials",
+        lambda _options: ("adc-token", "adc-project"),
+    )
+    token, endpoint = _resolve_vertex_options(
+        _model(),
+        "",
+        "",
+        {"env": {}},
+    )
+    assert token == "adc-token"
+    assert endpoint == (
+        "https://us-central1-aiplatform.googleapis.com/v1/projects/adc-project"
+        "/locations/us-central1/publishers/google"
+    )

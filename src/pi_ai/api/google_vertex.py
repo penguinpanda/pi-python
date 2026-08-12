@@ -14,6 +14,27 @@ from ..utils.provider_env import get_provider_env_value
 from .google_generative_ai import google_generative_ai_stream
 
 _DEFAULT_LOCATION = "us-central1"
+_CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
+
+
+def _resolve_adc_credentials(
+    options: dict[str, Any],
+) -> tuple[str | None, str | None]:
+    """从 Application Default Credentials 解析 (token, project)；未安装 google-auth 时返回 (None, None)。"""
+    try:
+        import google.auth
+        from google.auth.transport.requests import Request
+    except Exception:
+        return None, None
+    try:
+        credentials, project = google.auth.default(
+            scopes=[_CLOUD_PLATFORM_SCOPE],
+            request=Request(),
+        )
+        credentials.refresh(Request())
+        return getattr(credentials, "token", None), project
+    except Exception:
+        return None, None
 
 
 def _resolve_vertex_options(
@@ -26,13 +47,21 @@ def _resolve_vertex_options(
         "GOOGLE_OAUTH_ACCESS_TOKEN",
         options.get("env"),
     )
-    if not token:
-        raise RuntimeError(f"No access token for provider: {model.provider}")
     project = (
         options.get("project")
         or get_provider_env_value("GOOGLE_CLOUD_PROJECT", options.get("env"))
         or get_provider_env_value("GCP_PROJECT", options.get("env"))
     )
+    if not token:
+        token, adc_project = _resolve_adc_credentials(options)
+        if project is None:
+            project = adc_project
+    if not token:
+        raise RuntimeError(
+            f"No access token for provider: {model.provider}. "
+            "Set GOOGLE_OAUTH_ACCESS_TOKEN or configure Application Default Credentials "
+            "(google-auth + GOOGLE_APPLICATION_CREDENTIALS / gcloud auth application-default login)."
+        )
     if not project:
         raise RuntimeError("Google Vertex requires a project")
     location = (
