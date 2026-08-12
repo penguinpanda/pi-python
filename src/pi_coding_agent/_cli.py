@@ -116,6 +116,13 @@ async def _async_main(args: list[str] | None = None) -> int:
     if parsed.mode is None and not parsed.message and not parsed.json and sys.stdin.isatty():
         parsed.mode = "tui"
 
+    # TS 模式别名：text → print；json → print + --json（对齐 TS --mode json）。
+    if parsed.mode == "text":
+        parsed.mode = "print"
+    elif parsed.mode == "json":
+        parsed.mode = "print"
+        parsed.json = True
+
     # 首次启动向导（显式 --setup 或 TS 对齐的自动触发条件）。
     if parsed.setup or should_run_first_time_setup():
         return await run_first_time_setup(_auth_store())
@@ -909,9 +916,9 @@ def _create_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--mode",
-        choices=["print", "rpc", "tui"],
+        choices=["print", "text", "json", "rpc", "tui"],
         default=None,
-        help="Run mode: print (default), rpc (stdin/stdout JSONL), or tui",
+        help="Run mode: print/text (default), json, rpc (stdin/stdout JSONL), or tui",
     )
     p.add_argument(
         "--setup",
