@@ -137,16 +137,17 @@ def _parse_flowchart(lines: list[str]) -> tuple[list[_Node], list[_Edge], list[s
 
 
 def _frame(label: str, shape: str) -> list[str]:
-    """单节点 Unicode 框（3 行）。"""
+    """单节点 Unicode 框（3 行；CJK 按显示宽度计算边框）。"""
+    label_width = _display_width(label)
     if shape == "diamond":
         top = f"◄─{label}─►"
         return [top]
     inner = f"│ {label} │"
-    top = f"┌{'─' * (len(label) + 2)}┐"
-    bottom = f"└{'─' * (len(label) + 2)}┘"
+    top = f"┌{'─' * (label_width + 2)}┐"
+    bottom = f"└{'─' * (label_width + 2)}┘"
     if shape == "round":
-        top = f"╭{'─' * (len(label) + 2)}╮"
-        bottom = f"╰{'─' * (len(label) + 2)}╯"
+        top = f"╭{'─' * (label_width + 2)}╮"
+        bottom = f"╰{'─' * (label_width + 2)}╯"
     return [top, inner, bottom]
 
 
@@ -335,11 +336,14 @@ def render_mermaid(code: str) -> MermaidArt | None:
                     node_map[node_id] = _Node(id=node_id, label=node_id, shape="box")
         if not node_map:
             return MermaidArt(plain=[], warnings=["Empty diagram"])
-        art = (
-            _flowchart_td(node_map, edges)
-            if direction in ("td", "tb", "bt")
-            else _flowchart_lr(node_map, edges)
-        )
+        if direction in ("td", "tb", "bt"):
+            art = _flowchart_td(node_map, edges)
+            if direction == "bt":
+                # 自底向上：行序反转（箭头方向近似对齐）。
+                art.plain = list(reversed(art.plain))
+                art.styled = list(reversed(art.styled))
+        else:
+            art = _flowchart_lr(node_map, edges)
         art.warnings.extend(warnings)
         return art
     if directive.startswith("sequencediagram"):

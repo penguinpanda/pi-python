@@ -52,6 +52,9 @@ def create_mermaid_markdown_transformer(
             art = render_mermaid(code)
             if art is None or art.width > available_width:
                 return match.group(0)
+            if not art.plain:
+                # 空图（解析失败/无内容）：保留原代码块，避免块消失。
+                return match.group(0)
             if not context.get("isStreaming") and art.warnings:
                 suffix = f" (+{len(art.warnings) - 1} more)" if len(art.warnings) > 1 else ""
                 warning = f"Mermaid diagram not rendered: {art.warnings[0]}{suffix}"
