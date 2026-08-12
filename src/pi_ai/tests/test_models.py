@@ -19,7 +19,7 @@ class TestModelsRegistry:
     def test_create_default_models(self):
         models = create_default_models()
         providers = models.get_providers()
-        assert len(providers) == 36
+        assert len(providers) == 37
         assert models.get_provider("google") is not None
         assert models.get_provider("mistral") is not None
         assert models.get_provider("azure-openai-responses") is not None

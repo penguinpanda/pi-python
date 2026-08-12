@@ -9,6 +9,7 @@ from .github_copilot import GITHUB_COPILOT_MODELS, github_copilot_provider
 from .openrouter import openrouter_provider
 from .ant_ling import ant_ling_provider
 from .openai_codex import openai_codex_provider
+from .radius import radius_provider
 from .google_vertex import GOOGLE_VERTEX_MODELS, google_vertex_provider
 from .amazon_bedrock import BEDROCK_MODELS, amazon_bedrock_provider
 from .openai_completions_providers import (
@@ -70,6 +71,7 @@ __all__ = [
     "openrouter_provider",
     "ant_ling_provider",
     "openai_codex_provider",
+    "radius_provider",
     "google_vertex_provider",
     "GOOGLE_VERTEX_MODELS",
     "amazon_bedrock_provider",

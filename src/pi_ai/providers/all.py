@@ -9,6 +9,7 @@ from ..providers import (
     openrouter_provider,
     ant_ling_provider,
     openai_codex_provider,
+    radius_provider,
     google_vertex_provider,
     amazon_bedrock_provider,
     baseten_provider,
@@ -53,6 +54,7 @@ def create_default_models() -> Models:
     models.add_provider(openrouter_provider())
     models.add_provider(ant_ling_provider())
     models.add_provider(openai_codex_provider())
+    models.add_provider(radius_provider())
     models.add_provider(google_vertex_provider())
     models.add_provider(amazon_bedrock_provider())
     models.add_provider(groq_provider())
