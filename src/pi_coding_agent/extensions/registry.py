@@ -59,6 +59,7 @@ class ExtensionRegistry:
                 handler,
                 description=command.description,
                 argument_hint=command.argument_hint,
+                get_argument_completions=command.get_argument_completions,
             )
 
     def _wrap_command(self, command_handler):

@@ -22,7 +22,10 @@ def create_extension(pi):
         "description": "Extension tool",
         "parameters": {"type": "object"},
     })
-    pi.register_command("extcmd", {"description": "Extension command"})
+    pi.register_command("extcmd", {
+        "description": "Extension command",
+        "getArgumentCompletions": lambda prefix: [{"value": "x"}],
+    })
     pi.register_flag("ext-flag", {"type": "boolean", "default": True})
     pi.register_provider("acme", {"api_key": "sk-acme", "models": []})
 """
@@ -45,6 +48,7 @@ class TestLoadExtension:
         assert "message_end" in extension.handlers
         assert "ext-tool" in extension.tools
         assert "extcmd" in extension.commands
+        assert extension.commands["extcmd"].get_argument_completions is not None
         assert "ext-flag" in extension.flags
         assert extension.providers == [("acme", {"api_key": "sk-acme", "models": []})]
 

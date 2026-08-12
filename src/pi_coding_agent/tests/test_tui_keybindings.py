@@ -61,3 +61,20 @@ class TestKeybindingsManager:
         assert manager.get_action_key("app.exit") == "ctrl+d"
         assert manager.get_action_key("app.message.followUp") == "alt+enter"
         assert manager.get_action_key("app.session.new") == "ctrl+n"
+
+    def test_session_picker_defaults_and_resolve(self):
+        manager = KeybindingsManager()
+        assert manager.get_session_picker_key("app.session.toggleSort") == "ctrl+s"
+        assert manager.resolve_session_picker("ctrl+s") == "app.session.toggleSort"
+        assert manager.resolve("ctrl+s") is None
+
+    def test_session_picker_settings_override(self):
+        manager = KeybindingsManager()
+        manager.load_from_settings({"keybindings": {"app.session.toggleSort": "ctrl+k"}})
+        assert manager.get_session_picker_key("app.session.toggleSort") == "ctrl+k"
+        assert manager.resolve_session_picker("ctrl+k") == "app.session.toggleSort"
+        assert manager.resolve_session_picker("ctrl+s") is None
+
+    def test_session_picker_settings_disable(self):
+        manager = KeybindingsManager(user_bindings={"app.session.delete": []})
+        assert manager.is_session_picker_enabled("app.session.delete") is False

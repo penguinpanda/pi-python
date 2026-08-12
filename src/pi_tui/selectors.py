@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable
 
 from pi_tui.engine.cells import Line, blank_line, line_from_text
@@ -16,6 +19,7 @@ from pi_tui.engine.widgets import (
     Vertical,
     Widget,
 )
+from pi_tui.keybindings import DEFAULT_SESSION_PICKER_KEYBINDINGS
 
 
 def format_label_timestamp(iso_value: str | None) -> str:
@@ -139,50 +143,407 @@ class ModelSelector(OverlayDialog):
 
 
 class SessionPicker(CopySelectedMixin, OverlayDialog):
-    """会话恢复选择器：按修改时间排序。"""
+    """会话恢复选择器：排序 / 过滤 / scope / 路径 / 删除 / 重命名。"""
 
-    def __init__(self, sessions: list[dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        sessions: list[Any],
+        *,
+        all_sessions: list[Any] | None = None,
+        current_cwd: str | None = None,
+        current_session_path: str | None = None,
+        on_rename: Callable[[str, str], Any] | None = None,
+        on_delete: Callable[[str], Any] | None = None,
+        reload_sessions: Callable[[], Any] | None = None,
+        keybindings_manager=None,
+        keybindings: dict[str, str] | None = None,
+        max_height: int = 12,
+    ) -> None:
         super().__init__()
-        self._sessions = list(sessions)
-        items: list[SelectItem] = []
-        for session in self._sessions:
-            when = datetime.fromtimestamp(session["modified"]).strftime("%Y-%m-%d %H:%M")
-            items.append(
-                SelectItem(
-                    value=str(session["path"]),
-                    label=f"{session['session_id']}  {when}",
-                )
-            )
-        self._list = _ResultSelectList(
-            items,
-            enable_search=False,
-            max_height=12,
-            on_selected=self._on_selected,
-            on_cancelled=lambda: self.dismiss(None),
+        # lazy import 避免 pi_tui → pi_coding_agent 顶层依赖。
+        from pi_coding_agent.modes.interactive.session_selector import (
+            SessionPickerModel,
         )
-        self._body = Vertical()
-        self._body.mount(Label("Resume session", height=1))
-        self._body.mount(self._list)
 
-    def _on_selected(self, item: SelectItem | None) -> None:
-        if item is None:
+        self._model = SessionPickerModel(
+            current_sessions=sessions,
+            all_sessions=all_sessions,
+            current_cwd=current_cwd,
+            current_session_path=current_session_path,
+        )
+        self._on_rename = on_rename
+        self._on_delete = on_delete
+        self._reload_sessions = reload_sessions
+        self._keybindings_manager = keybindings_manager
+        self._session_keys = {
+            action: binding.key for action, binding in DEFAULT_SESSION_PICKER_KEYBINDINGS.items()
+        }
+        if keybindings:
+            self._session_keys.update(keybindings)
+        self._max_height = max(4, int(max_height))
+        self._confirming_path: str | None = None
+        self._status: tuple[str, str] | None = None
+        self._rename_mode = False
+        self._rename_target: str | None = None
+        self._rename_input = Input()
+        self._query = ""
+
+    # ------------------------------------------------------------------
+    # 选择
+    # ------------------------------------------------------------------
+
+    def _selected_copy_text(self) -> str:
+        path = self._model.selected_path
+        return path or ""
+
+    def _select_current(self) -> None:
+        path = self._model.selected_path
+        if path is None:
             self.dismiss(None)
             return
         self.copy_selected()
-        self.dismiss(item.value)
+        self.dismiss(path)
 
-    def _selected_copy_text(self) -> str:
-        item = self._list.selected_item
-        return str(item.value) if item is not None else ""
+    # ------------------------------------------------------------------
+    # 删除 / 重命名
+    # ------------------------------------------------------------------
+
+    def _start_delete_confirmation(self) -> None:
+        if self._model.is_selected_current:
+            self._set_status("error", "Cannot delete the currently active session")
+            return
+        self._confirming_path = self._model.selected_path
+        self.refresh()
+
+    async def _confirm_delete(self) -> None:
+        path = self._confirming_path
+        self._confirming_path = None
+        if path is None:
+            return
+        if self._on_delete is None:
+            self._set_status("error", "Deleting sessions is not available")
+            return
+        try:
+            result = self._on_delete(path)
+            if inspect.isawaitable(result):
+                result = await result
+            if isinstance(result, str) and result:
+                self._set_status("error", result)
+                return
+        except Exception as exc:
+            self._set_status("error", f"Failed to delete: {exc}")
+            return
+        self._model.remove_path(path)
+        await self._refresh_after_mutation()
+        self._set_status("info", "Session deleted")
+        self.refresh()
+
+    def _enter_rename_mode(self) -> None:
+        session = self._model.selected_node
+        if session is None:
+            return
+        self._rename_mode = True
+        self._rename_target = session.session.path
+        self._rename_input.value = session.session.name or ""
+        self._rename_input.cursor = len(self._rename_input.value)
+        self.refresh()
+
+    def _exit_rename_mode(self) -> None:
+        self._rename_mode = False
+        self._rename_target = None
+        self.refresh()
+
+    async def _confirm_rename(self) -> None:
+        target = self._rename_target
+        value = self._rename_input.value
+        self._exit_rename_mode()
+        if target is None or not value.strip():
+            return
+        if self._on_rename is None:
+            self._set_status("error", "Renaming sessions is not available")
+            return
+        try:
+            result = self._on_rename(target, value)
+            if inspect.isawaitable(result):
+                result = await result
+            if isinstance(result, str) and result:
+                self._set_status("error", result)
+                return
+        except Exception as exc:
+            self._set_status("error", f"Failed to rename: {exc}")
+            return
+        await self._refresh_after_mutation()
+        self._set_status("info", "Session renamed")
+        self.refresh()
+
+    async def _refresh_after_mutation(self) -> None:
+        if self._reload_sessions is None:
+            return
+        try:
+            result = self._reload_sessions()
+            if inspect.isawaitable(result):
+                result = await result
+            if isinstance(result, tuple) and len(result) == 2:
+                current, all_sessions = result
+                self._model.current_sessions = list(current)
+                if all_sessions is not None:
+                    self._model.all_sessions = list(all_sessions)
+                self._model._refresh()
+        except Exception:
+            self._model._refresh()
+
+    def _set_status(self, kind: str, message: str) -> None:
+        self._status = (kind, message)
+
+    # ------------------------------------------------------------------
+    # 键盘
+    # ------------------------------------------------------------------
 
     def handle_key(self, key: Key) -> bool:
-        return self._list.handle_key(key)
+        if self._rename_mode:
+            return self._handle_rename_key(key)
+        if self._confirming_path is not None:
+            if key.name == "enter":
+                self._run(self._confirm_delete())
+            elif key.name == "escape":
+                self._confirming_path = None
+                self.refresh()
+            return True
+
+        name = key.name
+        if name == self._session_key("app.session.toggleScope"):
+            self._model.toggle_scope()
+            self.refresh()
+            return True
+        if name == self._session_key("app.session.toggleSort"):
+            self._model.toggle_sort()
+            self.refresh()
+            return True
+        if name == self._session_key("app.session.toggleNamedFilter"):
+            self._model.toggle_name_filter()
+            self.refresh()
+            return True
+        if name == self._session_key("app.session.togglePath"):
+            self._model.toggle_path()
+            self.refresh()
+            return True
+        if name == self._session_key("app.session.delete"):
+            self._start_delete_confirmation()
+            return True
+        if name == self._session_key("app.session.rename"):
+            self._enter_rename_mode()
+            return True
+        if name == self._session_key("app.session.deleteNoninvasive"):
+            if self._query:
+                self._query = self._query[:-1]
+                self._model.set_query(self._query)
+            else:
+                self._start_delete_confirmation()
+            self.refresh()
+            return True
+        if name == "up":
+            self._model.move_selection(-1)
+            self.refresh()
+            return True
+        if name == "down":
+            self._model.move_selection(1)
+            self.refresh()
+            return True
+        if name == "pageup":
+            self._model.page_selection(-(self._max_height - 3))
+            self.refresh()
+            return True
+        if name == "pagedown":
+            self._model.page_selection(self._max_height - 3)
+            self.refresh()
+            return True
+        if name == "enter":
+            self._select_current()
+            return True
+        if name == "escape":
+            self.dismiss(None)
+            return True
+        if name == "backspace":
+            if self._query:
+                self._query = self._query[:-1]
+                self._model.set_query(self._query)
+            self.refresh()
+            return True
+        if key.char is not None and key.char.isprintable():
+            self._query += key.char
+            self._model.set_query(self._query)
+            self.refresh()
+            return True
+        return False
+
+    def _handle_rename_key(self, key: Key) -> bool:
+        if key.name == "escape":
+            self._exit_rename_mode()
+            return True
+        if key.name == "enter":
+            self._run(self._confirm_rename())
+            return True
+        if self._rename_input.handle_key(key):
+            self.refresh()
+            return True
+        return False
+
+    def _run(self, coro) -> None:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._async_task = asyncio.create_task(coro)
+
+    def _session_key(self, action: str) -> str:
+        if self._keybindings_manager is not None:
+            getter = getattr(self._keybindings_manager, "get_session_picker_key", None)
+            if getter is not None:
+                value = getter(action)
+                if value:
+                    return value
+        return self._session_keys.get(action, "")
+
+    # ------------------------------------------------------------------
+    # 渲染
+    # ------------------------------------------------------------------
 
     def render(self, width: int, height: int) -> list[Line]:
-        return self._body.render(width, height)
+        if self._rename_mode:
+            return self._render_rename(width, height)
+        lines: list[Line] = []
+        lines.append(line_from_text(self._title(), width))
+        lines.append(line_from_text(self._query or "Search sessions...", width, _dim_style()))
+        if self._status is not None:
+            lines.append(line_from_text(self._status[1], width))
+        elif self._confirming_path is not None:
+            lines.append(
+                line_from_text(
+                    "Delete session? Enter to confirm · Esc to cancel",
+                    width,
+                )
+            )
+        else:
+            lines.append(line_from_text(self._hints(), width))
+
+        visible = min(height - len(lines), len(self._model.rows))
+        start, end = _visible_window(
+            self._model.selected_index,
+            visible,
+            len(self._model.rows),
+        )
+        for index in range(start, end):
+            node = self._model.rows[index]
+            selected = index == self._model.selected_index
+            style = None
+            if selected:
+                from rich.style import Style
+
+                style = Style(reverse=True)
+            prefix = self._tree_prefix(node)
+            text = self._row_text(node.session, width - len(prefix))
+            lines.append(line_from_text(f"{prefix}{text}", width, style))
+        while len(lines) < height:
+            lines.append(blank_line(width))
+        return lines
+
+    def _render_rename(self, width: int, height: int) -> list[Line]:
+        lines = [
+            line_from_text("Rename Session", width),
+            line_from_text("", width),
+        ]
+        lines.extend(self._rename_input.render(width, max(1, height - 4)))
+        lines.append(line_from_text("Enter to save · Esc to cancel", width, _dim_style()))
+        while len(lines) < height:
+            lines.append(blank_line(width))
+        return lines
+
+    def _title(self) -> str:
+        scope = "Current Folder" if self._model.scope.value == "current" else "All"
+        sort = {
+            "threaded": "Threaded",
+            "recent": "Recent",
+            "relevance": "Fuzzy",
+        }[self._model.sort_mode.value]
+        name = "Named" if self._model.name_filter.value == "named" else "All"
+        path = "on" if self._model.show_path else "off"
+        return f"Resume Session ({scope})  Name: {name}  Sort: {sort}  Path: {path}"
+
+    def _hints(self) -> str:
+        parts = [
+            "Tab: scope",
+            "Ctrl+S: sort",
+            "Ctrl+N: named",
+            "Ctrl+P: path",
+            "Ctrl+D: delete",
+            "Ctrl+R: rename",
+            're:<regex> · "phrase"',
+        ]
+        return " · ".join(parts)
+
+    def _row_text(self, session, width: int) -> str:
+        text = session.name or session.first_message or session.session_id
+        right = f"{session.message_count} {_age_text(session.modified)}"
+        if self._model.scope.value == "all" and session.cwd:
+            right = f"{_shorten_path(session.cwd)} {right}"
+        if self._model.show_path:
+            right = f"{_shorten_path(session.path)} {right}"
+        available = max(10, width - len(right) - 3)
+        text = _truncate(text, available)
+        return f" {text}  {right}"
+
+    def _tree_prefix(self, node) -> str:
+        if node.depth == 0:
+            return ""
+        parts = ["│  " if continues else "   " for continues in node.ancestor_continues]
+        branch = "└─ " if node.is_last else "├─ "
+        return "".join(parts) + branch
 
     def content_size(self) -> tuple[int, int]:
-        return self._body.content_size()
+        return (1000, min(3 + len(self._model.rows), self._max_height))
+
+
+def _dim_style():
+    from rich.style import Style
+
+    return Style(dim=True)
+
+
+def _visible_window(selected: int, visible: int, total: int) -> tuple[int, int]:
+    if total <= visible or visible <= 0:
+        return (0, total)
+    start = max(0, min(selected - visible // 2, total - visible))
+    return (start, min(start + visible, total))
+
+
+def _truncate(text: str, width: int) -> str:
+    if len(text) <= width:
+        return text
+    return text[: max(0, width - 1)] + "…"
+
+
+def _shorten_path(path: str) -> str:
+    home = str(Path.home())
+    if path.startswith(home):
+        return f"~{path[len(home) :]}"
+    return path
+
+
+def _age_text(timestamp: float) -> str:
+    diff = datetime.now().timestamp() - timestamp
+    if diff < 60:
+        return "now"
+    if diff < 3600:
+        return f"{int(diff // 60)}m"
+    if diff < 86400:
+        return f"{int(diff // 3600)}h"
+    if diff < 604800:
+        return f"{int(diff // 86400)}d"
+    if diff < 2592000:
+        return f"{int(diff // 604800)}w"
+    if diff < 31536000:
+        return f"{int(diff // 2592000)}mo"
+    return f"{int(diff // 31536000)}y"
 
 
 def _flatten_tree(

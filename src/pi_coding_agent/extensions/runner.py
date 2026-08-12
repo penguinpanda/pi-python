@@ -581,6 +581,11 @@ class ExtensionRunner:
                     name=invocation,
                     description=command.description,
                     argument_hint=command.argument_hint,
+                    get_argument_completions=getattr(
+                        command,
+                        "get_argument_completions",
+                        None,
+                    ),
                     handler=command.handler,
                     source_info=command.source_info,
                 )

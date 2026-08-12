@@ -5,7 +5,12 @@
 pi_coding_agent.modes.interactive。
 """
 
-from .autocomplete import AutocompleteProvider, CombinedAutocompleteProvider
+from .autocomplete import (
+    AutocompleteItem,
+    AutocompleteProvider,
+    AutocompleteSuggestions,
+    CombinedAutocompleteProvider,
+)
 from .clipboard_image import ClipboardImage
 from .components import (
     MessageEntry,
@@ -17,7 +22,12 @@ from .components import (
     PiStatusBar,
     message_to_entries,
 )
-from .keybindings import DEFAULT_APP_KEYBINDINGS, Keybinding, KeybindingsManager
+from .keybindings import (
+    DEFAULT_APP_KEYBINDINGS,
+    DEFAULT_SESSION_PICKER_KEYBINDINGS,
+    Keybinding,
+    KeybindingsManager,
+)
 from .lists import SelectItem, SelectList, SettingItem, SettingsList
 from .overlay import (
     Margin,
@@ -59,7 +69,9 @@ from .theme import (
 
 __all__ = [
     "ClipboardImage",
+    "AutocompleteItem",
     "AutocompleteProvider",
+    "AutocompleteSuggestions",
     "CombinedAutocompleteProvider",
     "MessageEntry",
     "PiChatContainer",
@@ -70,6 +82,7 @@ __all__ = [
     "PiStatusBar",
     "message_to_entries",
     "DEFAULT_APP_KEYBINDINGS",
+    "DEFAULT_SESSION_PICKER_KEYBINDINGS",
     "Keybinding",
     "KeybindingsManager",
     "SelectItem",

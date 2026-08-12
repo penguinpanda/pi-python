@@ -107,6 +107,22 @@
   `LocalFileSystem`）与 `JsonlSessionRepoOptions` 构造，`JsonlSessionStorage`
   新增 `drain()`；公开导出 `JsonlSessionCreateOptions` /
   `JsonlSessionListOptions` / `JsonlSessionMetadata` / `JsonlV4Header`
+- `/resume` Session Selector 对齐 TS：recent / threaded / fuzzy 排序、
+  named / all 过滤、current / all scope、path display、rename、
+  delete confirmation（`trash` 优先，`unlink` 回退）
+- Interactive Mode 统一 autocomplete provider：内置命令、prompt templates、
+  extension commands、skills、`/model`、`/login`、fd/readdir 路径补全统一走
+  编辑器内联渲染，扩展 autocomplete 不再弹模态选择器
+- 扩展命令支持 `getArgumentCompletions`（兼容 `getArgumentCompletions`
+  camelCase 注册键），参数补全透传到统一 autocomplete provider
+- Session Picker 快捷键并入 `KeybindingsManager` 独立 action 命名空间，
+  支持 settings `keybindings` 覆盖与禁用
+- 新增托管工具下载/缓存（`tools/_ensure_tool.py`）：fd/rg 缺失时按平台
+  从 GitHub 下载并缓存到 `~/.pi/agent/bin`，`PI_OFFLINE` 下跳过
+- `list_sessions` 复用 v4 search index：索引存在且未陈旧时直接读取摘要，
+  不再逐个打开会话文件；首次扫描后可写入 `search-index.json` 缓存
+- `Model` 新增 `aliases` 元数据字段，`/model` 补全按 id / name / aliases /
+  provider 模糊搜索
 
 ### Changed
 

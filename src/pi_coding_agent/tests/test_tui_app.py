@@ -96,6 +96,26 @@ async def test_typing_and_submit_calls_prompt() -> None:
 
 
 @pytest.mark.asyncio
+async def test_slash_autocomplete_inline_and_submit() -> None:
+    term = FakeTerminal(size=(100, 30))
+    app = _make_app(term)
+
+    async def actions(_term, _app) -> None:
+        term.feed_text("/mo")
+        await asyncio.sleep(0.2)
+        assert _app._completion_items
+        values = [item["value"] for item in _app._completion_items]
+        assert values[0] == "model"
+        assert _app._editor.completion_active is True
+        term.feed(b"\r")
+        await asyncio.sleep(0.2)
+        assert _app._editor.text == "/model "
+        assert _app._editor.completion_active is False
+
+    await _run(app, term, actions)
+
+
+@pytest.mark.asyncio
 async def test_choice_selector_flow() -> None:
     term = FakeTerminal(size=(100, 30))
     app = _make_app(term)

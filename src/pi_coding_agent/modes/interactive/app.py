@@ -13,7 +13,6 @@ from typing import Any, Callable, cast
 from rich.style import Style
 
 from pi_agent import AgentEvent
-from pi_tui.autocomplete import CombinedAutocompleteProvider
 from pi_tui.clipboard_image import ClipboardImage
 from pi_tui.components import (
     BashExecutionEntry,
@@ -31,7 +30,6 @@ from pi_tui.engine.widgets import Static
 from pi_tui.keybindings import KeybindingsManager
 from pi_tui.overlay import OverlayHandle
 from pi_tui.selectors import (
-    ChoiceSelector,
     ExtensionSelector,
     ModelSelector,
     OAuthSelector,
@@ -53,8 +51,9 @@ from ...extensions import ExtensionRunner
 from ...extensions.registry import ExtensionRegistry
 from ...model_runtime import ModelRuntime
 from ...system_prompt import load_project_context_files
+from ...tools._ensure_tool import ensure_tool, get_tool_path
 from ...tools.render_utils import get_text_output, shorten_path
-from .autocomplete import create_slash_command_provider
+from .autocomplete import create_interactive_autocomplete_provider
 from .slash_commands import SlashContext, SlashCommandRegistry, register_builtin_commands
 
 
@@ -188,6 +187,8 @@ class PiTuiApp(App):
         self._overlay_renderers: dict[str, Callable[[int, int], list[str]]] = {}
         self._completion_items: list[dict] = []
         self._completion_index = 0
+        self._completion_prefix = ""
+        self._completion_kind = "text"
         self._hidden_thinking_label = "Thinking"
         self._working_message = "Working"
         self._working_visible = True
@@ -257,6 +258,21 @@ class PiTuiApp(App):
             trust_manager=trust_manager,
         )
         self._slash_context.rebuild_session = self._apply_rebuilt_session
+        self._autocomplete_provider = self._build_autocomplete_provider()
+
+    def _build_autocomplete_provider(self):
+        """按当前 registry / 资源重建统一补全 provider。"""
+        return create_interactive_autocomplete_provider(
+            slash_registry=self._slash_registry,
+            template_loader=self._session.template_loader,
+            extension_runner=self._session.extension_runner,
+            skill_loader=self._session.skill_loader,
+            settings_manager=self._settings_manager,
+            model_runtime=self._model_runtime,
+            session=self._session,
+            base_path=self._session.cwd,
+            fd_path=get_tool_path("fd"),
+        )
 
     @property
     def _editor(self) -> PiEditor:
@@ -299,9 +315,16 @@ class PiTuiApp(App):
         self._update_footer()
         self._editor.focus()
         self._show_startup_resources_hint()
+        self._run_task(self._ensure_fd_for_autocomplete())
         # 启动时对未定信任项目提示（对齐 TS 启动 trust 选择器）。
         if self._needs_trust_decision:
             self._open_trust_selector()
+
+    async def _ensure_fd_for_autocomplete(self) -> None:
+        """后台确保 fd 可用，成功后重建补全 provider（对齐 TS ensureTool）。"""
+        await ensure_tool("fd", silent=True)
+        if get_tool_path("fd") is not None:
+            self._autocomplete_provider = self._build_autocomplete_provider()
 
     def on_unmount(self) -> None:
         if self._unsubscribe is not None:
@@ -920,52 +943,31 @@ class PiTuiApp(App):
         self,
         message: PiEditor.AutocompleteRequested,
     ) -> None:
-        """Tab / 自动触发：slash 命令走非模态实时补全，其余走扩展选择器。"""
-        text = message.editor.text
-        if text.startswith("/") and " " not in text:
-            await self._update_slash_completion(text)
-            return
-        self._hide_slash_completion()
-        runner = self._session.extension_runner
-        providers: list = []
-        if runner is not None:
-            providers.extend(runner.get_autocomplete())
-        completions = await CombinedAutocompleteProvider(providers).collect(text)
-        if not completions:
-            return
-
-        def _label(item: dict) -> str:
-            return str(item.get("label", item.get("value", "")))
-
-        def _callback(selected) -> None:
-            if selected is None:
-                return
-            match = next(
-                (item for item in completions if _label(item) == selected),
-                None,
-            )
-            if match is None:
-                return
-            value = str(match.get("value", match.get("label", "")))
-            self._insert_completion(value)
-
-        self.push_screen(
-            ChoiceSelector("Autocomplete", [_label(item) for item in completions]),
-            callback=_callback,
+        """Tab / 自动触发：统一走非模态内联补全（对齐 TS CombinedAutocompleteProvider）。"""
+        editor = message.editor
+        text = editor.text
+        cursor = self._editor_cursor(editor)
+        suggestions = await self._autocomplete_provider.get_suggestions(
+            text,
+            force=True,
+            cursor=cursor,
         )
-
-    async def _update_slash_completion(self, text: str) -> None:
-        """非模态 slash 补全：编辑器保持焦点，实时过滤并渲染到编辑器下方（对齐 TS）。"""
-        provider = create_slash_command_provider(
-            self._slash_registry,
-            self._session.template_loader,
-        )
-        items = provider(text) or []
-        self._completion_items = items
-        self._completion_index = 0
-        if not items:
+        if suggestions is None or not suggestions.items:
             self._hide_slash_completion()
             return
+        self._completion_items = [
+            {
+                "value": item.value,
+                "label": item.label,
+                "description": item.description,
+                "kind": item.kind,
+                "source": item.source,
+            }
+            for item in suggestions.items
+        ]
+        self._completion_prefix = suggestions.prefix
+        self._completion_kind = suggestions.kind
+        self._completion_index = 0
         self._render_slash_completion()
 
     def _render_slash_completion(self) -> None:
@@ -993,19 +995,48 @@ class PiTuiApp(App):
     def _hide_slash_completion(self) -> None:
         self._completion_items = []
         self._completion_index = 0
+        self._completion_prefix = ""
+        self._completion_kind = "text"
         self._editor.clear_completion()
         self.screen.set_child_basis(self._editor, 6)
 
     def _insert_completion(self, value: str) -> None:
-        if value.startswith("/"):
-            parts = self._editor.text.split(" ", 1)
-            rest = parts[1] if len(parts) > 1 else ""
-            self._editor.text = value + (f" {rest}" if rest else "")
-            return
-        try:
-            self._editor.insert(value)
-        except Exception:
-            self._editor.text += value
+        from pi_tui.autocomplete import AutocompleteItem
+
+        item = AutocompleteItem(value=value, kind=self._completion_kind)
+        text, cursor = self._autocomplete_provider.apply_completion(
+            self._editor.text,
+            item,
+            self._completion_prefix,
+            self._editor_cursor(self._editor),
+        )
+        self._set_editor_cursor(text, cursor)
+
+    def _editor_cursor(self, editor) -> int:
+        lines = list(editor.lines)
+        row = min(editor.cursor_row, len(lines) - 1)
+        col = editor.cursor_col if row == editor.cursor_row else len(lines[row])
+        return sum(len(line) + 1 for line in lines[:row]) + col
+
+    def _set_editor_cursor(self, text: str, cursor: int) -> None:
+        lines = text.split("\n")
+        remaining = cursor
+        row = 0
+        col = 0
+        for index, line in enumerate(lines):
+            if remaining <= len(line):
+                row = index
+                col = remaining
+                break
+            remaining -= len(line) + 1
+        else:
+            row = len(lines) - 1
+            col = len(lines[-1])
+        self._editor.lines = lines
+        self._editor.cursor_row = row
+        self._editor.cursor_col = col
+        self._editor.selection_anchor = None
+        self._editor.refresh()
 
     def on_pi_editor_completion_navigate_requested(self, message) -> None:
         if not self._completion_items:
@@ -1625,6 +1656,7 @@ class PiTuiApp(App):
         self._session = new_session
         self._slash_context.session = new_session
         self._bind_session()
+        self._autocomplete_provider = self._build_autocomplete_provider()
         self._chat.clear_messages()
         self._update_footer()
         self._set_status("New session")
@@ -1718,6 +1750,7 @@ class PiTuiApp(App):
                 ).apply()
             self._slash_registry = registry
             self._slash_context.slash_registry = registry
+            self._autocomplete_provider = self._build_autocomplete_provider()
             if self._header is not None:
                 self._header.refresh_hints()
             details.append("keybindings refreshed")
@@ -1746,6 +1779,7 @@ class PiTuiApp(App):
         self._session = new_session
         self._slash_context.session = new_session
         self._bind_session()
+        self._autocomplete_provider = self._build_autocomplete_provider()
         self._chat.clear_messages()
         self._tool_entries.clear()
         self._rendered_summary_ids = set()
@@ -1759,14 +1793,64 @@ class PiTuiApp(App):
         self._run_task(self._resume_session())
 
     async def _resume_session(self) -> None:
-        sessions = _list_sessions()
-        if not sessions:
+        from ..._session_manager_v4 import list_sessions as list_sessions_async
+
+        sessions_dir = get_sessions_dir()
+        current_sessions = await list_sessions_async(
+            sessions_dir,
+            cwd=self._session.cwd,
+            cache_search_index=True,
+        )
+        all_sessions = await list_sessions_async(sessions_dir, cache_search_index=True)
+        if not current_sessions and not all_sessions:
             self._notify("No saved sessions")
             return
+        session_path = self._session.session_manager.session_path
         self.push_screen(
-            SessionPicker(sessions),
+            SessionPicker(
+                current_sessions,
+                all_sessions=all_sessions,
+                current_cwd=self._session.cwd,
+                current_session_path=str(session_path) if session_path is not None else None,
+                on_rename=self._rename_session_from_picker,
+                on_delete=self._delete_session_from_picker,
+                reload_sessions=self._reload_picker_sessions,
+                keybindings_manager=self._keybindings,
+            ),
             callback=self._on_session_selected,
         )
+
+    async def _rename_session_from_picker(self, path: str, name: str) -> str | None:
+        from ..._session_manager_v4 import open_session_manager
+
+        manager = await open_session_manager(path)
+        try:
+            await manager.append_session_info(name)
+        finally:
+            close = getattr(manager, "close", None)
+            if close is not None:
+                result = close()
+                if result is not None and inspect.isawaitable(result):
+                    await result
+        return None
+
+    async def _delete_session_from_picker(self, path: str) -> str | None:
+        from .session_selector import delete_session_file
+
+        result = await delete_session_file(path)
+        return None if result.ok else result.error
+
+    async def _reload_picker_sessions(self) -> tuple[list, list]:
+        from ..._session_manager_v4 import list_sessions as list_sessions_async
+
+        sessions_dir = get_sessions_dir()
+        current = await list_sessions_async(
+            sessions_dir,
+            cwd=self._session.cwd,
+            cache_search_index=True,
+        )
+        all_sessions = await list_sessions_async(sessions_dir, cache_search_index=True)
+        return current, all_sessions
 
     def _on_session_selected(self, path) -> None:
         if path is None or self._resume_factory is None:
@@ -1786,6 +1870,7 @@ class PiTuiApp(App):
         self._session = new_session
         self._slash_context.session = new_session
         self._bind_session()
+        self._autocomplete_provider = self._build_autocomplete_provider()
         self._chat.clear_messages()
         self._tool_entries.clear()
         self._rendered_summary_ids = set()

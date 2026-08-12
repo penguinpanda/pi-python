@@ -12,6 +12,7 @@ from pi_coding_agent.extensions.runner import ExtensionRunner
 from pi_coding_agent.extensions.types import (
     Extension,
     ExtensionError,
+    RegisteredCommand,
 )
 from pi_coding_agent.model_runtime import ModelRuntime
 
@@ -176,6 +177,19 @@ class TestRegistrations:
         runner = ExtensionRunner([make("cmd"), make("cmd"), make("other")])
         names = [command.name for command in runner.get_registered_commands()]
         assert names == ["cmd:1", "cmd:2", "other"]
+
+    def test_command_preserves_argument_completions(self):
+        extension = Extension(path="<inline>", resolved_path="<inline>")
+        completions = lambda prefix: [{"value": prefix}]  # noqa: E731
+        extension.commands["cmd"] = RegisteredCommand(
+            name="cmd",
+            description="d",
+            handler=None,
+            get_argument_completions=completions,
+        )
+        runner = ExtensionRunner([extension])
+        command = runner.get_registered_commands()[0]
+        assert command.get_argument_completions is completions
 
     def test_flags_and_shortcuts(self):
         extension = Extension(path="<inline>", resolved_path="<inline>")

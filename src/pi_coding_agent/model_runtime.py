@@ -183,6 +183,7 @@ def _apply_model_override(model: Model, override: ModelOverride) -> Model:
         provider=model.provider,
         api=model.api,
         name=override.name if override.name is not None else model.name,
+        aliases=(list(override.aliases) if override.aliases is not None else list(model.aliases)),
         input=cast(list[ModelInput], list(override.input))
         if override.input is not None
         else model.input,
@@ -244,6 +245,7 @@ def _model_from_json(
         provider=provider_id,
         api=api,
         name=definition.name or definition.id,
+        aliases=list(definition.aliases or []),
         input=cast(list[ModelInput], list(definition.input))
         if definition.input is not None
         else ["text"],
@@ -327,6 +329,7 @@ def _apply_models_json(
             provider=model.provider,
             api=model.api,
             name=model.name,
+            aliases=list(model.aliases),
             input=list(model.input),
             output=list(model.output),
             cost=model.cost,
@@ -379,6 +382,7 @@ def _apply_extension(
                     provider=model.provider,
                     api=model.api,
                     name=model.name,
+                    aliases=list(model.aliases),
                     input=list(model.input),
                     output=list(model.output),
                     cost=model.cost,
@@ -423,6 +427,7 @@ def _apply_extension(
                 provider=provider_id,
                 api=api,
                 name=definition.get("name") or definition.get("id"),
+                aliases=list(definition.get("aliases") or []),
                 input=list(definition.get("input") or ["text"]),
                 output=["text"],
                 cost=cast(

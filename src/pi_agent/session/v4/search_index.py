@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
@@ -20,6 +21,15 @@ from .types import (
     SessionSearchHit,
     SessionSearchOptions,
 )
+
+
+@dataclass(slots=True)
+class SessionIndexSummary:
+    """索引内单个会话的摘要数据。"""
+
+    metadata: dict[str, Any]
+    name: str | None = None
+    entries: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 class PersistentSessionSearchIndex:
@@ -70,7 +80,7 @@ class PersistentSessionSearchIndex:
 
     async def replace_session(self, metadata: SessionMetadata, entries: list[Entry]) -> None:
         async with self._lock:
-            self._data[metadata["id"]] = {
+            bucket: dict[str, Any] = {
                 "metadata": {
                     key: value
                     for key, value in metadata.items()
@@ -84,7 +94,27 @@ class PersistentSessionSearchIndex:
                     for entry in entries
                 },
             }
+            name = metadata.get("name")
+            if name is not None:
+                bucket["name"] = name
+            self._data[metadata["id"]] = bucket
             self._save()
+
+    def is_populated(self) -> bool:
+        return bool(self._data)
+
+    def summaries(self) -> list[SessionIndexSummary]:
+        result: list[SessionIndexSummary] = []
+        for bucket in self._data.values():
+            metadata = dict(bucket.get("metadata") or {})
+            result.append(
+                SessionIndexSummary(
+                    metadata=metadata,
+                    name=cast(str | None, bucket.get("name")),
+                    entries=dict(bucket.get("entries") or {}),
+                )
+            )
+        return result
 
     async def delete_session(self, metadata: SessionMetadata) -> None:
         async with self._lock:
@@ -121,7 +151,15 @@ async def rebuild_v4_search_index(repo: Any, index: PersistentSessionSearchIndex
     for metadata in await repo.list():
         session = await repo.open(metadata)
         entries = await session.find_entries({"order": "oldestFirst"})
-        await index.replace_session(metadata, entries)
+        enriched = dict(metadata)
+        name = await session.get_name()
+        if name is not None:
+            enriched["name"] = name
+        await index.replace_session(cast(SessionMetadata, enriched), entries)
 
 
-__all__ = ["PersistentSessionSearchIndex", "rebuild_v4_search_index"]
+__all__ = [
+    "PersistentSessionSearchIndex",
+    "SessionIndexSummary",
+    "rebuild_v4_search_index",
+]

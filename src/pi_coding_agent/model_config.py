@@ -45,6 +45,7 @@ class ModelOverride:
     """单个模型的 models.json 覆盖（modelOverrides.<id>）。"""
 
     name: str | None = None
+    aliases: tuple[str, ...] | None = None
     reasoning: bool | None = None
     thinking_level_map: dict[str, str | None] | None = None
     input: tuple[str, ...] | None = None
@@ -61,6 +62,7 @@ class ModelDefinition:
 
     id: str
     name: str | None = None
+    aliases: tuple[str, ...] | None = None
     api: str | None = None
     base_url: str | None = None
     reasoning: bool | None = None

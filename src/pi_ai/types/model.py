@@ -79,6 +79,7 @@ class Model:
     provider: ProviderId
     api: ApiId  # API 类型
     name: str = ""  # 模型名称
+    aliases: list[str] = field(default_factory=list)  # 可搜索/可解析的模型别名
     input: list[ModelInput] = field(default_factory=list)  # 输入能力
     output: list[ModelOutput] = field(default_factory=list)  # 输出能力
     cost: ModelCost = field(default_factory=ModelCost)  # Token 成本

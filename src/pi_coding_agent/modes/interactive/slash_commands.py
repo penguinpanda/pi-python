@@ -24,6 +24,7 @@ class SlashCommand:
     handler: Callable[["SlashContext", str], Any]
     description: str = ""
     argument_hint: str | None = None
+    get_argument_completions: Callable[[str], Any] | None = None
 
 
 class SlashContext:
@@ -179,12 +180,14 @@ class SlashCommandRegistry:
         *,
         description: str = "",
         argument_hint: str | None = None,
+        get_argument_completions: Callable[[str], Any] | None = None,
     ) -> None:
         self._commands[name] = SlashCommand(
             name=name,
             handler=handler,
             description=description,
             argument_hint=argument_hint,
+            get_argument_completions=get_argument_completions,
         )
 
     def get(self, name: str) -> SlashCommand | None:

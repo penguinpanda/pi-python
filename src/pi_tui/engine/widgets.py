@@ -1245,7 +1245,7 @@ class Editor(Widget):
                 self._jump_to_char(key.char, direction)
                 return True
             self.insert(key.char)
-            if self.text.startswith("/") and " " not in self.text:
+            if self._should_autocomplete_after_insert():
                 self.post_message(Editor.AutocompleteRequested(self), "pi_editor")
             return True
         self._jump_mode = None
@@ -1301,9 +1301,23 @@ class Editor(Widget):
             return True
         else:
             self._pending = ""
-            return False
-        self._pending = ""
-        return True
+        return False
+
+    def _should_autocomplete_after_insert(self) -> bool:
+        """输入后自然触发补全：slash 命令、@ 文件或路径上下文。"""
+        line = self.lines[self.cursor_row][: self.cursor_col]
+        if line.startswith("/") and " " not in line:
+            return True
+        if line.startswith("@"):
+            return True
+        if (
+            "/" in line
+            or line.startswith(".")
+            or line.startswith("~/")
+            or line.endswith((" ", "/", '"'))
+        ):
+            return True
+        return False
 
     # ------------------------------------------------------------------
     # 渲染

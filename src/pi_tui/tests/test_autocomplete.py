@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -72,3 +73,97 @@ async def test_empty_and_invalid_results() -> None:
 @pytest.mark.asyncio
 async def test_empty_providers() -> None:
     assert await CombinedAutocompleteProvider().collect("x") == []
+
+
+@pytest.mark.asyncio
+async def test_command_suggestions_fuzzy() -> None:
+    provider = CombinedAutocompleteProvider(
+        commands=[
+            SimpleNamespace(
+                name="model",
+                description="Select model",
+                argument_hint="<provider/model>",
+            ),
+            SimpleNamespace(
+                name="new",
+                description="Start a new session",
+                argument_hint=None,
+            ),
+        ],
+        base_path="/tmp",
+    )
+    suggestions = await provider.get_suggestions("/mo")
+    assert suggestions is not None
+    assert suggestions.kind == "command"
+    assert [item.value for item in suggestions.items] == ["model"]
+    assert suggestions.items[0].description == "<provider/model> — Select model"
+
+
+@pytest.mark.asyncio
+async def test_argument_suggestions() -> None:
+    provider = CombinedAutocompleteProvider(
+        commands=[
+            SimpleNamespace(
+                name="model",
+                description="Select model",
+                argument_hint="<provider/model>",
+                get_argument_completions=lambda prefix: [
+                    {"value": "faux/faux-1", "label": "faux-1", "description": "faux"}
+                ],
+            )
+        ],
+        base_path="/tmp",
+    )
+    suggestions = await provider.get_suggestions("/model faux", force=True)
+    assert suggestions is not None
+    assert suggestions.kind == "argument"
+    assert suggestions.items[0].value == "faux/faux-1"
+
+
+@pytest.mark.asyncio
+async def test_path_completion_directories_first(tmp_path) -> None:
+    (tmp_path / "alpha.txt").write_text("a", encoding="utf-8")
+    (tmp_path / "beta").mkdir()
+    provider = CombinedAutocompleteProvider(base_path=str(tmp_path))
+    suggestions = await provider.get_suggestions("", force=True)
+    assert suggestions is not None
+    assert suggestions.kind == "path"
+    assert suggestions.items[0].value.endswith("/")
+    assert {item.label for item in suggestions.items} == {"beta/", "alpha.txt"}
+
+
+@pytest.mark.asyncio
+async def test_path_completion_quotes_spaces(tmp_path) -> None:
+    (tmp_path / "my docs").mkdir()
+    provider = CombinedAutocompleteProvider(base_path=str(tmp_path))
+    suggestions = await provider.get_suggestions("my", force=True)
+    assert suggestions is not None
+    assert suggestions.items[0].value == '"my docs/"'
+
+
+@pytest.mark.asyncio
+async def test_apply_completion() -> None:
+    provider = CombinedAutocompleteProvider(
+        commands=[SimpleNamespace(name="model", description="", argument_hint=None)],
+        base_path="/tmp",
+    )
+    suggestions = await provider.get_suggestions("/mo")
+    assert suggestions is not None
+    new_text, cursor = provider.apply_completion(
+        "/mo",
+        suggestions.items[0],
+        suggestions.prefix,
+    )
+    assert new_text == "/model "
+    assert cursor == len("/model ")
+
+
+@pytest.mark.asyncio
+async def test_extension_provider_fallback(tmp_path) -> None:
+    provider = CombinedAutocompleteProvider(
+        [lambda text: [{"value": "ext:item", "label": "Ext"}]],
+        base_path=str(tmp_path),
+    )
+    suggestions = await provider.get_suggestions("hello")
+    assert suggestions is not None
+    assert suggestions.items[0].value == "ext:item"

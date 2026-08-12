@@ -35,6 +35,11 @@ class SessionInfo:
     session_id: str
     cwd: str
     modified: float
+    name: str | None = None
+    parent_session_id: str | None = None
+    first_message: str = ""
+    message_count: int = 0
+    search_text: str = ""
 
 
 def _run_sync(coro: Any) -> Any:

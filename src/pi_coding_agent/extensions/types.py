@@ -206,6 +206,7 @@ class RegisteredCommand:
     name: str
     description: str = ""
     argument_hint: str | None = None
+    get_argument_completions: Callable | None = None
     handler: Callable | None = None
     source_info: dict | None = None
 
@@ -336,6 +337,8 @@ class ExtensionAPI:
 
     def register_command(self, name: str, options: dict | None = None) -> None:
         options = dict(options or {})
+        if "getArgumentCompletions" in options:
+            options["get_argument_completions"] = options.pop("getArgumentCompletions")
         options["name"] = name
         options["source_info"] = {"source": self._extension.source, "path": self._extension.path}
         self._extension.commands[name] = RegisteredCommand(**options)

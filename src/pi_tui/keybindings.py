@@ -82,6 +82,36 @@ DEFAULT_APP_KEYBINDINGS: dict[str, Keybinding] = {
     ),
 }
 
+DEFAULT_SESSION_PICKER_KEYBINDINGS: dict[str, Keybinding] = {
+    "app.session.toggleScope": Keybinding(
+        "tab", "app.session.toggleScope", "session_toggle_scope", "Toggle session scope"
+    ),
+    "app.session.toggleSort": Keybinding(
+        "ctrl+s", "app.session.toggleSort", "session_toggle_sort", "Toggle session sort mode"
+    ),
+    "app.session.toggleNamedFilter": Keybinding(
+        "ctrl+n",
+        "app.session.toggleNamedFilter",
+        "session_toggle_named_filter",
+        "Toggle named session filter",
+    ),
+    "app.session.togglePath": Keybinding(
+        "ctrl+p", "app.session.togglePath", "session_toggle_path", "Toggle session path display"
+    ),
+    "app.session.delete": Keybinding(
+        "ctrl+d", "app.session.delete", "session_delete", "Delete selected session"
+    ),
+    "app.session.rename": Keybinding(
+        "ctrl+r", "app.session.rename", "session_rename", "Rename selected session"
+    ),
+    "app.session.deleteNoninvasive": Keybinding(
+        "ctrl+backspace",
+        "app.session.deleteNoninvasive",
+        "session_delete_noninvasive",
+        "Delete session when query is empty",
+    ),
+}
+
 
 class KeybindingsManager:
     """快捷键解析：默认表 + settings 覆盖。"""
@@ -92,20 +122,20 @@ class KeybindingsManager:
         user_bindings: dict[str, Any] | None = None,
     ) -> None:
         self._defaults = dict(defaults or DEFAULT_APP_KEYBINDINGS)
+        self._session_picker_defaults = dict(DEFAULT_SESSION_PICKER_KEYBINDINGS)
         self._bindings: dict[str, Keybinding] = {}
         self._alt_keys: dict[str, str] = {}
-        for action_id, binding in self._defaults.items():
-            self._bindings[action_id] = Keybinding(
-                key=binding.key,
-                action_id=binding.action_id,
-                action=binding.action,
-                description=binding.description,
-            )
+        self._session_bindings: dict[str, Keybinding] = {}
+        self._session_alt_keys: dict[str, str] = {}
+        self._init_bindings(self._bindings, self._defaults)
+        self._init_bindings(self._session_bindings, self._session_picker_defaults)
         self._by_key: dict[str, str] = {}
+        self._session_by_key: dict[str, str] = {}
         if user_bindings:
             self.set_user_bindings(user_bindings)
         else:
             self._rebuild_index()
+            self._rebuild_session_index()
 
     def register(self, binding: Keybinding) -> None:
         """注册/覆盖一个绑定。"""
@@ -121,23 +151,36 @@ class KeybindingsManager:
         """恢复默认绑定，清除扩展注册的绑定（settings 覆盖由 load_from_settings 重放）。"""
         self._bindings = {}
         self._alt_keys = {}
-        for action_id, binding in self._defaults.items():
-            self._bindings[action_id] = Keybinding(
-                key=binding.key,
-                action_id=binding.action_id,
-                action=binding.action,
-                description=binding.description,
-            )
+        self._session_bindings = {}
+        self._session_alt_keys = {}
+        self._init_bindings(self._bindings, self._defaults)
+        self._init_bindings(self._session_bindings, self._session_picker_defaults)
         self._rebuild_index()
+        self._rebuild_session_index()
 
     def set_user_bindings(self, user_bindings: dict[str, Any]) -> None:
         """应用 settings keybindings 覆盖（action_id → key/keys/None）。"""
+        self._apply_user_bindings(self._bindings, self._alt_keys, user_bindings)
+        self._apply_user_bindings(
+            self._session_bindings,
+            self._session_alt_keys,
+            user_bindings,
+        )
+        self._rebuild_index()
+        self._rebuild_session_index()
+
+    def _apply_user_bindings(
+        self,
+        bindings: dict[str, Keybinding],
+        alt_keys: dict[str, str],
+        user_bindings: dict[str, Any],
+    ) -> None:
         for action_id, value in user_bindings.items():
-            if action_id not in self._bindings:
+            if action_id not in bindings:
                 continue
-            self._alt_keys = {
-                key: other for key, other in self._alt_keys.items() if other != action_id
-            }
+            for key, other in list(alt_keys.items()):
+                if other == action_id:
+                    del alt_keys[key]
             if value is None:
                 continue  # 保持默认（TS 语义：不设置）
             keys: list[str]
@@ -149,12 +192,11 @@ class KeybindingsManager:
                 keys = []
             if not keys:
                 # 空列表 → 禁用该 action。
-                self._bindings[action_id].key = ""
+                bindings[action_id].key = ""
                 continue
-            self._bindings[action_id].key = keys[0]
+            bindings[action_id].key = keys[0]
             if len(keys) > 1:
-                self._alt_keys.update({key: action_id for key in keys[1:]})
-        self._rebuild_index()
+                alt_keys.update({key: action_id for key in keys[1:]})
 
     def load_from_settings(self, settings: dict) -> None:
         """从 settings.json 加载 keybindings 节。"""
@@ -169,9 +211,33 @@ class KeybindingsManager:
                 self._by_key[binding.key] = action_id
         self._by_key.update(self._alt_keys)
 
+    def _rebuild_session_index(self) -> None:
+        self._session_by_key = {}
+        for action_id, binding in self._session_bindings.items():
+            if binding.key:
+                self._session_by_key[binding.key] = action_id
+        self._session_by_key.update(self._session_alt_keys)
+
+    @staticmethod
+    def _init_bindings(
+        bindings: dict[str, Keybinding],
+        defaults: dict[str, Keybinding],
+    ) -> None:
+        for action_id, binding in defaults.items():
+            bindings[action_id] = Keybinding(
+                key=binding.key,
+                action_id=binding.action_id,
+                action=binding.action,
+                description=binding.description,
+            )
+
     def resolve(self, key: str) -> str | None:
         """按键名解析 action_id。"""
         return self._by_key.get(key)
+
+    def resolve_session_picker(self, key: str) -> str | None:
+        """Session Picker 命名空间按键名解析 action_id。"""
+        return self._session_by_key.get(key)
 
     def get_action_key(self, action_id: str) -> str | None:
         binding = self._bindings.get(action_id)
@@ -180,6 +246,21 @@ class KeybindingsManager:
     def is_enabled(self, action_id: str) -> bool:
         binding = self._bindings.get(action_id)
         return binding is not None and bool(binding.key)
+
+    def get_session_picker_key(self, action_id: str) -> str | None:
+        binding = self._session_bindings.get(action_id)
+        return binding.key if binding and binding.key else None
+
+    def is_session_picker_enabled(self, action_id: str) -> bool:
+        binding = self._session_bindings.get(action_id)
+        return binding is not None and bool(binding.key)
+
+    def all_session_picker_bindings(self) -> list[Keybinding]:
+        return [
+            Keybinding(b.key, b.action_id, b.action, b.description)
+            for b in self._session_bindings.values()
+            if b.key
+        ]
 
     def all_bindings(self) -> list[Keybinding]:
         """全部启用的绑定（供 App 快捷键分发使用）。"""
@@ -190,4 +271,9 @@ class KeybindingsManager:
         ]
 
 
-__all__ = ["Keybinding", "KeybindingsManager", "DEFAULT_APP_KEYBINDINGS"]
+__all__ = [
+    "Keybinding",
+    "KeybindingsManager",
+    "DEFAULT_APP_KEYBINDINGS",
+    "DEFAULT_SESSION_PICKER_KEYBINDINGS",
+]

@@ -75,8 +75,7 @@ def get_tools_dir(agent_dir: Path | None = None) -> Path:
 def get_bin_dir(agent_dir: Path | None = None) -> Path:
     """托管二进制目录: ~/.pi/agent/bin/
 
-    占位：TS 把自动解压的 fd/rg 放这里；Python 直接使用系统命令或
-    内置实现，当前未消费该目录。
+    fd/rg 由 `pi_coding_agent.tools._ensure_tool` 下载并缓存到这里。
     """
     return (agent_dir or get_agent_dir()) / "bin"
 
