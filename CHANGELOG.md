@@ -121,6 +121,50 @@
   从 GitHub 下载并缓存到 `~/.pi/agent/bin`，带重试；`PI_OFFLINE` 下跳过
 - `/model` 补全对齐 TS：按 id / provider / name 模糊搜索，不再使用显式
   aliases 或自动派生去日期后缀 id
+- 差距审查（`docs/nd_upload/0812/code_review/pi-python-vs-ts-gap-report.md`）
+  批次闭合：TUI 启动 changelog 通知（`lastChangelogVersion` 记录 +
+  `collapseChangelog` 设置）、Azure base-URL 归一化（Azure 主机强制
+  `/openai/v1`）、`/hotkeys` 分组表格输出、对话框可见倒计时
+  （`auto-cancel in Xs`）、`/session` usage 分组明细
+  （`get_usage_cost_breakdown` 按 provider/model 归组）
+- 设置选择器键族补全：transport / steeringMode / followUpMode / theme /
+  retryEnabled / httpIdleTimeoutMs / hideThinkingBlock / showCacheMissNotices /
+  quietStartup / collapseChangelog / defaultThinkingLevel，新增
+  `set_global_setting`（globalSettings 分层写入）
+- Codex WebSocket 连接失败自动回退 SSE（`_CodexWsConnectError` + 会话级
+  `websocketSseFallbackSessions` 记忆）；流开始后失败抛
+  `_CodexWsStreamError`（对齐 TS 不回退语义）
+- AWS Bedrock：`additionalModelRequestFields.thinking`（budget 型 +
+  `thinking_display`）、toolResult 连续消息合并为单条 user 消息与 image
+  内容转换、`cachePoint` prompt caching 注入（`_supports_prompt_caching`
+  + `AWS_BEDROCK_FORCE_CACHE`）
+- 会话树选择器折叠/展开（ctrl+left/right + `⊞`/`⊟` 标记）与 shift+l
+  label 编辑（`set_label`）
+- ScopedModels 选择器：ctrl+a 全选 / ctrl+x 全清 / ctrl+p 切换 provider /
+  alt+up/down 重排 / ctrl+s 持久化到 `settings.scopedModels`（选中顺序即
+  模型循环顺序）
+- find/ls 工具响应取消信号（`_aborted` → `Operation aborted` 结果）
+- 扩展 UI context 补齐 `getTheme` / `getAllThemes` / `onTerminalInput` /
+  `getContextUsage`（输入 hook 可消费事件）
+- legacy auth 一次性迁移（`migrate_auth_to_auth_json`：oauth.json +
+  settings.json apiKeys → auth.json 0600，CLI 启动执行）与 TUI CSI 16t
+  cell 尺寸查询
+- 包管理子命令：`pi install/remove/update`（npm:/git:/local 源，
+  user/project scope，settings.packages 持久化）
+- PI_EXPERIMENTAL 门控与 first-time setup 自动触发（官方发行 + 默认 agent
+  目录 + settings.json 不存在）+ enableAnalytics 同意询问
+- OAuth 浏览器流程：OpenAI Codex PKCE loopback（端口 1455 + 手动粘贴回退 +
+  device-code 404 自动切换）、OpenRouter loopback（ephemeral 端口 + 回调内
+  exchange + 手动粘贴竞争）、xAI device-code（SuperGrok/X Premium 订阅）
+- Radius 网关 provider（pi-messages + `GET /v1/config` 动态 catalog）与
+  订阅 OAuth（网关发现 + loopback + `/v1/oauth/token`）
+- 远程模型目录 overlay（`with_remote_catalog`：ETag/Last-Modified 条件请求、
+  4h 新鲜度窗口、304/404/501 语义），CLI 创建 runtime 时叠加到内置 provider
+- mermaid 代码块终端图渲染：内置 flowchart TD/LR + sequenceDiagram 渲染器，
+  `off|final|streaming` 三模式 transformer（宽度检查、警告、thinking 跳过），
+  `mermaidRenderingMode` 设置
+- SDK 导出 `AgentSessionRuntime`（session/cwd/diagnostics 访问器 +
+  `set_rebind_session`）
 
 ### Changed
 
