@@ -183,6 +183,10 @@
 
 ### Fixed
 
+- `_CloudflareAuth` 补 `resolve`，修复默认 ModelRuntime/CLI/evals 启动时
+  `AttributeError`（Cloudflare provider 只有 `resolve_auth`）
+- `model_to_dict` 处理 `cost=None`，修复 `get_available_models` 在包含
+  无成本模型时序列化失败
 - 修复 DeepSeek Responses 多轮 400 “reasoning_text must be passed back”：
   流式下 reasoning item 的 `content` 为空时，用已累积的 reasoning delta
   文本补全回放项，确保后续轮次把 reasoning_text 原样传回

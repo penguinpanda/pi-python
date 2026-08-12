@@ -34,6 +34,14 @@ async def test_cloudflare_workers_auth() -> None:
     assert result.auth["api_key"] == "token"
 
 
+def test_cloudflare_resolve_returns_env_key(monkeypatch) -> None:
+    monkeypatch.setenv("CLOUDFLARE_API_KEY", "token")
+    result = _CloudflareAuth("workers-ai").resolve()
+    assert result is not None
+    assert result.api_key == "token"
+    assert result.source == "CLOUDFLARE_API_KEY"
+
+
 async def test_cloudflare_gateway_auth() -> None:
     auth = _CloudflareAuth("ai-gateway")
     result = await auth.resolve_auth(

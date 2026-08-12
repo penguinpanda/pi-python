@@ -46,6 +46,32 @@ def test_model_serialization_roundtrip():
     assert restored.reasoning is True
 
 
+def test_model_to_dict_handles_missing_cost():
+    model = Model(
+        id="no-cost",
+        provider="custom",
+        api="openai-completions",
+        name="No Cost",
+        input=["text"],
+        output=["text"],
+        max_tokens=1024,
+        base_url="http://localhost:8080/v1",
+        context_window=128000,
+    )
+    serialized = model_to_dict(model)
+    assert serialized["cost"] == {
+        "input": 0.0,
+        "output": 0.0,
+        "cache_read": 0.0,
+        "cache_write": 0.0,
+        "tiers": [],
+    }
+    restored_cost = model_from_dict(serialized).cost
+    assert restored_cost is not None
+    assert restored_cost.input == 0.0
+    assert restored_cost.tiers == []
+
+
 @pytest.mark.asyncio
 async def test_in_memory_store_isolation():
     store = InMemoryModelsStore()

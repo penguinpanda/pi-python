@@ -6,6 +6,7 @@ import os
 
 from typing import Any, cast
 
+from pi_ai.auth import ResolvedAuth
 from pi_ai.auth.types import AuthContext, AuthResult, CredentialStore
 from pi_ai.provider import Provider, RefreshModelsContext, create_provider
 from .openai_completions_providers import _fetch_openai_models
@@ -14,6 +15,18 @@ from .openai_completions_providers import _fetch_openai_models
 class _CloudflareAuth:
     def __init__(self, kind: str) -> None:
         self.kind = kind
+
+    def resolve(self, credential: Any = None) -> ResolvedAuth | None:
+        env = credential.get("env", {}) if isinstance(credential, dict) else {}
+        key = (
+            credential.get("key")
+            if isinstance(credential, dict)
+            else getattr(credential, "key", None)
+        )
+        token = key or os.environ.get("CLOUDFLARE_API_KEY") or env.get("CLOUDFLARE_API_KEY")
+        if not token:
+            return None
+        return ResolvedAuth(api_key=token, source="CLOUDFLARE_API_KEY")
 
     async def resolve_auth(
         self,

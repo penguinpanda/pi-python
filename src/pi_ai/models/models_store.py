@@ -94,16 +94,31 @@ class InMemoryModelsStore:
 def model_to_dict(model: Model) -> dict[str, Any]:
     """Model → 可 JSON 序列化的字典。"""
     cost = model.cost
-    tiers = [
-        {
-            "input": tier.input,
-            "output": tier.output,
-            "cache_read": tier.cache_read,
-            "cache_write": tier.cache_write,
-            "input_tokens_above": tier.input_tokens_above,
+    if cost is None:
+        cost_dict = {
+            "input": 0.0,
+            "output": 0.0,
+            "cache_read": 0.0,
+            "cache_write": 0.0,
+            "tiers": [],
         }
-        for tier in cost.tiers
-    ]
+    else:
+        cost_dict = {
+            "input": cost.input,
+            "output": cost.output,
+            "cache_read": cost.cache_read,
+            "cache_write": cost.cache_write,
+            "tiers": [
+                {
+                    "input": tier.input,
+                    "output": tier.output,
+                    "cache_read": tier.cache_read,
+                    "cache_write": tier.cache_write,
+                    "input_tokens_above": tier.input_tokens_above,
+                }
+                for tier in cost.tiers
+            ],
+        }
     return {
         "id": model.id,
         "provider": model.provider,
@@ -111,13 +126,7 @@ def model_to_dict(model: Model) -> dict[str, Any]:
         "name": model.name,
         "input": list(model.input),
         "output": list(model.output),
-        "cost": {
-            "input": cost.input,
-            "output": cost.output,
-            "cache_read": cost.cache_read,
-            "cache_write": cost.cache_write,
-            "tiers": tiers,
-        },
+        "cost": cost_dict,
         "max_tokens": model.max_tokens,
         "base_url": model.base_url,
         "context_window": model.context_window,
