@@ -930,3 +930,23 @@ async def test_replace_session_disposes_old_on_different_manager() -> None:
         old.dispose.assert_awaited_once()
 
     await _run(app, term, actions)
+
+
+@pytest.mark.asyncio
+async def test_retry_indicator_shows_countdown_and_clears() -> None:
+    """auto_retry_start 显示倒计时指示器；auto_retry_end 清除（对齐 TS）。"""
+    term = FakeTerminal(size=(100, 30))
+    app = _make_app(term)
+
+    async def actions(_term, _app) -> None:
+        app._on_session_event(
+            {"type": "auto_retry_start", "attempt": 1, "max_attempts": 3, "delay_ms": 1000}
+        )
+        await asyncio.sleep(0.2)
+        assert "Retrying 1/3" in (app._status.content or "")
+        app._on_session_event(
+            {"type": "auto_retry_end", "attempt": 1, "success": True, "final_error": None}
+        )
+        assert app._retry_indicator_task is None
+
+    await _run(app, term, actions)

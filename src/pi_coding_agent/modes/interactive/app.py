@@ -7,6 +7,7 @@ import inspect
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any, Callable, cast
 
@@ -198,6 +199,8 @@ class PiTuiApp(App):
         self._autocomplete_debounce_task: asyncio.Task | None = None
         self._autocomplete_request_task: asyncio.Task | None = None
         self._autocomplete_request_id = 0
+        # 自动重试倒计时指示器任务。
+        self._retry_indicator_task: asyncio.Task | None = None
         self._hidden_thinking_label = "Thinking"
         self._working_message = "Working"
         self._working_visible = True
@@ -441,6 +444,25 @@ class PiTuiApp(App):
                 self._set_status("Compacting", animated=True)
             elif event_type in ("compaction_end",):
                 self._set_status("Idle", animated=False)
+            elif event_type == "auto_retry_start":
+                # 自动重试倒计时指示器（对齐 TS RetryStatusIndicator）。
+                self._show_retry_indicator(
+                    event.get("attempt", 1),
+                    event.get("max_attempts", 1),
+                    event.get("delay_ms", 0),
+                )
+            elif event_type == "auto_retry_end":
+                self._clear_retry_indicator()
+                if not event.get("success"):
+                    attempt = event.get("attempt", 1)
+                    final_error = event.get("final_error") or "Unknown error"
+                    self._notify(f"Retry failed after {attempt} attempts: {final_error}")
+            elif event_type == "summarization_retry_scheduled":
+                self._show_retry_indicator(
+                    event.get("attempt", 1),
+                    event.get("max_attempts", 1),
+                    event.get("delay_ms", 0),
+                )
             elif event_type in ("model_changed", "thinking_level_changed"):
                 self._update_footer()
             elif event_type == "queue_update":
@@ -470,6 +492,31 @@ class PiTuiApp(App):
                 self._on_tool_execution_end(event)
         except Exception:
             pass
+
+    def _show_retry_indicator(self, attempt: int, max_attempts: int, delay_ms: float) -> None:
+        """自动重试倒计时指示器（对齐 TS RetryStatusIndicator）。"""
+        self._clear_retry_indicator()
+        deadline = time.monotonic() + (delay_ms or 0) / 1000.0
+
+        async def _countdown() -> None:
+            while True:
+                remaining = max(0.0, deadline - time.monotonic())
+                if remaining > 0:
+                    self._set_status(
+                        f"Retrying {attempt}/{max_attempts} in {remaining:.0f}s",
+                        animated=False,
+                    )
+                else:
+                    self._set_status(f"Retrying {attempt}/{max_attempts}...", animated=True)
+                    return
+                await asyncio.sleep(0.5)
+
+        self._retry_indicator_task = self._run_task(_countdown())
+
+    def _clear_retry_indicator(self) -> None:
+        if self._retry_indicator_task is not None:
+            self._retry_indicator_task.cancel()
+            self._retry_indicator_task = None
 
     def _begin_stream(self) -> None:
         """消息开始：挂一个流式占位条目。"""
