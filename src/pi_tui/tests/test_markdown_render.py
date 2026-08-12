@@ -111,3 +111,10 @@ def test_table_renders_with_cells() -> None:
     plain = _plain(lines)
     assert any("│ a │ b │" in line for line in plain)
     assert any("│ 1 │ 2 │" in line for line in plain)
+
+
+def test_table_narrow_falls_back_to_raw_markdown() -> None:
+    lines = render_markdown("| Provider | 模型 ID |\n|---|---|\n| OpenAI | gpt-5 |", 8)
+    plain = _plain(lines)
+    assert any("Provider" in line for line in plain)
+    assert any("OpenAI" in line for line in plain)

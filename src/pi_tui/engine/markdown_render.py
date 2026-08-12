@@ -370,6 +370,7 @@ class _Renderer:
         self.options = options or MarkdownOptions()
         self.latex_map: dict[int, str] = {}
         self.block_ids: set[int] = set()
+        self.source = ""
 
     def render(self, text: str, width: int) -> list[Line]:
         safe_width = max(1, int(width))
@@ -378,6 +379,7 @@ class _Renderer:
         )
         if not source.strip():
             return []
+        self.source = source
         source = source.replace("\t", "   ")
         source = _preprocess_strikethrough(source)
         if self.options.render_latex:
@@ -637,7 +639,9 @@ class _Renderer:
         border_overhead = 3 * num_cols + 1
         available_for_cells = width - border_overhead
         if available_for_cells < num_cols:
-            raw = (node.token.content or "").strip()
+            start, end = node.token.map or (0, len(self.source.splitlines()))
+            source_lines = self.source.splitlines()
+            raw = "\n".join(source_lines[start:end]).strip() or self.source.strip()
             fallback_lines = [list(_cells_from_text(line, base_style)) for line in raw.split("\n")]
             if next_type and next_type != "space":
                 fallback_lines.append([])

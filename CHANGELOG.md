@@ -183,6 +183,8 @@
 
 ### Fixed
 
+- Markdown 表格在终端宽度过窄时不再变成空行：按 token 行号从源文本回退
+  到原始 Markdown 表格（对齐 TS `token.raw` 回退）
 - `_CloudflareAuth` 补 `resolve`，修复默认 ModelRuntime/CLI/evals 启动时
   `AttributeError`（Cloudflare provider 只有 `resolve_auth`）
 - `model_to_dict` 处理 `cost=None`，修复 `get_available_models` 在包含
