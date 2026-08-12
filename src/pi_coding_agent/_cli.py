@@ -98,6 +98,8 @@ async def _async_main(args: list[str] | None = None) -> int:
         return await _run_auth_command(effective_args)
     if effective_args and effective_args[0] in ("install", "remove", "update", "list"):
         return await _run_package_command(effective_args)
+    if effective_args and effective_args[0] == "config":
+        return await _run_config_command(effective_args[1:])
 
     parser = _create_parser()
     parsed = parser.parse_args(args)
@@ -698,6 +700,51 @@ async def _auth_print(kind: str, args: list[str]) -> int:
     return 0
 
 
+async def _run_config_command(args: list[str]) -> int:
+    """pi config：打印全局/项目包资源配置（对齐 TS handleConfigCommand 只读子集）。"""
+    from .package_manager import PackageManager
+
+    local = "-l" in args or "--local" in args
+    if "-h" in args or "--help" in args:
+        print("Usage: pi config [-l|--local]  (show package config; TS 交互式选择器未移植)")
+        return 0
+
+    cwd = str(Path.cwd())
+    settings_manager = SettingsManager.create(cwd, project_trusted=False)
+    manager = PackageManager(cwd, settings_manager=settings_manager)
+    packages = manager.list_configured_packages()
+
+    def _print_scope(scope: str, title: str) -> None:
+        scoped = [p for p in packages if p.scope == scope]
+        if not scoped:
+            print(f"{title}: (none)")
+            return
+        print(f"{title}:")
+        for pkg in scoped:
+            status = " (filtered)" if pkg.filtered else ""
+            print(f"  {pkg.source}{status}")
+            if pkg.installed_path:
+                print(f"    {pkg.installed_path}")
+
+    if local:
+        trusted = False
+        try:
+            trusted = settings_manager.is_project_trusted()
+        except Exception:
+            trusted = False
+        if not trusted:
+            print(
+                "Error: Project is not trusted. Use --approve to view local package config.",
+                file=sys.stderr,
+            )
+            return 1
+        _print_scope("project", "Project packages")
+        return 0
+    _print_scope("user", "User packages")
+    _print_scope("project", "Project packages")
+    return 0
+
+
 async def _run_package_command(args: list[str]) -> int:
     """pi install / remove / update 子命令（对齐 TS handlePackageCommand 核心子集）。"""
     from .package_manager import PackageManager
@@ -759,6 +806,18 @@ async def _run_package_command(args: list[str]) -> int:
                     print(f"  {pkg.source}")
                     if pkg.installed_path:
                         print(f"    {pkg.installed_path}")
+            return 0
+        if command == "update" and "--models" in rest:
+            # 刷新模型目录（对齐 TS update --models → refreshModelCatalogs）。
+            from pi_ai.models import ModelsRefreshOptions
+
+            try:
+                runtime = await _create_runtime()
+                await runtime.refresh(ModelsRefreshOptions(allow_network=True, force=True))
+            except Exception as exc:
+                print(f"Error: {exc}", file=sys.stderr)
+                return 1
+            print("Updated model catalogs")
             return 0
         await manager.update(rest[0] if rest else None)
         print("Updated packages")
