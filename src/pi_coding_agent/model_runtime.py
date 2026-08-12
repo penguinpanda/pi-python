@@ -70,6 +70,23 @@ class ModelRuntimeAuthOverrides(TypedDict, total=False):
     min_oauth_validity_ms: int
 
 
+class CredentialSynchronizationError(Exception):
+    """凭证操作已提交但本地同步失败（对齐 TS CredentialSynchronizationError）。"""
+
+    def __init__(
+        self,
+        provider_id: str,
+        operation: str,
+        credential: Any = None,
+    ) -> None:
+        super().__init__(
+            f"Credential {operation} committed for {provider_id}, but local synchronization failed"
+        )
+        self.provider_id = provider_id
+        self.operation = operation
+        self.credential = credential
+
+
 class AuthStatus(TypedDict):
     configured: bool
     source: str | None
@@ -1113,6 +1130,33 @@ class ModelRuntime:
         await self._credentials.delete(provider_id)
         self._recompose_provider(provider_id)
         await self.refresh(ModelsRefreshOptions(allow_network=False))
+
+    async def login(self, provider_id: str, interaction: Any) -> Any:
+        """编排 OAuth 登录（对齐 TS ModelRuntime.login）。
+
+        经 provider 的 oauth 流程登录，凭证持久化后 recompose + 无网络刷新 +
+        可用性刷新；同步失败抛 CredentialSynchronizationError。
+        """
+        provider = self._models.get_provider(provider_id)
+        if provider is None:
+            raise CredentialSynchronizationError(provider_id, "login")
+        auth = getattr(provider, "auth", None)
+        oauth = getattr(auth, "oauth", None) if auth is not None else None
+        if oauth is None:
+            raise ValueError(f"Provider '{provider_id}' has no OAuth flow")
+        credential = await oauth.login(interaction)
+
+        async def _store(_current):
+            return credential
+
+        await self._credentials.modify(provider_id, _store)
+        try:
+            self._recompose_provider(provider_id)
+            await self.refresh(ModelsRefreshOptions(allow_network=False))
+            await self._run_availability_refresh()
+        except Exception as exc:
+            raise CredentialSynchronizationError(provider_id, "login", credential) from exc
+        return credential
 
     # ------------------------------------------------------------------
     # 动态刷新

@@ -387,3 +387,58 @@ class TestRuntimeStream:
             block.get("text", "") for block in message["content"] if block.get("type") == "text"
         )
         assert text == "with headers ok"
+
+
+@pytest.mark.asyncio
+async def test_login_orchestrates_oauth_and_persists(monkeypatch, tmp_path):
+    """login：经 provider oauth 流程登录、凭证持久化并触发同步。"""
+    from types import SimpleNamespace
+
+    from pi_coding_agent.model_runtime import CredentialSynchronizationError, ModelRuntime
+
+    captured: dict = {}
+
+    class _FakeOAuth:
+        async def login(self, interaction):
+            captured["interaction"] = interaction
+            return {"type": "oauth", "access": "tok"}
+
+    class _FakeProvider:
+        id = "oauth-prov"
+        auth = SimpleNamespace(oauth=_FakeOAuth())
+
+    class _FakeModels:
+        def get_provider(self, provider_id):
+            return _FakeProvider() if provider_id == "oauth-prov" else None
+
+    runtime = ModelRuntime.__new__(ModelRuntime)
+    runtime._models = _FakeModels()
+    runtime._credentials = AuthStorage.in_memory()
+    runtime._configured_providers = set()
+    runtime._stored_providers = set()
+    runtime._available = []
+    runtime._auth_checks = {}
+    runtime._models_path = None
+
+    async def _fake_refresh(options=None):
+        captured["refreshed"] = True
+        return SimpleNamespace(aborted=False, errors={})
+
+    runtime.refresh = _fake_refresh  # type: ignore[method-assign]
+
+    async def _fake_availability_refresh():
+        return None
+
+    runtime._run_availability_refresh = _fake_availability_refresh  # type: ignore[method-assign]
+    runtime._recompose_provider = lambda pid: None  # type: ignore[method-assign]
+
+    credential = await runtime.login("oauth-prov", {"signal": None})
+    assert credential == {"type": "oauth", "access": "tok"}
+    assert captured["interaction"] == {"signal": None}
+    assert captured["refreshed"] is True
+    stored = await runtime._credentials.read("oauth-prov")
+    assert stored is not None and stored.get("access") == "tok"
+
+    # 无 OAuth 流程的 provider 报错
+    with pytest.raises(CredentialSynchronizationError):
+        await runtime.login("missing-prov", {"signal": None})
