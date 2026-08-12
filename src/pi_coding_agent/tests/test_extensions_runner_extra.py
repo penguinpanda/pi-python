@@ -349,3 +349,41 @@ async def test_new_session_with_session_callback() -> None:
     # 旧 ctx 已失效
     with pytest.raises(RuntimeError, match="stale after session replacement"):
         _ = captured.cwd
+
+
+def test_register_provider_native_object_overload() -> None:
+    """registerProvider 双重重载：原生 Provider 对象与 (name, config) 配置。"""
+    from pi_ai import Provider
+
+    provider = Provider(
+        id="ext-native",
+        name="Ext Native",
+        auth=None,
+        base_url="https://ext.example.com/v1",
+        models=[],
+    )
+    runner = ExtensionRunner([])
+    extension = Extension(path="<inline>", resolved_path="<inline>")
+    runner.extensions.append(extension)
+    from pi_coding_agent.extensions.types import ExtensionAPI
+
+    api = ExtensionAPI(extension, runner.runtime, cwd=".")
+    api.register_provider(provider)
+    api.register_provider("legacy", {"baseUrl": "https://legacy"})
+
+    assert extension.native_providers == [provider]
+    assert extension.providers == [("legacy", {"baseUrl": "https://legacy"})]
+
+    # 应用到 runtime（fake model_runtime 收集调用）
+    applied: list = []
+
+    class _FakeRuntime:
+        def register_provider(self, name, config):
+            applied.append(("config", name))
+
+        def register_native_provider(self, provider_obj):
+            applied.append(("native", provider_obj.id))
+
+    runner.model_runtime = _FakeRuntime()
+    runner.apply_providers()
+    assert applied == [("config", "legacy"), ("native", "ext-native")]

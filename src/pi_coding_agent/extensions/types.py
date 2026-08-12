@@ -266,6 +266,7 @@ class Extension:
     entry_renderers: dict[str, Callable] = field(default_factory=dict)
     markdown_transformers: list[Callable] = field(default_factory=list)
     providers: list[tuple[str, dict]] = field(default_factory=list)
+    native_providers: list[Any] = field(default_factory=list)
     autocomplete: list[Callable] = field(default_factory=list)
 
 
@@ -409,8 +410,16 @@ class ExtensionAPI:
     def register_autocomplete(self, provider: Callable) -> None:
         self._extension.autocomplete.append(provider)
 
-    def register_provider(self, name: str, config: dict) -> None:
-        self._extension.providers.append((name, dict(config)))
+    def register_provider(self, name: str | Any, config: dict | None = None) -> None:
+        """注册 provider（对齐 TS registerProvider 双重重载）。
+
+        - register_provider(provider)：原生 pi_ai Provider 对象；
+        - register_provider(name, config)：legacy 配置注册（绑定后应用）。
+        """
+        if config is None and not isinstance(name, str):
+            self._extension.native_providers.append(name)
+            return
+        self._extension.providers.append((name, dict(config or {})))
 
     def unregister_provider(self, name: str) -> None:
         self._extension.providers = [
@@ -477,6 +486,11 @@ class ExtensionAPI:
             "set_active_tools"
         )
         action(tool_names)
+
+    def refresh_tools(self) -> None:
+        """把扩展注册的工具重新应用到当前会话（对齐 TS refreshTools）。"""
+        action = self._runtime.get_action("refresh_tools") or _not_initialized("refresh_tools")
+        action()
 
     def get_all_tools(self):
         action = self._runtime.get_action("get_all_tools")

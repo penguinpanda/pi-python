@@ -364,6 +364,7 @@ class ExtensionRunner:
         self.runtime.set_action(
             "set_active_tools", lambda names: self._set_active_tools(session, names)
         )
+        self.runtime.set_action("refresh_tools", lambda: session._apply_extension_tools())
         self.runtime.set_action("get_all_tools", lambda: self._get_all_tools(session))
         self.runtime.set_action("get_commands", self.get_registered_commands)
         self.runtime.set_action(
@@ -717,13 +718,24 @@ class ExtensionRunner:
     # ------------------------------------------------------------------
 
     def apply_providers(self) -> None:
-        """把扩展注册的 provider 配置应用到 ModelRuntime。"""
+        """把扩展注册的 provider（配置与原生对象）应用到 ModelRuntime。"""
         if self.model_runtime is None:
             return
         for extension in self.extensions:
             for name, config in extension.providers:
                 try:
                     self.model_runtime.register_provider(name, config)
+                except Exception as exc:
+                    self.emit_error(
+                        ExtensionError(
+                            extension_path=extension.path,
+                            event="register_provider",
+                            error=str(exc),
+                        )
+                    )
+            for provider in extension.native_providers:
+                try:
+                    self.model_runtime.register_native_provider(provider)
                 except Exception as exc:
                     self.emit_error(
                         ExtensionError(
