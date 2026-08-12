@@ -49,8 +49,36 @@ AgentHarnessErrorCode = Literal[
 ]
 
 
-class AgentHarnessError(Exception):
+class TaggedError(Exception):
+    """带稳定 `_tag` 的基础错误类型（对齐 TS TaggedError）。"""
+
+    tag: str = "TaggedError"
+
+    def __init__(
+        self,
+        message: str,
+        cause: BaseException | None = None,
+        **attributes: Any,
+    ) -> None:
+        super().__init__(message)
+        self._tag = self.tag
+        self.message = message
+        self.cause = cause
+        for key, value in attributes.items():
+            setattr(self, key, value)
+
+    def to_json(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        for key, value in vars(self).items():
+            if key not in ("_tag", "message", "__cause__", "__traceback__"):
+                payload[key] = value
+        return {"_tag": self.tag, "message": self.message, **payload}
+
+
+class AgentHarnessError(TaggedError):
     """AgentHarness 顶层错误，带稳定分类 code（对齐 TS AgentHarnessError）。"""
+
+    tag = "AgentHarnessError"
 
     def __init__(
         self,
@@ -58,9 +86,126 @@ class AgentHarnessError(Exception):
         message: str,
         cause: BaseException | None = None,
     ) -> None:
-        super().__init__(message)
+        super().__init__(message, cause=cause)
         self.code = code
-        self.cause = cause
+
+
+class LaneBusyError(TaggedError):
+    tag = "LaneBusy"
+
+    def __init__(self, lane: str, operation_id: str, operation_kind: str, message: str) -> None:
+        super().__init__(
+            message, lane=lane, operation_id=operation_id, operation_kind=operation_kind
+        )
+
+
+class MissingIdentitiesError(TaggedError):
+    tag = "MissingIdentities"
+
+    def __init__(self, lane: str, tools: list[str], models: list[str], message: str) -> None:
+        super().__init__(message, lane=lane, tools=tools, models=models)
+
+
+class NoActiveRunError(TaggedError):
+    tag = "NoActiveRun"
+
+    def __init__(self, lane: str, message: str) -> None:
+        super().__init__(message, lane=lane)
+
+
+class NoActiveOperationError(TaggedError):
+    tag = "NoActiveOperation"
+
+    def __init__(self, lane: str, message: str) -> None:
+        super().__init__(message, lane=lane)
+
+
+class NothingToResumeError(TaggedError):
+    tag = "NothingToResume"
+
+    def __init__(self, lane: str, message: str) -> None:
+        super().__init__(message, lane=lane)
+
+
+class InvalidMessageError(TaggedError):
+    tag = "InvalidMessage"
+
+    def __init__(self, lane: str, reason: str, message: str) -> None:
+        super().__init__(message, lane=lane, reason=reason)
+
+
+class UnknownSkillError(TaggedError):
+    tag = "UnknownSkill"
+
+    def __init__(self, name: str, message: str) -> None:
+        super().__init__(message, name=name)
+
+
+class UnknownTemplateError(TaggedError):
+    tag = "UnknownTemplate"
+
+    def __init__(self, name: str, message: str) -> None:
+        super().__init__(message, name=name)
+
+
+class UnknownTargetError(TaggedError):
+    tag = "UnknownTarget"
+
+    def __init__(self, target_id: str, message: str) -> None:
+        super().__init__(message, target_id=target_id)
+
+
+class UnknownQueueItemError(TaggedError):
+    tag = "UnknownQueueItem"
+
+    def __init__(self, lane: str, entry_id: str, message: str) -> None:
+        super().__init__(message, lane=lane, entry_id=entry_id)
+
+
+class LaneExistsError(TaggedError):
+    tag = "LaneExists"
+
+    def __init__(self, lane: str, message: str) -> None:
+        super().__init__(message, lane=lane)
+
+
+class InvalidLaneError(TaggedError):
+    tag = "InvalidLane"
+
+    def __init__(self, lane: str, reason: str, message: str) -> None:
+        super().__init__(message, lane=lane, reason=reason)
+
+
+class NothingToCompactError(TaggedError):
+    tag = "NothingToCompact"
+
+    def __init__(self, lane: str, message: str) -> None:
+        super().__init__(message, lane=lane)
+
+
+class ClosedError(TaggedError):
+    tag = "Closed"
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
+class HarnessFault(TaggedError):
+    tag = "HarnessFault"
+
+
+class HarnessClosed(TaggedError):
+    tag = "HarnessClosed"
+
+    def __init__(self) -> None:
+        super().__init__("AgentHarness was closed while the operation was active")
+
+
+class HarnessNotImplemented(TaggedError):
+    tag = "HarnessNotImplemented"
+
+    def __init__(self, operation: str) -> None:
+        super().__init__(f"AgentHarness.{operation} is not implemented yet", operation=operation)
 
 
 T = TypeVar("T")

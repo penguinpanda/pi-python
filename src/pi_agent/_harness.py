@@ -92,6 +92,7 @@ from ._types import (
     StreamFn,
     ThinkingLevel,
 )
+from .telemetry_schema import start_harness_span
 
 TContext = TypeVar("TContext")
 
@@ -1129,8 +1130,10 @@ class AgentHarness(Generic[TContext]):
 
     async def compact(self, custom_instructions: str | None = None) -> CompactResult:
         """上下文压缩（telemetry span 包裹）。"""
-        return await self._telemetry.start_span(
-            SpanOptions(name="pi.harness.compact"),
+        return await start_harness_span(
+            self._telemetry,
+            "pi.harness.compaction",
+            {},
             lambda _span: self._compact_impl(custom_instructions),
         )
 
@@ -1227,11 +1230,10 @@ class AgentHarness(Generic[TContext]):
         options: NavigateOptions | None = None,
     ) -> NavigateTreeResult:
         """分支导航（telemetry span 包裹）。"""
-        return await self._telemetry.start_span(
-            SpanOptions(
-                name="pi.harness.navigate_tree",
-                attributes={"pi.agent.target": target_id},
-            ),
+        return await start_harness_span(
+            self._telemetry,
+            "pi.harness.navigation",
+            {"pi.agent.target": target_id},
             lambda _span: self._navigate_tree_impl(target_id, options),
         )
 
