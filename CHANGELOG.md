@@ -24,6 +24,8 @@
   Gemini 3 / Gemma 4 advanced thinking 配置（thinkingLevel / thinkingBudget）
 - Google Vertex 支持 Application Default Credentials 回退（`google-auth` +
   `requests`，未显式传 token 时自动刷新）
+- OpenAI Codex SSE 对齐 `/codex/responses` URL，并支持 zstd 请求体压缩
+  （`zstandard` level 3，transport 层按 `content-encoding: zstd` 压缩）
 - 新增 `scripts/check.py` 与 pre-commit 配置，本地一键复现 CI 的 ruff/mypy/pytest 检查
 - 交互模式支持 `!cmd` / `!!cmd` 本地 shell 命令：`!` 执行并进入 LLM 上下文，`!!` 执行但不进上下文，输出流式渲染
 - 引入 ruff（lint + format）与 mypy 配置及依赖

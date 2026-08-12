@@ -4,12 +4,18 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
+import zstandard
 
 from pi_ai import Models, create_default_models
 from pi_ai.api import openai_codex_responses
 from pi_ai.api.api_provider_registry import get_api_provider
-from pi_ai.api.openai_codex_responses import codex_cancel_deferred, codex_fetch_deferred
+from pi_ai.api.openai_codex_responses import (
+    _CodexZstdTransport,
+    codex_cancel_deferred,
+    codex_fetch_deferred,
+)
 from pi_ai._types import Context, Model
 from pi_ai.providers.openai_codex import openai_codex_provider
 from pi_ai.utils._event_stream import AssistantMessageEventStream
@@ -67,9 +73,31 @@ async def test_codex_stream_builds_headers(monkeypatch) -> None:
     assert call_kwargs["request_model_id"] == "gpt-5.4"
     factory = call_kwargs["client_factory"]
     factory("k", "", timeout=1.0, max_retries=2, headers=None)
-    assert captured["base_url"] == "https://chatgpt.com/backend-api"
+    assert captured["base_url"] == "https://chatgpt.com/backend-api/codex"
     assert captured["default_headers"]["OpenAI-Beta"] == "responses=experimental"
+    assert captured["default_headers"]["content-encoding"] == "zstd"
     assert captured["default_headers"]["chatgpt-account-id"] == "u-1"
+
+
+@pytest.mark.asyncio
+async def test_codex_zstd_transport_compresses_request_body() -> None:
+    captured: dict[str, bytes] = {}
+
+    class _Inner(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            captured["content"] = request.content
+            return httpx.Response(200)
+
+    request = httpx.Request(
+        "POST",
+        "https://example.com/codex/responses",
+        headers={"content-encoding": "zstd"},
+        content=b'{"model":"gpt-5.4"}',
+    )
+    await _CodexZstdTransport(_Inner()).handle_async_request(request)
+
+    decompressed = zstandard.ZstdDecompressor().decompress(captured["content"])
+    assert decompressed == b'{"model":"gpt-5.4"}'
 
 
 @pytest.mark.asyncio

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import httpx
 
 from typing import Any, Callable, cast
 
@@ -29,7 +30,12 @@ from .responses import responses_stream
 _DEFAULT_BASE_URL = "https://chatgpt.com/backend-api"
 
 
-def _codex_headers(api_key: str, options: dict[str, Any]) -> dict[str, str]:
+def _codex_headers(
+    api_key: str,
+    options: dict[str, Any],
+    *,
+    compressed: bool = False,
+) -> dict[str, str]:
     headers: dict[str, str] = {
         "Authorization": f"Bearer {api_key}",
         "OpenAI-Beta": "responses=experimental",
@@ -37,6 +43,8 @@ def _codex_headers(api_key: str, options: dict[str, Any]) -> dict[str, str]:
         "content-type": "application/json",
         "originator": "pi",
     }
+    if compressed:
+        headers["content-encoding"] = "zstd"
     account_id = options.get("chatgpt_account_id") or ""
     if account_id:
         headers["chatgpt-account-id"] = account_id
@@ -44,6 +52,49 @@ def _codex_headers(api_key: str, options: dict[str, Any]) -> dict[str, str]:
         if value is not None:
             headers[name] = value
     return headers
+
+
+def _resolve_codex_client_base_url(base_url: str) -> str:
+    """Codex SDK base：让 AsyncOpenAI 追加 /responses 后落在 /codex/responses。"""
+    raw = (base_url or _DEFAULT_BASE_URL).rstrip("/")
+    if raw.endswith("/codex/responses"):
+        return raw[: -len("/responses")]
+    if raw.endswith("/codex"):
+        return raw
+    return f"{raw}/codex"
+
+
+def _zstd_compress(data: bytes) -> bytes | None:
+    try:
+        import zstandard
+    except ImportError:
+        return None
+    try:
+        return zstandard.ZstdCompressor(level=3).compress(data)
+    except Exception:
+        return None
+
+
+class _CodexZstdTransport(httpx.AsyncBaseTransport):
+    """在发送前把标记为 content-encoding: zstd 的请求体压缩。"""
+
+    def __init__(self, inner: httpx.AsyncBaseTransport) -> None:
+        self._inner = inner
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        if request.headers.get("content-encoding") == "zstd" and request.content:
+            compressed = _zstd_compress(request.content)
+            if compressed is not None:
+                new_request = httpx.Request(
+                    method=request.method,
+                    url=request.url,
+                    headers=request.headers,
+                    content=compressed,
+                    extensions=request.extensions,
+                )
+                new_request.headers["content-length"] = str(len(compressed))
+                return await self._inner.handle_async_request(new_request)
+        return await self._inner.handle_async_request(request)
 
 
 async def openai_codex_responses_stream(
@@ -54,8 +105,8 @@ async def openai_codex_responses_stream(
     options: StreamOptions | None = None,
 ) -> AssistantMessageEventStream:
     opts = dict(options or {})
-    codex_headers = _codex_headers(api_key, opts)
-    endpoint = (base_url or model.base_url or _DEFAULT_BASE_URL).rstrip("/")
+    codex_headers = _codex_headers(api_key, opts, compressed=True)
+    endpoint = _resolve_codex_client_base_url(base_url or model.base_url or "")
 
     def _factory(
         _api_key: str,
@@ -65,12 +116,17 @@ async def openai_codex_responses_stream(
         max_retries: int,
         headers: dict[str, str] | None,
     ) -> AsyncOpenAI:
+        inner = httpx.AsyncHTTPTransport()
+        http_client = httpx.AsyncClient(
+            transport=_CodexZstdTransport(inner),
+            timeout=timeout,
+        )
         return AsyncOpenAI(
             api_key=_api_key,
             base_url=endpoint,
-            timeout=timeout,
             max_retries=max_retries,
             default_headers=codex_headers,
+            http_client=http_client,
         )
 
     return await responses_stream(

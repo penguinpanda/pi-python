@@ -35,6 +35,7 @@ dependencies = [
     "pathspec>=1.1.1",
     "google-auth>=2.56.3",
     "requests>=2.34.2",
+    "zstandard>=0.25.0",
 ]
 
 [project.scripts]
