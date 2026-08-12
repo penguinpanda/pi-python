@@ -171,6 +171,56 @@ async def test_non_slash_submit_calls_prompt() -> None:
 
 
 @pytest.mark.asyncio
+async def test_resume_no_saved_sessions_notifies(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("PI_CODING_AGENT_SESSION_DIR", str(tmp_path / "empty-sessions"))
+    term = FakeTerminal(size=(100, 30))
+    app = _make_app(term)
+    notifications: list[str] = []
+    app._notify = notifications.append  # type: ignore[method-assign]
+
+    await app._resume_session()
+    assert notifications == ["No saved sessions"]
+    app.exit()
+
+
+@pytest.mark.asyncio
+async def test_slash_unknown_command_notifies() -> None:
+    term = FakeTerminal(size=(100, 30))
+    session = _make_session()
+    session.expand_prompt.side_effect = lambda text: text
+    app = _make_app(term, session)
+
+    async def actions(_term, _app) -> None:
+        term.feed_text("/nope")
+        await asyncio.sleep(0.3)
+        if _app._editor.completion_active:
+            term.feed(b"\x1b")
+            await asyncio.sleep(0.1)
+        term.feed(b"\r")
+        await asyncio.sleep(0.2)
+        entries = _app._chat.query(MessageEntry)
+        assert any("Unknown command" in entry.entry_text for entry in entries)
+
+    await _run(app, term, actions)
+
+
+@pytest.mark.asyncio
+async def test_bash_submit_calls_session() -> None:
+    term = FakeTerminal(size=(100, 30))
+    session = _make_session()
+    app = _make_app(term, session)
+
+    async def actions(_term, _app) -> None:
+        term.feed_text("!ls")
+        await asyncio.sleep(0.1)
+        term.feed(b"\r")
+        await asyncio.sleep(0.2)
+        session.execute_bash.assert_called_once()
+
+    await _run(app, term, actions)
+
+
+@pytest.mark.asyncio
 async def test_choice_selector_flow() -> None:
     term = FakeTerminal(size=(100, 30))
     app = _make_app(term)
