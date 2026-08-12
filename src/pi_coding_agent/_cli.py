@@ -27,7 +27,7 @@ from .extensions import Extension, ExtensionAPI, ExtensionLoader, ExtensionRunne
 from .extensions.builtin_llama import create_extension as create_llama_extension
 from ._print_mode import run_print_mode, run_print_mode_json
 from .file_processor import process_at_files
-from .first_time_setup import run_first_time_setup
+from .first_time_setup import run_first_time_setup, should_run_first_time_setup
 from .tools import create_all_tools, filter_tools_by_names
 from .rpc import run_rpc_mode
 from .modes.interactive import run_tui_mode
@@ -114,8 +114,8 @@ async def _async_main(args: list[str] | None = None) -> int:
     if parsed.mode is None and not parsed.message and not parsed.json and sys.stdin.isatty():
         parsed.mode = "tui"
 
-    # 首次启动向导。
-    if parsed.setup:
+    # 首次启动向导（显式 --setup 或 TS 对齐的自动触发条件）。
+    if parsed.setup or should_run_first_time_setup():
         return await run_first_time_setup(_auth_store())
 
     # 确定工作目录
