@@ -88,6 +88,10 @@ from ._shared import (
 )
 from .simple_options import clamp_max_tokens_to_context
 from .transform_messages import normalize_tool_call_id, transform_messages
+from .github_copilot_headers import (
+    build_copilot_dynamic_headers,
+    has_copilot_vision_input,
+)
 from .compat_runtime import (
     max_tokens_field,
     supports_long_cache_retention,
@@ -265,12 +269,22 @@ async def chat_completions_stream(
             # 由 openai SDK 内置处理，指数退避封顶 60s。
             # （max_retry_delay_ms 暂不生效：SDK 客户端不接受该参数。）
             timeout_ms = opts.get("timeout_ms")
+            request_headers = dict(opts.get("headers") or {})
+            if model.provider == "github-copilot":
+                # 动态头（对齐 TS buildCopilotDynamicHeaders）：无这些头
+                # Copilot 请求（尤其图片）可能被拒。
+                request_headers.update(
+                    build_copilot_dynamic_headers(
+                        messages=context.messages,
+                        has_images=has_copilot_vision_input(context.messages),
+                    )
+                )
             client = _create_client(
                 api_key,
                 base_url,
                 timeout=timeout_ms / 1000.0 if timeout_ms else 120.0,
                 max_retries=opts.get("max_retries", 2),
-                headers=opts.get("headers"),
+                headers=request_headers or None,
             )
 
             # 跨 Provider 消息规范化。

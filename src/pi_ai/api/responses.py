@@ -98,6 +98,10 @@ from ._shared import (
     to_responses_tools,
 )
 from .simple_options import clamp_max_tokens_to_context
+from .github_copilot_headers import (
+    build_copilot_dynamic_headers,
+    has_copilot_vision_input,
+)
 from .compat_runtime import (
     compat_value,
     supports_long_cache_retention,
@@ -688,13 +692,23 @@ async def responses_stream(
             # 由 openai SDK 内置处理，指数退避封顶 60s。
             # （max_retry_delay_ms 暂不生效：SDK 客户端不接受该参数。）
             timeout_ms = opts.get("timeout_ms")
+            request_headers = dict(opts.get("headers") or {})
+            if model.provider == "github-copilot":
+                # 动态头（对齐 TS buildCopilotDynamicHeaders）。
+                request_headers.update(
+                    build_copilot_dynamic_headers(
+                        messages=context.messages,
+                        has_images=has_copilot_vision_input(context.messages),
+                    )
+                )
+            resolved_headers = request_headers or None
             if client_factory is not None:
                 client = client_factory(
                     api_key,
                     base_url,
                     timeout=timeout_ms / 1000.0 if timeout_ms else 180.0,
                     max_retries=opts.get("max_retries", 2),
-                    headers=opts.get("headers"),
+                    headers=resolved_headers,
                 )
             else:
                 client = _create_client(
@@ -702,7 +716,7 @@ async def responses_stream(
                     base_url,
                     timeout=timeout_ms / 1000.0 if timeout_ms else 180.0,
                     max_retries=opts.get("max_retries", 2),
-                    headers=opts.get("headers"),
+                    headers=resolved_headers,
                 )
             # 跨 Provider 消息规范化。
             #
