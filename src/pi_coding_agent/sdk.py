@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Callable, Literal, cast
 
 from pi_ai import Model
 from pi_ai.models.models_store import FileModelsStore, InMemoryModelsStore
@@ -62,6 +62,55 @@ class CreateAgentSessionResult:
     session: AgentSession
     extensions_result: ResourceLoadResult
     model_fallback_message: str | None = None
+
+
+class AgentSessionRuntime:
+    """host 会话运行时包装（对齐 TS AgentSessionRuntime 核心访问器）。
+
+    session/services/cwd/diagnostics 访问器 + rebind 回调；
+    SDK 消费方（RPC server 等）用它统一持有一个可替换的会话。
+    """
+
+    def __init__(
+        self,
+        session: AgentSession,
+        cwd: str,
+        *,
+        diagnostics: list[dict] | None = None,
+        model_fallback_message: str | None = None,
+    ) -> None:
+        self._session = session
+        self._cwd = cwd
+        self._diagnostics = list(diagnostics or [])
+        self._model_fallback_message = model_fallback_message
+        self._rebind: Callable[[AgentSession], Any] | None = None
+
+    @property
+    def session(self) -> AgentSession:
+        return self._session
+
+    @property
+    def cwd(self) -> str:
+        return self._cwd
+
+    @property
+    def diagnostics(self) -> list[dict]:
+        return list(self._diagnostics)
+
+    @property
+    def model_fallback_message(self) -> str | None:
+        return self._model_fallback_message
+
+    def set_rebind_session(self, rebind: Callable[[AgentSession], Any] | None) -> None:
+        """设置会话重建回调（对齐 TS setRebindSession）。"""
+        self._rebind = rebind
+
+    async def rebind(self, session: AgentSession) -> None:
+        if self._rebind is not None:
+            result = self._rebind(session)
+            if inspect.isawaitable(result):
+                await result
+        self._session = session
 
 
 def _entry_thinking_level(branch: list[Any]) -> str | None:
@@ -287,5 +336,6 @@ async def create_agent_session(
 __all__ = [
     "CreateAgentSessionOptions",
     "CreateAgentSessionResult",
+    "AgentSessionRuntime",
     "create_agent_session",
 ]
