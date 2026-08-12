@@ -1086,22 +1086,47 @@ class OAuthSelector(OverlayDialog):
 
 
 class ScopedModelsSelector(OverlayDialog):
-    """模型范围选择器：Enter 切换选中，Esc 保存。"""
+    """模型范围选择器：Enter 切换选中，ctrl+a 全选，ctrl+x 全清，
+    ctrl+p 切换 provider，alt+up/down 调整顺序，ctrl+s 持久化，Esc 保存。
+
+    选中顺序即模型循环顺序（对齐 TS scoped-models-selector）。
+    """
 
     def __init__(
         self,
         models: list[Any],
         selected: set[tuple[str, str]] | None = None,
         current: Any | None = None,
+        on_persist=None,
     ) -> None:
         super().__init__()
         self._models = list(models)
         self._selected = set(selected or {})
+        self._order: list[tuple[str, str]] = [
+            key for key in (selected or {}) if key in {self._key(m) for m in self._models}
+        ]
         self._current = current
         self._selected_index = 0
+        self._on_persist = on_persist
 
     def _key(self, model) -> tuple[str, str]:
         return (model.provider, model.id)
+
+    def _provider_keys(self, provider: str) -> list[tuple[str, str]]:
+        return [self._key(m) for m in self._models if m.provider == provider]
+
+    def _toggle(self, model_key: tuple[str, str]) -> None:
+        if model_key in self._selected:
+            self._selected.discard(model_key)
+            self._order.remove(model_key)
+        else:
+            self._selected.add(model_key)
+            self._order.append(model_key)
+
+    def _dismiss(self, persist: bool) -> None:
+        if self._on_persist is not None and persist:
+            self._on_persist(list(self._order))
+        self.dismiss(list(self._order))
 
     def handle_key(self, key: Key) -> bool:
         name = key.name
@@ -1115,24 +1140,76 @@ class ScopedModelsSelector(OverlayDialog):
             return True
         if name == "enter":
             if 0 <= self._selected_index < len(self._models):
-                model_key = self._key(self._models[self._selected_index])
-                if model_key in self._selected:
-                    self._selected.discard(model_key)
-                else:
-                    self._selected.add(model_key)
+                self._toggle(self._key(self._models[self._selected_index]))
                 self.refresh()
             return True
+        if name == "ctrl+a":
+            # 全选（对齐 TS app.models.enableAll）。
+            for model in self._models:
+                model_key = self._key(model)
+                if model_key not in self._selected:
+                    self._selected.add(model_key)
+                    self._order.append(model_key)
+            self.refresh()
+            return True
+        if name == "ctrl+x":
+            # 全清（对齐 TS app.models.clearAll）。
+            self._selected.clear()
+            self._order.clear()
+            self.refresh()
+            return True
+        if name == "ctrl+p":
+            # 切换当前 provider 的全部模型（对齐 TS app.models.toggleProvider）。
+            if 0 <= self._selected_index < len(self._models):
+                provider_keys = self._provider_keys(self._models[self._selected_index].provider)
+                if all(k in self._selected for k in provider_keys):
+                    for model_key in provider_keys:
+                        if model_key in self._selected:
+                            self._selected.discard(model_key)
+                            self._order.remove(model_key)
+                else:
+                    for model_key in provider_keys:
+                        if model_key not in self._selected:
+                            self._selected.add(model_key)
+                            self._order.append(model_key)
+                self.refresh()
+            return True
+        if name in ("alt+up", "alt+down"):
+            # 已启用顺序调整（对齐 TS app.models.reorderUp/reorderDown）。
+            if 0 <= self._selected_index < len(self._models):
+                model_key = self._key(self._models[self._selected_index])
+                if model_key in self._order:
+                    index = self._order.index(model_key)
+                    delta = -1 if name == "alt+up" else 1
+                    new_index = index + delta
+                    if 0 <= new_index < len(self._order):
+                        self._order[index], self._order[new_index] = (
+                            self._order[new_index],
+                            self._order[index],
+                        )
+                        self.refresh()
+            return True
+        if name == "ctrl+s":
+            self._dismiss(persist=True)
+            return True
         if name == "escape":
-            self.dismiss(set(self._selected))
+            self._dismiss(persist=False)
             return True
         return False
 
     def render(self, width: int, height: int) -> list[Line]:
-        lines: list[Line] = [line_from_text("Scoped models (Enter: toggle, Esc: save)", width)]
+        title = (
+            "Scoped models (Enter: toggle, ctrl+a: all, ctrl+x: clear, "
+            "ctrl+p: provider, alt+up/down: reorder, ctrl+s: save, Esc: close)"
+        )
+        lines: list[Line] = [line_from_text(title, width)]
         visible = min(height - 1, len(self._models))
         for index in range(visible):
             model = self._models[index]
             model_key = self._key(model)
+            position = ""
+            if model_key in self._order:
+                position = f" #{self._order.index(model_key) + 1}"
             check = " ✓" if model_key in self._selected else ""
             marker = ">" if index == self._selected_index else " "
             style = None
@@ -1141,7 +1218,9 @@ class ScopedModelsSelector(OverlayDialog):
 
                 style = Style(reverse=True)
             lines.append(
-                line_from_text(f"{marker} {model.provider}/{model.id}{check}", width, style)
+                line_from_text(
+                    f"{marker} {model.provider}/{model.id}{position}{check}", width, style
+                )
             )
         while len(lines) < height:
             lines.append(blank_line(width))

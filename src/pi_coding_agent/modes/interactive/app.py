@@ -1685,13 +1685,42 @@ class PiTuiApp(App):
         if not models:
             self._notify("No models available")
             return
-        selected = {
+        session_keys = {
             (scoped.model.provider, scoped.model.id) for scoped in self._session.scoped_models
         }
+        if not session_keys and self._settings_manager is not None:
+            # 会话未显式设置时回退 settings.scopedModels（对齐 TS 项目级保存）。
+            stored = self._settings.get("scopedModels")
+            if isinstance(stored, list):
+                session_keys = {
+                    (str(entry[0]), str(entry[1]))
+                    for entry in stored
+                    if isinstance(entry, list) and len(entry) == 2
+                }
         self.push_screen(
-            ScopedModelsSelector(models, selected, current=self._session.model),
+            ScopedModelsSelector(
+                models,
+                session_keys,
+                current=self._session.model,
+                on_persist=self._persist_scoped_models,
+            ),
             callback=self._on_scoped_models_selected,
         )
+
+    def _persist_scoped_models(self, ordered) -> None:
+        """ctrl+s：把模型顺序写入 settings.scopedModels（对齐 TS onPersist）。"""
+        if self._settings_manager is None:
+            self._notify("No settings manager available")
+            return
+        try:
+            self._settings_manager.set_project_setting(
+                "scopedModels", [[provider, model_id] for provider, model_id in ordered]
+            )
+        except RuntimeError as exc:
+            self._notify(str(exc))
+            return
+        self._settings = self._settings_manager.as_dict()
+        self._notify(f"Saved {len(ordered)} scoped models")
 
     def _on_scoped_models_selected(self, selected) -> None:
         if selected is None:

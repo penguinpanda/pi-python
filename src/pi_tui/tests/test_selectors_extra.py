@@ -82,6 +82,39 @@ def test_scoped_models_selector_toggle_and_save() -> None:
     assert "✓" in "\n".join(line.text() for line in lines)
 
 
+def test_scoped_models_selector_bulk_ops_and_reorder() -> None:
+    """ctrl+a 全选、ctrl+x 全清、ctrl+p 切换 provider、alt+up/down 重排、ctrl+s 持久化。"""
+    models = [
+        SimpleNamespace(provider="faux", id="faux-1"),
+        SimpleNamespace(provider="faux", id="faux-2"),
+        SimpleNamespace(provider="openai", id="gpt-1"),
+    ]
+    selector = ScopedModelsSelector(models, selected=set())
+    assert selector.handle_key(_key("ctrl+a")) is True
+    assert len(selector._selected) == 3
+    assert len(selector._order) == 3
+
+    # ctrl+p：当前行（index 0，faux）已全选 → 清空 faux 全部
+    assert selector.handle_key(_key("ctrl+p")) is True
+    assert selector._selected == {("openai", "gpt-1")}
+
+    # 全清
+    assert selector.handle_key(_key("ctrl+x")) is True
+    assert selector._selected == set()
+
+    # 重排：选中 faux-1、faux-2、gpt-1 后 alt+up 调整 gpt-1（index 2）到前
+    selector.handle_key(_key("ctrl+a"))
+    selector._selected_index = 2
+    assert selector.handle_key(_key("alt+up")) is True
+    assert selector._order == [("faux", "faux-1"), ("openai", "gpt-1"), ("faux", "faux-2")]
+
+    # ctrl+s 持久化回调
+    persisted: list = []
+    selector._on_persist = persisted.append
+    assert selector.handle_key(_key("ctrl+s")) is True
+    assert persisted == [selector._order]
+
+
 def test_extension_selector_search() -> None:
     selector = ExtensionSelector(
         [
