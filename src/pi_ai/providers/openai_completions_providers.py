@@ -159,7 +159,27 @@ def zai_provider() -> Provider:
 
 
 def xai_provider() -> Provider:
-    return _provider("xai", "xAI", "https://api.x.ai/v1", "XAI_API_KEY")
+    from pi_ai.auth.oauth.xai import xai_oauth
+
+    class _XaiAuth:
+        oauth = xai_oauth
+        display_name = "xAI API key"
+        env_vars = ["XAI_API_KEY"]
+
+        def resolve(self, credential=None):  # type: ignore[no-untyped-def]
+            return env_api_key_auth(self.display_name, self.env_vars).resolve(credential)
+
+    return create_provider(
+        id="xai",
+        name="xAI",
+        auth=_XaiAuth(),  # type: ignore[arg-type]
+        models=[],
+        base_url="https://api.x.ai/v1",
+        api_kind="completions",
+        fetch_models=lambda context: _fetch_openai_models(
+            "xai", "https://api.x.ai/v1", "XAI_API_KEY", context
+        ),
+    )
 
 
 def moonshotai_cn_provider() -> Provider:
