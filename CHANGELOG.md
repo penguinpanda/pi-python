@@ -8,6 +8,18 @@
 
 ### Added
 
+- 新增 Google Generative AI / Google Vertex / Mistral / Azure OpenAI / OpenAI Codex / AWS Bedrock 核心 API 与 provider
+- AWS Bedrock 支持 SigV4 与 bearer token；Cloudflare Workers AI / AI Gateway 自定义认证；OpenAI Codex deferred fetch/cancel
+- OpenAI 兼容 completions provider 支持动态 `/models` 发现（Groq/Together/Cerebras/Fireworks/xAI/NVIDIA/HuggingFace/Baseten/Moonshot/Xiaomi/Z.ai/OpenCode/Xiaomi Token Plan 等）
+- `Models` 新增 `get_auth` / `check_auth` / `get_available` / `login` / `logout`；OpenRouter 与 GitHub Copilot 支持 API key + OAuth 双认证
+- 新增 `pi_telemetry` 包、`TerminalProtocol`/`ProcessTerminal`、TUI 子系统独立模块、`TruncatedText`、`EditorComponent`
+- 新增 parity/golden 测试目录与 `create_agent_session` SDK 入口
+- `create_agent_session` 补齐 TS `CreateAgentSessionOptions` 选项集：`agent_dir` /
+  `settings_manager` / `resource_loader` / 工具 allowlist-denylist / `no_tools` /
+  `custom_tools` / 会话模型恢复 / `session_start_event`，返回
+  `CreateAgentSessionResult`
+- Mistral Conversations 补齐 TS 一致的 9 位字母数字 tool call ID 规范化
+  （含冲突避让），经 `chat_completions_stream` 可选 normalizer 接入
 - 新增 `scripts/check.py` 与 pre-commit 配置，本地一键复现 CI 的 ruff/mypy/pytest 检查
 - 交互模式支持 `!cmd` / `!!cmd` 本地 shell 命令：`!` 执行并进入 LLM 上下文，`!!` 执行但不进上下文，输出流式渲染
 - 引入 ruff（lint + format）与 mypy 配置及依赖
