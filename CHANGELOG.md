@@ -173,6 +173,10 @@
   回调与手动粘贴并行竞争（Codex/OpenRouter/Radius，浏览器不可达不再挂起）、
   state 校验、回调响应连接回收；包管理命令注入防护（npm/git `--` 分隔、
   空源与路径逃逸拒绝、子进程超时）；远程目录 404/501 清空动态模型
+- TUI Ctrl+Z suspend 挂起恢复（POSIX：退出 alt-screen → SIGTSTP，挂起期间
+  忽略 SIGINT，SIGCONT 恢复重绘；Windows 提示不支持，对齐 TS handleCtrlZ）
+- OAuth login 主流程与 loopback socket 回归测试（xAI device-code、OpenRouter
+  手动粘贴、Radius 浏览器回调与回调服务器）
 
 ### Changed
 
