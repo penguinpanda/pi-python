@@ -249,6 +249,9 @@
   后续所有轮次卡死；`transform_messages` 同时对旧会话中重复的 text 块去重
 - 修复 TUI 消息正文含绝对路径时整体退化为纯文本的问题：现在始终走 markdown
   渲染，路径仍通过 `linkify_lines` 生成 OSC 8 链接
+- 修复 PostgreSQL v4 会话后端 conformance 问题：`get_log` 保留 `entry_seq`
+  列、fork 初始化 `session_sequences` 并补齐默认 `parentSessionId`，
+  `session_sequences` 写入改为 upsert
 
 ## [0.1.0]
 

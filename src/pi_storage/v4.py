@@ -128,9 +128,12 @@ async def _next_seq(conn: asyncpg.Connection, session_id: str) -> int:
 
 async def _set_seq(conn: asyncpg.Connection, session_id: str, next_seq: int) -> None:
     await conn.execute(
-        "UPDATE session_sequences SET next_seq = $1 WHERE session_id = $2",
-        next_seq,
+        """
+        INSERT INTO session_sequences (session_id, next_seq) VALUES ($1, $2)
+        ON CONFLICT (session_id) DO UPDATE SET next_seq = EXCLUDED.next_seq
+        """,
         session_id,
+        next_seq,
     )
 
 
@@ -1127,7 +1130,7 @@ class PostgresV4SessionStorage:
         try:
             entry_rows = await conn.fetch(
                 """
-                SELECT id, entry_seq AS seq, parent_id, type, timestamp, payload
+                SELECT id, entry_seq, parent_id, type, timestamp, payload
                 FROM session_entries WHERE session_id = $1 AND entry_seq > $2
                 ORDER BY entry_seq
                 """,
@@ -1162,7 +1165,7 @@ class PostgresV4SessionStorage:
             await self._repo.pool.release(conn)
         log: list[LogItem] = []
         for row in entry_rows:
-            log.append({"kind": "entry", "seq": row["seq"], "entry": _decode_entry(row)})
+            log.append({"kind": "entry", "seq": row["entry_seq"], "entry": _decode_entry(row)})
         for row in record_rows:
             log.append({"kind": "record", "seq": row["seq"], "record": _decode_record(row)})
         for row in lane_rows:
@@ -1712,9 +1715,8 @@ class PostgresV4SessionRepo:
                         "createdAt": created_at,
                         "cwd": fork_options.get("cwd") or source_row["cwd"],
                         "path": self._path(session_id),
+                        "parentSessionId": options.get("parentSessionId") or source["id"],
                     }
-                    if options.get("parentSessionId") is not None:
-                        metadata["parentSessionId"] = options["parentSessionId"]
                     if fork_options.get("metadata") is not None:
                         metadata["metadata"] = fork_options["metadata"]
                     return await self._claim_with_conn(conn, metadata)
