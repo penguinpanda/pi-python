@@ -357,7 +357,7 @@ class RpcMessageHandler:
         model_runtime: ModelRuntime,
         *,
         ui_context: RpcUiContext | None = None,
-        session_factory: Callable[[], AgentSession | Awaitable[AgentSession]] | None = None,
+        session_factory: Callable[..., AgentSession | Awaitable[AgentSession]] | None = None,
         session_rebuilder=None,
     ) -> None:
         self.session = session
@@ -461,17 +461,58 @@ class RpcMessageHandler:
         await self.session.abort()
         return success_response(command_id, "abort")
 
-    async def _handle_new_session(self, _cmd: dict, command_id: str | None) -> dict:
+    async def _handle_new_session(self, cmd: dict, command_id: str | None) -> dict:
         if self.session_factory is None:
             return error_response(command_id, "new_session", "Session factory not configured")
+        parent_session = cmd.get("parentSession")
         try:
-            result = self.session_factory()
-            new_session = await result if inspect.isawaitable(result) else result
+            if isinstance(parent_session, str) and parent_session:
+                # parentSession：fork 自父会话（对齐 TS newSession({parentSession})）。
+                new_session = await self._fork_from_parent(parent_session)
+            else:
+                result = self.session_factory()
+                new_session = await result if inspect.isawaitable(result) else result
         except Exception as exc:
             return error_response(command_id, "new_session", str(exc))
         self.created_sessions.append(new_session)
         self.session = new_session
         return success_response(command_id, "new_session", {"cancelled": False})
+
+    async def _fork_from_parent(self, parent_session_id: str):
+        """按父会话 ID fork 出新会话（parentSession lineage）。"""
+        from .._session_manager_v4 import list_sessions, open_session_manager
+
+        from .._config import get_sessions_dir
+
+        # 优先当前会话的 sessions 根目录（测试/自定义目录场景）。
+        current_manager = getattr(self.session, "session_manager", None)
+        sessions_dir = getattr(current_manager, "_sessions_root", None) or get_sessions_dir()
+        sessions = await list_sessions(sessions_dir)
+        matches = [info for info in sessions if info.session_id == parent_session_id]
+        if not matches:
+            raise ValueError(f"Parent session not found: {parent_session_id}")
+        parent = await open_session_manager(matches[0].path)
+        try:
+            leaf = parent.get_leaf_id()
+            if leaf is None:
+                # 父会话无条目：fork 等价于带 parentSessionId 的新会话。
+                from .._session_manager_v4 import create_session_manager
+
+                forked = await create_session_manager(
+                    parent.cwd,
+                    sessions_dir=sessions_dir,
+                    parent_session_id=parent.session_id,
+                )
+            else:
+                forked = await parent.fork(leaf)
+        finally:
+            close = getattr(parent, "close", None)
+            if close is not None:
+                await close()
+        if self.session_factory is None:
+            raise RuntimeError("Session factory not configured")
+        result = self.session_factory(forked)
+        return await result if inspect.isawaitable(result) else result
 
     # ------------------------------------------------------------------
     # 状态

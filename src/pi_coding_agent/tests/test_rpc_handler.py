@@ -7,6 +7,8 @@ import io
 import json
 from pathlib import Path
 
+import pytest
+
 from pi_agent import Agent, AgentOptions
 from pi_ai import Model, Models
 from pi_ai.providers.faux import faux_provider
@@ -686,3 +688,44 @@ class TestRunRpcMode:
         line = json.loads(stdout.getvalue().decode("utf-8").strip())
         assert line["command"] == "parse"
         assert line["success"] is False
+
+
+@pytest.mark.asyncio
+async def test_new_session_parent_session_fork(tmp_path, monkeypatch):
+    """new_session.parentSession：fork 自父会话（factory 收到 fork 出的 manager）。"""
+    import pi_coding_agent._config as config_mod
+
+    monkeypatch.setattr(config_mod, "get_sessions_dir", lambda: tmp_path / "sessions")
+    runtime = _make_runtime()
+    handler = _make_handler(runtime, tmp_path)
+    received: list = []
+
+    async def factory(manager=None):
+        received.append(manager)
+        session = _make_session(runtime, tmp_path)
+        return session
+
+    handler.session_factory = factory
+
+    # 未找到父会话：报错
+    response = await handler.handle_command(
+        {"type": "new_session", "parentSession": "no-such-parent"}
+    )
+    assert response["success"] is False
+    assert "Parent session not found" in response["error"]
+
+    # 创建父会话后 fork 成功
+    from pi_coding_agent._session_manager_v4 import create_session_manager
+
+    parent = await create_session_manager(str(tmp_path), sessions_dir=tmp_path / "sessions")
+    assert parent.session_id
+    await parent.close()
+
+    response = await handler.handle_command(
+        {"type": "new_session", "parentSession": parent.session_id}
+    )
+    assert response["success"] is True
+    assert received and received[0] is not None
+    assert received[0].session_id != parent.session_id
+    metadata = await received[0]._session.get_metadata()
+    assert metadata.get("parentSessionId") == parent.session_id

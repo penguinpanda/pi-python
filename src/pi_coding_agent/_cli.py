@@ -457,8 +457,8 @@ async def _async_main(args: list[str] | None = None) -> int:
     if parsed.thinking:
         session.set_thinking_level(parsed.thinking)
 
-    async def session_factory() -> AgentSession:
-        fresh_manager = await create_session_manager(cwd)
+    async def session_factory(manager=None) -> AgentSession:
+        fresh_manager = manager if manager is not None else await create_session_manager(cwd)
         fresh_model, fresh_scoped = await _resolve_initial_model(
             runtime, parsed, settings, fresh_manager, is_continuing=False
         )

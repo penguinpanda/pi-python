@@ -24,7 +24,7 @@ from pi_agent.session.v4.context import build_session_context
 from pi_agent.session.v4.memory import InMemorySessionRepo
 from pi_agent.session.v4.repo import JsonlSessionRepo
 from pi_agent.session.v4.session import Session
-from pi_agent.session.v4.jsonl_types import JsonlSessionListOptions
+from pi_agent.session.v4.jsonl_types import JsonlSessionCreateOptions, JsonlSessionListOptions
 from pi_agent.session.v4.types import Entry, SessionMetadata
 
 from ._session_manager import SessionInfo, SessionTreeNode
@@ -118,12 +118,15 @@ async def create_session_manager(
     cwd: str,
     sessions_dir: str | Path | None = None,
     session_id: str | None = None,
+    parent_session_id: str | None = None,
     repo: Any = None,
 ) -> SessionManagerLike:
     """创建 v4 会话管理器。"""
     if repo is not None:
         return await V4SessionManager.from_repo(repo, cwd, session_id)
-    return await V4SessionManager.create(cwd, sessions_dir, session_id)
+    return await V4SessionManager.create(
+        cwd, sessions_dir, session_id, parent_session_id=parent_session_id
+    )
 
 
 async def open_session_manager(
@@ -229,11 +232,15 @@ class V4SessionManager:
         cwd: str,
         sessions_dir: str | Path | None = None,
         session_id: str | None = None,
+        parent_session_id: str | None = None,
     ) -> "V4SessionManager":
         """创建新 v4 会话（目录布局与 SessionManager 一致）。"""
         root = Path(sessions_dir) if sessions_dir else _default_sessions_dir()
         repo = JsonlSessionRepo(root)
-        session = await repo.create({"cwd": cwd, "id": session_id or uuidv7()})
+        options: JsonlSessionCreateOptions = {"cwd": cwd, "id": session_id or uuidv7()}
+        if parent_session_id:
+            options["parentSessionId"] = parent_session_id
+        session = await repo.create(options)
         return await cls._from_session(cwd, session, repo, root)
 
     @classmethod
