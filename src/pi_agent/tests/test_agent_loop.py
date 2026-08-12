@@ -327,6 +327,68 @@ class TestToolCallLoop:
         roles = [m.get("role") for m in result]
         assert "toolResult" in roles
 
+    @pytest.mark.asyncio
+    async def test_prepare_arguments_runs_before_schema_validation(self):
+        """prepareArguments 在 schema 校验前归一化参数（对齐 TS prepareToolCallArguments）。"""
+        from pi_agent._agent_loop import _PreparedToolCall, _prepare_tool_call
+
+        def _normalize(args: dict):
+            # legacy 顶层 oldText/newText → edits（对齐 TS prepareEditArguments）
+            if "oldText" in args:
+                return {
+                    "path": args["path"],
+                    "edits": [{"oldText": args["oldText"], "newText": args["newText"]}],
+                }
+            return None
+
+        async def _execute(tool_call_id, params, signal=None, on_update=None):
+            return AgentToolResult(content=[TextContent(type="text", text="ok")])
+
+        tool = AgentTool(
+            name="edit",
+            description="edit",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "edits": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "oldText": {"type": "string"},
+                                "newText": {"type": "string"},
+                            },
+                            "required": ["oldText", "newText"],
+                        },
+                    },
+                },
+                "required": ["path", "edits"],
+            },
+            label="edit",
+            execute=_execute,
+            prepare_arguments=_normalize,
+        )
+
+        context = AgentContext(system_prompt="t", messages=[], tools=[tool])
+        config = AgentLoopConfig(
+            model=_make_model(),
+            convert_to_llm=lambda msgs: list(msgs),  # type: ignore[arg-type,return-value]
+        )
+        # legacy 载荷不满足 schema（缺 edits，含多余 oldText/newText）
+        tc_final = _make_llm_tool_response(
+            "edit", {"path": "f.txt", "oldText": "a", "newText": "b"}
+        )
+        tc = tc_final["content"][0]
+        outcome = await _prepare_tool_call(tc, tc_final, context, config, None)
+        assert isinstance(outcome, _PreparedToolCall)
+        assert outcome.args == {
+            "path": "f.txt",
+            "edits": [{"oldText": "a", "newText": "b"}],
+        }
+
+
+class TestToolArgumentValidation:
     """工具参数 schema 校验（_execute_tool_calls 阶段1）。"""
 
     @pytest.mark.asyncio

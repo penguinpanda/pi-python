@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import Any
 
 from pi_ai.types import TextContent
@@ -78,6 +80,60 @@ def create_bash_tool(options: BashToolOptions | None = None) -> AgentTool:
         if on_update is not None:
             on_update(AgentToolResult(content=[], details=None))
 
+        # 节流实时进度（对齐 TS bash.ts：初始空 update + 100ms 节流 + 最终全量 update）。
+        get_latest_progress = None
+        update_timer: asyncio.Handle | None = None
+        update_dirty = False
+        last_update_at = 0.0
+
+        def _emit_output_update() -> None:
+            nonlocal update_dirty, last_update_at
+            if on_update is None or not update_dirty or get_latest_progress is None:
+                return
+            update_dirty = False
+            last_update_at = time.monotonic()
+            progress = get_latest_progress()
+            on_update(
+                AgentToolResult(
+                    content=[TextContent(type="text", text=progress.output)],
+                    details={
+                        "truncation": (
+                            progress.truncation if progress.truncation.truncated else None
+                        ),
+                        "fullOutputPath": progress.full_output_path,
+                    },
+                )
+            )
+
+        def _cancel_update_timer() -> None:
+            nonlocal update_timer
+            if update_timer is not None:
+                update_timer.cancel()
+                update_timer = None
+
+        def _flush_updates() -> None:
+            nonlocal update_timer
+            update_timer = None
+            _emit_output_update()
+
+        def _schedule_output_update() -> None:
+            nonlocal update_dirty, update_timer
+            if on_update is None:
+                return
+            update_dirty = True
+            delay = _BASH_UPDATE_THROTTLE_MS / 1000.0 - (time.monotonic() - last_update_at)
+            if delay <= 0:
+                _cancel_update_timer()
+                _emit_output_update()
+                return
+            if update_timer is None:
+                update_timer = asyncio.get_running_loop().call_later(delay, _flush_updates)
+
+        def _on_chunk(_chunk: str, get_progress) -> None:
+            nonlocal get_latest_progress
+            get_latest_progress = get_progress
+            _schedule_output_update()
+
         capture_result = get_or_throw(
             await execute_shell_with_capture(
                 env,
@@ -90,9 +146,18 @@ def create_bash_tool(options: BashToolOptions | None = None) -> AgentTool:
                     "timeout": timeout,
                     "abortSignal": signal,
                     "returnExecutionErrors": True,
+                    "onChunk": _on_chunk,
                 },
             )
         )
+        _cancel_update_timer()
+
+        def _final_progress():
+            return capture_result
+
+        get_latest_progress = _final_progress
+        update_dirty = True
+        _emit_output_update()
 
         output_text = capture_result.output
         details: Any = None

@@ -475,6 +475,36 @@ class TestPromptGuidelines:
         )
 
 
+class TestBashLiveProgress:
+    @pytest.mark.asyncio
+    async def test_bash_emits_throttled_live_updates(self, tmp_path):
+        """bash 工具在运行中发出节流实时进度（初始空 update + 中间更新 + 最终全量）。"""
+        env = PythonExecutionEnv(str(tmp_path))
+        if not await _shell_available(env):
+            pytest.skip("No bash shell available")
+        tool = create_bash_tool(BashToolOptions(expose_session_environment=False))
+        updates: list = []
+
+        def on_update(partial):
+            updates.append(partial)
+
+        command = "for i in 1 2 3 4 5; do echo line$i; sleep 0.15; done"
+        result = await tool.execute(
+            "t1", {"command": command, "timeout": 10}, None, on_update, _tool_context(env)
+        )
+        assert result is not None
+        # 初始空 update
+        assert updates and updates[0].content == []
+        texts = ["".join((c.get("text") or "") for c in u.content) for u in updates]
+        # 中间存在节流 live update（非空且早于最终全量）
+        live = [t for t in texts[1:-1] if t]
+        assert live, f"no live updates emitted: {texts}"
+        # 最终 update 包含全部输出
+        assert "line5" in texts[-1]
+        # 至少一条 live update 携带输出（不晚于最终全量内容）
+        assert any("line1" in t for t in live)
+
+
 class TestSessionEnvInjection:
     @pytest.mark.asyncio
     async def test_exec_unset_env(self, tmp_path, monkeypatch):

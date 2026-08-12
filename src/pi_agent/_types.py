@@ -181,6 +181,11 @@ class AgentTool:
 
     # ---- 生命周期钩子（可选，默认 None 不改变现有行为）----
 
+    # 参数预处理（prepareArguments）：在 schema 校验前调用，返回替换后的
+    # 参数 dict（返回 None 保持原参数）。用于 legacy 载荷归一化
+    # （如 edit 工具的顶层 oldText/newText → edits，对齐 TS agent-loop.ts）。
+    prepare_arguments: Callable[[dict[str, Any]], dict[str, Any] | None] | None = None
+
     # 执行前钩子：收到参数 dict 与执行上下文。
     # 返回 None 表示放行；返回 dict 可替换传给 execute 的参数。
     before_execute: Callable[[dict[str, Any], Any], Awaitable[Any]] | None = None

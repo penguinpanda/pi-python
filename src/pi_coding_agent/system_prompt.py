@@ -9,7 +9,13 @@ from pathlib import Path
 from ._config import get_agent_dir, get_docs_path, get_examples_path, get_readme_path
 from .skills import format_skills_for_prompt
 
-_CONTEXT_FILE_NAMES = ("AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD")
+_CONTEXT_FILE_NAMES = (
+    "AGENTS.override.md",
+    "AGENTS.md",
+    "AGENTS.MD",
+    "CLAUDE.md",
+    "CLAUDE.MD",
+)
 
 
 @dataclass(slots=True)
@@ -162,7 +168,8 @@ def find_shadowed_context_file(cwd: str | Path) -> str | None:
 
 
 def load_project_context_files(cwd: str | Path, agent_dir: str | Path | None = None) -> list[dict]:
-    """加载全局 agent 目录 + cwd 祖先链上的 AGENTS.md/CLAUDE.md（去重 + worktree 遮蔽）。"""
+    """加载全局 agent 目录 + cwd 祖先链上的 AGENTS.override.md/AGENTS.md/CLAUDE.md
+    （AGENTS.override.md 优先，去重 + worktree 遮蔽）。"""
     resolved_agent_dir = (Path(agent_dir) if agent_dir else get_agent_dir()).resolve()
     resolved_cwd = Path(cwd).expanduser().resolve()
     context_files: list[dict] = []
@@ -189,6 +196,63 @@ def load_project_context_files(cwd: str | Path, agent_dir: str | Path | None = N
 
     context_files.extend(ancestor_files)
     return context_files
+
+
+def resolve_prompt_input(value: str | None, description: str) -> str | None:
+    """TS resolvePromptInput：字符串若指向已存在的文件则读文件内容，否则原样返回。"""
+    if not value:
+        return None
+    path = Path(value).expanduser()
+    if path.is_file():
+        try:
+            return path.read_text(encoding="utf-8")
+        except OSError:
+            return value
+    return value
+
+
+def _discover_system_prompt_file(
+    cwd: str | Path,
+    agent_dir: str | Path,
+    project_trusted: bool,
+    filename: str,
+) -> dict | None:
+    """发现项目（trust-gated .pi/<filename>）或全局（agentDir/<filename>）提示文件。
+
+    对齐 TS ResourceLoader.discoverSystemPromptFile / discoverAppendSystemPromptFile。
+    """
+    project_path = Path(cwd) / ".pi" / filename
+    if project_trusted and project_path.is_file():
+        candidate = project_path
+    else:
+        candidate = Path(agent_dir) / filename
+        if not candidate.is_file():
+            return None
+    try:
+        return {
+            "path": str(candidate),
+            "content": candidate.read_text(encoding="utf-8"),
+        }
+    except OSError:
+        return None
+
+
+def discover_system_prompt_file(
+    cwd: str | Path,
+    agent_dir: str | Path,
+    project_trusted: bool,
+) -> dict | None:
+    """发现 SYSTEM.md（项目 trust-gated → 全局 agentDir）。"""
+    return _discover_system_prompt_file(cwd, agent_dir, project_trusted, "SYSTEM.md")
+
+
+def discover_append_system_prompt_file(
+    cwd: str | Path,
+    agent_dir: str | Path,
+    project_trusted: bool,
+) -> dict | None:
+    """发现 APPEND_SYSTEM.md（项目 trust-gated → 全局 agentDir）。"""
+    return _discover_system_prompt_file(cwd, agent_dir, project_trusted, "APPEND_SYSTEM.md")
 
 
 def build_system_prompt(options: BuildSystemPromptOptions) -> str:
@@ -305,7 +369,10 @@ Pi documentation (read only when the user asks about pi itself, its SDK, extensi
 __all__ = [
     "BuildSystemPromptOptions",
     "build_system_prompt",
+    "discover_append_system_prompt_file",
+    "discover_system_prompt_file",
     "load_project_context_files",
+    "resolve_prompt_input",
     "tool_snippets_for",
     "tool_prompt_guidelines_for",
 ]

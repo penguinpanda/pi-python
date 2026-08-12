@@ -48,6 +48,8 @@ def create_edit_tool() -> AgentTool:
         tool_call_id, params, signal=None, on_update=None, context=None
     ) -> AgentToolResult:
         env = context.env
+        # prepare_arguments 已在 schema 校验前归一化（对齐 TS prepareEditArguments）；
+        # 此处保留幂等归一化作为防御（无 loop 直接调用 execute 的场景）。
         input_data = _prepare_edit_arguments(params)
         path = input_data["path"]
         edits = input_data.get("edits")
@@ -109,6 +111,7 @@ def create_edit_tool() -> AgentTool:
     return AgentTool(
         name="edit",
         label="edit",
+        prepare_arguments=_prepare_edit_arguments,
         prompt_snippet=(
             "Make precise file edits with exact text replacement, "
             "including multiple disjoint edits in one call"

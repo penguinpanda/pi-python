@@ -9,9 +9,12 @@ import pytest
 from pi_coding_agent.system_prompt import (
     BuildSystemPromptOptions,
     build_system_prompt,
+    discover_append_system_prompt_file,
+    discover_system_prompt_file,
     find_git_paths,
     find_shadowed_context_file,
     load_project_context_files,
+    resolve_prompt_input,
     tool_prompt_guidelines_for,
     tool_snippets_for,
 )
@@ -505,3 +508,45 @@ def test_sibling_worktree_not_shadowed(tmp_path):
     assert find_shadowed_context_file(feat) is None
     files = load_project_context_files(feat, agent_dir=tmp_path / "agent")
     assert [Path(f["path"]).resolve() for f in files] == [(feat / "AGENTS.md").resolve()]
+
+
+def test_agents_override_takes_precedence(tmp_path):
+    """AGENTS.override.md 优先于 AGENTS.md（对齐 TS loadContextFileFromDir）。"""
+    (tmp_path / "AGENTS.md").write_text("base rules", encoding="utf-8")
+    (tmp_path / "AGENTS.override.md").write_text("override rules", encoding="utf-8")
+    files = load_project_context_files(tmp_path, agent_dir=tmp_path / "agent")
+    assert len(files) == 1
+    assert files[0]["content"] == "override rules"
+    assert files[0]["path"].endswith("AGENTS.override.md")
+
+
+def test_discover_system_prompt_trust_gated(tmp_path):
+    """SYSTEM.md：trusted 时用项目 .pi/SYSTEM.md，否则回退全局 agentDir。"""
+    agent_dir = tmp_path / "agent"
+    agent_dir.mkdir()
+    (agent_dir / "SYSTEM.md").write_text("global system", encoding="utf-8")
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".pi").mkdir()
+    (project / ".pi" / "SYSTEM.md").write_text("project system", encoding="utf-8")
+
+    assert discover_system_prompt_file(project, agent_dir, True)["content"] == "project system"
+    assert discover_system_prompt_file(project, agent_dir, False)["content"] == "global system"
+    assert discover_append_system_prompt_file(project, agent_dir, False) is None
+
+    (agent_dir / "APPEND_SYSTEM.md").write_text("global append", encoding="utf-8")
+    assert (
+        discover_append_system_prompt_file(project, agent_dir, False)["content"] == "global append"
+    )
+
+
+def test_resolve_prompt_input_reads_file_path(tmp_path):
+    """字符串为已存在文件路径时读文件内容（对齐 TS resolvePromptInput）。"""
+    path = tmp_path / "prompt.md"
+    path.write_text("file content", encoding="utf-8")
+    assert resolve_prompt_input(str(path), "system prompt") == "file content"
+    assert resolve_prompt_input("plain text", "system prompt") == "plain text"
+    assert resolve_prompt_input(None, "system prompt") is None
+    assert resolve_prompt_input(str(tmp_path / "missing.md"), "system prompt") == str(
+        tmp_path / "missing.md"
+    )

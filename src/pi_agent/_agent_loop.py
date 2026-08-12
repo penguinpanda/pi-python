@@ -1218,6 +1218,13 @@ async def _prepare_tool_call(
         )
         return _ImmediateToolOutcome(tc, args, error_result, is_error=True)
 
+    # prepareArguments（对齐 TS agent-loop.ts prepareToolCallArguments）：
+    # schema 校验前归一化参数（如 edit 工具的 legacy oldText/newText 载荷）。
+    if tool_def.prepare_arguments is not None:
+        prepared_args = tool_def.prepare_arguments(args)
+        if prepared_args is not None:
+            args = prepared_args
+
     # 参数校验：按 input_schema 校验并返回转换后的参数
     # （validateToolCall：失败返回错误 ToolResult 让 LLM 自纠）。
     try:

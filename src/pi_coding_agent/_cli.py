@@ -52,7 +52,10 @@ from .settings_manager import SettingsManager
 from .system_prompt import (
     BuildSystemPromptOptions,
     build_system_prompt,
+    discover_append_system_prompt_file,
+    discover_system_prompt_file,
     load_project_context_files,
+    resolve_prompt_input,
     tool_prompt_guidelines_for,
     tool_snippets_for,
 )
@@ -236,11 +239,28 @@ async def _async_main(args: list[str] | None = None) -> int:
 
     def system_prompt_builder() -> str:
         custom_prompt = parsed.system_prompt or settings_manager.get_system_prompt()
+        if not custom_prompt:
+            # 未显式设置时发现 SYSTEM.md（对齐 TS discoverSystemPromptFile：
+            # trust-gated 项目 .pi/SYSTEM.md → 全局 agentDir/SYSTEM.md）。
+            discovered_system = discover_system_prompt_file(cwd, get_agent_dir(), project_trusted)
+            if discovered_system is not None:
+                custom_prompt = discovered_system["content"]
+        custom_prompt = resolve_prompt_input(custom_prompt, "system prompt")
         append_parts = settings_manager.get_append_system_prompt()
         if parsed.append_system_prompt:
             append_parts.append(parsed.append_system_prompt)
         if preset is not None and isinstance(preset.get("instructions"), str):
             append_parts.append(preset["instructions"])
+        if not append_parts:
+            # append 源未显式设置时发现 APPEND_SYSTEM.md（对齐 TS）。
+            discovered_append = discover_append_system_prompt_file(
+                cwd, get_agent_dir(), project_trusted
+            )
+            if discovered_append is not None:
+                append_parts.append(discovered_append["content"])
+        append_parts = [
+            resolve_prompt_input(part, "append system prompt") or "" for part in append_parts
+        ]
         skills = list(skill_loader.all())
         runner = extension_state["runner"]
         if runner is not None:
