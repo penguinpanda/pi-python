@@ -202,12 +202,11 @@ class TestSessionManagerCompaction:
         asyncio.run(mgr.append_message(UserMessage(role="user", content="new")))
 
         messages = mgr.build_context()
-        assert len(messages) == 2
+        assert len(messages) == 3
         assert messages[0]["role"] == "compactionSummary"
         assert messages[0]["summary"] == "compacted summary"
-        assert messages[0]["tokens_before"] == 100
-        assert messages[1]["role"] == "user"
-        assert messages[1]["content"] == "new"
+        assert messages[-1]["role"] == "user"
+        assert messages[-1]["content"] == "new"
 
     def test_append_compaction_returns_entry_id(self):
         mgr = SessionManager.in_memory(cwd="/tmp/test")
@@ -219,7 +218,7 @@ class TestSessionManagerCompaction:
         entries = mgr.get_entries()
         assert entries[-1]["type"] == "compaction"
         assert entries[-1]["summary"] == "summary"
-        assert entries[-1]["firstKeptEntryId"] == e1
+        assert entries[-1]["retainedTail"][0]["role"] == "user"
 
     def test_persisted_compaction_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -233,9 +232,9 @@ class TestSessionManagerCompaction:
             session_path = mgr1.session_path
             mgr2 = SessionManager.open(session_path)
             messages = mgr2.build_context()
-            assert len(messages) == 2
+            assert len(messages) == 3
             assert messages[0]["role"] == "compactionSummary"
-            assert messages[1]["content"] == "new"
+            assert messages[-1]["content"] == "new"
 
     def test_build_context_without_compaction_unchanged(self):
         mgr = SessionManager.in_memory(cwd="/tmp/test")
@@ -284,47 +283,11 @@ class TestSessionLayout:
         assert [info.session_id for info in infos] == ["newer", "older"]
         assert infos[0].cwd == "/tmp/b"
 
-    def test_migrate_flat_sessions_moves_to_cwd_dir(self, tmp_path):
-        from pi_coding_agent._session_manager import migrate_flat_sessions
-
-        flat = tmp_path / "old.jsonl"
-        flat.write_text(
-            json.dumps(
-                {
-                    "type": "session",
-                    "version": 3,
-                    "id": "old1",
-                    "timestamp": "2026-01-01T00:00:00+00:00",
-                    "cwd": "/tmp/proj",
-                }
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-
-        assert migrate_flat_sessions(tmp_path) == 1
-        assert not flat.exists()
-        target = tmp_path / "--tmp-proj--" / "2026-01-01T00-00-00+00-00_old1.jsonl"
-        assert target.exists()
-        infos = SessionManager.list_sessions(tmp_path)
-        assert [info.session_id for info in infos] == ["old1"]
-        assert infos[0].cwd == "/tmp/proj"
-
-    def test_migrate_flat_sessions_legacy_fallback(self, tmp_path):
-        from pi_coding_agent._session_manager import migrate_flat_sessions
-
-        flat = tmp_path / "broken.jsonl"
-        flat.write_text("{ not json\n", encoding="utf-8")
-        assert migrate_flat_sessions(tmp_path) == 1
-        assert not flat.exists()
-        legacy_files = list((tmp_path / "--legacy--").glob("*.jsonl"))
-        assert len(legacy_files) == 1
-
 
 class TestEditMessage:
-    """/input：合并文本进历史 user 消息并回卷 leaf。"""
+    """/input：v4 仅追加语义下合并/替换历史 user 消息。"""
 
-    def test_merge_rewinds_leaf_and_keeps_old_branch(self, tmp_path):
+    def test_merge_appends_and_keeps_old_branch(self, tmp_path):
         import asyncio
 
         mgr = SessionManager.create(cwd="/tmp/proj", sessions_dir=tmp_path)
@@ -335,17 +298,21 @@ class TestEditMessage:
         merged = mgr.edit_message(e1, "new detail")
 
         assert merged == "old\n\nnew detail"
-        assert mgr.get_leaf_id() == e1
-        assert [m["content"] for m in mgr.build_context()] == ["old\n\nnew detail"]
-        # 旧分支条目保留在文件中（树仍可见），并追加 leaf 指针。
+        leaf = mgr.get_leaf_id()
+        assert leaf is not None and leaf != e1
+        assert [m["content"] for m in mgr.build_context()] == [
+            "old",
+            "second",
+            "third",
+            "old\n\nnew detail",
+        ]
+        # 旧条目保留在文件中（树仍可见）。
         entries = mgr.get_entries()
         assert len(entries) == 4
-        assert entries[-1]["type"] == "leaf"
-        assert entries[-1]["targetId"] == e1
-        # 重开后 leaf 仍指向编辑后的消息。
+        # 重开后 leaf 指向追加的合并消息。
         reopened = SessionManager.open(mgr.session_path)
-        assert reopened.get_leaf_id() == e1
-        assert [m["content"] for m in reopened.build_context()] == ["old\n\nnew detail"]
+        assert reopened.get_leaf_id() == leaf
+        assert [m["content"] for m in reopened.build_context()][-1] == "old\n\nnew detail"
 
     def test_replace_mode(self, tmp_path):
         import asyncio
@@ -353,7 +320,7 @@ class TestEditMessage:
         mgr = SessionManager.create(cwd="/tmp/proj", sessions_dir=tmp_path)
         e1 = asyncio.run(mgr.append_message(UserMessage(role="user", content="old")))
         assert mgr.edit_message(e1, "replacement", mode="replace") == "replacement"
-        assert [m["content"] for m in mgr.build_context()] == ["replacement"]
+        assert [m["content"] for m in mgr.build_context()] == ["old", "replacement"]
 
     def test_edit_errors(self, tmp_path):
         import asyncio
