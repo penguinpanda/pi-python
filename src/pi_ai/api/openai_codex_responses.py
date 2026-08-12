@@ -34,6 +34,27 @@ from .responses import responses_stream
 _DEFAULT_BASE_URL = "https://chatgpt.com/backend-api"
 
 
+_websocket_sse_fallback_sessions: set[str] = set()
+
+
+class _CodexWsConnectError(Exception):
+    """WS 连接阶段失败（未产生任何事件），可回退 SSE。"""
+
+
+class _CodexWsStreamError(Exception):
+    """WS 已开始事件流后的传输失败，不回退。"""
+
+
+def _is_ws_sse_fallback_active(session_id: str | None) -> bool:
+    """会话是否已标记 WS→SSE 回退（对齐 TS websocketSseFallbackSessions）。"""
+    return bool(session_id) and session_id in _websocket_sse_fallback_sessions
+
+
+def _record_ws_failure(session_id: str | None) -> None:
+    if session_id:
+        _websocket_sse_fallback_sessions.add(session_id)
+
+
 def _codex_headers(
     api_key: str,
     options: dict[str, Any],
@@ -154,12 +175,15 @@ class _CodexWebSocketEvents:
         self._options = options
         self._events = False
         self._ws: Any = None
+        self._closed = False
 
     def __aiter__(self) -> "_CodexWebSocketEvents":
         return self
 
     async def __anext__(self) -> Any:
         while True:
+            if self._closed:
+                raise StopAsyncIteration
             if not self._events:
                 await self._open()
             try:
@@ -169,7 +193,8 @@ class _CodexWebSocketEvents:
                 )
             except Exception as exc:
                 await self.aclose()
-                raise StopAsyncIteration from exc
+                # 已开始事件流后的传输失败：不回退（对齐 TS websocketStarted → throw）。
+                raise _CodexWsStreamError(f"Codex WebSocket stream failed: {exc}") from exc
             text = raw if isinstance(raw, str) else raw.decode("utf-8", errors="replace")
             try:
                 event = json.loads(text)
@@ -188,17 +213,22 @@ class _CodexWebSocketEvents:
                     return _to_event_obj(event)
                 finally:
                     await self.aclose()
+                    self._closed = True
             return _to_event_obj(event)
 
     async def _open(self) -> None:
         import websockets
 
         timeout_ms = int(self._options.get("websocket_connect_timeout_ms") or 15000)
-        self._ws = await websockets.connect(
-            self._url,
-            additional_headers=self._headers,
-            open_timeout=timeout_ms / 1000.0,
-        )
+        try:
+            self._ws = await websockets.connect(
+                self._url,
+                additional_headers=self._headers,
+                open_timeout=timeout_ms / 1000.0,
+            )
+        except Exception as exc:
+            # 连接阶段失败（未产生任何事件）：可回退 SSE（对齐 TS websocketStarted=false）。
+            raise _CodexWsConnectError(f"Codex WebSocket connect failed: {exc}") from exc
         self._events = True
         await self._ws.send(json.dumps({"type": "response.create", **self._body}))
 
@@ -253,29 +283,16 @@ async def openai_codex_responses_stream(
     use_websocket = transport in ("websocket", "websocket-cached", "auto")
     endpoint = _resolve_codex_client_base_url(base_url or model.base_url or "")
     request_id = str(opts.get("session_id") or uuidv7())
-    if use_websocket:
-        ws_url = _resolve_codex_websocket_url(base_url or model.base_url or "")
-        ws_headers = _codex_websocket_headers(api_key, opts, request_id)
-
-        def _ws_factory(
-            _api_key: str,
-            _base_url: str,
-            *,
-            timeout: float,
-            max_retries: int,
-            headers: dict[str, str] | None,
-        ) -> _CodexWebSocketClient:
-            return _CodexWebSocketClient(ws_url, ws_headers, opts)
-
-        return await responses_stream(
-            model,
-            context,
-            api_key,
-            endpoint,
-            options,
-            client_factory=cast(Callable[..., Any], _ws_factory),
-            request_model_id=model.id,
-        )
+    session_id = request_id
+    if use_websocket and not _is_ws_sse_fallback_active(session_id):
+        try:
+            return await _websocket_stream(
+                model, context, api_key, base_url, endpoint, opts, request_id
+            )
+        except _CodexWsConnectError:
+            # 连接阶段失败：记录会话级回退并转 SSE（对齐 TS
+            # recordWebSocketSseFallback → SSE 路径）。
+            _record_ws_failure(session_id)
 
     codex_headers = _codex_headers(api_key, opts, compressed=True)
 
@@ -307,6 +324,39 @@ async def openai_codex_responses_stream(
         endpoint,
         options,
         client_factory=cast(Callable[..., Any], _factory),
+        request_model_id=model.id,
+    )
+
+
+async def _websocket_stream(
+    model: Model,
+    context: Context,
+    api_key: str,
+    base_url: str,
+    endpoint: str,
+    opts: dict[str, Any],
+    request_id: str,
+) -> AssistantMessageEventStream:
+    ws_url = _resolve_codex_websocket_url(base_url or model.base_url or "")
+    ws_headers = _codex_websocket_headers(api_key, opts, request_id)
+
+    def _ws_factory(
+        _api_key: str,
+        _base_url: str,
+        *,
+        timeout: float,
+        max_retries: int,
+        headers: dict[str, str] | None,
+    ) -> _CodexWebSocketClient:
+        return _CodexWebSocketClient(ws_url, ws_headers, opts)
+
+    return await responses_stream(
+        model,
+        context,
+        api_key,
+        endpoint,
+        cast(StreamOptions, opts),
+        client_factory=cast(Callable[..., Any], _ws_factory),
         request_model_id=model.id,
     )
 

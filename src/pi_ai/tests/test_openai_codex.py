@@ -230,6 +230,63 @@ async def test_codex_websocket_stream_integration(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_websocket_connect_failure_falls_back_to_sse(monkeypatch) -> None:
+    """WS 连接阶段失败回退 SSE；同会话后续请求直接 SSE（对齐 TS fallback 会话记忆）。"""
+    from pi_ai.api.openai_codex_responses import (
+        _CodexWsConnectError,
+        _is_ws_sse_fallback_active,
+    )
+
+    calls: list[str] = []
+
+    async def fake_responses_stream(model, context, api_key, base_url, options=None, **kwargs):
+        client_factory = kwargs.get("client_factory")
+        kind = "ws" if client_factory.__name__ == "_ws_factory" else "sse"
+        calls.append(kind)
+        if kind == "ws":
+            raise _CodexWsConnectError("connect failed")
+        stream = AssistantMessageEventStream()
+        output = {
+            "content": [{"type": "text", "text": "from-sse"}],
+            "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+            "stop_reason": "stop",
+        }
+        stream.push({"type": "start", "partial": output})
+        stream.push({"type": "done", "reason": "stop", "message": output})
+        stream.end()
+        return stream
+
+    monkeypatch.setattr(
+        "pi_ai.api.openai_codex_responses.responses_stream",
+        fake_responses_stream,
+    )
+    session_id = "codex-session-fallback-test"
+    stream = await openai_codex_responses.openai_codex_responses_stream(
+        _model(),
+        _context(),
+        "k",
+        "",
+        {"transport": "websocket", "api_key": "k", "session_id": session_id},
+    )
+    events = [event async for event in stream]
+    assert calls == ["ws", "sse"]
+    assert events[-1]["message"]["content"][0]["text"] == "from-sse"
+    assert _is_ws_sse_fallback_active(session_id)
+
+    # 同会话再次请求：跳过 WS 直接 SSE
+    stream2 = await openai_codex_responses.openai_codex_responses_stream(
+        _model(),
+        _context(),
+        "k",
+        "",
+        {"transport": "websocket", "api_key": "k", "session_id": session_id},
+    )
+    async for _event in stream2:
+        pass
+    assert calls == ["ws", "sse", "sse"]
+
+
+@pytest.mark.asyncio
 async def test_codex_fetch_deferred(monkeypatch) -> None:
     class _TextBlock:
         type = "output_text"
