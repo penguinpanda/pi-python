@@ -126,6 +126,9 @@ async def _async_main(args: list[str] | None = None) -> int:
         and settings.get("defaultProjectTrust", "ask") == "ask"
     )
     project_trusted = await resolve_project_trusted(cwd, trust_manager, settings, ui=None)
+    # --approve/-a / --no-approve/-na：本次运行的信任覆盖（对齐 TS projectTrustOverride）。
+    if parsed.project_trust_override is not None:
+        project_trusted = parsed.project_trust_override
     settings_manager.set_project_trusted(project_trusted)
     settings = settings_manager.as_dict()
     if needs_trust_decision and not project_trusted and parsed.mode != "tui":
@@ -148,6 +151,8 @@ async def _async_main(args: list[str] | None = None) -> int:
             parsed.provider = preset["provider"]
 
     # 创建 ModelRuntime（组合 provider + models.json + auth.json）
+    if parsed.offline:
+        os.environ["PI_OFFLINE"] = "1"
     runtime = await _create_runtime()
     set_agent_stream_fn(runtime.stream)
 
@@ -296,7 +301,7 @@ async def _async_main(args: list[str] | None = None) -> int:
         if parsed.exclude_tools
         else None
     )
-    if parsed.no_tools:
+    if parsed.no_tools or parsed.no_builtin_tools:
         selected_tools: list[str] = []
     elif tools_include is not None or tools_exclude:
         selected_tools = [
@@ -510,6 +515,7 @@ async def _async_main(args: list[str] | None = None) -> int:
             no_context_files=parsed.no_context_files,
             startup_resources=startup_resources,
             ui_mode=parsed.tui_mode or None,
+            theme_name=parsed.theme or None,
         )
 
     # 运行 print 模式
@@ -748,9 +754,15 @@ def _create_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-session", action="store_true", help="Don't persist session to disk")
 
     # 工具控制
-    p.add_argument("--tools", type=str, help="Comma-separated tool whitelist")
-    p.add_argument("--exclude-tools", type=str, help="Comma-separated tool blacklist")
-    p.add_argument("--no-tools", action="store_true", help="Disable all tools")
+    p.add_argument("--tools", "-t", type=str, help="Comma-separated tool whitelist")
+    p.add_argument("--exclude-tools", "-xt", type=str, help="Comma-separated tool blacklist")
+    p.add_argument("--no-tools", "-nt", action="store_true", help="Disable all tools")
+    p.add_argument(
+        "--no-builtin-tools",
+        "-nbt",
+        action="store_true",
+        help="Disable builtin tools (extension-registered tools still apply)",
+    )
 
     # 资源加载（对齐 TS：--extension / --skill / --prompt-template 可重复）
     p.add_argument(
@@ -797,6 +809,29 @@ def _create_parser() -> argparse.ArgumentParser:
         default=None,
         help="TUI render mode",
     )
+    p.add_argument(
+        "--theme",
+        type=str,
+        help="TUI theme name (repeatable to add theme files)",
+    )
+    p.add_argument("--no-themes", action="store_true", help="Disable theme discovery")
+    p.add_argument(
+        "-a",
+        "--approve",
+        dest="project_trust_override",
+        action="store_true",
+        default=None,
+        help="Trust the project for this run (skip trust prompt)",
+    )
+    p.add_argument(
+        "-na",
+        "--no-approve",
+        dest="project_trust_override",
+        action="store_false",
+        help="Do not trust the project for this run",
+    )
+    p.add_argument("--verbose", action="store_true", help="Verbose logging")
+    p.add_argument("--offline", action="store_true", help="Skip network model refresh")
     p.add_argument(
         "--export",
         type=str,
