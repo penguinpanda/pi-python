@@ -183,6 +183,7 @@
 
 ### Fixed
 
+- Markdown 表格换行单元格保留补位空格，换行后的 `│` 与首行/边框保持对齐
 - Markdown 表格在终端宽度过窄时不再变成空行：按 token 行号从源文本回退
   到原始 Markdown 表格（对齐 TS `token.raw` 回退）
 - `_CloudflareAuth` 补 `resolve`，修复默认 ModelRuntime/CLI/evals 启动时

@@ -118,3 +118,15 @@ def test_table_narrow_falls_back_to_raw_markdown() -> None:
     plain = _plain(lines)
     assert any("Provider" in line for line in plain)
     assert any("OpenAI" in line for line in plain)
+
+
+def test_table_wrapped_cells_keep_column_alignment() -> None:
+    lines = render_markdown(
+        "| 脚本 | 功能 |\n|---|---|\n| generate_models.py | 自动生成模型元数据 |",
+        40,
+    )
+    raw = ["".join(cell.char for cell in line.cells) for line in lines]
+    first = next(line for line in raw if line.startswith("│ generate_models.p"))
+    second = next(line for line in raw if line.startswith("│ y"))
+    assert first.index("│", 2) == second.index("│", 2)
+    assert second[second.index("│", 2) - 1] == " "

@@ -927,9 +927,8 @@ class _Renderer:
             for cell in cells:
                 if cell.char == " ":
                     current_width = flush_word(current, current_width)
-                    if current and current[-1].char != " ":
-                        current.extend([Cell(" ", cell.style, cell.link)])
-                        current_width += 1
+                    current.extend([Cell(" ", cell.style, cell.link)])
+                    current_width += 1
                 else:
                     word.append(cell)
                     word_width += _visible_width(cell.char)
