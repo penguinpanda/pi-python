@@ -7,7 +7,7 @@ import pytest
 from pi_agent.session.v4.context import SessionContextBuildOptions
 from pi_agent.session.v4.memory import InMemorySessionRepo
 
-from test_session_v4_conformance import (
+from pi_agent.session.v4.testing.conformance import (
     create_assistant_message,
     create_user_message,
     entry_ids,

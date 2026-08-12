@@ -9,7 +9,7 @@ import pytest
 from pi_agent.session.v4.repo import JsonlSessionRepo
 from pi_agent.session.v4.search import ScanningSessionSearch
 
-from test_session_v4_conformance import create_user_message
+from pi_agent.session.v4.testing.conformance import create_user_message
 
 
 @pytest.fixture

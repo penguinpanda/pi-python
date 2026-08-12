@@ -12,7 +12,7 @@ from pi_agent.session.v4.search_index import (
     rebuild_v4_search_index,
 )
 
-from test_session_v4_conformance import create_user_message
+from pi_agent.session.v4.testing.conformance import create_user_message
 
 
 @pytest.fixture
