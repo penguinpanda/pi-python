@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import os
 import time
 from pathlib import Path
 from typing import Any, Protocol, cast
@@ -106,25 +105,16 @@ class SessionManagerLike(Protocol):
     ) -> str | None: ...
 
 
-def v4_sessions_enabled() -> bool:
-    """PI_SESSION_FORMAT=v3 时回退 v3 会话（过渡期调试）。"""
-    return os.environ.get("PI_SESSION_FORMAT", "auto") != "v3"
-
-
 async def create_session_manager(
     cwd: str,
     sessions_dir: str | Path | None = None,
     session_id: str | None = None,
     repo: Any = None,
 ) -> SessionManagerLike:
-    """按格式开关创建会话管理器（默认 v4）。"""
+    """创建 v4 会话管理器。"""
     if repo is not None:
         return await V4SessionManager.from_repo(repo, cwd, session_id)
-    if v4_sessions_enabled():
-        return await V4SessionManager.create(cwd, sessions_dir, session_id)
-    from ._session_manager import SessionManager
-
-    return SessionManager.create(cwd, sessions_dir, session_id)
+    return await V4SessionManager.create(cwd, sessions_dir, session_id)
 
 
 async def open_session_manager(
@@ -133,33 +123,21 @@ async def open_session_manager(
     repo: Any = None,
     metadata: SessionMetadata | None = None,
 ) -> SessionManagerLike:
-    """按格式开关打开会话（v3 文件在 v4 模式下惰性转换）。"""
+    """打开会话；v3 文件由 v4 仓库惰性转换。"""
     if repo is not None:
         if metadata is None:
             raise ValueError("open_session_manager with repo requires metadata")
         return await V4SessionManager.open_with_repo(repo, metadata)
-    if v4_sessions_enabled():
-        return await V4SessionManager.open(filepath, cwd_override)
-    from ._session_manager import SessionManager
-
-    return SessionManager.open(filepath, cwd_override)
+    return await V4SessionManager.open(filepath, cwd_override)
 
 
 async def in_memory_session_manager(cwd: str, session_id: str | None = None) -> SessionManagerLike:
-    if v4_sessions_enabled():
-        return await V4SessionManager.in_memory(cwd, session_id)
-    from ._session_manager import SessionManager
-
-    return SessionManager.in_memory(cwd, session_id)
+    return await V4SessionManager.in_memory(cwd, session_id)
 
 
 async def list_sessions(directory: str | Path, cwd: str | None = None) -> list[SessionInfo]:
-    """按格式开关列出会话。"""
-    if v4_sessions_enabled():
-        return await V4SessionManager.list_sessions(directory, cwd)
-    from ._session_manager import SessionManager
-
-    return SessionManager.list_sessions(directory)
+    """列出 v4 会话。"""
+    return await V4SessionManager.list_sessions(directory, cwd)
 
 
 async def fork_session_manager(
@@ -781,5 +759,4 @@ __all__ = [
     "open_session_manager",
     "in_memory_session_manager",
     "list_sessions",
-    "v4_sessions_enabled",
 ]

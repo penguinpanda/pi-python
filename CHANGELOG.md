@@ -8,6 +8,10 @@
 
 ### Added
 
+- Agent 内联 `AI_TELEMETRY_SCHEMA` / `HARNESS_TELEMETRY_SCHEMA`
+  （`pi_agent/telemetry_schema.py`，Schema 不再依赖 `pi_telemetry` 定义）
+- `TaggedError` 基类与 TS harness 对应具体错误子类，支持 `match/case` 与
+  `to_json()`（`pi_agent._harness_types`）
 - Session v4 新增 `reducer.py`：record log 12 类 corruption 校验与
   `reduce_lane_state()` lane 状态归约（对齐 TS `harness/reducer.ts`）
 - `pi_agent` 新增独立 `format_skills_for_system_prompt()`，对齐 TS
@@ -99,6 +103,8 @@
 
 ### Changed
 
+- 会话运行时工厂固定走 v4：移除 `PI_SESSION_FORMAT=v3` 运行时回退，旧 v3
+  文件由 v4 仓库始终惰性迁移；`pi_evals` harness 会话管理器迁移到 v4
 - Azure OpenAI Responses 默认 `apiVersion` 对齐 TS `v1`（`AZURE_OPENAI_API_VERSION` 可覆盖）
 - `AgentHarness` 公开 API  legacy（0.84.0 之前）：`models: Models` + `session: Session`
   必填并移除 `stream_fn`；新增 `request_shutdown()` / `wait_for_shutdown()`、

@@ -25,7 +25,7 @@ from pi_ai import create_default_models
 from pi_ai.models.models_store import FileModelsStore
 from pi_ai.types.model import Model
 from pi_coding_agent._session import AgentSession
-from pi_coding_agent._session_manager import SessionManager
+from pi_coding_agent._session_manager_v4 import SessionManagerLike, create_session_manager
 from pi_coding_agent._config import get_agent_dir
 from pi_coding_agent.extensions import ExtensionLoader, ExtensionRunner
 from pi_coding_agent.model_runtime import ModelRuntime
@@ -294,7 +294,7 @@ async def run_pi_coding_agent(
     outcome_error: BaseException | None = None
     run: HarnessRun | None = None
     session: AgentSession | None = None
-    session_manager: SessionManager | None = None
+    session_manager: SessionManagerLike | None = None
     root = Path(tempfile.mkdtemp(prefix="pi-eval-"))
     try:
         cwd = root / "workspace"
@@ -305,7 +305,7 @@ async def run_pi_coding_agent(
         sessions_dir.mkdir()
         if options.workspace_setup is not None:
             options.workspace_setup(cwd)
-        session_manager = SessionManager.create(str(cwd), sessions_dir=sessions_dir)
+        session_manager = await create_session_manager(str(cwd), sessions_dir=sessions_dir)
         context.set_artifact("runId", session_manager.session_id)
 
         skill_loader = SkillLoader(

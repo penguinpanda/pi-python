@@ -243,18 +243,14 @@ class TestLazyConversion:
         assert await session.get_name() == "Migrated"
 
     @pytest.mark.asyncio
-    async def test_pi_session_format_v3_blocks_conversion(self, tmp_path, monkeypatch):
+    async def test_v3_file_always_migrates(self, tmp_path):
         repo = JsonlSessionRepo(str(tmp_path / "sessions"))
         path = str(tmp_path / "v3.jsonl")
         _write_v3(tmp_path, path)
-        original = Path(path).read_bytes()
-        monkeypatch.setenv("PI_SESSION_FORMAT", "v3")
 
-        with pytest.raises(SessionError) as excinfo:
-            await repo.open(_v3_metadata(path, str(tmp_path)))
-        assert excinfo.value.code == "storage"
-        assert Path(path).read_bytes() == original
-        assert not Path(f"{path}.bak").exists()
+        session = await repo.open(_v3_metadata(path, str(tmp_path)))
+        assert await session.get_name() == "Migrated"
+        assert Path(f"{path}.bak").exists()
 
     @pytest.mark.asyncio
     async def test_invalid_v3_file_keeps_original(self, tmp_path):

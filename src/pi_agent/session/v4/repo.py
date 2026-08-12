@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -58,11 +57,6 @@ def _now_ms() -> int:
 
 def _mtime_ms(path: Path) -> int:
     return path.stat().st_mtime_ns // 1_000_000
-
-
-def _migration_enabled() -> bool:
-    """PI_SESSION_FORMAT=v3 时禁用惰性迁移（过渡期调试）。"""
-    return os.environ.get("PI_SESSION_FORMAT", "auto") != "v3"
 
 
 def _metadata_from_first_line(first_line: str, path: str, modified_at: int) -> JsonlSessionMetadata:
@@ -134,7 +128,7 @@ class JsonlSessionRepo:
         return await self.open(self.metadata_for_path(path, cwd_override))
 
     async def _load_storage(self, jsonl_metadata: JsonlSessionMetadata) -> JsonlSessionStorage:
-        """加载存储；v3 文件按 PI_SESSION_FORMAT 惰性转换为 v4。"""
+        """加载存储；v3 文件始终惰性转换为 v4。"""
         metadata = jsonl_metadata
         path = Path(metadata["path"])
         if not path.exists():
@@ -142,11 +136,6 @@ class JsonlSessionRepo:
         first_line = path.read_text(encoding="utf-8").split("\n", 1)[0]
         if '"kind":"header"' in first_line or first_line.startswith('{"kind": "header"'):
             return await JsonlSessionStorage.load(str(path))
-        if not _migration_enabled():
-            raise SessionError(
-                "storage",
-                "PI_SESSION_FORMAT=v3 禁用在 v4 仓库中惰性转换旧会话",
-            )
         return await convert_v3_file_to_v4(str(path))
 
     async def list(
