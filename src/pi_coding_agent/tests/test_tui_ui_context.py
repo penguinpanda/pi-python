@@ -89,6 +89,53 @@ def test_theme_facade_fg_bg():
     assert ctx.theme.strikethrough("done") == "\x1b[9mdone\x1b[0m"
 
 
+def test_get_theme_and_context_usage():
+
+    class _Loader:
+        def available(self):
+            return ["dark", "light", "custom"]
+
+        def load(self, name):
+            return {"dark": "d", "light": "l", "custom": "c"}.get(name)
+
+    class _SessionStats:
+        def get_session_stats(self):
+            return {"tokens": {"input": 10, "output": 5, "total": 15}, "cost": 0.5}
+
+    app = _StubApp()
+    app._theme_loader = _Loader()
+    app._session = _SessionStats()
+    ctx = TuiUIContext(app)
+    assert ctx.get_theme("light") == "l"
+    assert ctx.get_theme("missing") is None
+    names = [item["name"] for item in ctx.get_all_themes()]
+    assert names == ["dark", "light", "custom"]
+    usage = ctx.get_context_usage()
+    assert usage == {
+        "inputTokens": 10,
+        "outputTokens": 5,
+        "totalTokens": 15,
+        "costUsd": 0.5,
+    }
+
+
+def test_on_terminal_input_subscribe_unsubscribe():
+    app = _StubApp()
+    app._terminal_input_handlers = []
+    app.add_terminal_input_handler = lambda handler: (  # type: ignore[method-assign]
+        app._terminal_input_handlers.append(handler)
+        or (lambda: app._terminal_input_handlers.remove(handler))
+    )
+    ctx = TuiUIContext(app)
+    seen: list = []
+    unsubscribe = ctx.on_terminal_input(lambda event: seen.append(event))
+    assert unsubscribe is not None
+    app._terminal_input_handlers[0](object())
+    assert len(seen) == 1
+    unsubscribe()
+    assert app._terminal_input_handlers == []
+
+
 def test_set_status_editor_title():
     app = _StubApp()
     ctx = TuiUIContext(app)

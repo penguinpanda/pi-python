@@ -197,6 +197,7 @@ class PiTuiApp(App):
         self._widget_below: dict[str, str] = {}
         self._overlay_dialog_callbacks: dict[str, Callable[[Any], None] | None] = {}
         self._overlay_renderers: dict[str, Callable[[int, int], list[str]]] = {}
+        self._terminal_input_handlers: list[Callable[[Any], Any]] = []
         self._completion_items: list[dict] = []
         self._completion_index = 0
         self._completion_prefix = ""
@@ -2258,10 +2259,30 @@ class PiTuiApp(App):
 
     async def _handle_event(self, event: KeyEvent) -> None:
         was_resize = event.type == "resize"
+        # 终端输入 hook（对齐 TS onTerminalInput）：先分发给订阅者，
+        # 返回 False 表示已消费该输入。
+        for handler in list(self._terminal_input_handlers):
+            try:
+                if handler(event) is False:
+                    return
+            except Exception:
+                continue
         await super()._handle_event(event)
         if was_resize:
             for key in list(self._overlay_renderers):
                 self._render_overlay_renderer(key)
+
+    def add_terminal_input_handler(self, handler) -> Callable[[], None]:
+        """订阅终端输入事件，返回取消订阅函数（对齐 TS onTerminalInput）。"""
+        self._terminal_input_handlers.append(handler)
+
+        def _unsubscribe() -> None:
+            try:
+                self._terminal_input_handlers.remove(handler)
+            except ValueError:
+                pass
+
+        return _unsubscribe
 
 
 def _list_sessions() -> list[dict[str, Any]]:

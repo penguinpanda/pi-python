@@ -180,6 +180,40 @@ class TuiUIContext:
             if countdown_task is not None:
                 countdown_task.cancel()
 
+    def get_theme(self, name: str):
+        """按名加载主题（对齐 TS getTheme）。"""
+        try:
+            return self._app._theme_loader.load(name)
+        except Exception:
+            return None
+
+    def get_all_themes(self) -> list[dict]:
+        """全部可用主题（对齐 TS getAllThemes）。"""
+        loader = self._app._theme_loader
+        theme_dir = getattr(loader, "_theme_dir", None)
+        return [
+            {"name": name, "path": str(theme_dir / f"{name}.json") if theme_dir else None}
+            for name in loader.available()
+        ]
+
+    def on_terminal_input(self, handler):
+        """订阅终端输入流（对齐 TS onTerminalInput；返回取消订阅函数）。"""
+        return self._app.add_terminal_input_handler(handler)
+
+    def get_context_usage(self):
+        """当前上下文 usage 汇总（对齐 TS getContextUsage）。"""
+        try:
+            stats = self._app._session.get_session_stats()
+        except Exception:
+            return None
+        tokens = stats.get("tokens") or {}
+        return {
+            "inputTokens": tokens.get("input", 0),
+            "outputTokens": tokens.get("output", 0),
+            "totalTokens": tokens.get("total", 0),
+            "costUsd": stats.get("cost", 0),
+        }
+
     def notify(self, message: str, notify_type: str | None = None) -> None:
         self._app._set_status(message)
 
