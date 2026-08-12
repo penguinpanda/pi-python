@@ -797,3 +797,87 @@ class TestOpenaiMessagesReasoningContent:
         result = to_openai_messages(messages, model)  # type: ignore[arg-type]
         assert "reasoning_content" not in result[0]
         assert result[0]["content"] == "answer"
+
+
+class TestThinkingFormatMatrix:
+    """thinkingFormat 矩阵（zai/qwen/openrouter/string-thinking 等，对齐 TS）。"""
+
+    def _model(self, thinking_format: str, **compat) -> Model:
+        return Model(
+            id=f"m-{thinking_format}",
+            provider="test",
+            api="openai-completions",
+            name="T",
+            input=["text"],
+            output=["text"],
+            reasoning=True,
+            thinking_level_map={"off": "off", "high": "high"},
+            compat={"thinkingFormat": thinking_format, **compat},
+        )
+
+    @pytest.mark.asyncio
+    async def test_zai_thinking_enabled(self):
+        model = self._model("zai", supportsReasoningEffort=True)
+        client = _mock_client([_chunk(content="ok", finish_reason="stop")])
+        _, _ = await _collect_events(
+            model,
+            Context(messages=[{"role": "user", "content": "Hi"}]),
+            client,
+            options={"reasoning": "high"},
+        )
+        kwargs = client.chat.completions.create.call_args.kwargs
+        assert kwargs["thinking"] == {"type": "enabled", "clear_thinking": False}
+        assert kwargs["reasoning_effort"] == "high"
+
+    @pytest.mark.asyncio
+    async def test_qwen_enable_thinking_flag(self):
+        model = self._model("qwen", supportsReasoningEffort=True)
+        client = _mock_client([_chunk(content="ok", finish_reason="stop")])
+        _, _ = await _collect_events(
+            model,
+            Context(messages=[{"role": "user", "content": "Hi"}]),
+            client,
+            options={"reasoning": "off"},
+        )
+        kwargs = client.chat.completions.create.call_args.kwargs
+        assert kwargs["enable_thinking"] is False
+
+    @pytest.mark.asyncio
+    async def test_openrouter_nested_reasoning(self):
+        model = self._model("openrouter")
+        client = _mock_client([_chunk(content="ok", finish_reason="stop")])
+        _, _ = await _collect_events(
+            model,
+            Context(messages=[{"role": "user", "content": "Hi"}]),
+            client,
+            options={"reasoning": "high"},
+        )
+        kwargs = client.chat.completions.create.call_args.kwargs
+        assert kwargs["reasoning"] == {"effort": "high"}
+
+    @pytest.mark.asyncio
+    async def test_string_thinking_passthrough(self):
+        model = self._model("string-thinking")
+        client = _mock_client([_chunk(content="ok", finish_reason="stop")])
+        _, _ = await _collect_events(
+            model,
+            Context(messages=[{"role": "user", "content": "Hi"}]),
+            client,
+            options={"reasoning": "high"},
+        )
+        kwargs = client.chat.completions.create.call_args.kwargs
+        assert kwargs["thinking"] == "high"
+
+    @pytest.mark.asyncio
+    async def test_together_reasoning_enabled_flag(self):
+        model = self._model("together", supportsReasoningEffort=True)
+        client = _mock_client([_chunk(content="ok", finish_reason="stop")])
+        _, _ = await _collect_events(
+            model,
+            Context(messages=[{"role": "user", "content": "Hi"}]),
+            client,
+            options={"reasoning": "high"},
+        )
+        kwargs = client.chat.completions.create.call_args.kwargs
+        assert kwargs["reasoning"] == {"enabled": True}
+        assert kwargs["reasoning_effort"] == "high"

@@ -93,6 +93,7 @@ from .github_copilot_headers import (
     has_copilot_vision_input,
 )
 from .compat_runtime import (
+    compat_value,
     max_tokens_field,
     supports_long_cache_retention,
     supports_reasoning_effort,
@@ -103,6 +104,10 @@ from ..utils.prompt_cache import (
     clamp_openai_prompt_cache_key,
     resolve_cache_retention,
 )
+
+
+# 推理阶段至少为回答保留的 token 数（对齐 TS simple-options.ts MIN_ANSWER_TOKENS）。
+MIN_ANSWER_TOKENS = 1024
 
 
 def _parse_chunk_usage(raw_usage: Any, model: Model) -> Usage:
@@ -361,29 +366,113 @@ async def chat_completions_stream(
             if cache_retention == "long" and supports_long:
                 kwargs["prompt_cache_retention"] = "24h"
 
-            # 推理级别转发（对齐 TS openai-completions.ts buildParams）。
-            #
-            # DeepSeek V4（thinkingFormat="deepseek"）：
-            #   - 指定 effort：thinking.type=enabled + reasoning_effort；
-            #     thinking_level_map 中缺失或为 None 的级别按原值透传；
-            #   - 未指定 effort 且 map 未把 off 声明为 None：
-            #     thinking.type=disabled（显式关闭推理）。
+            # 推理级别转发（对齐 TS openai-completions.ts buildParams 的
+            # thinkingFormat 矩阵：zai / qwen / qwen-chat-template /
+            # chat-template / baseten / deepseek / openrouter / ant-ling /
+            # together / string-thinking + vLLM thinking_token_budget）。
             reasoning_level = cast(ModelThinkingLevel | None, opts.get("reasoning"))
             thinking_map = model.thinking_level_map or {}
-            if thinking_format(model) == "deepseek" and model.reasoning:
-                if reasoning_level is not None and reasoning_level != "off":
+            thinking_fmt = thinking_format(model)
+
+            def _effort(level: ModelThinkingLevel | None):
+                if level is None:
+                    return None
+                mapped = thinking_map.get(level)
+                return mapped if mapped is not None else level
+
+            _thinking_on = reasoning_level is not None and reasoning_level != "off"
+
+            if model.reasoning and thinking_fmt == "zai":
+                if _thinking_on:
+                    kwargs["thinking"] = {"type": "enabled", "clear_thinking": False}
+                    if supports_reasoning_effort(model):
+                        kwargs["reasoning_effort"] = _effort(reasoning_level)
+                else:
+                    kwargs["thinking"] = {"type": "disabled"}
+            elif model.reasoning and thinking_fmt == "qwen":
+                kwargs["enable_thinking"] = _thinking_on
+                if _thinking_on and supports_reasoning_effort(model):
+                    kwargs["reasoning_effort"] = _effort(reasoning_level)
+            elif model.reasoning and thinking_fmt == "qwen-chat-template":
+                kwargs["chat_template_kwargs"] = {
+                    "enable_thinking": _thinking_on,
+                    "preserve_thinking": True,
+                }
+            elif model.reasoning and thinking_fmt in ("chat-template", "baseten"):
+                values: dict[str, Any] = {
+                    level: value for level, value in thinking_map.items() if isinstance(value, str)
+                }
+                if values:
+                    key = (
+                        "chat_template_kwargs"
+                        if thinking_fmt == "chat-template"
+                        else "chat_template_args"
+                    )
+                    kwargs[key] = values
+                if thinking_fmt == "baseten" and supports_reasoning_effort(model):
+                    mapped_effort = (
+                        _effort(reasoning_level) if _thinking_on else thinking_map.get("off")
+                    )
+                    if isinstance(mapped_effort, str):
+                        kwargs["reasoning_effort"] = mapped_effort
+            elif thinking_fmt == "deepseek" and model.reasoning:
+                if _thinking_on:
                     kwargs["thinking"] = {"type": "enabled"}
                     if supports_reasoning_effort(model):
-                        mapped_effort = thinking_map.get(reasoning_level)
-                        kwargs["reasoning_effort"] = (
-                            mapped_effort if mapped_effort is not None else reasoning_level
-                        )
+                        kwargs["reasoning_effort"] = _effort(reasoning_level)
                 elif "off" not in thinking_map or thinking_map["off"] is not None:
                     kwargs["thinking"] = {"type": "disabled"}
-            elif reasoning_level is not None and reasoning_level in thinking_map:
-                mapped_effort = thinking_map[reasoning_level]
-                if mapped_effort not in (None, "disabled") and supports_reasoning_effort(model):
-                    kwargs["reasoning_effort"] = mapped_effort
+            elif model.reasoning and thinking_fmt == "openrouter":
+                if _thinking_on:
+                    kwargs["reasoning"] = {"effort": _effort(reasoning_level)}
+                elif "off" not in thinking_map or thinking_map["off"] is not None:
+                    kwargs["reasoning"] = {"effort": thinking_map.get("off") or "none"}
+            elif model.reasoning and thinking_fmt == "ant-ling" and _thinking_on:
+                effort = thinking_map.get(cast(ModelThinkingLevel, reasoning_level))
+                if isinstance(effort, str):
+                    kwargs["reasoning"] = {"effort": effort}
+            elif model.reasoning and thinking_fmt == "together":
+                kwargs["reasoning"] = {"enabled": _thinking_on}
+                if _thinking_on and supports_reasoning_effort(model):
+                    kwargs["reasoning_effort"] = _effort(reasoning_level)
+            elif model.reasoning and thinking_fmt == "string-thinking":
+                if _thinking_on:
+                    kwargs["thinking"] = _effort(reasoning_level)
+                elif "off" not in thinking_map or thinking_map["off"] is not None:
+                    kwargs["thinking"] = thinking_map.get("off") or "none"
+            elif _thinking_on and supports_reasoning_effort(model):
+                # OpenAI-style reasoning_effort
+                kwargs["reasoning_effort"] = _effort(reasoning_level)
+            elif not _thinking_on and model.reasoning and supports_reasoning_effort(model):
+                off_value = thinking_map.get("off")
+                if isinstance(off_value, str):
+                    kwargs["reasoning_effort"] = off_value
+
+            # vLLM thinking_token_budget（对齐 TS）：推理与回答共享 max_tokens，
+            # 不设上限时推理阶段可能耗尽全部额度、没有回答与工具调用。
+            if (
+                compat_value(model, "supportsThinkingTokenBudget", False)
+                and _thinking_on
+                and model.reasoning
+            ):
+                budgets: dict[str, int] = {
+                    "minimal": 1024,
+                    "low": 2048,
+                    "medium": 8192,
+                    "high": 16384,
+                    **cast(dict[str, int], opts.get("thinking_budgets") or {}),
+                }
+                ceiling = (
+                    kwargs.get("max_tokens")
+                    or kwargs.get("max_completion_tokens")
+                    or model.max_tokens
+                )
+                budget = min(
+                    budgets.get(cast(ModelThinkingLevel, reasoning_level), 0) or 0,
+                    max(0, ceiling - MIN_ANSWER_TOKENS),
+                )
+                if budget > 0:
+                    kwargs["thinking_token_budget"] = budget
 
             # 发起流式请求。
             #
