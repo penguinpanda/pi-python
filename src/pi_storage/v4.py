@@ -1002,6 +1002,10 @@ class PostgresV4SessionStorage:
 
     async def find_entries(self, query: EntryQuery | None = None) -> list[Entry]:
         query = query or {}
+        _assert_query_limit(query.get("limit"))
+        cursor = query.get("cursor")
+        if cursor is not None:
+            _assert_query_cursor(cursor.get("afterSeq"))
         order = "ASC" if query.get("order") == "oldestFirst" else "DESC"
         conn = await self._repo._acquire()
         try:
@@ -1019,6 +1023,10 @@ class PostgresV4SessionStorage:
 
     async def find_entries_on_branch(self, query: BranchEntryQuery | None = None) -> list[Entry]:
         branch_query: dict[str, Any] = dict(query or {})
+        _assert_query_limit(branch_query.get("limit"))
+        cursor = branch_query.get("cursor")
+        if cursor is not None:
+            _assert_query_cursor(cursor.get("afterSeq"))
         start = branch_query.get("start")
         if not isinstance(start, str):
             raise SessionError("invalid_query", "branch query requires start")
@@ -1038,6 +1046,8 @@ class PostgresV4SessionStorage:
 
     async def find_records(self, query: RecordQuery | None = None) -> list[LaneRecord]:
         query = query or {}
+        _assert_query_limit(query.get("limit"))
+        _assert_query_cursor(query.get("afterSeq"))
         predicates = ["session_id = $1"]
         params: list[Any] = [self.session_id]
         if query.get("lane") is not None:
@@ -1077,7 +1087,8 @@ class PostgresV4SessionStorage:
     async def find_open_operations(
         self, lane: str, options: dict[str, int] | None = None
     ) -> list[OperationStartedRecord]:
-        del options
+        options = options or {}
+        _assert_query_limit(options.get("limit"))
         conn = await self._repo._acquire()
         try:
             row = await conn.fetchrow(
@@ -1109,6 +1120,8 @@ class PostgresV4SessionStorage:
 
     async def get_log(self, options: LogOptions | None = None) -> list[LogItem]:
         options = options or {}
+        _assert_query_limit(options.get("limit"))
+        _assert_query_cursor(options.get("afterSeq"))
         after_seq = options.get("afterSeq")
         conn = await self._repo._acquire()
         try:
@@ -1260,6 +1273,16 @@ def _filter_entries(entries: list[Entry], query: EntryQuery) -> list[Entry]:
         if query.get("limit") is not None and len(results) >= query["limit"]:
             break
     return results
+
+
+def _assert_query_limit(value: Any) -> None:
+    if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value <= 0):
+        raise SessionError("invalid_query", "limit must be a positive integer")
+
+
+def _assert_query_cursor(value: Any) -> None:
+    if value is not None and (not isinstance(value, int) or isinstance(value, bool) or value < 0):
+        raise SessionError("invalid_query", "cursor sequence must be a non-negative integer")
 
 
 def _decode_session_row(row: Any, path: str) -> PgSessionMetadata:

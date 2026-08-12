@@ -100,6 +100,13 @@
   `qwen-token-plan-cn`（`QWEN_TOKEN_PLAN_CN_API_KEY`），模型目录经
   `scripts/generate_models.py` 从 TS 上游数据生成（16 个 tool-capable 模型/站，
   含 qwen3.x / deepseek / kimi / glm / minimax），并注册默认模型 `qwen3.7-max`
+- Session v4 新增后端无关 conformance 工厂
+  `create_session_backend_conformance()`（`pi_agent.session.v4.testing`），
+  InMemory / JSONL / PostgreSQL 后端复用同一组一致性用例
+- JSONL v4 仓库支持注入 `JsonlSessionRepoFileSystem`（默认
+  `LocalFileSystem`）与 `JsonlSessionRepoOptions` 构造，`JsonlSessionStorage`
+  新增 `drain()`；公开导出 `JsonlSessionCreateOptions` /
+  `JsonlSessionListOptions` / `JsonlSessionMetadata` / `JsonlV4Header`
 
 ### Changed
 

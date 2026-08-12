@@ -9,6 +9,11 @@ import uuid
 
 import pytest
 
+from pi_agent.session.v4.testing.conformance import (
+    SessionBackendConformanceCase,
+    SessionBackendFixture,
+    create_session_backend_conformance,
+)
 from pi_storage.v4 import (
     PostgresV4SessionRepo,
     PgSessionSearch,
@@ -343,3 +348,40 @@ class TestWriterLease:
         await manager.append_message(_user("hi"))
         assert [m["role"] for m in manager.build_context()] == ["user"]
         await manager.close()
+
+
+class _PgConformanceFixture:
+    def __init__(self, repo: PostgresV4SessionRepo, schema: str) -> None:
+        self._repo = repo
+        self._schema = schema
+
+    @property
+    def repository(self) -> PostgresV4SessionRepo:
+        return self._repo
+
+    async def dispose(self) -> None:
+        await self._repo.close()
+        conn = await _dsn_connect()
+        try:
+            await conn.execute(f'DROP SCHEMA IF EXISTS "{self._schema}" CASCADE')
+        finally:
+            await conn.close()
+
+
+class TestBackendConformance:
+    @pytest.mark.asyncio
+    async def test_postgres_runs_shared_conformance(self) -> None:
+        if not PG_AVAILABLE:
+            pytest.skip("PostgreSQL not available")
+
+        def _factory() -> list[SessionBackendConformanceCase]:
+            async def factory() -> SessionBackendFixture:
+                schema = f"conform_{uuid.uuid4().hex[:10]}"
+                repo = PostgresV4SessionRepo(_dsn(), schema=schema)
+                await repo.connect()
+                return _PgConformanceFixture(repo, schema)
+
+            return create_session_backend_conformance(factory)
+
+        for case in _factory():
+            await case.run()
