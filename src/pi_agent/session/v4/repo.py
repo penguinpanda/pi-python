@@ -11,11 +11,13 @@ from pi_ai.utils.uuid import uuidv7
 
 from .codec import invalid_file, metadata_from_header, parse_header
 from .converter import convert_v3_file_to_v4, v3_header_metadata
+from .fs import JsonlSessionRepoFileSystem, LocalFileSystem
 from .json_validation import assert_json_serializable
 from .jsonl_types import (
     JsonlSessionCreateOptions,
     JsonlSessionListOptions,
     JsonlSessionMetadata,
+    JsonlSessionRepoOptions,
     JsonlV4Header,
 )
 from .session import Session
@@ -55,10 +57,6 @@ def _now_ms() -> int:
     return time.time_ns() // 1_000_000
 
 
-def _mtime_ms(path: Path) -> int:
-    return path.stat().st_mtime_ns // 1_000_000
-
-
 def _metadata_from_first_line(first_line: str, path: str, modified_at: int) -> JsonlSessionMetadata:
     """按首行 version 分发到 v4 / v3 元数据解析。"""
     if '"kind":"header"' in first_line or first_line.startswith('{"kind": "header"'):
@@ -69,21 +67,38 @@ def _metadata_from_first_line(first_line: str, path: str, modified_at: int) -> J
 class JsonlSessionRepo:
     """JSONL v4 会话仓库：create / open / list / delete / fork。"""
 
-    def __init__(self, sessions_root: str | Path) -> None:
-        self._sessions_root = Path(sessions_root).resolve()
+    def __init__(
+        self,
+        sessions_root: str | Path | JsonlSessionRepoOptions | None = None,
+        *,
+        fs: JsonlSessionRepoFileSystem | None = None,
+    ) -> None:
+        root: str | Path
+        file_system: JsonlSessionRepoFileSystem | None
+        if isinstance(sessions_root, dict):
+            options = sessions_root
+            root = options["sessionsRoot"]
+            file_system = options["fs"]
+        else:
+            if sessions_root is None:
+                raise TypeError("sessions_root or JsonlSessionRepoOptions is required")
+            root = sessions_root
+            file_system = fs
+        self._sessions_root = str(root)
+        self._fs = file_system or LocalFileSystem()
 
     async def create(self, options: JsonlSessionCreateOptions | None = None) -> Session:
         options = options or {}
         session_id = options.get("id") or uuidv7()
         _validate_session_id(session_id)
-        cwd = str(Path(options.get("cwd", ".")).resolve())
+        cwd = self._fs.absolute_path(options.get("cwd", "."))
         if await self._session_id_exists(session_id, cwd):
             raise SessionError("already_exists", f"Session already exists: {session_id}")
 
         created_at = _now_ms()
         session_dir = self._session_dir(cwd)
-        session_dir.mkdir(parents=True, exist_ok=True)
-        path = str(session_dir / _session_file_name(created_at, session_id))
+        self._fs.create_dir(session_dir, recursive=True)
+        path = self._fs.join_path([str(session_dir), _session_file_name(created_at, session_id)])
         if options.get("metadata") is not None:
             assert_json_serializable(options["metadata"])
         header: JsonlV4Header = {
@@ -97,7 +112,7 @@ class JsonlSessionRepo:
             header["parentSessionId"] = options["parentSessionId"]
         if options.get("metadata") is not None:
             header["metadata"] = options["metadata"]
-        storage = await JsonlSessionStorage.create(path, header)
+        storage = await JsonlSessionStorage.create(path, header, self._fs)
         return Session(storage)
 
     async def open(self, metadata: SessionMetadata) -> Session:
@@ -115,10 +130,12 @@ class JsonlSessionRepo:
     ) -> JsonlSessionMetadata:
         """按文件路径读取首行并构造元数据（v3/v4 均可）。"""
         file_path = Path(path)
-        first_line = file_path.read_text(encoding="utf-8").split("\n", 1)[0]
+        first_line = self._fs.read_text_file(file_path).split("\n", 1)[0]
         if not first_line:
             raise invalid_file(str(file_path), 1, "is missing a header")
-        metadata = _metadata_from_first_line(first_line, str(file_path), _mtime_ms(file_path))
+        metadata = _metadata_from_first_line(
+            first_line, str(file_path), self._fs.file_info(file_path).mtime_ms
+        )
         if cwd_override is not None:
             metadata["cwd"] = cwd_override
         return metadata
@@ -131,11 +148,11 @@ class JsonlSessionRepo:
         """加载存储；v3 文件始终惰性转换为 v4。"""
         metadata = jsonl_metadata
         path = Path(metadata["path"])
-        if not path.exists():
+        if not self._fs.exists(path):
             raise SessionError("not_found", f"Session not found: {metadata['path']}")
-        first_line = path.read_text(encoding="utf-8").split("\n", 1)[0]
+        first_line = self._fs.read_text_file(path).split("\n", 1)[0]
         if '"kind":"header"' in first_line or first_line.startswith('{"kind": "header"'):
-            return await JsonlSessionStorage.load(str(path))
+            return await JsonlSessionStorage.load(str(path), self._fs)
         return await convert_v3_file_to_v4(str(path))
 
     async def list(
@@ -144,32 +161,37 @@ class JsonlSessionRepo:
         options = options or {}
         directories: list[Path]
         if options.get("cwd") is not None:
-            directory = self._session_dir(str(Path(options["cwd"]).resolve()))
-            directories = [directory] if directory.exists() else []
+            directory = Path(self._session_dir(self._fs.absolute_path(options["cwd"])))
+            directories = [directory] if self._fs.exists(directory) else []
         else:
-            if not self._sessions_root.exists():
+            if not self._fs.exists(self._sessions_root):
                 directories = []
             else:
-                directories = [entry for entry in self._sessions_root.iterdir() if entry.is_dir()]
+                directories = [
+                    Path(entry.path)
+                    for entry in self._fs.list_dir(self._sessions_root)
+                    if entry.kind in ("directory", "symlink")
+                ]
         metadata: list[JsonlSessionMetadata] = []
         for directory in directories:
-            for file_path in directory.iterdir():
-                if file_path.is_dir() or not file_path.name.endswith(".jsonl"):
+            for file_info in self._fs.list_dir(directory):
+                if file_info.kind == "directory" or not file_info.name.endswith(".jsonl"):
                     continue
-                content = file_path.read_text(encoding="utf-8")
+                file_path = Path(file_info.path)
+                content = self._fs.read_text_file(file_path)
                 first_line = content.split("\n", 1)[0]
                 if not first_line:
                     raise invalid_file(str(file_path), 1, "is missing a header")
                 metadata.append(
-                    _metadata_from_first_line(first_line, str(file_path), _mtime_ms(file_path))
+                    _metadata_from_first_line(first_line, str(file_path), file_info.mtime_ms)
                 )
         metadata.sort(key=lambda item: item["modifiedAt"], reverse=True)
         return metadata
 
     async def delete(self, metadata: SessionMetadata) -> None:
         path = Path(cast(JsonlSessionMetadata, metadata)["path"])
-        path.unlink(missing_ok=True)
-        Path(f"{path}.bak").unlink(missing_ok=True)
+        self._fs.remove(path, force=True)
+        self._fs.remove(Path(f"{path}.bak"), force=True)
 
     async def fork(
         self,
@@ -182,13 +204,13 @@ class JsonlSessionRepo:
         fork_options = cast(dict[str, Any], options)
         session_id = options.get("id") or uuidv7()
         _validate_session_id(session_id)
-        cwd = str(Path(fork_options.get("cwd") or source_metadata.get("cwd") or ".").resolve())
+        cwd = self._fs.absolute_path(fork_options.get("cwd") or source_metadata.get("cwd") or ".")
         if await self._session_id_exists(session_id, cwd):
             raise SessionError("already_exists", f"Session already exists: {session_id}")
         created_at = _now_ms()
         session_dir = self._session_dir(cwd)
-        session_dir.mkdir(parents=True, exist_ok=True)
-        path = str(session_dir / _session_file_name(created_at, session_id))
+        self._fs.create_dir(session_dir, recursive=True)
+        path = self._fs.join_path([str(session_dir), _session_file_name(created_at, session_id)])
         header: JsonlV4Header = {
             "kind": "header",
             "version": 4,
@@ -203,15 +225,19 @@ class JsonlSessionRepo:
         storage = await source_storage.fork(path, header, options)
         return Session(storage)
 
-    def _session_dir(self, cwd: str) -> Path:
-        return self._sessions_root / _session_directory_name(cwd)
+    def _session_dir(self, cwd: str) -> str:
+        root = self._fs.absolute_path(self._sessions_root)
+        return self._fs.join_path([root, _session_directory_name(cwd)])
 
     async def _session_id_exists(self, session_id: str, cwd: str) -> bool:
         suffix = f"_{session_id}.jsonl"
         directory = self._session_dir(cwd)
-        if not directory.exists():
+        if not self._fs.exists(directory):
             return False
-        return any(entry.is_file() and entry.name.endswith(suffix) for entry in directory.iterdir())
+        return any(
+            entry.kind != "directory" and entry.name.endswith(suffix)
+            for entry in self._fs.list_dir(directory)
+        )
 
 
 __all__ = ["JsonlSessionRepo", "_validate_session_id"]

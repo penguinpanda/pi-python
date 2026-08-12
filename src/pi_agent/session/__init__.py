@@ -6,11 +6,25 @@
 from __future__ import annotations
 
 from .v4.context import build_session_context
+from .v4.fs import FileInfo, JsonlSessionRepoFileSystem, LocalFileSystem
+from .v4.jsonl_types import (
+    JsonlSessionCreateOptions,
+    JsonlSessionListOptions,
+    JsonlSessionMetadata,
+    JsonlSessionRepoOptions,
+    JsonlV4Header,
+)
 from .v4.memory import InMemorySessionRepo, InMemorySessionStorage
 from .v4.repo import JsonlSessionRepo
 from .v4.search import ScanningSessionSearch
 from .v4.session import Session, SessionTree
 from .v4.storage import JsonlSessionStorage
+from .v4.testing import (
+    SessionBackendConformanceCase,
+    SessionBackendFixture,
+    SessionBackendFixtureFactory,
+    create_session_backend_conformance,
+)
 from .v4.types import (
     SessionError,
     SessionRepo,
@@ -21,12 +35,24 @@ __all__ = [
     "Session",
     "SessionTree",
     "SessionError",
+    "FileInfo",
     "SessionStorage",
     "SessionRepo",
+    "JsonlSessionRepoFileSystem",
+    "JsonlSessionRepoOptions",
+    "JsonlSessionCreateOptions",
+    "JsonlSessionListOptions",
+    "JsonlSessionMetadata",
+    "JsonlV4Header",
+    "LocalFileSystem",
     "InMemorySessionRepo",
     "InMemorySessionStorage",
     "JsonlSessionRepo",
     "JsonlSessionStorage",
     "ScanningSessionSearch",
+    "SessionBackendConformanceCase",
+    "SessionBackendFixture",
+    "SessionBackendFixtureFactory",
     "build_session_context",
+    "create_session_backend_conformance",
 ]

@@ -6,6 +6,7 @@ from typing import Any, Literal, TypedDict
 
 from typing_extensions import NotRequired
 
+from .fs import JsonlSessionRepoFileSystem
 from .types import SessionCreateOptions, SessionMetadata
 
 
@@ -46,9 +47,17 @@ class JsonlSessionListOptions(TypedDict, total=False):
     cwd: str
 
 
+class JsonlSessionRepoOptions(TypedDict):
+    """JSONL 仓库构造选项（对齐 TS `JsonlSessionRepoOptions`）。"""
+
+    fs: JsonlSessionRepoFileSystem
+    sessionsRoot: str
+
+
 __all__ = [
     "JsonlSessionMetadata",
     "JsonlV4Header",
     "JsonlSessionCreateOptions",
     "JsonlSessionListOptions",
+    "JsonlSessionRepoOptions",
 ]

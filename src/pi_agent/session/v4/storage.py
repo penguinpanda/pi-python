@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import time
 from copy import deepcopy
 from pathlib import Path
@@ -17,6 +16,7 @@ from .codec import (
     parse_header,
     parse_mutation,
 )
+from .fs import JsonlSessionRepoFileSystem, LocalFileSystem
 from .jsonl_types import JsonlSessionMetadata, JsonlV4Header
 from .state import SessionMutation, SessionState
 from .types import (
@@ -37,47 +37,65 @@ from .types import (
 )
 
 
-def _publish_file_atomically(destination: str, populate: Callable[[str], None]) -> None:
+def _publish_file_atomically(
+    destination: str,
+    populate: Callable[[str], None],
+    fs: JsonlSessionRepoFileSystem | None = None,
+) -> None:
     """写入临时文件后原子 rename；失败时尽力清理临时文件并保留原文件。"""
+    file_system = fs or LocalFileSystem()
     temp_path = f"{destination}.tmp"
     try:
         populate(temp_path)
-        os.replace(temp_path, destination)
+        file_system.rename_file(temp_path, destination)
     except Exception:
         try:
-            os.unlink(temp_path)
-        except FileNotFoundError:
+            file_system.remove(temp_path, force=True)
+        except OSError:
             pass
         raise
-
-
-def _mtime_ms(path: Path) -> int:
-    return path.stat().st_mtime_ns // 1_000_000
 
 
 class JsonlSessionStorage:
     """JSONL v4 会话存储：写入串行化 + 原子发布 + torn-tail 修复。"""
 
-    def __init__(self, path: str | Path, metadata: JsonlSessionMetadata) -> None:
+    def __init__(
+        self,
+        path: str | Path,
+        metadata: JsonlSessionMetadata,
+        fs: JsonlSessionRepoFileSystem | None = None,
+    ) -> None:
         self._path = Path(path)
         self._metadata = deepcopy(metadata)
         self._state = SessionState()
         self._lock = asyncio.Lock()
+        self._fs = fs or LocalFileSystem()
 
     @staticmethod
-    async def create(path: str, header: JsonlV4Header) -> "JsonlSessionStorage":
+    async def create(
+        path: str,
+        header: JsonlV4Header,
+        fs: JsonlSessionRepoFileSystem | None = None,
+    ) -> "JsonlSessionStorage":
         file_path = Path(path)
-        file_path.write_text(encode_header(header), encoding="utf-8")
+        file_system = fs or LocalFileSystem()
+        file_system.write_file(file_path, encode_header(header))
+        info = file_system.file_info(file_path)
         return JsonlSessionStorage(
             file_path,
-            metadata_from_header(header, str(file_path), _mtime_ms(file_path)),
+            metadata_from_header(header, str(file_path), info.mtime_ms),
+            file_system,
         )
 
     @staticmethod
-    async def load(path: str) -> "JsonlSessionStorage":
+    async def load(
+        path: str,
+        fs: JsonlSessionRepoFileSystem | None = None,
+    ) -> "JsonlSessionStorage":
         file_path = Path(path)
+        file_system = fs or LocalFileSystem()
         try:
-            content = file_path.read_text(encoding="utf-8")
+            content = file_system.read_text_file(file_path)
         except FileNotFoundError as error:
             raise SessionError("not_found", f"Session not found: {path}", error) from error
         physical_lines = content.split("\n")
@@ -88,7 +106,8 @@ class JsonlSessionStorage:
         header = parse_header(physical_lines[0], str(file_path))
         storage = JsonlSessionStorage(
             file_path,
-            metadata_from_header(header, str(file_path), _mtime_ms(file_path)),
+            metadata_from_header(header, str(file_path), file_system.file_info(file_path).mtime_ms),
+            file_system,
         )
         for index in range(1, len(physical_lines)):
             line = physical_lines[index]
@@ -100,17 +119,17 @@ class JsonlSessionStorage:
                 valid_prefix = "\n".join(physical_lines[:index]) + "\n"
 
                 def _repair_torn_tail(temp: str, prefix: str = valid_prefix) -> None:
-                    Path(temp).write_text(prefix, encoding="utf-8")
+                    file_system.write_file(temp, prefix)
 
                 _publish_file_atomically(
                     str(file_path),
                     _repair_torn_tail,
+                    file_system,
                 )
                 return storage
             storage._apply_mutation(mutation, str(file_path), index + 1)
         if not content.endswith("\n"):
-            with file_path.open("a", encoding="utf-8") as handle:
-                handle.write("\n")
+            file_system.append_file(file_path, "\n")
         return storage
 
     async def fork(
@@ -123,14 +142,17 @@ class JsonlSessionStorage:
             target_state.apply_mutation(mutation)
 
         def _populate(temp: str) -> None:
-            temp_path = Path(temp)
-            temp_path.write_text(encode_header(header), encoding="utf-8")
-            with temp_path.open("a", encoding="utf-8") as handle:
-                for mutation in mutations:
-                    handle.write(encode_mutation(mutation))
+            self._fs.write_file(temp, encode_header(header))
+            for mutation in mutations:
+                self._fs.append_file(temp, encode_mutation(mutation))
 
-        _publish_file_atomically(str(path), _populate)
-        return await JsonlSessionStorage.load(path)
+        _publish_file_atomically(str(path), _populate, self._fs)
+        return await JsonlSessionStorage.load(path, self._fs)
+
+    async def drain(self) -> None:
+        """等待当前串行化写入完成（对齐 TS `drain()`）。"""
+        async with self._lock:
+            return None
 
     async def get_metadata(self) -> JsonlSessionMetadata:
         return deepcopy(self._metadata)
@@ -257,8 +279,7 @@ class JsonlSessionStorage:
         return deepcopy(self._state.get_stats())
 
     def _append_mutation(self, mutation: SessionMutation) -> None:
-        with self._path.open("a", encoding="utf-8") as handle:
-            handle.write(encode_mutation(mutation))
+        self._fs.append_file(self._path, encode_mutation(mutation))
 
     def _apply_mutation(
         self,

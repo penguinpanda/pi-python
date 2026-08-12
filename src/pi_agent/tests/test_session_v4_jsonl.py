@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from pi_agent.session.v4.fs import LocalFileSystem
 from pi_agent.session.v4.repo import JsonlSessionRepo
 from pi_agent.session.v4.storage import JsonlSessionStorage, _publish_file_atomically
 from pi_agent.session.v4.types import SessionError
 
-from test_session_v4_conformance import (
+from pi_agent.session.v4.testing.conformance import (
     create_assistant_message,
     create_user_message,
     entry_ids,
@@ -243,3 +245,39 @@ class TestRepair:
             _publish_file_atomically(str(destination), _boom)
         assert destination.read_text(encoding="utf-8") == "original\n"
         assert not Path(f"{destination}.tmp").exists()
+
+
+class _RecordingFileSystem:
+    def __init__(self, inner: LocalFileSystem) -> None:
+        self._inner = inner
+        self.calls: list[str] = []
+
+    def __getattr__(self, name: str) -> Any:
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            self.calls.append(name)
+            return getattr(self._inner, name)(*args, **kwargs)
+
+        return wrapper
+
+
+class TestFileSystemAbstraction:
+    @pytest.mark.asyncio
+    async def test_repo_accepts_options_dict_and_injected_fs(self, tmp_path):
+        recording = _RecordingFileSystem(LocalFileSystem())
+        repo = JsonlSessionRepo({"sessionsRoot": str(tmp_path / "sessions"), "fs": recording})
+
+        session = await repo.create({"id": "one", "cwd": str(tmp_path)})
+        await session.append_message(create_user_message("root"))
+
+        listed = await repo.list()
+        assert [item["id"] for item in listed] == ["one"]
+        assert "create_dir" in recording.calls
+        assert "write_file" in recording.calls
+
+    @pytest.mark.asyncio
+    async def test_storage_drain_is_available(self, repo, tmp_path):
+        session = await repo.create({"id": "drain", "cwd": str(tmp_path)})
+        await session.append_message(create_user_message("root"))
+        storage = session._storage
+        await storage.drain()
+        assert (await storage.get_stats())["messageCount"] == 1

@@ -1,10 +1,18 @@
-"""JSONL v4 Session 内存模型（对齐 TS harness/session 的 v4 语义）。
+"""v4 Session 系统（对齐 TS `harness/session`）。
 
-本子包是 `docs/nd_upload/pi-agent/session-v4-migration-plan.md` M0 的产物：
-只包含纯内存模型（类型 / SessionState / Session facade / InMemory 存储），
-不涉及文件读写。JSONL v4 存储与迁移由后续里程碑实现。
+包含内存模型、JSONL 持久化/迁移、搜索索引、reducer 与后端 conformance 工厂。
 """
 
+from __future__ import annotations
+
+from .fs import FileInfo, JsonlSessionRepoFileSystem, LocalFileSystem
+from .jsonl_types import (
+    JsonlSessionCreateOptions,
+    JsonlSessionListOptions,
+    JsonlSessionMetadata,
+    JsonlSessionRepoOptions,
+    JsonlV4Header,
+)
 from .memory import InMemorySessionRepo, InMemorySessionStorage
 from .repo import JsonlSessionRepo
 from .reducer import (
@@ -24,13 +32,27 @@ from .search import ScanningSessionSearch
 from .session import Session, SessionTree
 from .state import SessionState
 from .storage import JsonlSessionStorage
+from .testing import (
+    SessionBackendConformanceCase,
+    SessionBackendFixture,
+    SessionBackendFixtureFactory,
+    create_session_backend_conformance,
+)
 from .types import SessionError
 
 __all__ = [
+    "FileInfo",
     "InMemorySessionRepo",
     "InMemorySessionStorage",
     "JsonlSessionRepo",
+    "JsonlSessionRepoFileSystem",
+    "JsonlSessionRepoOptions",
     "JsonlSessionStorage",
+    "JsonlSessionCreateOptions",
+    "JsonlSessionListOptions",
+    "JsonlSessionMetadata",
+    "JsonlV4Header",
+    "LocalFileSystem",
     "EffectiveLaneConfiguration",
     "LaneReductionInput",
     "LaneReductionResult",
@@ -39,12 +61,16 @@ __all__ = [
     "RecordLogCorruptionReason",
     "RecordLogSlice",
     "ScanningSessionSearch",
+    "SessionBackendConformanceCase",
+    "SessionBackendFixture",
+    "SessionBackendFixtureFactory",
     "Session",
     "SessionError",
     "SessionState",
     "SessionTree",
     "TerminalFailureState",
     "ToolBatchState",
+    "create_session_backend_conformance",
     "reduce_lane_state",
     "validate_record_log",
 ]
