@@ -66,6 +66,8 @@ packages = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = [
+    "tests/parity",
+    "tests/golden",
     "src/pi_ai/tests",
     "src/pi_agent/tests",
     "src/pi_coding_agent/tests",
