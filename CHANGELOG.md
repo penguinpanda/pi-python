@@ -169,10 +169,6 @@
   `pi config` 只读视图、`pi update --models` 目录刷新、CLI `--name` 会话命名、
   `--mode text/json` TS 命名别名；RPC prompt preflight 语义（提交成功才发
   success，失败发 error，对齐 TS preflightResult）
-- OAuth loopback 安全/资源修复：每次登录独立回调状态与幂等关闭（OpenRouter）、
-  回调与手动粘贴并行竞争（Codex/OpenRouter/Radius，浏览器不可达不再挂起）、
-  state 校验、回调响应连接回收；包管理命令注入防护（npm/git `--` 分隔、
-  空源与路径逃逸拒绝、子进程超时）；远程目录 404/501 清空动态模型
 - TUI Ctrl+Z suspend 挂起恢复（POSIX：退出 alt-screen → SIGTSTP，挂起期间
   忽略 SIGINT，SIGCONT 恢复重绘；Windows 提示不支持，对齐 TS handleCtrlZ）
 - OAuth login 主流程与 loopback socket 回归测试（xAI device-code、OpenRouter
@@ -326,6 +322,11 @@
 - 修复 PostgreSQL v4 会话后端 conformance 问题：`get_log` 保留 `entry_seq`
   列、fork 初始化 `session_sequences` 并补齐默认 `parentSessionId`，
   `session_sequences` 写入改为 upsert
+- OAuth loopback 安全/资源修复：每次登录独立回调状态与幂等关闭（OpenRouter）、
+  回调与手动粘贴并行竞争（Codex/OpenRouter/Radius，浏览器不可达不再挂起）、
+  state 校验、回调响应连接回收；包管理命令注入防护（npm/git `--` 分隔、
+  空源与路径逃逸拒绝、子进程超时）；远程目录 404/501 清空动态模型
+- mermaid `bt` 方向行序反转、节点框按 CJK 显示宽度计算、空图保留原代码块
 
 ## [0.1.0]
 
