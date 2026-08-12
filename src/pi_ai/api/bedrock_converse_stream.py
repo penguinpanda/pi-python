@@ -49,6 +49,7 @@ from ..utils.cost import calculate_cost
 from ..utils.provider_env import get_provider_env_value
 from ._shared import build_error_message, empty_usage, parse_tool_arguments
 from .simple_options import clamp_max_tokens_to_context
+from ..utils.prompt_cache import resolve_cache_retention
 
 _AsyncClient = httpx.AsyncClient
 _DEFAULT_REGION = "us-east-1"
@@ -226,6 +227,24 @@ async def read_bedrock_events(
             yield message
 
 
+def _supports_prompt_caching(model: Model, env: dict | None) -> bool:
+    """模型是否支持 Bedrock prompt caching（对齐 TS supportsPromptCaching）。"""
+    candidates = [model.id, model.name or ""]
+    has_claude_ref = any("claude" in s for s in candidates)
+    if not has_claude_ref:
+        # application inference profile ARN 不含模型名：允许环境变量强制。
+        return get_provider_env_value("AWS_BEDROCK_FORCE_CACHE", env) == "1"
+    if any(t in s for s in candidates for t in ("fable-5", "opus-5", "sonnet-5")):
+        return True
+    if any("-4-" in s for s in candidates):
+        return True
+    if any("claude-3-7-sonnet" in s for s in candidates):
+        return True
+    if any("claude-3-5-haiku" in s for s in candidates):
+        return True
+    return False
+
+
 def _to_bedrock_messages(context: Context) -> list[dict[str, Any]]:
     messages: list[dict[str, Any]] = []
     i = 0
@@ -400,6 +419,17 @@ def bedrock_converse_stream(
     tools = _to_bedrock_tools(context)
     requested = opts.get("max_tokens")
     max_tokens = requested if requested is not None else model.max_tokens
+
+    # Prompt caching（对齐 TS convertMessages 的 cachePoint 注入）。
+    cache_retention = resolve_cache_retention(opts.get("cache_retention"), opts.get("env"))
+    env = cast(dict | None, opts.get("env"))
+    if cache_retention != "none" and _supports_prompt_caching(model, env) and messages:
+        last_message = messages[-1]
+        if last_message.get("role") == "user" and last_message.get("content"):
+            cache_point: dict[str, Any] = {"type": "default"}
+            if cache_retention == "long":
+                cache_point["ttl"] = 3600
+            cast(list[dict[str, Any]], last_message["content"]).append({"cachePoint": cache_point})
 
     payload: dict[str, Any] = {
         "modelId": model.id,

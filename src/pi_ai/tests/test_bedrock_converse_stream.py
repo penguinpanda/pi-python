@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import struct
 from datetime import datetime, timezone
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -50,35 +51,38 @@ def _frame(payload: dict, event_type: str) -> bytes:
 def test_tool_results_merged_and_images_converted() -> None:
     """连续 toolResult 合并为单条 user 消息；image 内容转换为 Bedrock 格式。"""
     context = Context(
-        messages=[
-            {
-                "role": "assistant",
-                "content": [
-                    {
-                        "type": "toolCall",
-                        "id": "tc-1",
-                        "name": "bash",
-                        "arguments": {"command": "ls"},
-                    }
-                ],
-            },
-            {
-                "role": "toolResult",
-                "tool_call_id": "tc-1",
-                "content": [{"type": "text", "text": "ok"}],
-            },
-            {
-                "role": "toolResult",
-                "tool_call_id": "tc-1",
-                "content": [
-                    {
-                        "type": "image",
-                        "mime_type": "image/png",
-                        "data": b"\x89PNG",
-                    }
-                ],
-            },
-        ]
+        messages=cast(
+            Any,
+            [
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "toolCall",
+                            "id": "tc-1",
+                            "name": "bash",
+                            "arguments": {"command": "ls"},
+                        }
+                    ],
+                },
+                {
+                    "role": "toolResult",
+                    "tool_call_id": "tc-1",
+                    "content": [{"type": "text", "text": "ok"}],
+                },
+                {
+                    "role": "toolResult",
+                    "tool_call_id": "tc-1",
+                    "content": [
+                        {
+                            "type": "image",
+                            "mime_type": "image/png",
+                            "data": b"\x89PNG",
+                        }
+                    ],
+                },
+            ],
+        ),
     )
     messages = _to_bedrock_messages(context)
     assert len(messages) == 2
@@ -95,12 +99,69 @@ def test_tool_results_merged_and_images_converted() -> None:
 
 def test_empty_tool_result_uses_placeholder() -> None:
     context = Context(
-        messages=[
-            {"role": "toolResult", "tool_call_id": "tc-1", "content": []},
-        ]
+        messages=cast(
+            Any,
+            [
+                {"role": "toolResult", "tool_call_id": "tc-1", "content": []},
+            ],
+        )
     )
     messages = _to_bedrock_messages(context)
     assert messages[0]["content"][0]["toolResult"]["content"] == [{"text": "<empty>"}]
+
+
+def test_supports_prompt_caching() -> None:
+    from pi_ai.api.bedrock_converse_stream import _supports_prompt_caching
+
+    claude4 = Model(
+        id="anthropic.claude-sonnet-4-20250514",
+        provider="amazon-bedrock",
+        api="bedrock-converse-stream",
+    )
+    assert _supports_prompt_caching(claude4, None)
+    claude37 = Model(id="anthropic.claude-3-7-sonnet", provider="p", api="a")
+    assert _supports_prompt_caching(claude37, None)
+    other = Model(id="arn:aws:bedrock:us-east-1:123:inference-profile/x", provider="p", api="a")
+    assert not _supports_prompt_caching(other, None)
+    assert _supports_prompt_caching(other, {"AWS_BEDROCK_FORCE_CACHE": "1"})
+
+
+@pytest.mark.asyncio
+async def test_cache_point_added_to_last_user_message(monkeypatch) -> None:
+    """cacheRetention 非 none 且模型支持时，最后一条 user 消息追加 cachePoint。"""
+    events = [
+        _frame({"type": "messageStart"}, "messageStart"),
+        _frame(
+            {"type": "contentBlockDelta", "delta": {"text": "ok"}},
+            "contentBlockDelta",
+        ),
+        _frame({"type": "contentBlockStop", "contentBlockIndex": 0}, "contentBlockStop"),
+        _frame({"type": "messageStop", "stopReason": "end_turn"}, "messageStop"),
+    ]
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200, content=b"".join(events), headers={"content-type": "application/json"}
+        )
+
+    monkeypatch.setattr(
+        bedrock_converse_stream,
+        "_AsyncClient",
+        lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(handler), **kwargs),
+    )
+    stream = bedrock_converse_stream.bedrock_converse_stream(
+        _model(),
+        _context(),
+        "token",
+        "",
+        cast(Any, {"region": "us-west-2", "cache_retention": "long"}),
+    )
+    async for _event in stream:
+        pass
+    blocks = captured["payload"]["messages"][-1]["content"]
+    assert blocks[-1]["cachePoint"] == {"type": "default", "ttl": 3600}
 
 
 def test_thinking_fields() -> None:
