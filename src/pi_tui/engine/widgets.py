@@ -1905,6 +1905,7 @@ class SelectList(Widget):
         search_placeholder: str = "Filter...",
         list_id: str | None = None,
         max_height: int = 14,
+        show_scroll_indicator: bool = False,
         **kwargs: Any,
     ) -> None:
         super().__init__(focusable=True, **kwargs)
@@ -1915,6 +1916,7 @@ class SelectList(Widget):
         self._search_placeholder = search_placeholder
         self._list_id = list_id or "select-list-view"
         self.max_height = max_height
+        self._show_scroll_indicator = show_scroll_indicator
         self.query = ""
         self._selected_index = 0
         if current is not None:
@@ -1982,19 +1984,43 @@ class SelectList(Widget):
             if not self.query:
                 style = (style or Style()) + Style(dim=True)
             lines.append(line_from_text(self.query or self._search_placeholder, width, style))
-        visible = min(height - len(lines), len(self._filtered))
-        for index in range(visible):
+        capacity = max(1, height - len(lines))
+        total = len(self._filtered)
+        scrolls = self._show_scroll_indicator and total > capacity
+        list_capacity = capacity - 1 if scrolls else capacity
+        # 居中滚动窗口（对齐 TS model-selector：选中项位于窗口中部并 clamp）。
+        if total <= list_capacity:
+            start = 0
+        else:
+            start = min(
+                max(0, self._selected_index - list_capacity // 2),
+                total - list_capacity,
+            )
+        visible = min(list_capacity, total - start)
+        for offset in range(visible):
+            index = start + offset
             item = self._filtered[index]
             marker = ">" if index == self._selected_index else " "
-            if item.value == self._current and index != self._selected_index:
-                marker = "•"
-            label = f"{marker} {item.display_label}"
+            suffix = ""
+            if item.value == self._current:
+                suffix = " ✓"
+            label = f"{marker} {item.display_label}{suffix}"
             if item.description:
                 label += f"  {item.description}"
             style = self.base_style
             if index == self._selected_index:
                 style = (style or Style()) + Style(reverse=True)
             lines.append(line_from_text(label, width, style))
+        if scrolls and (start > 0 or start + visible < total):
+            if len(lines) < height:
+                indicator_style = (self.base_style or Style()) + Style(dim=True)
+                lines.append(
+                    line_from_text(
+                        f"  ({self._selected_index + 1}/{total})",
+                        width,
+                        indicator_style,
+                    )
+                )
         while len(lines) < height:
             lines.append(blank_line(width, self.base_style))
         return lines

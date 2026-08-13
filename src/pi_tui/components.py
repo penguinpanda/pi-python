@@ -180,6 +180,10 @@ def message_to_entries(
             )
         for tool_call in tool_calls:
             entries.append(("Tool call", tool_call))
+        error_message = message.get("error_message")
+        if not entries and isinstance(error_message, str) and error_message:
+            # 异常路径合成的空内容错误消息：显示错误详情。
+            entries.append((label, error_message))
         if not entries and images_out:
             entries.append((label, "[image]"))
         return entries

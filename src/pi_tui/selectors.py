@@ -66,7 +66,8 @@ class CopySelectedMixin:
 
 
 def _model_label(model) -> str:
-    return f"{model.provider}/{model.id}  {model.name}"
+    """对齐 TS model-selector：`model-id [provider]`（id 在前、provider badge 在后）。"""
+    return f"{model.id} [{model.provider}]"
 
 
 class _ResultSelectList(SelectList):
@@ -95,7 +96,7 @@ class _ResultSelectList(SelectList):
 
 
 class ModelSelector(OverlayDialog):
-    """模型选择器：分组显示 + 实时搜索 + 键盘导航。"""
+    """模型选择器：分组显示 + 实时搜索 + 键盘导航（对齐 TS ModelSelectorComponent）。"""
 
     def __init__(self, models: list[Any], current: Any | None = None) -> None:
         super().__init__()
@@ -114,7 +115,8 @@ class ModelSelector(OverlayDialog):
             current=current_key,
             enable_search=True,
             search_placeholder="Search models...",
-            max_height=12,
+            max_height=11,
+            show_scroll_indicator=True,
             on_selected=self._on_selected,
             on_cancelled=lambda: self.dismiss(None),
         )

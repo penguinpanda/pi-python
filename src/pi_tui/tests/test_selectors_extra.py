@@ -30,8 +30,27 @@ def test_model_selector_navigation_and_render() -> None:
     selector = ModelSelector(models, current=models[0])
     assert selector.handle_key(_key("down")) is True
     lines = selector.render(80, 20)
-    assert "faux/faux-1" in "\n".join(line.text() for line in lines)
+    assert "faux-1 [faux]" in "\n".join(line.text() for line in lines)
     assert selector.handle_key(_key("enter")) is True
+
+
+def test_model_selector_scroll_window_and_current_marker() -> None:
+    """滚动窗口居中、滚动指示器、当前模型 ✓ 标记（对齐 TS model-selector）。"""
+    models = [SimpleNamespace(provider="faux", id=f"m-{index}", name="M") for index in range(30)]
+    # 当前模型指向列表尾部：打开时窗口应包含它（居中滚动）。
+    selector = ModelSelector(models, current=models[25])
+    lines = selector.render(80, 12)
+    text = "\n".join(line.text() for line in lines)
+    assert "m-25 [faux]" in text  # 当前模型在窗口内
+    assert "✓" in text  # 当前标记
+    assert "(26/30)" in text  # 滚动指示器
+
+    # 导航到末尾：窗口跟随且指示器更新
+    for _ in range(4):
+        selector.handle_key(_key("down"))
+    text = "\n".join(line.text() for line in selector.render(80, 12))
+    assert "m-29 [faux]" in text
+    assert "(30/30)" in text
 
 
 def test_choice_selector_search() -> None:
