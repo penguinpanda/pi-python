@@ -82,7 +82,7 @@ class TestModelsRegistry:
 
         ds_pro = models.get_model("deepseek", "deepseek-v4-pro")
         assert ds_pro is not None
-        assert ds_pro.api == "openai-completions"
+        assert ds_pro.api == "openai-responses"
         assert ds_pro.context_window == 1000000
 
     def test_get_model_missing(self):

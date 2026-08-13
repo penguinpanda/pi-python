@@ -55,6 +55,18 @@ _MODEL_OVERRIDES: dict[str, dict[str, dict[str, Any]]] = {
                 "supportsWebSearch": True,
             },
         },
+        "deepseek-v4-pro": {
+            "api": "openai-responses",
+            "compat": {
+                "supportsStore": False,
+                "supportsDeveloperRole": False,
+                "requiresReasoningContentOnAssistantMessages": True,
+                "thinkingFormat": "deepseek",
+                "supportsExplicitPromptCacheMode": False,
+                "supportsLongCacheRetention": False,
+                "supportsWebSearch": True,
+            },
+        },
     },
 }
 

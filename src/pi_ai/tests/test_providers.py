@@ -117,7 +117,7 @@ class TestDeepSeekProvider:
         assert v4_flash.cost.cache_write == 0.0
         assert v4_flash.thinking_level_map == {
             "minimal": None,
-            "low": None,
+            "low": "low",
             "medium": None,
             "high": "high",
             "max": "max",
@@ -133,7 +133,7 @@ class TestDeepSeekProvider:
         }
 
         v4_pro = by_id["deepseek-v4-pro"]
-        assert v4_pro.api == "openai-completions"
+        assert v4_pro.api == "openai-responses"
         assert v4_pro.reasoning is True
         assert v4_pro.max_tokens == 384000
         assert v4_pro.context_window == 1000000
@@ -141,6 +141,22 @@ class TestDeepSeekProvider:
         assert v4_pro.cost.output == 0.87
         assert v4_pro.cost.cache_read == 0.003625
         assert v4_pro.cost.cache_write == 0.0
+        assert v4_pro.thinking_level_map == {
+            "minimal": None,
+            "low": "low",
+            "medium": None,
+            "high": "high",
+            "max": "max",
+        }
+        assert v4_pro.compat == {
+            "supportsStore": False,
+            "supportsDeveloperRole": False,
+            "requiresReasoningContentOnAssistantMessages": True,
+            "thinkingFormat": "deepseek",
+            "supportsExplicitPromptCacheMode": False,
+            "supportsLongCacheRetention": False,
+            "supportsWebSearch": True,
+        }
 
 
 class TestQwenProvider:
