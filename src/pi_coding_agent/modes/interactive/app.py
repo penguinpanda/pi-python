@@ -21,11 +21,6 @@ from pi_tui.components import (
     BashExecutionEntry,
     MessageEntry,
     ToolExecutionEntry,
-    PiChatContainer,
-    PiEditor,
-    PiFooter,
-    PiHeader,
-    PiStatusBar,
 )
 from pi_tui.engine import App, FakeTerminal, Terminal
 from pi_tui.engine.keys import KeyEvent
@@ -57,6 +52,7 @@ from ...system_prompt import load_project_context_files
 from ...tools._ensure_tool import ensure_tool, get_tool_path
 from ...tools.render_utils import get_text_output, shorten_path
 from .autocomplete import create_interactive_autocomplete_provider
+from .components import PiChatContainer, PiEditor, PiFooter, PiHeader, PiStatusBar
 from .slash_commands import SlashContext, SlashCommandRegistry, register_builtin_commands
 
 
@@ -111,6 +107,38 @@ class _TuiAuthInteraction:
             message,
             placeholder=prompt.get("placeholder", ""),
         )
+
+
+class _LoginDialogAuthInteraction:
+    """把 OAuth 回调映射到 LoginDialogComponent。"""
+
+    def __init__(self, app: "PiTuiApp", component) -> None:
+        self.app = app
+        self.component = component
+        self.signal = None
+
+    def notify(self, event: dict) -> None:
+        event_type = event.get("type")
+        if event_type == "auth_url":
+            self.component.show_auth(
+                event.get("url", ""),
+                event.get("instructions"),
+            )
+        elif event_type == "device_code":
+            self.component.show_device_code(event)
+        elif event_type == "info":
+            self.component.show_details([event.get("message", "")])
+        elif event_type == "progress":
+            self.component.show_progress(event.get("message", ""))
+        elif event.get("message"):
+            self.component.show_progress(event["message"])
+
+    async def prompt(self, prompt) -> str:
+        value = await self.app._await_text_input(
+            prompt.get("message", ""),
+            placeholder=prompt.get("placeholder", ""),
+        )
+        return value if value is not None else ""
 
 
 def _theme_style(theme: Theme, bg_key: str, fg_key: str) -> Style:
@@ -214,6 +242,7 @@ class PiTuiApp(App):
         self._working_visible = True
         self._stream_entry: MessageEntry | None = None
         self._tool_entries: dict[str, ToolExecutionEntry] = {}
+        self._rendered_diff_ids: set[str] = set()
         self._pending_image: bytes | None = None
 
         # 布局组件（on_mount 挂载）：对齐 TS transcript + dock 顺序。
@@ -596,6 +625,7 @@ class PiTuiApp(App):
                     is_error=bool(result.get("isError") or result.get("is_error")),
                     result=result,
                 )
+                self._maybe_add_diff_entry(str(block.get("id") or entry.tool_call_id), result)
         if created:
             self._chat.scroll_end()
 
@@ -656,6 +686,27 @@ class PiTuiApp(App):
             return ""
         return str(raw)
 
+    def _maybe_add_diff_entry(self, call_id: str, result: Any) -> None:
+        """把工具结果里的 diff 详情渲染为独立聊天条目。"""
+        payload = self._result_to_dict(result)
+        if payload is None:
+            return
+        details = payload.get("details")
+        if not isinstance(details, dict):
+            return
+        diff = details.get("diff")
+        if not isinstance(diff, str) or not diff.strip():
+            return
+        diff_key = f"{call_id}:{id(diff)}"
+        if diff_key in self._rendered_diff_ids:
+            return
+        self._rendered_diff_ids.add(diff_key)
+        from .components import DiffEntry
+
+        entry = DiffEntry(diff, theme_colors=self._chat_theme_colors)
+        self._chat.mount(entry)
+        self._chat.scroll_end()
+
     def _on_tool_execution_start(self, event: dict) -> None:
         """工具开始执行：创建条目并挂进聊天（对齐 TS tool_execution_start）。"""
         entry, created = self._ensure_tool_entry(
@@ -689,6 +740,7 @@ class PiTuiApp(App):
             is_error=bool(event.get("is_error")),
             result=result,
         )
+        self._maybe_add_diff_entry(call_id, result)
 
     def _extension_custom_message_renderer(self, message):
         runner = self._session.extension_runner
@@ -751,7 +803,7 @@ class PiTuiApp(App):
 
     def _replace_editor(self, component) -> None:
         """用扩展提供的编辑器组件替换 PiEditor。"""
-        from pi_tui import PiEditor as PiEditorType
+        from .components import PiEditor as PiEditorType
 
         if not isinstance(component, PiEditorType):
             raise TypeError("set_editor_component requires a PiEditor subclass")
@@ -969,6 +1021,53 @@ class PiTuiApp(App):
         entries = self._chat.query(MessageEntry)
         if entries:
             self._chat.scroll_to_widget(entries[-1])
+
+    def _show_armin_component(self) -> None:
+        from .components import ArminComponent
+
+        self._chat.mount(ArminComponent())
+        self._chat.scroll_end()
+
+    def _show_daxnuts_component(self) -> None:
+        from .components import DaxnutsComponent
+
+        self._chat.mount(DaxnutsComponent())
+        self._chat.scroll_end()
+
+    def _show_earendil_announcement_component(self) -> None:
+        from .components import EarendilAnnouncementComponent
+
+        self._chat.mount(EarendilAnnouncementComponent())
+        self._chat.scroll_end()
+
+    def _open_show_images_selector(self) -> None:
+        from .components import ShowImagesSelectorComponent
+
+        component = ShowImagesSelectorComponent(
+            self._show_images,
+            on_select=lambda value: None,
+            on_cancel=lambda: None,
+        )
+
+        def _handle_show_images(value: bool) -> None:
+            self._set_show_images(value)
+            self._close_overlay_dialog(component)
+
+        component._on_select = _handle_show_images
+        component._on_cancel = lambda: self._close_overlay_dialog(component)
+        self.push_screen(
+            component,
+            callback=lambda _value: self._update_footer(),
+        )
+
+    def _set_show_images(self, show: bool) -> None:
+        self._show_images = show
+        self._chat.set_image_options(
+            show_images=show,
+            image_width_cells=self._image_width_cells,
+        )
+        if self._settings_manager is not None:
+            self._settings_manager.set_show_images(show)
 
     def _show_startup_changelog_if_needed(self) -> None:
         """启动时显示 changelog（对齐 TS getChangelogForDisplay + showStartupNoticesIfNeeded）。
@@ -1262,6 +1361,15 @@ class PiTuiApp(App):
             self._notify(f"Prompt failed: {exc}")
 
     async def _exec_slash(self, text: str) -> None:
+        if text == "/arminsayshi":
+            self._show_armin_component()
+            return
+        if text == "/dementedelves":
+            self._show_daxnuts_component()
+            return
+        if text == "/show-images":
+            self._open_show_images_selector()
+            return
         expanded = self._session.expand_prompt(text)
         if expanded != text:
             await self._send_prompt(expanded)
@@ -1731,9 +1839,44 @@ class PiTuiApp(App):
     def _on_oauth_selected(self, provider_id, mode: str) -> None:
         if provider_id is None:
             return
-        self._run_task(
-            self._exec_slash(f"/{'logout' if mode == 'logout' else 'login'} {provider_id}")
+        if mode == "login":
+            self._run_task(self._login_with_dialog(provider_id))
+            return
+        self._run_task(self._exec_slash(f"/logout {provider_id}"))
+
+    async def _login_with_dialog(self, provider_id: str) -> None:
+        from pi_ai.auth.oauth import builtin_oauth_providers
+
+        from .components import LoginDialogComponent
+
+        provider = next(
+            (item for item in builtin_oauth_providers() if item[0] == provider_id),
+            None,
         )
+        if provider is None:
+            self._notify(f"Unknown provider: {provider_id}")
+            return
+        _pid, name, flow = provider
+        component = LoginDialogComponent(
+            provider_id,
+            provider_name=name,
+            on_complete=lambda _success, _message: None,
+        )
+        self.push_screen(component, callback=lambda _value: None)
+        interaction = _LoginDialogAuthInteraction(self, component)
+        try:
+            credential = await cast(Any, flow).login(interaction)
+            store = self._model_runtime.auth_store
+            if store is not None:
+                await store.modify(
+                    provider_id,
+                    lambda _current: credential,
+                )
+            self._notify(f"Logged in: {name} ({provider_id})")
+        except Exception as exc:
+            self._notify(f"Login failed: {exc}")
+        finally:
+            self._close_overlay_dialog(component)
 
     async def _open_scoped_models_selector(self) -> None:
         models = await self._model_runtime.get_available()
@@ -1909,6 +2052,7 @@ class PiTuiApp(App):
         self._chat.set_visibility(show_tools=self._show_tools, show_thinking=self._show_thinking)
         self._chat.clear_messages()
         self._tool_entries.clear()
+        self._rendered_diff_ids.clear()
         for message in self._session.get_messages():
             if message.get("role") == "assistant":
                 self._render_tool_calls(message)
@@ -2119,6 +2263,7 @@ class PiTuiApp(App):
         self._chat.clear_messages()
         self._tool_entries.clear()
         self._rendered_summary_ids = set()
+        self._rendered_diff_ids.clear()
         for message in new_session.get_messages():
             self._chat.add_message_agent(cast(dict[str, Any], message))
         self._render_missed_summaries()
@@ -2216,6 +2361,7 @@ class PiTuiApp(App):
         self._chat.clear_messages()
         self._tool_entries.clear()
         self._rendered_summary_ids = set()
+        self._rendered_diff_ids.clear()
         for message in new_session.get_messages():
             self._chat.add_message_agent(cast(dict[str, Any], message))
         self._render_missed_summaries()

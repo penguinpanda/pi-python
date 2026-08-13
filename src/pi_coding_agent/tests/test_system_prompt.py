@@ -333,13 +333,29 @@ class TestConfigPaths:
     def test_cli_sets_pi_coding_agent_marker(self, monkeypatch):
         import os
 
+        import httpx
         import pytest
         from pi_coding_agent._cli import main
 
         monkeypatch.delenv("PI_CODING_AGENT", raising=False)
-        with pytest.raises(SystemExit):
-            main(["--version"])
+        monkeypatch.delenv("AI_AGENT", raising=False)
+        default_timeout = httpx._config.DEFAULT_TIMEOUT_CONFIG
+        original = (
+            default_timeout.connect,
+            default_timeout.read,
+            default_timeout.write,
+            default_timeout.pool,
+        )
+        try:
+            with pytest.raises(SystemExit):
+                main(["--version"])
+        finally:
+            default_timeout.connect = original[0]
+            default_timeout.read = original[1]
+            default_timeout.write = original[2]
+            default_timeout.pool = original[3]
         assert os.environ.get("PI_CODING_AGENT") == "true"
+        assert os.environ.get("AI_AGENT") == "pi"
 
     def test_resolve_preset(self):
         from pi_coding_agent._cli import _create_parser, _resolve_preset
@@ -357,12 +373,15 @@ class TestConfigPaths:
     def test_allow_model_network_offline_env(self, monkeypatch):
         from pi_coding_agent._cli import _allow_model_network
 
-        assert _allow_model_network() is True
+        assert _allow_model_network() is False
         for value in ("1", "true", "yes", "TRUE"):
             monkeypatch.setenv("PI_OFFLINE", value)
             assert _allow_model_network() is False
         monkeypatch.setenv("PI_OFFLINE", "0")
-        assert _allow_model_network() is True
+        assert _allow_model_network() is False
+        for value in ("1", "true", "yes", "TRUE"):
+            monkeypatch.setenv("PI_MODEL_NETWORK", value)
+            assert _allow_model_network() is True
 
     def test_no_context_files(self, tmp_path):
         files = load_project_context_files(tmp_path / "empty" / "x", tmp_path / "agent")

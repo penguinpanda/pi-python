@@ -28,6 +28,7 @@ from .extensions.builtin_llama import create_extension as create_llama_extension
 from ._print_mode import run_print_mode, run_print_mode_json
 from .file_processor import process_at_files
 from .first_time_setup import run_first_time_setup, should_run_first_time_setup
+from .http_dispatcher import apply_http_proxy_settings, configure_http_dispatcher
 from .tools import create_all_tools, filter_tools_by_names
 from .rpc import run_rpc_mode
 from .modes.interactive import run_tui_mode
@@ -77,6 +78,9 @@ def main(args: list[str] | None = None) -> int:
     """
     # 进程标记：子进程据此识别自己在 pi 内（对齐 TS PI_CODING_AGENT）。
     os.environ.setdefault("PI_CODING_AGENT", "true")
+    os.environ.setdefault("AI_AGENT", "pi")
+    # 在 provider SDK 发起请求前完成全局 HTTP dispatcher 默认配置。
+    configure_http_dispatcher()
     # 下游提前关闭管道（如 `--json | grep -m1`）时按 Unix 惯例静默终止，
     # 避免 Python 默认把 EPIPE 转成 BrokenPipeError traceback。
     # Windows 无 SIGPIPE，由 _print_mode 的 BrokenPipeError 兜底。
@@ -125,7 +129,7 @@ async def _async_main(args: list[str] | None = None) -> int:
 
     # 首次启动向导（显式 --setup 或 TS 对齐的自动触发条件）。
     if parsed.setup or should_run_first_time_setup():
-        return await run_first_time_setup(_auth_store())
+        return await run_first_time_setup()
 
     # 确定工作目录
     cwd = str(Path.cwd())
@@ -133,6 +137,12 @@ async def _async_main(args: list[str] | None = None) -> int:
     # 加载配置（双层 + 信任感知：先全局，信任决定后加载项目）。
     settings_manager = SettingsManager.create(cwd, project_trusted=False)
     settings = settings_manager.as_dict()
+    apply_http_proxy_settings(settings.get("httpProxy"))
+    try:
+        configure_http_dispatcher(settings_manager.get_http_idle_timeout_ms())
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
 
     # 项目信任：启动时解析（TUI 的交互提示由应用内 TrustSelector 承担，
     # 其余模式无 UI 时按 defaultProjectTrust=ask 拒绝并提示）。
@@ -1129,8 +1139,14 @@ def _resolve_preset(parsed, settings: dict) -> dict | None:
 
 
 def _allow_model_network() -> bool:
-    """PI_OFFLINE=1/true/yes 时禁止模型目录网络刷新。"""
-    return os.environ.get("PI_OFFLINE", "").lower() not in ("1", "true", "yes")
+    """默认禁止 create-time 网络刷新，显式 PI_MODEL_NETWORK=1 才开启。
+
+    对齐 TS ModelRuntime.create(allowModelNetwork=false)。PI_OFFLINE 仍保留
+    为显式离线开关；pi update --models 不走此函数，直接使用 force 网络刷新。
+    """
+    if os.environ.get("PI_OFFLINE", "").lower() in ("1", "true", "yes"):
+        return False
+    return os.environ.get("PI_MODEL_NETWORK", "").lower() in ("1", "true", "yes")
 
 
 def _print_models(

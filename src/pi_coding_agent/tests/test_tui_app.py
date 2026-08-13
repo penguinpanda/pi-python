@@ -9,8 +9,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from pi_coding_agent.modes.interactive.app import PiTuiApp
+from pi_coding_agent.modes.interactive.components import PiEditor
 from pi_tui.autocomplete import AutocompleteItem, AutocompleteSuggestions
-from pi_tui.components import BashExecutionEntry, MessageEntry, PiEditor, ToolExecutionEntry
+from pi_tui.components import BashExecutionEntry, MessageEntry, ToolExecutionEntry
 from pi_tui.engine import FakeTerminal
 from pi_tui.selectors import ChoiceSelector
 

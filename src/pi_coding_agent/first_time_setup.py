@@ -1,9 +1,12 @@
-"""首次启动向导：配置初始 provider 与 API key。"""
+"""首次启动 TUI 向导（对齐 TS FirstTimeSetupComponent）。"""
 
 from __future__ import annotations
 
-import asyncio
 import os
+from typing import Any
+
+from pi_tui.engine import App, FakeTerminal, Terminal
+from pi_tui.theme import ThemeLoader
 
 
 def are_experimental_features_enabled() -> bool:
@@ -26,60 +29,75 @@ def should_run_first_time_setup() -> bool:
         return False
 
 
-async def run_first_time_setup(auth_store) -> int:
-    """交互式配置：选择 provider → 输入 API key → 保存到 auth.json。"""
-    providers = [("openai", "OpenAI"), ("deepseek", "DeepSeek")]
-    print("Welcome to pi!")
-    print("Let's configure an API provider.\n")
-    print("Providers:")
-    for index, (provider_id, name) in enumerate(providers, 1):
-        print(f"  {index}. {name} ({provider_id})")
-    while True:
-        raw = input(f"Enter number (1-{len(providers)}): ").strip()
+class _FirstTimeSetupApp(App):
+    """承载 FirstTimeSetupComponent 的最小独立 App。"""
+
+    def __init__(self, settings_manager, terminal) -> None:
+        super().__init__(terminal=terminal, size=terminal.size, ui_mode="fullscreen")
+        self._settings_manager = settings_manager
+        self._result: tuple[str, bool] | None = None
+
+    def on_mount(self) -> None:
+        from .modes.interactive.components import FirstTimeSetupComponent
+
+        detected_theme = ThemeLoader().detect_terminal_background()
+        component = FirstTimeSetupComponent(
+            detected_theme,
+            on_theme_preview=self._preview_theme,
+            on_submit=self._submit,
+            on_cancel=self._cancel,
+        )
+        self.screen.mount(component)
+        self.focus(component)
+
+    def _preview_theme(self, theme: str) -> None:
         try:
-            provider_id, display_name = providers[int(raw) - 1]
-            break
-        except (ValueError, IndexError):
-            print("Invalid selection.")
+            self.screen.base_style = None
+        except Exception:
+            pass
+        self.request_render()
 
-    api_key = input(f"Enter your {display_name} API key: ").strip()
-    if not api_key:
-        print("No API key provided. Setup skipped.")
-        return 1
+    def _submit(self, theme: str, share_analytics: bool) -> None:
+        self._settings_manager.set_theme(theme)
+        self._settings_manager.set_global_setting("enableAnalytics", share_analytics)
+        self._settings_manager.flush()
+        self.exit()
 
-    from pi_ai.auth import ApiKeyCredential
+    def _cancel(self) -> None:
+        self.exit()
 
-    async def _set(_current):
-        return ApiKeyCredential(type="api_key", key=api_key)
 
-    await auth_store.modify(provider_id, _set)
-    print(f"\nCredentials saved to {auth_store.path}")
+def _default_terminal(size=(80, 24)):
+    try:
+        return Terminal(size=size)
+    except Exception:
+        return FakeTerminal(size=size)
 
-    # experimental 门控的 analytics 同意询问（对齐 TS showAnalyticsConsent）。
-    if are_experimental_features_enabled():
-        _ask_analytics_consent()
 
-    print("You can now run: pi-python -p 'hello'")
+async def run_first_time_setup(
+    settings_manager: Any | None = None,
+    terminal=None,
+) -> int:
+    """运行首次设置 TUI，仅设置主题与 analytics。"""
+    if settings_manager is None:
+        from .settings_manager import SettingsManager
+
+        settings_manager = SettingsManager.create(os.getcwd(), project_trusted=False)
+    app = _FirstTimeSetupApp(settings_manager, terminal or _default_terminal())
+    await app.run_async()
     return 0
 
 
-def _ask_analytics_consent() -> None:
-    """询问 enableAnalytics 并写入全局设置（对齐 TS showAnalyticsConsent）。"""
-    answer = input("\nShare anonymous usage analytics to improve pi? (y/N): ").strip().lower()
-    if answer not in ("y", "yes"):
-        return
-    from .settings_manager import SettingsManager
+def run_first_time_setup_sync(settings_manager=None, terminal=None) -> int:
+    """同步包装（测试/外部调用）。"""
+    import asyncio
 
-    try:
-        manager = SettingsManager.create(os.getcwd(), project_trusted=False)
-        manager.set_global_setting("enableAnalytics", True)
-    except Exception:
-        print("Could not save analytics preference.")
+    return asyncio.run(run_first_time_setup(settings_manager, terminal))
 
 
-def run_first_time_setup_sync(auth_store) -> int:
-    """同步包装（CLI 用）。"""
-    return asyncio.run(run_first_time_setup(auth_store))
-
-
-__all__ = ["run_first_time_setup", "run_first_time_setup_sync"]
+__all__ = [
+    "are_experimental_features_enabled",
+    "should_run_first_time_setup",
+    "run_first_time_setup",
+    "run_first_time_setup_sync",
+]

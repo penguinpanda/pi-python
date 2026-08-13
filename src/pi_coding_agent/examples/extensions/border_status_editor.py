@@ -3,7 +3,7 @@
 Python port of border-status-editor.ts（简化：用 border_title/subtitle 显示状态）。
 """
 
-from pi_tui import PiEditor
+from pi_coding_agent.modes.interactive.components import PiEditor
 
 from pi_coding_agent import ExtensionAPI
 

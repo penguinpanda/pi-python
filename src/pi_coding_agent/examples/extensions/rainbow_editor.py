@@ -5,7 +5,7 @@ Python port of rainbow-editor.ts（简化：用边框标题颜色动画代替逐
 
 import asyncio
 
-from pi_tui import PiEditor
+from pi_coding_agent.modes.interactive.components import PiEditor
 
 from pi_coding_agent import ExtensionAPI
 

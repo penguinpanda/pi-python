@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pi_tui.components import PiEditorVim
+from pi_coding_agent.modes.interactive.components import PiEditorVim
 from pi_tui.engine import App, FakeTerminal
 from pi_tui.engine.keys import Key
 

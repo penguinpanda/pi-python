@@ -309,6 +309,7 @@ async def test_create_runtime_persists_models_store(monkeypatch, tmp_path):
     assert isinstance(captured["models_store"], FileModelsStore)
     assert captured["models_path"] == str(tmp_path / "models.json")
     assert captured["auth_path"] == str(tmp_path / "auth.json")
+    assert captured["allow_model_network"] is False
 
 
 async def test_open_or_create_session_by_id(tmp_path):

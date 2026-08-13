@@ -1465,19 +1465,6 @@ class Editor(Widget):
         return False
 
 
-class PiEditor(Editor):
-    """兼容别名：引擎 Editor 即 PiEditor。"""
-
-
-class PiEditorVim(Editor):
-    """vim 模式编辑器（Esc 切换 normal/insert）。"""
-
-    def __init__(self, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self.vim_mode = "insert"
-        self.vim_enabled = True
-
-
 class ScrollView(Widget):
     """垂直滚动视口（Flex scroll 节点）：滚动状态 + 滚动条（支持拖拽）。"""
 
@@ -2127,8 +2114,6 @@ __all__ = [
     "TruncatedText",
     "Input",
     "Editor",
-    "PiEditor",
-    "PiEditorVim",
     "ScrollView",
     "Markdown",
     "Loader",

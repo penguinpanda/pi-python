@@ -3,7 +3,7 @@
 Python port of modal-editor.ts（简化：Escape 切换 normal/insert，normal 下 hjkl 移动）。
 """
 
-from pi_tui import PiEditor
+from pi_coding_agent.modes.interactive.components import PiEditor
 
 from pi_coding_agent import ExtensionAPI
 

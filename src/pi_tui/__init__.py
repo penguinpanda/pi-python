@@ -12,16 +12,7 @@ from .autocomplete import (
     CombinedAutocompleteProvider,
 )
 from .clipboard_image import ClipboardImage
-from .components import (
-    MessageEntry,
-    PiChatContainer,
-    PiEditor,
-    PiEditorVim,
-    PiFooter,
-    PiHeader,
-    PiStatusBar,
-    message_to_entries,
-)
+from .components import MessageEntry, message_to_entries
 from .keybindings import (
     DEFAULT_APP_KEYBINDINGS,
     DEFAULT_SESSION_PICKER_KEYBINDINGS,
@@ -74,12 +65,6 @@ __all__ = [
     "AutocompleteSuggestions",
     "CombinedAutocompleteProvider",
     "MessageEntry",
-    "PiChatContainer",
-    "PiEditor",
-    "PiEditorVim",
-    "PiFooter",
-    "PiHeader",
-    "PiStatusBar",
     "message_to_entries",
     "DEFAULT_APP_KEYBINDINGS",
     "DEFAULT_SESSION_PICKER_KEYBINDINGS",
