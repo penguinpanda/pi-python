@@ -1,4 +1,5 @@
 # pi-storage — PostgreSQL 会话存储
+[English](README.en.md) | [中文](README.md)
 
 对齐 TS [packages/storage/sqlite-node](https://github.com/earendil-works/pi-mono/tree/main/packages/storage)：
 Python 侧后端定为 **PostgreSQL**（接口照抄 TS 的 SessionStore / SessionSearch），

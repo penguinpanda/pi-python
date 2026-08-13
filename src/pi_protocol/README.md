@@ -1,4 +1,5 @@
 # pi-protocol — protocol v2 线协议
+[English](README.en.md) | [中文](README.md)
 
 对齐 TS [packages/protocol](https://github.com/earendil-works/pi-mono/tree/main/packages/protocol)，
 定义 pi server 与 client 之间的线协议（`PROTOCOL_VERSION = 2`）。

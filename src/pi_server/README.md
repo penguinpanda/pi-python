@@ -1,4 +1,5 @@
 # pi-server — 常驻 pi 服务
+[English](README.en.md) | [中文](README.md)
 
 对齐 TS [packages/server](https://github.com/earendil-works/pi-mono/tree/main/packages/server)：
 asyncio 常驻进程，基于 protocol v2 提供 attach/detach、快照推送与命令分发。

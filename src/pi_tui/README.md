@@ -1,4 +1,5 @@
 # pi-tui — 终端 UI 框架（内置引擎）
+[English](README.en.md) | [中文](README.md)
 
 基于 [pi-mono/packages/tui](https://github.com/earendil-works/pi-mono) 的 Python 复刻，
 与 `pi_ai` / `pi_agent` 平级的可复用终端 UI 框架包（**无 Textual**）：

@@ -1,4 +1,5 @@
 # pi-evals — 评测 harness（TS packages/evals 完整移植）
+[English](README.en.md) | [中文](README.md)
 
 对齐 TS [packages/evals](https://github.com/earendil-works/pi-mono/tree/main/packages/evals)：
 把 pi-harness、vitest-evals 等价物（judge / harness table / artifacts /

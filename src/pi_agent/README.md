@@ -1,4 +1,5 @@
 # pi-agent — LLM Agent 循环与运行设施
+[English](README.en.md) | [中文](README.md)
 
 基于 [pi-mono/packages/agent](https://github.com/earendil-works/pi-mono) 的 Python 复刻。
 

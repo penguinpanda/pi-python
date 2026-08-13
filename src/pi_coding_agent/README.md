@@ -1,4 +1,5 @@
 # pi-coding-agent — CLI 编码代理
+[English](README.en.md) | [中文](README.md)
 
 基于 [pi-mono/packages/coding-agent](https://github.com/earendil-works/pi-mono) 的 Python 全功能复刻。
 
