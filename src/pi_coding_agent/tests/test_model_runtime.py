@@ -443,3 +443,107 @@ async def test_login_orchestrates_oauth_and_persists(monkeypatch, tmp_path):
     # 无 OAuth 流程的 provider 报错
     with pytest.raises(CredentialSynchronizationError):
         await runtime.login("missing-prov", {"signal": None})
+
+
+@pytest.mark.asyncio
+async def test_credential_operations_serialize_per_provider(monkeypatch) -> None:
+    """同 provider 凭证操作按提交顺序串行执行（对齐 TS enqueueCredentialOperation）。"""
+    import asyncio
+    from types import SimpleNamespace
+
+    captured: dict = {"events": []}
+
+    class _FakeOAuth:
+        async def login(self, interaction):
+            captured["events"].append("login-start")
+            await asyncio.sleep(0.05)
+            captured["events"].append("login-end")
+            return {"type": "oauth", "access": "tok", "refresh": "ref", "expires": 2**63}
+
+    class _FakeProvider:
+        id = "ser-prov"
+        auth = SimpleNamespace(oauth=_FakeOAuth())
+
+    class _FakeModels:
+        def get_provider(self, provider_id):
+            return _FakeProvider() if provider_id == "ser-prov" else None
+
+        def remove_provider(self, provider_id):
+            return None
+
+        def get_models(self):
+            return []
+
+        def add_provider(self, provider):
+            return None
+
+    runtime = ModelRuntime.__new__(ModelRuntime)
+    runtime._models = _FakeModels()
+    runtime._credentials = AuthStorage.in_memory()
+    runtime._credential_operations = {}
+    runtime._configured_providers = set()
+    runtime._stored_providers = set()
+    runtime._available = []
+    runtime._auth_checks = {}
+    runtime._models_path = None
+    runtime._builtins = {}
+    runtime._native_extension_providers = {}
+    runtime._extension_providers = {}
+    runtime._composition_errors = {}
+    runtime._config = SimpleNamespace(get_provider_override=lambda pid: None)
+    runtime._compose_model_provider = lambda pid: None
+
+    async def _fake_refresh(options=None):
+        captured["events"].append("refresh")
+        return SimpleNamespace(aborted=False, errors={})
+
+    runtime.refresh = _fake_refresh  # type: ignore[method-assign]
+    runtime._run_availability_refresh = _fake_refresh  # type: ignore[method-assign]
+
+    first = asyncio.create_task(runtime.login("ser-prov", {"signal": None}))
+    await asyncio.sleep(0.01)  # 让第一个进入执行
+    second = asyncio.create_task(runtime.login("ser-prov", {"signal": None}))
+    await asyncio.gather(first, second)
+
+    # 串行：第二个 login 在第一个结束后才开始
+    events = captured["events"]
+    first_end = events.index("login-end", events.index("login-start"))
+    second_start = events.index("login-start", first_end + 1)
+    assert first_end < second_start
+    # 队列清空
+    assert runtime._credential_operations == {}
+
+
+@pytest.mark.asyncio
+async def test_credential_operation_previous_failure_does_not_block(monkeypatch) -> None:
+    """前序操作失败不阻断后续操作（对齐 TS 队列语义）。"""
+    import asyncio
+    from types import SimpleNamespace
+
+    runtime = ModelRuntime.__new__(ModelRuntime)
+    runtime._models = SimpleNamespace(get_provider=lambda pid: None)
+    runtime._credentials = AuthStorage.in_memory()
+    runtime._credential_operations = {}
+    runtime._configured_providers = set()
+    runtime._stored_providers = set()
+    runtime._available = []
+    runtime._auth_checks = {}
+    runtime._models_path = None
+
+    # 第一个操作：直接失败的任务
+    async def _failing() -> None:
+        raise RuntimeError("boom")
+
+    first = asyncio.create_task(runtime._enqueue_credential_operation("fail-prov", _failing))
+    with pytest.raises(RuntimeError):
+        await first
+
+    # 第二个操作应正常执行
+    ran = []
+
+    async def _ok() -> None:
+        ran.append(True)
+
+    await runtime._enqueue_credential_operation("fail-prov", _ok)
+    assert ran == [True]
+    assert runtime._credential_operations == {}
