@@ -115,8 +115,27 @@ def with_remote_catalog(
         if validator:
             headers["if-none-match"] = validator
 
-        async with _client_factory(timeout=20) as client:
-            response = await client.get(url, headers=headers)
+        try:
+            async with _client_factory(timeout=10) as client:
+                response = await client.get(url, headers=headers)
+        except httpx.HTTPError as exc:
+            if context.signal is not None and context.signal.is_set():
+                return
+            # 连接失败（离线/网络不可达）：同样记录 checkedAt，
+            # 4 小时新鲜度窗口内不再重试，避免每次启动阻塞在目录刷新。
+            if context.store is not None:
+                base = stored or ModelsStoreEntry(
+                    models=[], checked_at=None, last_modified=None, etag=None
+                )
+                await context.store.write(
+                    ModelsStoreEntry(
+                        models=list(base.models),
+                        checked_at=_now_ms(),
+                        last_modified=base.last_modified or 0,
+                        etag=base.etag,
+                    )
+                )
+            raise RuntimeError(f"Model catalog request failed for {provider.id}: {exc}") from exc
         if context.signal is not None and context.signal.is_set():
             return
         checked_at = _now_ms()

@@ -129,6 +129,53 @@ async def test_remote_catalog_transient_failure_keeps_etag(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_remote_catalog_connect_failure_records_checked_at(monkeypatch) -> None:
+    """连接失败：记录 checkedAt（4h 窗口内不再重试），下次启动不阻塞。"""
+    import pi_coding_agent.remote_catalog_provider as mod
+    from pi_ai.models.models_store import InMemoryModelsStore, provider_models_store
+
+    provider = _provider()
+    overlaid = with_remote_catalog(provider, "https://cat.example.com")
+    store = provider_models_store(InMemoryModelsStore(), provider.id)
+
+    def failing_factory(*a, **kw):
+        class _Client:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def get(self, url, headers=None):
+                import httpx
+
+                raise httpx.ConnectError("unreachable")
+
+        return _Client()
+
+    monkeypatch.setattr(mod, "_client_factory", failing_factory)
+    context = RefreshModelsContext(store=store, allow_network=True, force=True)
+    with pytest.raises(RuntimeError):
+        await overlaid.refresh_models(context)
+
+    entry = await store.read()
+    assert entry is not None
+    assert entry.checked_at is not None  # 已记录：窗口内不再重试
+
+    # 窗口内第二次 refresh：直接跳过（不发起请求）
+    requests = []
+
+    def counting_factory(*a, **kw):
+        requests.append(1)
+        raise AssertionError("should not be called")
+
+    monkeypatch.setattr(mod, "_client_factory", counting_factory)
+    context2 = RefreshModelsContext(store=store, allow_network=True, force=False)
+    await overlaid.refresh_models(context2)
+    assert requests == []
+
+
+@pytest.mark.asyncio
 async def test_remote_catalog_refresh_and_304_window(monkeypatch) -> None:
     import pi_coding_agent.remote_catalog_provider as mod
     from pi_ai.models.models_store import provider_models_store
