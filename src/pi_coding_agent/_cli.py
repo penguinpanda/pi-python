@@ -622,8 +622,6 @@ class _CliAuthInteraction:
 
 async def _run_auth_command(args: list[str]) -> int:
     command = args[0]
-    if command == "list":
-        return await _auth_list()
     if command == "login":
         provider_id = args[1] if len(args) > 1 else None
         return await _auth_login(provider_id)
