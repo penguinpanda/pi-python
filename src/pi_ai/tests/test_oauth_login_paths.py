@@ -253,6 +253,32 @@ async def test_radius_token_missing_fields(monkeypatch) -> None:
         )
 
 
+def test_openrouter_parse_input_variants() -> None:
+    """URL / code= 串 / 原始码三种输入形式。"""
+    assert (
+        openrouter._parse_authorization_input(f"{openrouter.FALLBACK_CALLBACK_URL}?code=u1&state=x")
+        == "u1"
+    )
+    assert openrouter._parse_authorization_input("code=u2") == "u2"
+    assert openrouter._parse_authorization_input("raw-code") == "raw-code"
+    assert openrouter._parse_authorization_input(None) is None
+    assert openrouter._parse_authorization_input("") is None
+
+
+@pytest.mark.asyncio
+async def test_openrouter_to_auth_and_refresh() -> None:
+    credential = {
+        "type": "oauth",
+        "access": "or-key",
+        "refresh": "",
+        "expires": 2**63,
+    }
+    auth = await openrouter.open_router_oauth.to_auth(credential)
+    assert auth == {"api_key": "or-key"}
+    # refresh 返回原凭证（key 永久）
+    assert await openrouter.open_router_oauth.refresh(credential) is credential
+
+
 def test_xai_response_validation() -> None:
     """_required_string / _positive_number / verification_uri 校验错误路径。"""
     with pytest.raises(RuntimeError, match="device_code"):
