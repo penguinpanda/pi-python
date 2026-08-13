@@ -23,10 +23,10 @@ pi-python/
 
 | 包 | 文档 | 说明 | 打包 |
 |---|------|------|:---:|
-| `pi_ai` | [README](src/pi_ai/README.md) | 统一 LLM API，Provider 抽象模式。支持 OpenAI (Responses API)、DeepSeek/Qwen (Completions API)、Ollama 本地与 Faux 测试 Provider | ✓ |
-| `pi_agent` | [README](src/pi_agent/README.md) | 最小核心 Agent 循环。事件驱动、工具调用、循环钩子 | ✓ |
-| `pi_coding_agent` | [README](src/pi_coding_agent/README.md) | CLI 编码代理。7 个编码工具、DAG 会话持久化、双层配置、扩展/技能/信任/压缩 | ✓ |
-| `pi_tui` | [README](src/pi_tui/README.md) | 内置引擎 TUI：主题、快捷键、选择器、剪贴板图片 | ✓ |
+| `pi_ai` | [README](src/pi_ai/README.md) | 统一 LLM API，Provider 抽象模式。支持 OpenAI (Responses API)、DeepSeek/Qwen (Completions API)、Ollama 本地、Radius 网关（动态目录）与 Faux 测试 Provider；OAuth 浏览器/设备码登录（Codex/OpenRouter/xAI/Radius） | ✓ |
+| `pi_agent` | [README](src/pi_agent/README.md) | 最小核心 Agent 循环。事件驱动、工具调用、循环钩子、harness/session v4 | ✓ |
+| `pi_coding_agent` | [README](src/pi_coding_agent/README.md) | CLI 编码代理。编码工具、DAG 会话持久化、双层配置、扩展/技能/信任/压缩、包管理子命令（install/remove/update/list/config）、远程模型目录 overlay（ETag 4h） | ✓ |
+| `pi_tui` | [README](src/pi_tui/README.md) | 内置引擎 TUI：主题、快捷键、选择器、剪贴板图片、mermaid 终端图渲染、suspend（Ctrl+Z） | ✓ |
 | `pi_protocol` | [README](src/pi_protocol/README.md) | protocol v2：Command/Result/Snapshot/Progress/Error + JSONL framing | ✓ |
 | `pi_storage` | [README](src/pi_storage/README.md) | PostgreSQL SessionStore/SessionSearch（`docker compose up -d pg`） | ✓ |
 | `pi_server` | [README](src/pi_server/README.md) | 常驻服务：`python -m pi_server`（stdio JSONL） | ✓ |
@@ -42,8 +42,8 @@ pi_coding_agent (CLI + Tools + Sessions)
 
 - **pi_ai** — 底层 LLM 调用：`Models` 注册表管理多个 Provider，`complete()` / `stream()` 统一非流式/流式调用，`EventStream` 生产者-消费者异步事件流
 - **pi_agent** — 中间层 Agent 循环：纯函数引擎 `run_agent_loop()` + 有状态 `Agent` 包装类，事件驱动、工具调用、取消机制、循环钩子
-- **pi_coding_agent** — 顶层 CLI：`pi-python -p "..."` 单次编码查询，7 个编码工具（read/write/edit/bash/grep/find/ls），JSONL 会话持久化，双层 settings.json 配置，30 个 Slash 命令，项目信任，系统提示构建器（AGENTS.md/CLAUDE.md），turn timings / cache stats
-- **pi_tui / pi_protocol / pi_storage / pi_server / pi_evals** — TUI 引擎层、protocol v2、PostgreSQL 存储、常驻服务与评测 harness（见下表）
+- **pi_coding_agent** — 顶层 CLI：`pi-python -p "..."` 单次编码查询，编码工具（read/write/edit/bash/grep/find/ls），JSONL 会话持久化，双层 settings.json 配置，Slash 命令，项目信任，系统提示构建器（AGENTS.md/CLAUDE.md），turn timings / cache stats，包管理子命令（`pi install/remove/update/list/config`），远程模型目录 overlay
+- **pi_tui / pi_protocol / pi_storage / pi_server / pi_evals** — TUI 引擎层（含 mermaid 终端图渲染与 Ctrl+Z suspend）、protocol v2、PostgreSQL 存储、常驻服务与评测 harness（见下表）
 
 ---
 
@@ -154,6 +154,13 @@ uv run python -m pi_coding_agent --model deepseek-v4-flash -p "explain this code
 
 # 不持久化会话
 uv run python -m pi_coding_agent --no-session -p "what is 2+2?"
+
+# TUI 交互模式（无参数且 stdin 为 TTY 时默认进入）
+uv run python -m pi_coding_agent --mode tui
+
+# 包管理
+uv run python -m pi_coding_agent install npm:pi-extension-example
+uv run python -m pi_coding_agent list
 ```
 
 详见 [src/pi_coding_agent/README.md](src/pi_coding_agent/README.md)。
@@ -188,10 +195,10 @@ uv sync
 # 运行全部测试（pi_ai + pi_agent + pi_coding_agent + pi_tui + 新包）
 uv run pytest
 
-# 静态检查（ruff lint + format；mypy 为基线阶段，CI 中暂不阻塞）
+# 静态检查（ruff lint + format + mypy；CI 中全部阻塞）
 uv run ruff check .
 uv run ruff format .
-uv run mypy src/pi_ai src/pi_agent
+uv run mypy src/pi_ai src/pi_agent src/pi_coding_agent src/pi_tui src/pi_protocol src/pi_storage src/pi_server src/pi_evals
 
 # 按包运行测试
 uv run pytest src/pi_ai/tests/ -v

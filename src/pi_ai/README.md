@@ -2,9 +2,15 @@
 
 统一的 LLM API，Provider 抽象模式。
 
-基于 [pi-mono/packages/ai](https://github.com/earendil-works/pi-mono) 的 TypeScript 版本复刻，默认内置 OpenAI、DeepSeek、Qwen、Qwen Token Plan、Ollama、Google、Mistral、Azure OpenAI、GitHub Copilot、OpenRouter、Ant Ling、OpenAI Codex、Google Vertex、AWS Bedrock 与 Faux provider。
+基于 [pi-mono/packages/ai](https://github.com/earendil-works/pi-mono) 的 TypeScript 版本复刻，默认内置 OpenAI、DeepSeek、Qwen、Qwen Token Plan、Ollama、Google、Mistral、Azure OpenAI、GitHub Copilot、OpenRouter、Ant Ling、OpenAI Codex、Google Vertex、AWS Bedrock、Radius（网关动态目录）与 Faux provider。
 
 另有 13 个 OpenAI 兼容 provider（Groq、Together、Cerebras、Fireworks、xAI、NVIDIA、Hugging Face、Baseten、Moonshot、Xiaomi、Z.ai 等）通过动态 `/models` 发现注册，首次刷新后自动获得模型列表。
+
+### OAuth 登录
+
+- **浏览器流程**（PKCE + 本地回调服务器 + 手动粘贴回退）：OpenAI Codex（端口 1455）、OpenRouter（ephemeral 端口）、Radius（网关发现 + 端口 1456）
+- **设备码流程**：xAI（SuperGrok/X Premium 订阅）、OpenAI Codex 兼容路径
+- 凭证持久化到 `~/.pi/agent/auth.json`（0600），刷新带过期倾斜保护
 
 ---
 

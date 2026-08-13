@@ -99,6 +99,31 @@ uv run python -m pi_coding_agent --append-system-prompt "只回答中文" -p "..
 uv run python -m pi_coding_agent --no-session -p "..."
 uv run python -m pi_coding_agent --session ~/.pi/agent/sessions/abc123.jsonl -p "continue"
 uv run python -m pi_coding_agent -c -p "continue"
+uv run python -m pi_coding_agent --fork <path|id> -p "..."
+uv run python -m pi_coding_agent --resume
+uv run python -m pi_coding_agent --session-id my-session -p "..."
+uv run python -m pi_coding_agent --session-dir ~/sessions -p "..."
+uv run python -m pi_coding_agent --name "my session" -p "..."   # 新建会话命名
+
+# 模式别名（对齐 TS --mode text/json）
+uv run python -m pi_coding_agent --mode text -p "..."
+uv run python -m pi_coding_agent --mode json -p "..."
+
+# 包管理子命令（npm:/git:/local 源，-l 写项目配置）
+uv run python -m pi_coding_agent install npm:pi-extension-example
+uv run python -m pi_coding_agent install git:https://github.com/x/y.git -l
+uv run python -m pi_coding_agent remove npm:pi-extension-example
+uv run python -m pi_coding_agent update            # 重装已配置源
+uv run python -m pi_coding_agent update --models   # 刷新模型目录
+uv run python -m pi_coding_agent list              # 已配置包
+uv run python -m pi_coding_agent config            # 包配置视图（--local 项目级）
+
+# 认证子命令
+uv run python -m pi_coding_agent login <provider>
+uv run python -m pi_coding_agent logout <provider>
+uv run python -m pi_coding_agent auth list
+uv run python -m pi_coding_agent auth print-api-key --model <model>
+uv run python -m pi_coding_agent auth print-bearer-token --model <model>
 
 # 工具控制
 uv run python -m pi_coding_agent --tools read,bash -p "..."
