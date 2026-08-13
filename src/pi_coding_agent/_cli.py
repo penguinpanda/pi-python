@@ -725,47 +725,51 @@ async def _auth_print(kind: str, args: list[str]) -> int:
 
 
 async def _run_config_command(args: list[str]) -> int:
-    """pi config：打印全局/项目包资源配置（对齐 TS handleConfigCommand 只读子集）。"""
-    from .package_manager import PackageManager
-
-    local = "-l" in args or "--local" in args
+    """pi config：打开交互式资源配置选择器。"""
+    local = False
+    project_trust_override: bool | None = None
+    for arg in args:
+        if arg in ("-l", "--local"):
+            local = True
+        elif arg in ("-a", "--approve"):
+            project_trust_override = True
+        elif arg in ("-na", "--no-approve"):
+            project_trust_override = False
+        elif arg.startswith("-") and arg not in ("-h", "--help"):
+            print(f'Unknown option {arg} for "config".', file=sys.stderr)
+            print("Usage: pi config [-l|--local] [--approve|--no-approve]", file=sys.stderr)
+            return 1
+        elif arg not in ("-h", "--help"):
+            print(f"Unexpected argument {arg}.", file=sys.stderr)
+            print("Usage: pi config [-l|--local] [--approve|--no-approve]", file=sys.stderr)
+            return 1
     if "-h" in args or "--help" in args:
-        print("Usage: pi config [-l|--local]  (show package config; TS 交互式选择器未移植)")
+        print(
+            "Usage: pi config [-l|--local] [--approve|--no-approve]\n"
+            "Open the resource configuration TUI to enable or disable local resources."
+        )
         return 0
 
     cwd = str(Path.cwd())
-    settings_manager = SettingsManager.create(cwd, project_trusted=False)
-    manager = PackageManager(cwd, settings_manager=settings_manager)
-    packages = manager.list_configured_packages()
+    project_trusted = project_trust_override
+    if project_trusted is None:
+        project_trusted = False
+    settings_manager = SettingsManager.create(cwd, project_trusted=project_trusted)
+    if local and not settings_manager.is_project_trusted():
+        print(
+            "Error: Project is not trusted. Use --approve to modify local resource config.",
+            file=sys.stderr,
+        )
+        return 1
 
-    def _print_scope(scope: str, title: str) -> None:
-        scoped = [p for p in packages if p.scope == scope]
-        if not scoped:
-            print(f"{title}: (none)")
-            return
-        print(f"{title}:")
-        for pkg in scoped:
-            status = " (filtered)" if pkg.filtered else ""
-            print(f"  {pkg.source}{status}")
-            if pkg.installed_path:
-                print(f"    {pkg.installed_path}")
+    from .config_selector import run_config_selector
 
-    if local:
-        trusted = False
-        try:
-            trusted = settings_manager.is_project_trusted()
-        except Exception:
-            trusted = False
-        if not trusted:
-            print(
-                "Error: Project is not trusted. Use --approve to view local package config.",
-                file=sys.stderr,
-            )
-            return 1
-        _print_scope("project", "Project packages")
-        return 0
-    _print_scope("user", "User packages")
-    _print_scope("project", "Project packages")
+    await run_config_selector(
+        settings_manager,
+        cwd=cwd,
+        agent_dir=get_agent_dir(),
+        write_scope="project" if local else "global",
+    )
     return 0
 
 

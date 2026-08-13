@@ -5,11 +5,14 @@ from __future__ import annotations
 from pi_coding_agent.modes.interactive.components import (
     ArminComponent,
     ConfigSelectorComponent,
+    ConfigSelectorModel,
     DaxnutsComponent,
     EarendilAnnouncementComponent,
     FirstTimeSetupComponent,
     LoginDialogComponent,
     ShowImagesSelectorComponent,
+    ResourceGroup,
+    ResourceItem,
     render_diff_lines,
 )
 from pi_tui.engine.keys import Key
@@ -56,14 +59,35 @@ def test_show_images_selector_saves_choice() -> None:
 
 
 def test_config_selector_toggles_entries() -> None:
-    toggled: list[tuple[dict, bool]] = []
-    entry = {"resource_type": "skills", "path": "a", "enabled": True}
+    toggled: list[tuple[ResourceItem, bool]] = []
+    item = ResourceItem(
+        key="skills:a",
+        resource_type="skills",
+        path="a",
+        enabled=True,
+        scope="user",
+        origin="top-level",
+        source="user",
+        display_name="a",
+        base_dir="",
+    )
+    model = ConfigSelectorModel(
+        groups=[ResourceGroup("skills", "user skills", "user", "top-level", "user", [item])],
+        cwd="/tmp",
+        agent_dir="/tmp/agent",
+        write_scope="global",
+        project_mode_available=False,
+    )
     component = ConfigSelectorComponent(
-        [entry], lambda item, enabled: toggled.append((item, enabled)), lambda: None
+        model,
+        on_toggle=lambda item, enabled: toggled.append((item, enabled)),
+        on_close=lambda: None,
+        on_exit=lambda: None,
+        on_switch_scope=lambda: None,
     )
     assert component.handle_key(_key("enter")) is True
-    assert entry["enabled"] is False
-    assert toggled == [(entry, False)]
+    assert item.enabled is False
+    assert toggled == [(item, False)]
 
 
 def test_art_components_render() -> None:
@@ -77,3 +101,24 @@ def test_diff_lines_color_removed_and_added() -> None:
     text = "\n".join(line.text() for line in lines)
     assert "-1 old" in text
     assert "+1 new" in text
+
+
+def test_diff_lines_highlight_changed_word() -> None:
+    lines = render_diff_lines("-1 keep old value\n+1 keep new value", 50)
+    removed = lines[0]
+    added = lines[1]
+    removed_text = removed.text()
+    added_text = added.text()
+    assert "old" in removed_text
+    assert "new" in added_text
+    assert any(cell.style is not None and cell.style.reverse for cell in removed.cells)
+    assert any(cell.style is not None and cell.style.reverse for cell in added.cells)
+
+
+def test_diff_lines_falls_back_to_character_changes() -> None:
+    lines = render_diff_lines("-1 abcdef\n+1 abXdef", 40)
+    removed = lines[0].text()
+    added = lines[1].text()
+    assert "abcdef" in removed
+    assert "abXdef" in added
+    assert any(cell.style is not None and cell.style.reverse for cell in lines[1].cells)

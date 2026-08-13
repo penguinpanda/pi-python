@@ -1,6 +1,6 @@
 # Pi 包（Python 移植状态）
 
-TS 的 `pi install / remove / update / config`、npm / git / 本地包源、`package.json` 的 `pi` manifest、包过滤与去重**尚未移植到 pi-python**。当前没有包安装命令，也没有 `~/.pi/agent/npm`、`.pi/npm`、git clone 等包存储目录。
+TS 的 `pi install / remove / update / config` 已移植核心子集：支持 npm / git / 本地包源，写入全局或项目 `packages` 配置。`pi config` 现在会打开交互式资源配置选择器，用于启用或禁用扩展 / 技能 / 提示模板 / 主题。
 
 ## 现状：资源如何加载
 
@@ -20,9 +20,7 @@ pi-python 通过 `ResourceLoader` 从以下位置加载扩展 / 技能 / 提示�
 
 ## 与 TS 的差异
 
-- 无 npm / git 源：`npm:@scope/pkg@1.2.3`、`git:github.com/user/repo@v1`、`https://...` 均不支持。
 - 无 `package.json` 的 `pi` manifest（`extensions` / `skills` / `prompts` / `themes` 键）。
-- 无 `pi config` 启用 / 禁用资源的交互命令。
 - 无安装后自动补齐依赖（npm install）流程。
 - 无全局 / 项目同名包覆盖和 `autoload: false` 增量语义。
 

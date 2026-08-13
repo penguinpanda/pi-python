@@ -57,6 +57,11 @@ async def test_pi_list_empty(monkeypatch, capsys) -> None:
 async def test_pi_config_readonly(monkeypatch, capsys, tmp_path) -> None:
     import pi_coding_agent._cli as cli
 
+    called: list[str] = []
+
+    async def _fake_selector(settings_manager, *, cwd, agent_dir, write_scope):
+        called.append(write_scope)
+
     class _Settings:
         def get_global_settings(self):
             return {"packages": ["local:/tmp/fake-ext"]}
@@ -76,11 +81,15 @@ async def test_pi_config_readonly(monkeypatch, capsys, tmp_path) -> None:
             {"create": staticmethod(lambda cwd, project_trusted=False: _Settings())},
         ),
     )
+    monkeypatch.setattr(cli, "get_agent_dir", lambda: tmp_path / "agent")
+    monkeypatch.setattr(
+        "pi_coding_agent.config_selector.run_config_selector",
+        _fake_selector,
+    )
     monkeypatch.chdir(tmp_path)
     assert await _run_config_command([]) == 0
-    out = capsys.readouterr().out
-    assert "User packages:" in out
-    assert "local:/tmp/fake-ext" in out
+    capsys.readouterr()
+    assert called == ["global"]
 
 
 @pytest.mark.asyncio

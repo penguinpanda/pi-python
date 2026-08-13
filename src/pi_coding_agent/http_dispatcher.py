@@ -62,6 +62,35 @@ def apply_http_proxy_settings(http_proxy: str | None) -> None:
 
 
 _configured_timeout_ms = DEFAULT_HTTP_IDLE_TIMEOUT_MS
+_original_async_client_init = httpx.AsyncClient.__init__
+_async_client_init_patched = False
+_original_default_timeout = (
+    httpx._config.DEFAULT_TIMEOUT_CONFIG.connect,
+    httpx._config.DEFAULT_TIMEOUT_CONFIG.read,
+    httpx._config.DEFAULT_TIMEOUT_CONFIG.write,
+    httpx._config.DEFAULT_TIMEOUT_CONFIG.pool,
+)
+
+
+def _as_timeout(value: Any) -> httpx.Timeout:
+    if isinstance(value, httpx.Timeout):
+        return value
+    return httpx.Timeout(value)
+
+
+def _limit_timeout(timeout: httpx.Timeout, timeout_seconds: float | None) -> httpx.Timeout:
+    """把显式 timeout 的未禁用字段限制到全局 idle timeout。"""
+    if timeout_seconds is None:
+        return httpx.Timeout(timeout=None)
+    values: list[float | None] = []
+    for field in (timeout.connect, timeout.read, timeout.write, timeout.pool):
+        values.append(None if field is None else min(float(field), timeout_seconds))
+    return httpx.Timeout(
+        connect=values[0],
+        read=values[1],
+        write=values[2],
+        pool=values[3],
+    )
 
 
 def _apply_global_default_timeout(timeout_ms: int) -> None:
@@ -74,6 +103,44 @@ def _apply_global_default_timeout(timeout_ms: int) -> None:
     default.pool = timeout_seconds
 
 
+def _install_async_client_timeout_patch() -> None:
+    """让所有 `httpx.AsyncClient(...)` 实例都遵守全局 idle timeout。"""
+    global _original_async_client_init, _async_client_init_patched
+    if _async_client_init_patched:
+        return
+
+    def _patched_init(self: httpx.AsyncClient, *args: Any, **kwargs: Any) -> None:
+        sentinel = object()
+        explicit = kwargs.pop("timeout", sentinel)
+        timeout_seconds = None if _configured_timeout_ms == 0 else _configured_timeout_ms / 1000.0
+        if explicit is sentinel or explicit is None:
+            kwargs["timeout"] = (
+                httpx.Timeout(timeout=None)
+                if timeout_seconds is None
+                else httpx.Timeout(timeout_seconds)
+            )
+        else:
+            kwargs["timeout"] = _limit_timeout(_as_timeout(explicit), timeout_seconds)
+        _original_async_client_init(self, *args, **kwargs)
+
+    httpx.AsyncClient.__init__ = _patched_init  # type: ignore[method-assign]
+    _async_client_init_patched = True
+
+
+def reset_http_dispatcher() -> None:
+    """恢复 httpx 默认状态（测试隔离用）。"""
+    global _configured_timeout_ms, _async_client_init_patched
+    if _async_client_init_patched:
+        httpx.AsyncClient.__init__ = _original_async_client_init  # type: ignore[method-assign]
+        _async_client_init_patched = False
+    _configured_timeout_ms = DEFAULT_HTTP_IDLE_TIMEOUT_MS
+    default = httpx._config.DEFAULT_TIMEOUT_CONFIG
+    default.connect = _original_default_timeout[0]
+    default.read = _original_default_timeout[1]
+    default.write = _original_default_timeout[2]
+    default.pool = _original_default_timeout[3]
+
+
 def configure_http_dispatcher(timeout_ms: int = DEFAULT_HTTP_IDLE_TIMEOUT_MS) -> None:
     """配置全局 HTTP 默认值并启用系统代理。"""
     global _configured_timeout_ms
@@ -82,6 +149,7 @@ def configure_http_dispatcher(timeout_ms: int = DEFAULT_HTTP_IDLE_TIMEOUT_MS) ->
         raise ValueError(f"Invalid HTTP idle timeout: {timeout_ms}")
     _configured_timeout_ms = normalized
     _apply_global_default_timeout(normalized)
+    _install_async_client_timeout_patch()
     # 不覆盖用户显式设置的代理；httpx 默认 trust_env 会读取这两个变量。
     os.environ.setdefault("HTTP_PROXY", os.environ.get("HTTP_PROXY", ""))
     os.environ.setdefault("HTTPS_PROXY", os.environ.get("HTTPS_PROXY", ""))
@@ -108,6 +176,7 @@ __all__ = [
     "format_http_idle_timeout_ms",
     "apply_http_proxy_settings",
     "configure_http_dispatcher",
+    "reset_http_dispatcher",
     "get_configured_http_timeout_ms",
     "make_http_client",
 ]

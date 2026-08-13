@@ -143,40 +143,48 @@ class ThemeMarkdownTheme(MarkdownTheme):
 
     def heading(self, base: Style | None, level: int) -> Style:
         return (base or Style()) + _style(
-            self._color("markdownHeading", "heading"),
+            self._color("mdHeading", "markdownHeading", "heading"),
             bold=True,
             underline=level == 1,
         )
 
     def link(self, base: Style | None) -> Style:
-        return (base or Style()) + _style(self._color("markdownLink", "link"), underline=True)
+        return (base or Style()) + _style(
+            self._color("mdLink", "markdownLink", "link"),
+            underline=True,
+        )
 
     def link_url(self, base: Style | None) -> Style:
-        return (base or Style()) + _style(self._color("textDim", "dim"))
+        return (base or Style()) + _style(
+            self._color("mdLinkUrl", "markdownLinkUrl", "textDim", "dim")
+        )
 
     def code(self, base: Style | None) -> Style:
         return (base or Style()) + _style(
-            self._color("code_fg", "text"),
+            self._color("mdCode", "code_fg", "text"),
             bgcolor=self._color("code_bg", "bgPanel"),
         )
 
     def code_block(self, base: Style | None) -> Style:
-        return self.code(base)
+        return (base or Style()) + _style(self._color("mdCodeBlock", "code_fg", "text"))
 
     def code_block_border(self, base: Style | None) -> Style:
-        return (base or Style()) + _style(self._color("textDim", "dim"))
+        return (base or Style()) + _style(self._color("mdCodeBlockBorder", "textDim", "dim"))
 
     def quote(self, base: Style | None) -> Style:
-        return (base or Style()) + _style(self._color("textDim", "dim"), italic=True)
+        return (base or Style()) + _style(
+            self._color("mdQuote", "textDim", "dim"),
+            italic=True,
+        )
 
     def quote_border(self, base: Style | None) -> Style:
-        return (base or Style()) + _style(self._color("textDim", "dim"))
+        return (base or Style()) + _style(self._color("mdQuoteBorder", "textDim", "dim"))
 
     def hr(self, base: Style | None) -> Style:
-        return (base or Style()) + _style(self._color("textDim", "dim"))
+        return (base or Style()) + _style(self._color("mdHr", "textDim", "dim"))
 
     def list_bullet(self, base: Style | None) -> Style:
-        return (base or Style()) + _style(self._color("accent", "markdownHeading"))
+        return (base or Style()) + _style(self._color("mdListBullet", "accent", "markdownHeading"))
 
     def highlight_code(self, code: str, lang: str | None) -> list[Line] | None:
         # 延迟导入避免 text.py ↔ markdown_render.py 循环依赖。

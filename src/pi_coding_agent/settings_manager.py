@@ -785,12 +785,18 @@ class SettingsManager:
         value = self._settings.get("extensions")
         return list(value) if isinstance(value, list) else []
 
+    def set_extensions(self, paths: list[str]) -> None:
+        self._set_global("extensions", list(paths))
+
     def set_project_extensions(self, paths: list[str]) -> None:
         self._set_project("extensions", list(paths))
 
     def get_skills(self) -> list[str]:
         value = self._settings.get("skills")
         return list(value) if isinstance(value, list) else []
+
+    def set_skills(self, paths: list[str]) -> None:
+        self._set_global("skills", list(paths))
 
     def set_project_skills(self, paths: list[str]) -> None:
         self._set_project("skills", list(paths))
@@ -799,12 +805,18 @@ class SettingsManager:
         value = self._settings.get("prompts")
         return list(value) if isinstance(value, list) else []
 
+    def set_prompts(self, paths: list[str]) -> None:
+        self._set_global("prompts", list(paths))
+
     def set_project_prompts(self, paths: list[str]) -> None:
         self._set_project("prompts", list(paths))
 
     def get_themes(self) -> list[str]:
         value = self._settings.get("themes")
         return list(value) if isinstance(value, list) else []
+
+    def set_themes(self, paths: list[str]) -> None:
+        self._set_global("themes", list(paths))
 
     def set_project_themes(self, paths: list[str]) -> None:
         self._set_project("themes", list(paths))

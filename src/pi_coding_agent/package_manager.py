@@ -92,6 +92,10 @@ class PackageManager:
         parsed = parse_source(source)
         return self._packages_dir(scope) / parsed.name
 
+    def installed_path(self, source: str, scope: str) -> Path:
+        """配置源对应的安装目录（供资源选择器等只读消费者使用）。"""
+        return self._installed_path(source, scope)
+
     def _assert_project_trusted(self, scope: str) -> None:
         if scope != "project":
             return

@@ -1,8 +1,17 @@
 """coding-agent 交互模式专用组件。"""
 
 from .art import ArminComponent, DaxnutsComponent, EarendilAnnouncementComponent
-from .dialogs import (
+from .config_selector import (
+    ConfigScope,
     ConfigSelectorComponent,
+    ConfigSelectorModel,
+    ResourceGroup,
+    ResourceItem,
+    ResourceOrigin,
+    ResourceScope,
+    ResourceType,
+)
+from .dialogs import (
     LoginDialogComponent,
     ShowImagesSelectorComponent,
 )
@@ -23,6 +32,13 @@ __all__ = [
     "DaxnutsComponent",
     "EarendilAnnouncementComponent",
     "ConfigSelectorComponent",
+    "ConfigSelectorModel",
+    "ConfigScope",
+    "ResourceGroup",
+    "ResourceItem",
+    "ResourceOrigin",
+    "ResourceScope",
+    "ResourceType",
     "LoginDialogComponent",
     "ShowImagesSelectorComponent",
     "DiffEntry",

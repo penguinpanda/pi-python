@@ -435,8 +435,18 @@ class PiTuiApp(App):
             else:
                 widget.base_style = _fg_style(theme, "text")
         self._chat_theme_colors = {
-            "heading": theme.colors.get("accent"),
-            "code_fg": theme.colors.get("text"),
+            "mdHeading": theme.colors.get("mdHeading", theme.colors.get("accent")),
+            "mdLink": theme.colors.get("mdLink", theme.colors.get("accent")),
+            "mdLinkUrl": theme.colors.get("mdLinkUrl", theme.colors.get("dim")),
+            "mdCode": theme.colors.get("mdCode", theme.colors.get("text")),
+            "mdCodeBlock": theme.colors.get("mdCodeBlock", theme.colors.get("text")),
+            "mdCodeBlockBorder": theme.colors.get("mdCodeBlockBorder", theme.colors.get("dim")),
+            "mdQuote": theme.colors.get("mdQuote", theme.colors.get("dim")),
+            "mdQuoteBorder": theme.colors.get("mdQuoteBorder", theme.colors.get("dim")),
+            "mdHr": theme.colors.get("mdHr", theme.colors.get("dim")),
+            "mdListBullet": theme.colors.get("mdListBullet", theme.colors.get("accent")),
+            "heading": theme.colors.get("mdHeading", theme.colors.get("accent")),
+            "code_fg": theme.colors.get("mdCodeBlock", theme.colors.get("text")),
             "code_bg": theme.colors.get("bgPanel", theme.colors.get("bgAlt")),
             "thinking": theme.colors.get("thinkingText"),
             "toolPendingBg": theme.colors.get("toolPendingBg"),

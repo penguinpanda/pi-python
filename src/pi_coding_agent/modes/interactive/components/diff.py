@@ -26,13 +26,20 @@ def _replace_tabs(text: str) -> str:
     return text.replace("\t", "   ")
 
 
-def _word_changes(old: str, new: str) -> tuple[list[tuple[str, bool]], list[tuple[str, bool]]]:
-    matcher = difflib.SequenceMatcher(a=old.split(), b=new.split())
+def _changes_from_matcher(
+    old_tokens: list[str],
+    new_tokens: list[str],
+) -> tuple[list[tuple[str, bool]], list[tuple[str, bool]]]:
+    matcher = difflib.SequenceMatcher(
+        a=old_tokens,
+        b=new_tokens,
+        autojunk=False,
+    )
     removed: list[tuple[str, bool]] = []
     added: list[tuple[str, bool]] = []
     for op, i1, i2, j1, j2 in matcher.get_opcodes():
-        old_part = " ".join(old.split()[i1:i2])
-        new_part = " ".join(new.split()[j1:j2])
+        old_part = " ".join(old_tokens[i1:i2])
+        new_part = " ".join(new_tokens[j1:j2])
         if op == "equal":
             removed.append((old_part, False))
             added.append((new_part, False))
@@ -43,6 +50,14 @@ def _word_changes(old: str, new: str) -> tuple[list[tuple[str, bool]], list[tupl
             removed.append((old_part, True))
         elif op == "insert":
             added.append((new_part, True))
+    return removed, added
+
+
+def _word_changes(old: str, new: str) -> tuple[list[tuple[str, bool]], list[tuple[str, bool]]]:
+    """按词级差异着色；无有效词边界时回退到逐字符。"""
+    removed, added = _changes_from_matcher(old.split(), new.split())
+    if not any(changed for _text, changed in removed + added):
+        removed, added = _changes_from_matcher(list(old), list(new))
     return removed, added
 
 

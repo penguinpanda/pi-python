@@ -10,6 +10,7 @@ from pi_coding_agent.http_dispatcher import (
     configure_http_dispatcher,
     make_http_client,
     parse_http_idle_timeout_ms,
+    reset_http_dispatcher,
 )
 
 
@@ -22,13 +23,6 @@ def test_parse_and_defaults() -> None:
 def test_proxy_and_client_factory(monkeypatch) -> None:
     monkeypatch.delenv("HTTP_PROXY", raising=False)
     monkeypatch.delenv("HTTPS_PROXY", raising=False)
-    default_timeout = httpx._config.DEFAULT_TIMEOUT_CONFIG
-    original = (
-        default_timeout.connect,
-        default_timeout.read,
-        default_timeout.write,
-        default_timeout.pool,
-    )
     try:
         apply_http_proxy_settings("http://proxy.local:8080")
         configure_http_dispatcher(30_000)
@@ -37,8 +31,8 @@ def test_proxy_and_client_factory(monkeypatch) -> None:
         assert client.timeout.connect == 30
         default_client = httpx.AsyncClient()
         assert default_client.timeout.connect == 30
+        limited_client = httpx.AsyncClient(timeout=180)
+        assert limited_client.timeout.connect == 30
+        assert limited_client.timeout.read == 30
     finally:
-        default_timeout.connect = original[0]
-        default_timeout.read = original[1]
-        default_timeout.write = original[2]
-        default_timeout.pool = original[3]
+        reset_http_dispatcher()

@@ -10,6 +10,7 @@ from pi_tui.engine.markdown_render import (
     DefaultTextStyle,
     MarkdownOptions,
     MarkdownTheme,
+    ThemeMarkdownTheme,
     render_markdown_lines,
 )
 from pi_tui.engine.text import render_markdown, strip_ansi
@@ -104,6 +105,19 @@ def test_default_text_style_applied() -> None:
     assert cells[0].style is not None
     assert cells[0].style.bold
     assert "red" in str(cells[0].style.color)
+
+
+def test_theme_uses_dedicated_markdown_color_keys() -> None:
+    theme = ThemeMarkdownTheme(
+        {
+            "mdHeading": "#ff0000",
+            "mdLink": "#00ff00",
+            "mdQuote": "#0000ff",
+        }
+    )
+    assert theme.heading(None, 1).color is not None
+    assert theme.link(None).color is not None
+    assert theme.quote(None).color is not None
 
 
 def test_table_renders_with_cells() -> None:

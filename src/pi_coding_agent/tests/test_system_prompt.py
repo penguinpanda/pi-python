@@ -333,27 +333,17 @@ class TestConfigPaths:
     def test_cli_sets_pi_coding_agent_marker(self, monkeypatch):
         import os
 
-        import httpx
         import pytest
         from pi_coding_agent._cli import main
+        from pi_coding_agent.http_dispatcher import reset_http_dispatcher
 
         monkeypatch.delenv("PI_CODING_AGENT", raising=False)
         monkeypatch.delenv("AI_AGENT", raising=False)
-        default_timeout = httpx._config.DEFAULT_TIMEOUT_CONFIG
-        original = (
-            default_timeout.connect,
-            default_timeout.read,
-            default_timeout.write,
-            default_timeout.pool,
-        )
         try:
             with pytest.raises(SystemExit):
                 main(["--version"])
         finally:
-            default_timeout.connect = original[0]
-            default_timeout.read = original[1]
-            default_timeout.write = original[2]
-            default_timeout.pool = original[3]
+            reset_http_dispatcher()
         assert os.environ.get("PI_CODING_AGENT") == "true"
         assert os.environ.get("AI_AGENT") == "pi"
 

@@ -41,6 +41,12 @@ from .extensions import (
 from .export_html import export_session_to_html
 from .file_processor import process_at_files
 from .first_time_setup import run_first_time_setup, run_first_time_setup_sync
+from .config_selector import (
+    build_config_selector_model,
+    persist_resource_toggle,
+    run_config_selector,
+    run_config_selector_sync,
+)
 from .trust import TrustManager, project_has_local_resources, resolve_project_trusted
 from .auth_storage import AuthStorage, FileAuthStorageBackend
 from .model_config import ModelConfig, ModelOverride, ProviderOverride
@@ -157,6 +163,10 @@ __all__ = [
     "process_at_files",
     "run_first_time_setup",
     "run_first_time_setup_sync",
+    "build_config_selector_model",
+    "persist_resource_toggle",
+    "run_config_selector",
+    "run_config_selector_sync",
     # Tools
     "create_all_tools",
     "create_coding_tools",
