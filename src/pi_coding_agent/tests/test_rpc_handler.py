@@ -327,12 +327,18 @@ class TestBashAndStats:
     async def test_bash(self, tmp_path):
         runtime = _make_runtime()
         handler = _make_handler(runtime, tmp_path)
+        emitted: list = []
+        handler.output = emitted.append
         response = await handler.handle_command(
             {"id": "1", "type": "bash", "command": "echo rpc-ok"}
         )
-        assert response["success"] is True
-        assert "rpc-ok" in response["data"]["output"]
-        assert response["data"]["exit_code"] == 0
+        assert response is None
+        if handler._bash_tasks:
+            await asyncio.gather(*list(handler._bash_tasks), return_exceptions=True)
+        assert len(emitted) == 1
+        assert emitted[0]["success"] is True
+        assert "rpc-ok" in emitted[0]["data"]["output"]
+        assert emitted[0]["data"]["exit_code"] == 0
 
     async def test_bash_requires_command(self, tmp_path):
         runtime = _make_runtime()
@@ -758,9 +764,64 @@ async def test_bash_command_uses_session_and_exclude_from_context(tmp_path):
             calls.append(("record", command, exclude_from_context))
 
     handler.session = _FakeSession()
+    emitted: list = []
+    handler.output = emitted.append
     response = await handler.handle_command(
         {"type": "bash", "command": "echo hi", "excludeFromContext": True}
     )
-    assert response["success"] is True
-    assert response["data"]["output"] == "out"
+    assert response is None
+    if handler._bash_tasks:
+        await asyncio.gather(*list(handler._bash_tasks), return_exceptions=True)
+    assert len(emitted) == 1
+    assert emitted[0]["success"] is True
+    assert emitted[0]["data"]["output"] == "out"
     assert ("echo hi", True) in calls
+
+
+@pytest.mark.asyncio
+async def test_abort_bash_cancels_running_command(tmp_path):
+    """abort_bash 在 bash 后台运行期间可以中止命令。"""
+    from types import SimpleNamespace
+
+    runtime = _make_runtime()
+    handler = _make_handler(runtime, tmp_path)
+    abort_signal = asyncio.Event()
+    calls: list = []
+
+    class _FakeSession:
+        cwd = str(tmp_path)
+        extension_runner = None
+
+        def abort_bash(self):
+            calls.append("abort")
+            abort_signal.set()
+
+        async def execute_bash(self, command, on_chunk=None, *, exclude_from_context=False, **kw):
+            calls.append(("exec", command, exclude_from_context))
+            await abort_signal.wait()
+            return SimpleNamespace(
+                output="aborted",
+                exit_code=None,
+                cancelled=True,
+                truncated=False,
+                full_output_path=None,
+            )
+
+        def record_bash_result(self, command, result, *, exclude_from_context=False):
+            calls.append(("record", command, exclude_from_context))
+
+    handler.session = _FakeSession()
+    emitted: list = []
+    handler.output = emitted.append
+
+    response = await handler.handle_command({"id": "1", "type": "bash", "command": "sleep 30"})
+    assert response is None
+    abort_response = await handler.handle_command({"id": "2", "type": "abort_bash"})
+    assert abort_response["success"] is True
+    if handler._bash_tasks:
+        await asyncio.gather(*list(handler._bash_tasks), return_exceptions=True)
+
+    assert "abort" in calls
+    assert len(emitted) == 1
+    assert emitted[0]["command"] == "bash"
+    assert emitted[0]["data"]["canceled"] is True

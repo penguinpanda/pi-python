@@ -7,6 +7,7 @@
 import asyncio
 import json
 
+from filelock import FileLock
 from pathlib import Path
 from typing import Any
 
@@ -84,6 +85,7 @@ class FileCredentialStore:
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
         self._locks: dict[str, asyncio.Lock] = {}
+        self._file_lock = FileLock(str(self._path) + ".lock", timeout=30)
 
     def _lock(self, provider_id: str) -> asyncio.Lock:
         lock = self._locks.get(provider_id)
@@ -125,21 +127,23 @@ class FileCredentialStore:
 
     async def modify(self, provider_id: str, fn) -> Credential | None:
         async with self._lock(provider_id):
-            data = self._load()
-            raw = data.get(provider_id)
-            current = _from_raw(raw) if isinstance(raw, dict) else None
-            next_value = await fn(current)
-            if next_value is not None:
-                data[provider_id] = _to_raw(next_value)
-                self._save(data)
-            return next_value if next_value is not None else current
+            with self._file_lock:
+                data = self._load()
+                raw = data.get(provider_id)
+                current = _from_raw(raw) if isinstance(raw, dict) else None
+                next_value = await fn(current)
+                if next_value is not None:
+                    data[provider_id] = _to_raw(next_value)
+                    self._save(data)
+                return next_value if next_value is not None else current
 
     async def delete(self, provider_id: str) -> None:
         async with self._lock(provider_id):
-            data = self._load()
-            if provider_id in data:
-                del data[provider_id]
-                self._save(data)
+            with self._file_lock:
+                data = self._load()
+                if provider_id in data:
+                    del data[provider_id]
+                    self._save(data)
 
     # 兼容旧 API。
     async def write(self, provider_id: str, credential: Credential) -> None:

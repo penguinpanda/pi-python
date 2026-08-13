@@ -33,6 +33,7 @@ from pi_ai.api.api_provider_registry import get_api_provider, invoke_api_stream
 from pi_ai.auth import ApiKeyCredential, EnvApiKeyAuth, ResolvedAuth
 from pi_ai.auth.resolve import ModelsError
 from pi_ai.auth.types import AuthResult, ModelAuth, credential_type
+from pi_ai.utils._background import track_background_task
 from pi_ai.models.models_store import InMemoryModelsStore, ModelsStore
 from pi_ai.models import ModelsRefreshOptions, ModelsRefreshResult
 from pi_ai.provider import _API_KIND_IDS
@@ -1311,10 +1312,10 @@ class ModelRuntime:
 
     def _schedule_refresh(self) -> None:
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
         except RuntimeError:
             return
-        loop.create_task(self.refresh(ModelsRefreshOptions(allow_network=False)))
+        track_background_task(self.refresh(ModelsRefreshOptions(allow_network=False)))
 
 
 def _validate_extension_provider(

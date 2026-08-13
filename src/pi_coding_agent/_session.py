@@ -2085,10 +2085,15 @@ class AgentSession:
         if self._pending_writes:
             await asyncio.gather(*self._pending_writes, return_exceptions=True)
             self._pending_writes.clear()
+        self.abort_bash()
+        self._agent.abort()
+        try:
+            await self._agent.wait_for_idle()
+        except Exception:
+            pass
         if self._unsub_agent:
             self._unsub_agent()
             self._unsub_agent = None
-        self._agent.abort()
         self._listeners.clear()
         # 统一清理该会话注册的资源（不阻断 dispose 自身）。
         from pi_ai.session_resources import cleanup_session_resources

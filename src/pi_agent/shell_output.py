@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from .env import ExecutionEnv, ShellExecOptions, to_execution_error
@@ -94,17 +95,45 @@ async def execute_shell_with_capture(
     current_line_bytes = 0
     full_output_path: str | None = None
     full_output_requested = False
-    full_output_initial: str = ""
     accepting_output = True
-    write_chain: list[str] = []
+    full_output_tasks: set[asyncio.Task] = set()
+    full_output_lock = asyncio.Lock()
     capture_error: BaseException | None = None
 
+    def _schedule_full_output(coro) -> None:
+        task = asyncio.create_task(coro)
+        full_output_tasks.add(task)
+        task.add_done_callback(full_output_tasks.discard)
+
+    async def _ensure_full_output_file(initial_content: str) -> None:
+        nonlocal capture_error, full_output_path
+        async with full_output_lock:
+            if capture_error is not None:
+                return
+            temp_file = await env.create_temp_file({"prefix": "bash-", "suffix": ".log"})
+            if not temp_file[0]:
+                capture_error = to_execution_error(temp_file[1])
+                return
+            full_output_path = temp_file[1]
+            append_result = await env.append_file(full_output_path, initial_content)
+            if not append_result[0]:
+                capture_error = to_execution_error(append_result[1])
+
+    async def _append_full_output(text: str) -> None:
+        nonlocal capture_error
+        async with full_output_lock:
+            if capture_error is not None or full_output_path is None:
+                return
+            append_result = await env.append_file(full_output_path, text)
+            if not append_result[0]:
+                capture_error = to_execution_error(append_result[1])
+
     def mark_full_output_requested(initial_content: str) -> None:
-        nonlocal full_output_requested, full_output_initial
+        nonlocal full_output_requested
         if full_output_requested or capture_error is not None:
             return
         full_output_requested = True
-        full_output_initial = initial_content
+        _schedule_full_output(_ensure_full_output_file(initial_content))
 
     def on_chunk_internal(text: str) -> None:
         nonlocal tail_output, total_bytes, completed_lines, has_open_line, current_line_bytes
@@ -131,8 +160,8 @@ async def execute_shell_with_capture(
                 total_bytes > DEFAULT_MAX_BYTES or total_lines > DEFAULT_MAX_LINES
             ) and not full_output_requested:
                 mark_full_output_requested(tail_output)
-            elif full_output_requested and full_output_path:
-                write_chain.append(cleaned)
+            elif full_output_requested:
+                _schedule_full_output(_append_full_output(cleaned))
             tail_output = _trim_to_last_utf8_bytes(tail_output, max_output_bytes)
             if on_chunk is not None:
                 on_chunk(cleaned, lambda: create_progress())
@@ -178,14 +207,8 @@ async def execute_shell_with_capture(
     if progress.truncation.truncated and not full_output_requested:
         mark_full_output_requested(tail_output)
 
-    if full_output_requested:
-        temp_file = await env.create_temp_file({"prefix": "bash-", "suffix": ".log"})
-        if temp_file[0]:
-            full_output_path = temp_file[1]
-            await env.append_file(full_output_path, full_output_initial)
-    if full_output_path and write_chain:
-        for chunk in write_chain:
-            await env.append_file(full_output_path, chunk)
+    if full_output_tasks:
+        await asyncio.gather(*full_output_tasks, return_exceptions=True)
     if capture_error is not None:
         return (False, to_execution_error(capture_error))
     progress = create_progress()

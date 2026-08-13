@@ -919,7 +919,15 @@ class App:
         task = asyncio.create_task(coroutine)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
+        task.add_done_callback(self._report_task_exception)
         return task
+
+    def _report_task_exception(self, task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            print(f"Unhandled TUI task exception: {exc!r}", file=sys.stderr)
 
     def set_clear_on_shrink(self, enabled: bool) -> None:
         """内容收缩时清理残留行（差分渲染已覆盖，选项保留 API 对齐）。"""

@@ -10,6 +10,7 @@ import copy
 import json
 
 from dataclasses import dataclass
+from filelock import FileLock
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -185,6 +186,7 @@ class FileModelsStore:
 
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
+        self._file_lock = FileLock(str(self._path) + ".lock", timeout=30)
 
     def _load(self) -> dict[str, dict[str, Any]]:
         try:
@@ -202,7 +204,8 @@ class FileModelsStore:
         tmp.replace(self._path)
 
     async def read(self, provider_id: str) -> ModelsStoreEntry | None:
-        raw = self._load().get(provider_id)
+        with self._file_lock:
+            raw = self._load().get(provider_id)
         if raw is None:
             return None
         return ModelsStoreEntry(
@@ -213,20 +216,22 @@ class FileModelsStore:
         )
 
     async def write(self, provider_id: str, entry: ModelsStoreEntry) -> None:
-        data = self._load()
-        data[provider_id] = {
-            "models": [model_to_dict(m) for m in entry.models],
-            "last_modified": entry.last_modified,
-            "checked_at": entry.checked_at,
-            "etag": entry.etag,
-        }
-        self._save(data)
+        with self._file_lock:
+            data = self._load()
+            data[provider_id] = {
+                "models": [model_to_dict(m) for m in entry.models],
+                "last_modified": entry.last_modified,
+                "checked_at": entry.checked_at,
+                "etag": entry.etag,
+            }
+            self._save(data)
 
     async def delete(self, provider_id: str) -> None:
-        data = self._load()
-        if provider_id in data:
-            del data[provider_id]
-            self._save(data)
+        with self._file_lock:
+            data = self._load()
+            if provider_id in data:
+                del data[provider_id]
+                self._save(data)
 
 
 __all__ = [

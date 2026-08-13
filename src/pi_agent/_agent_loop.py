@@ -1169,8 +1169,24 @@ async def _execute_tool_calls_parallel(
 
     exec_tasks = [(i, t) for i, t in entries if isinstance(t, asyncio.Task)]
     if exec_tasks:
-        done = await asyncio.gather(*(t for _, t in exec_tasks))
-        for (index, _), outcome in zip(exec_tasks, done, strict=True):
+        try:
+            outcomes = await asyncio.gather(
+                *(t for _, t in exec_tasks),
+                return_exceptions=True,
+            )
+        except BaseException:
+            for _, task in exec_tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*(t for _, t in exec_tasks), return_exceptions=True)
+            raise
+        for (index, _), outcome in zip(exec_tasks, outcomes, strict=True):
+            if isinstance(outcome, BaseException):
+                for _, task in exec_tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*(t for _, t in exec_tasks), return_exceptions=True)
+                raise outcome
             ordered_results[index] = cast(_FinalizedToolOutcome, outcome)
 
     tool_result_messages: list[ToolResultMessage] = []

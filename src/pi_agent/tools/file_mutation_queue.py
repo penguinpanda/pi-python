@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import weakref
 from typing import Any, Callable, TypeVar
 
 from ..env import ExecutionEnv, get_or_throw
@@ -25,14 +26,14 @@ def _done_future() -> asyncio.Future:
     return future
 
 
-_states: dict[int, _MutationState] = {}
+_states: weakref.WeakKeyDictionary[ExecutionEnv, _MutationState] = weakref.WeakKeyDictionary()
 
 
 def _get_state(env: ExecutionEnv) -> _MutationState:
-    state = _states.get(id(env))
+    state = _states.get(env)
     if state is None:
         state = _MutationState()
-        _states[id(env)] = state
+        _states[env] = state
     return state
 
 
@@ -57,9 +58,9 @@ async def with_file_mutation_queue(
     current_queue = state.queues.get(key)
     release_next: asyncio.Future = asyncio.get_running_loop().create_future()
     state.queues[key] = release_next
-    if current_queue is not None and not current_queue.done():
-        await current_queue
     try:
+        if current_queue is not None and not current_queue.done():
+            await current_queue
         return await operation()
     finally:
         if not release_next.done():

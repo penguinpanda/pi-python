@@ -127,7 +127,9 @@ def session_entry_to_context_messages(
     entry_type = entry["type"]
     if entry_type == "message":
         message = cast(Any, entry)["message"]
-        if message.get("role") == "assistant" and message.get("stopReason") == "deferred":
+        if message.get("role") == "assistant" and (
+            message.get("stop_reason") == "deferred" or message.get("stopReason") == "deferred"
+        ):
             return []
         return [message]
     if entry_type == "compaction":

@@ -369,8 +369,11 @@ class RpcMessageHandler:
         # fork/clone/switch_session 用：按给定 SessionManager 重建 AgentSession。
         self.session_rebuilder = session_rebuilder
         self.created_sessions: list[AgentSession] = []
+        self._disposed_session_ids: set[int] = set()
         # 后台 prompt 任务（命令循环不阻塞）。
         self._prompt_tasks: set[asyncio.Task] = set()
+        # 后台 bash 任务，允许命令循环在 bash 运行期间处理 abort_bash。
+        self._bash_tasks: set[asyncio.Task] = set()
         # 输出通道（preflight 成功后 prompt 的 success 响应经此发送）。
         self.output = output or (lambda _obj: None)
 
@@ -408,6 +411,24 @@ class RpcMessageHandler:
             "get_messages": self._handle_get_messages,
             "get_commands": self._handle_get_commands,
         }
+
+    async def _dispose_session(self, session: AgentSession) -> None:
+        """释放会话；同一会话最多 dispose 一次。"""
+        session_id = id(session)
+        if session_id in self._disposed_session_ids:
+            return
+        self._disposed_session_ids.add(session_id)
+        try:
+            await session.dispose()
+        except Exception:
+            pass
+
+    async def _replace_session(self, new_session: AgentSession) -> None:
+        """替换当前会话，并释放被替换下来的旧会话。"""
+        old = self.session
+        if old is not None and old is not new_session:
+            await self._dispose_session(old)
+        self.session = new_session
 
     async def handle_command(self, cmd: dict) -> dict | None:
         """分发命令，返回响应 dict（None 表示无响应）。"""
@@ -489,7 +510,7 @@ class RpcMessageHandler:
         except Exception as exc:
             return error_response(command_id, "new_session", str(exc))
         self.created_sessions.append(new_session)
-        self.session = new_session
+        await self._replace_session(new_session)
         return success_response(command_id, "new_session", {"cancelled": False})
 
     async def _fork_from_parent(self, parent_session_id: str):
@@ -677,53 +698,63 @@ class RpcMessageHandler:
     # Bash
     # ------------------------------------------------------------------
 
-    async def _handle_bash(self, cmd: dict, command_id: str | None) -> dict:
+    async def _handle_bash(self, cmd: dict, command_id: str | None) -> dict | None:
         command = cmd.get("command")
         if not isinstance(command, str) or not command.strip():
             return error_response(command_id, "bash", "Command is required")
         exclude_from_context = bool(cmd.get("excludeFromContext"))
-        try:
-            # 扩展 user_bash 事件（对齐 TS emitUserBash）：扩展可返回 result 直接采用。
-            runner = self.session.extension_runner
-            if runner is not None:
-                event_results = await runner.emit_event(
-                    "user_bash",
-                    {
-                        "command": command,
-                        "excludeFromContext": exclude_from_context,
-                        "cwd": self.session.cwd,
-                    },
-                )
-                for candidate in reversed(event_results):
-                    if isinstance(candidate, dict) and candidate.get("result") is not None:
-                        extension_result = candidate["result"]
-                        self.session.record_bash_result(
-                            command,
-                            extension_result,
-                            exclude_from_context=exclude_from_context,
-                        )
-                        return success_response(command_id, "bash", extension_result)
 
-            # 经 session 执行（对齐 TS session.executeBash：记录历史并进入上下文）。
-            result = await self.session.execute_bash(
-                command,
-                exclude_from_context=exclude_from_context,
-                timeout=120,
-            )
-            return success_response(
-                command_id,
-                "bash",
-                {
-                    "output": result.output,
-                    "exit_code": result.exit_code,
-                    "canceled": result.cancelled,
-                },
-            )
-        except Exception as exc:
-            return error_response(command_id, "bash", str(exc))
+        async def _run() -> None:
+            try:
+                # 扩展 user_bash 事件（对齐 TS emitUserBash）：扩展可返回 result 直接采用。
+                runner = self.session.extension_runner
+                if runner is not None:
+                    event_results = await runner.emit_event(
+                        "user_bash",
+                        {
+                            "command": command,
+                            "excludeFromContext": exclude_from_context,
+                            "cwd": self.session.cwd,
+                        },
+                    )
+                    for candidate in reversed(event_results):
+                        if isinstance(candidate, dict) and candidate.get("result") is not None:
+                            extension_result = candidate["result"]
+                            self.session.record_bash_result(
+                                command,
+                                extension_result,
+                                exclude_from_context=exclude_from_context,
+                            )
+                            self.output(success_response(command_id, "bash", extension_result))
+                            return
+
+                # 经 session 执行（对齐 TS session.executeBash：记录历史并进入上下文）。
+                result = await self.session.execute_bash(
+                    command,
+                    exclude_from_context=exclude_from_context,
+                    timeout=120,
+                )
+                self.output(
+                    success_response(
+                        command_id,
+                        "bash",
+                        {
+                            "output": result.output,
+                            "exit_code": result.exit_code,
+                            "canceled": result.cancelled,
+                        },
+                    )
+                )
+            except Exception as exc:
+                self.output(error_response(command_id, "bash", str(exc)))
+
+        task = asyncio.create_task(_run())
+        self._bash_tasks.add(task)
+        task.add_done_callback(self._bash_tasks.discard)
+        return None
 
     async def _handle_abort_bash(self, _cmd: dict, command_id: str | None) -> dict:
-        # 当前 bash 同步执行（无跟踪进程），no-op 成功。
+        self.session.abort_bash()
         return success_response(command_id, "abort_bash")
 
     # ------------------------------------------------------------------
@@ -773,7 +804,7 @@ class RpcMessageHandler:
         except Exception as exc:
             return error_response(command_id, "fork", str(exc))
         self.created_sessions.append(new_session)
-        self.session = new_session
+        await self._replace_session(new_session)
         return success_response(
             command_id,
             "fork",
@@ -794,7 +825,7 @@ class RpcMessageHandler:
         except Exception as exc:
             return error_response(command_id, "clone", str(exc))
         self.created_sessions.append(new_session)
-        self.session = new_session
+        await self._replace_session(new_session)
         return success_response(command_id, "clone", {"cancelled": False})
 
     async def _handle_switch_session(self, cmd: dict, command_id: str | None) -> dict:
@@ -809,7 +840,7 @@ class RpcMessageHandler:
         except Exception as exc:
             return error_response(command_id, "switch_session", str(exc))
         self.created_sessions.append(new_session)
-        self.session = new_session
+        await self._replace_session(new_session)
         return success_response(command_id, "switch_session", {"cancelled": False})
 
     async def _handle_get_tree(self, _cmd: dict, command_id: str | None) -> dict:
@@ -1051,19 +1082,15 @@ async def run_rpc_mode(
     finally:
         if handler._prompt_tasks:
             await asyncio.gather(*list(handler._prompt_tasks), return_exceptions=True)
+        if handler._bash_tasks:
+            await asyncio.gather(*list(handler._bash_tasks), return_exceptions=True)
         if unsubscribe is not None:
             unsubscribe()
         if extension_error_unsub is not None:
             extension_error_unsub()
         for created in list(handler.created_sessions):
-            try:
-                await created.dispose()
-            except Exception:
-                pass
-        try:
-            await handler.session.dispose()
-        except Exception:
-            pass
+            await handler._dispose_session(created)
+        await handler._dispose_session(handler.session)
         write_queue.put_nowait(None)
         await writer_task
     return 0
