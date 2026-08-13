@@ -162,6 +162,97 @@ class _FakeResponse:
         return self._body
 
 
+@pytest.mark.asyncio
+async def test_radius_token_error_detail(monkeypatch) -> None:
+    """token 请求失败：错误详情拼接进异常。"""
+
+    class _ErrorResponse:
+        status_code = 400
+        is_success = False
+        text = "oops"
+
+        def json(self):
+            return {"error": "invalid_grant", "error_description": "code expired"}
+
+    async def fake_post(url, **kwargs):
+        return _ErrorResponse()
+
+    def fake_client(*a, **kw):
+        class _Client:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            post = staticmethod(fake_post)
+
+        return _Client()
+
+    monkeypatch.setattr(radius, "_AsyncClient", fake_client)
+    with pytest.raises(RuntimeError, match="code expired"):
+        await radius._request_oauth_token(
+            "https://gw.example.com",
+            {"grant_type": "authorization_code"},
+            None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_radius_discover_fallback(monkeypatch) -> None:
+    """well-known 请求失败时回退默认授权端点。"""
+    import httpx
+
+    class _FailClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def get(self, url):
+            raise httpx.ConnectError("unreachable")
+
+    monkeypatch.setattr(radius, "_AsyncClient", lambda *a, **kw: _FailClient())
+    endpoint = await radius._discover_authorization_endpoint("https://gw.example.com")
+    assert endpoint == "https://gw.example.com/oauth/authorize"
+
+
+@pytest.mark.asyncio
+async def test_radius_token_missing_fields(monkeypatch) -> None:
+    """token 响应缺字段报错。"""
+
+    class _BadResponse:
+        status_code = 200
+        is_success = True
+
+        def json(self):
+            return {"access_token": "a"}  # 缺 refresh_token
+
+    async def fake_post(url, **kwargs):
+        return _BadResponse()
+
+    def fake_client(*a, **kw):
+        class _Client:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            post = staticmethod(fake_post)
+
+        return _Client()
+
+    monkeypatch.setattr(radius, "_AsyncClient", fake_client)
+    with pytest.raises(RuntimeError, match="missing fields"):
+        await radius._request_oauth_token(
+            "https://gw.example.com",
+            {"grant_type": "refresh_token"},
+            None,
+        )
+
+
 def test_xai_response_validation() -> None:
     """_required_string / _positive_number / verification_uri 校验错误路径。"""
     with pytest.raises(RuntimeError, match="device_code"):
