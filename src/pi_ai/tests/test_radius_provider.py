@@ -108,6 +108,67 @@ async def test_fetch_radius_models_offline_returns_empty(monkeypatch) -> None:
     assert models == []
 
 
+@pytest.mark.asyncio
+async def test_fetch_radius_models_http_error_wrapped(monkeypatch) -> None:
+    """网关请求失败：RuntimeError 包装（含网关信息）。"""
+    import httpx
+    import pi_ai.providers.radius as radius_mod
+
+    def failing_factory(*a, **kw):
+        class _Client:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def get(self, url, headers=None):
+                raise httpx.ConnectError("refused")
+
+        return _Client()
+
+    monkeypatch.setattr(radius_mod, "_client_factory", failing_factory)
+    context = RefreshModelsContext(allow_network=True)
+    with pytest.raises(RuntimeError, match="Could not load Radius config"):
+        await radius_mod._fetch_radius_models("radius", "https://gw.example.com", context)
+
+
+@pytest.mark.asyncio
+async def test_fetch_radius_models_invalid_config(monkeypatch) -> None:
+    """网关返回非法配置：RuntimeError。"""
+    import json
+    import httpx
+    import pi_ai.providers.radius as radius_mod
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=json.dumps({"not": "valid"}).encode())
+
+    monkeypatch.setattr(
+        radius_mod,
+        "_client_factory",
+        lambda *a, **kw: httpx.AsyncClient(*a, transport=httpx.MockTransport(handler), **kw),
+    )
+    context = RefreshModelsContext(allow_network=True)
+    with pytest.raises(RuntimeError, match="Invalid Radius config"):
+        await radius_mod._fetch_radius_models("radius", "https://gw.example.com", context)
+
+
+@pytest.mark.asyncio
+async def test_fetch_radius_models_abort_signal(monkeypatch) -> None:
+    """取消信号置位：不发起请求直接返回空。"""
+    import asyncio
+    import pi_ai.providers.radius as radius_mod
+
+    def failing_factory(*a, **kw):
+        raise AssertionError("should not be called")
+
+    monkeypatch.setattr(radius_mod, "_client_factory", failing_factory)
+    signal = asyncio.Event()
+    signal.set()
+    context = RefreshModelsContext(allow_network=True, signal=signal)
+    assert await radius_mod._fetch_radius_models("radius", "https://gw.example.com", context) == []
+
+
 def test_radius_provider_custom_gateway() -> None:
     provider = radius_provider(gateway="custom.example.com")
     assert provider.name == "Radius"
