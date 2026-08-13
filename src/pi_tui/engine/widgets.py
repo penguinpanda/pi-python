@@ -1347,13 +1347,17 @@ class Editor(Widget):
                 cursor_index = self.padding_x + (self.cursor_col - self.scroll_col)
                 if 0 <= cursor_index < width:
                     index = cursor_index
-                    cell = line.cells[index]
-                    cell.style = (cell.style or Style()) + Style(reverse=True)
+                    # 防御性边界（宽字符截断时 cells 可能与列宽不完全一致）。
+                    if index < len(line.cells):
+                        cell = line.cells[index]
+                        cell.style = (cell.style or Style()) + Style(reverse=True)
             if start is not None and end is not None and start[0] <= row <= end[0]:
                 from_col = start[1] if row == start[0] else 0
                 to_col = end[1] if row == end[0] else len(self.lines[row])
                 from_col = max(0, self.padding_x + from_col - self.scroll_col)
                 to_col = min(width, max(0, self.padding_x + to_col - self.scroll_col))
+                to_col = min(to_col, len(line.cells))
+                from_col = min(from_col, to_col)
                 for index in range(from_col, to_col):
                     cell = line.cells[index]
                     cell.style = (cell.style or Style()) + Style(reverse=True)
