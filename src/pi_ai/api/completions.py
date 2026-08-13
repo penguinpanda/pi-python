@@ -462,13 +462,21 @@ async def chat_completions_stream(
                     "high": 16384,
                     **cast(dict[str, int], opts.get("thinking_budgets") or {}),
                 }
-                ceiling = (
+                ceiling_raw: Any = (
                     kwargs.get("max_tokens")
-                    or kwargs.get("max_completion_tokens")
-                    or model.max_tokens
+                    if kwargs.get("max_tokens") is not None
+                    else kwargs.get("max_completion_tokens")
+                    if kwargs.get("max_completion_tokens") is not None
+                    else model.max_tokens
                 )
+                ceiling = int(ceiling_raw) if ceiling_raw is not None else 0
+                # 对齐 TS clampReasoning：xhigh/max 收敛到 high 再查表
+                # （TS 的 reasoning 类型不含 off；Python 由 _thinking_on 排除）。
+                level = cast(ModelThinkingLevel, reasoning_level)
+                if level in ("xhigh", "max"):
+                    level = "high"
                 budget = min(
-                    budgets.get(cast(ModelThinkingLevel, reasoning_level), 0) or 0,
+                    budgets.get(level, 0) or 0,
                     max(0, ceiling - MIN_ANSWER_TOKENS),
                 )
                 if budget > 0:

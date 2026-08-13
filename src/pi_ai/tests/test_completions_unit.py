@@ -817,6 +817,51 @@ class TestThinkingFormatMatrix:
         )
 
     @pytest.mark.asyncio
+    async def test_vllm_budget_xhigh_max_clamp_to_high(self):
+        """xhigh/max 收敛到 high 查表（对齐 TS clampReasoning），仍发预算。"""
+        model = self._model("qwen", supportsThinkingTokenBudget=True)
+        model.max_tokens = 32000
+        client = _mock_client([_chunk(content="ok", finish_reason="stop")])
+        for level in ("xhigh", "max"):
+            _, _ = await _collect_events(
+                model,
+                Context(messages=[{"role": "user", "content": "Hi"}]),
+                client,
+                options={"reasoning": level},
+            )
+            kwargs = client.chat.completions.create.call_args.kwargs
+            assert kwargs["extra_body"]["thinking_token_budget"] == 16384
+
+    @pytest.mark.asyncio
+    async def test_vllm_budget_ceiling_uses_nullish_semantics(self):
+        """ceiling 取 max_tokens ?? max_completion_tokens ?? model.maxTokens。"""
+        model = self._model("qwen", supportsThinkingTokenBudget=True)
+        client = _mock_client([_chunk(content="ok", finish_reason="stop")])
+        _, _ = await _collect_events(
+            model,
+            Context(messages=[{"role": "user", "content": "Hi"}]),
+            client,
+            options={"reasoning": "high", "max_tokens": 2000},
+        )
+        kwargs = client.chat.completions.create.call_args.kwargs
+        # ceiling=2000 → budget = min(16384, 2000 - 1024) = 976
+        assert kwargs["extra_body"]["thinking_token_budget"] == 976
+
+    @pytest.mark.asyncio
+    async def test_vllm_budget_not_sent_when_level_missing(self):
+        """budget 表查不到且无 clamp 路径时不发送（off 由 _thinking_on 排除）。"""
+        model = self._model("qwen", supportsThinkingTokenBudget=True)
+        client = _mock_client([_chunk(content="ok", finish_reason="stop")])
+        _, _ = await _collect_events(
+            model,
+            Context(messages=[{"role": "user", "content": "Hi"}]),
+            client,
+            options={"reasoning": "off"},
+        )
+        kwargs = client.chat.completions.create.call_args.kwargs
+        assert "thinking_token_budget" not in (kwargs.get("extra_body") or {})
+
+    @pytest.mark.asyncio
     async def test_zai_thinking_enabled(self):
         model = self._model("zai", supportsReasoningEffort=True)
         client = _mock_client([_chunk(content="ok", finish_reason="stop")])
