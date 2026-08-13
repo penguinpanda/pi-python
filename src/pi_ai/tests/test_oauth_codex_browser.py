@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import urllib.parse
 
+import pytest
+
 from pi_ai.auth.oauth.openai_codex import (
     BROWSER_REDIRECT_URI,
     _browser_login,
@@ -81,3 +83,48 @@ class _FakeBrowser:
     @staticmethod
     def open(url):
         _FakeBrowser.opened.append(url)
+
+
+def test_decode_jwt_and_account_id() -> None:
+    import base64
+    import json
+
+    from pi_ai.auth.oauth.openai_codex import (
+        get_account_id,
+        _decode_jwt_payload,
+    )
+
+    def _jwt(payload: dict) -> str:
+        body = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+        return f"h.{body}.s"
+
+    assert _decode_jwt_payload("not-a-jwt") is None
+    assert (
+        get_account_id(_jwt({"https://api.openai.com/auth": {"chatgpt_account_id": "acc-1"}}))
+        == "acc-1"
+    )
+    assert get_account_id(_jwt({"other": 1})) is None
+
+
+@pytest.mark.asyncio
+async def test_start_device_auth_404_hints_browser(monkeypatch) -> None:
+    """device code 404：提示改用浏览器登录。"""
+    import pi_ai.auth.oauth.openai_codex as codex
+
+    class _Response:
+        status_code = 404
+        is_success = False
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, *a, **kw):
+            return _Response()
+
+    monkeypatch.setattr(codex, "_AsyncClient", lambda *a, **kw: _Client())
+    with pytest.raises(RuntimeError, match="browser login"):
+        await codex.start_device_auth(None)
