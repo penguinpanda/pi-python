@@ -559,7 +559,7 @@ class TestCompletionsStream:
 
         _, _ = await _collect_events(model, context, client, options={"reasoning": "high"})
         kwargs = client.chat.completions.create.call_args.kwargs
-        assert kwargs["thinking"] == {"type": "enabled"}
+        assert kwargs["extra_body"]["thinking"] == {"type": "enabled"}
         assert kwargs["reasoning_effort"] == "high"
 
     @pytest.mark.asyncio
@@ -571,7 +571,7 @@ class TestCompletionsStream:
 
         _, _ = await _collect_events(model, context, client, options={"reasoning": "off"})
         kwargs = client.chat.completions.create.call_args.kwargs
-        assert kwargs["thinking"] == {"type": "disabled"}
+        assert kwargs["extra_body"]["thinking"] == {"type": "disabled"}
         assert "reasoning_effort" not in kwargs
 
     @pytest.mark.asyncio
@@ -583,7 +583,7 @@ class TestCompletionsStream:
 
         _, _ = await _collect_events(model, context, client)
         kwargs = client.chat.completions.create.call_args.kwargs
-        assert kwargs["thinking"] == {"type": "disabled"}
+        assert kwargs["extra_body"]["thinking"] == {"type": "disabled"}
         assert "reasoning_effort" not in kwargs
 
     @pytest.mark.asyncio
@@ -597,6 +597,7 @@ class TestCompletionsStream:
         _, _ = await _collect_events(model, context, client)
         kwargs = client.chat.completions.create.call_args.kwargs
         assert "thinking" not in kwargs
+        assert "thinking" not in (kwargs.get("extra_body") or {})
         assert "reasoning_effort" not in kwargs
 
     @pytest.mark.parametrize(
@@ -826,7 +827,7 @@ class TestThinkingFormatMatrix:
             options={"reasoning": "high"},
         )
         kwargs = client.chat.completions.create.call_args.kwargs
-        assert kwargs["thinking"] == {"type": "enabled", "clear_thinking": False}
+        assert kwargs["extra_body"]["thinking"] == {"type": "enabled", "clear_thinking": False}
         assert kwargs["reasoning_effort"] == "high"
 
     @pytest.mark.asyncio
@@ -840,7 +841,7 @@ class TestThinkingFormatMatrix:
             options={"reasoning": "off"},
         )
         kwargs = client.chat.completions.create.call_args.kwargs
-        assert kwargs["enable_thinking"] is False
+        assert kwargs["extra_body"]["enable_thinking"] is False
 
     @pytest.mark.asyncio
     async def test_openrouter_nested_reasoning(self):
@@ -866,7 +867,7 @@ class TestThinkingFormatMatrix:
             options={"reasoning": "high"},
         )
         kwargs = client.chat.completions.create.call_args.kwargs
-        assert kwargs["thinking"] == "high"
+        assert kwargs["extra_body"]["thinking"] == "high"
 
     @pytest.mark.asyncio
     async def test_together_reasoning_enabled_flag(self):

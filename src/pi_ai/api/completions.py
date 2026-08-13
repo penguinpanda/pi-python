@@ -474,6 +474,22 @@ async def chat_completions_stream(
                 if budget > 0:
                     kwargs["thinking_token_budget"] = budget
 
+            # 非 SDK 标准参数经 extra_body 透传（对齐 TS 直接构造请求体）：
+            # thinking / thinking_token_budget / chat_template_kwargs 等字段
+            # 不在 OpenAI SDK create() 签名内，直接传顶层会抛
+            # "got an unexpected keyword argument"。
+            for extra_key in (
+                "thinking",
+                "thinking_token_budget",
+                "chat_template_kwargs",
+                "chat_template_args",
+                "enable_thinking",
+            ):
+                if extra_key in kwargs:
+                    extra_body = dict(kwargs.get("extra_body") or {})
+                    extra_body[extra_key] = kwargs.pop(extra_key)
+                    kwargs["extra_body"] = extra_body
+
             # 发起流式请求。
             #
             # 返回的是异步可迭代对象。
