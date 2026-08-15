@@ -157,14 +157,17 @@ def _compaction_mutation(
 ) -> SessionMutation:
     retained_tail = entry.get("retainedTail")
     if retained_tail is None:
+        # 旧 v3 未存 retainedTail：按 firstKeptEntryId 从后续条目推导。
         retained_tail = []
         first_kept = entry.get("firstKeptEntryId")
         collecting = first_kept is None
-    for after in entries_after:
-        if after["id"] == first_kept:
-            collecting = True
-        if collecting and after["type"] == "message":
-            retained_tail.append(after["message"])
+        for after in entries_after:
+            if after["id"] == first_kept:
+                collecting = True
+            if collecting and after["type"] == "message":
+                retained_tail.append(after["message"])
+    else:
+        retained_tail = list(retained_tail)
     result: dict[str, Any] = {
         "type": "compaction",
         "id": entry["id"],

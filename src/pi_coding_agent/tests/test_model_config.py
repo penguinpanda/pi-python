@@ -51,21 +51,50 @@ class TestResolveConfigValue:
     def test_command_value(self):
         import os
 
+        from pi_coding_agent.resolve_config_value import _windows_git_bash
+
         clear_config_value_cache()
         assert is_command_config_value("!echo hello")
-        # echo 是 cmd 内建命令：Windows 上需经 cmd /c，其它平台可直接执行。
-        command = "!cmd /c echo hello" if os.name == "nt" else "!echo hello"
+        # 与实现一致的 shell 探测：Windows 上仅有 Git bash 时用 bash 语法
+        # （WSL system32 bash 不可用于 subprocess shell=True），否则 cmd /c。
+        if os.name == "nt" and _windows_git_bash() is None:
+            command = "!cmd /c echo hello"
+        else:
+            command = "!echo hello"
         assert resolve_config_value(command) == "hello"
 
     def test_command_value_supports_shell_pipeline(self):
         """!command 经系统 shell 执行：管道/重定向生效（对齐 TS execSync）。"""
         import os
 
+        from pi_coding_agent.resolve_config_value import _windows_git_bash
+
         clear_config_value_cache()
         if os.name == "nt":
-            assert resolve_config_value("!cmd /c echo hello | findstr hello") == "hello"
+            if _windows_git_bash() is not None:
+                assert resolve_config_value("!echo hello | grep hello") == "hello"
+            else:
+                assert resolve_config_value("!cmd /c echo hello | findstr hello") == "hello"
         else:
             assert resolve_config_value("!echo hello | tr a-z A-Z") == "HELLO"
+
+    def test_or_throw_uses_cached_command_result(self, monkeypatch):
+        """回归：or_throw 走缓存路径,!command 认证值每进程只执行一次。"""
+        import importlib
+
+        rcv = importlib.import_module("pi_coding_agent.resolve_config_value")
+
+        calls: list[str] = []
+
+        def fake_exec(command_config: str) -> str | None:
+            calls.append(command_config)
+            return "sk-secret"
+
+        monkeypatch.setattr(rcv, "_execute_command_uncached", fake_exec)
+        rcv.clear_config_value_cache()
+        assert resolve_config_value_or_throw("!my-cmd", "api key") == "sk-secret"
+        assert resolve_config_value_or_throw("!my-cmd", "api key") == "sk-secret"
+        assert len(calls) == 1
 
     def test_env_var_names(self):
         assert get_config_value_env_var_names("a-$FOO-b-${BAR}") == ["FOO", "BAR"]

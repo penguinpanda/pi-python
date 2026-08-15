@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+from typing import Callable
 
 from pi_tui.keybindings import Keybinding
 
@@ -17,11 +18,13 @@ class ExtensionRegistry:
         model_runtime=None,
         slash_registry=None,
         keybindings_manager=None,
+        action_handler_registrar: Callable[[str, Callable], None] | None = None,
     ) -> None:
         self._runner = runner
         self._model_runtime = model_runtime
         self._slash_registry = slash_registry
         self._keybindings_manager = keybindings_manager
+        self._action_handler_registrar = action_handler_registrar
 
     def get_tools(self):
         return self._runner.get_registered_tools()
@@ -85,6 +88,10 @@ class ExtensionRegistry:
                     description=shortcut.description or f"Extension shortcut {shortcut.shortcut}",
                 )
             )
+            # 引擎按 action_<name> 方法分发,扩展没有宿主方法;
+            # 把 handler 注册为 action handler,按键才能真正触发。
+            if shortcut.handler is not None and self._action_handler_registrar is not None:
+                self._action_handler_registrar(action_id, shortcut.handler)
 
 
 __all__ = ["ExtensionRegistry"]

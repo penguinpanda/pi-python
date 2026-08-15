@@ -162,6 +162,16 @@ def test_openrouter_parse_authorization_input():
     assert openrouter._parse_authorization_input("raw-code") == "raw-code"
     assert openrouter._parse_authorization_input("") is None
     assert openrouter._parse_authorization_input(None) is None
+    # 回归：粘贴内容携带 state 且与当前 flow 不一致时拒绝。
+    assert (
+        openrouter._parse_authorization_input("https://x.dev/cb?code=abc&state=stale", "fresh")
+        is None
+    )
+    assert openrouter._parse_authorization_input("code=abc&state=stale", "fresh") is None
+    assert (
+        openrouter._parse_authorization_input("https://x.dev/cb?code=abc&state=fresh", "fresh")
+        == "abc"
+    )
 
 
 def test_builtin_oauth_providers():

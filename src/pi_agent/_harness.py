@@ -960,6 +960,19 @@ class AgentHarness(Generic[TContext]):
                 signal=signal,
                 stream_fn=self._create_stream_fn(_get_turn_state),
             )
+        except asyncio.CancelledError:
+            # aborted：run_agent_loop 已补发 message_end（aborted 消息已持久化）
+            # 与 agent_end。取会话最后一条 aborted assistant 消息返回，
+            # 不再合成空失败消息或重复 turn_end / agent_end / settled。
+            for entry in reversed(await self._session.get_branch()):
+                if entry.get("type") == "message":
+                    message = cast(AgentMessage, entry.get("message"))
+                    if (
+                        message.get("role") == "assistant"
+                        and message.get("stop_reason") == "aborted"
+                    ):
+                        return cast(AssistantMessage, message)
+            raise
         except BaseException as error:
             return cast(
                 AssistantMessage,

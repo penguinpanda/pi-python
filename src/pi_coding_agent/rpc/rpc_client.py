@@ -45,11 +45,19 @@ class RpcClient:
         self._process: asyncio.subprocess.Process | None = None
         self._reader_task: asyncio.Task | None = None
         self._stderr_task: asyncio.Task | None = None
+        self._exit_task: asyncio.Task | None = None
         self._event_listeners: list[RpcEventListener] = []
         self._pending: dict[str, asyncio.Future] = {}
         self._request_id = 0
         self._stderr = ""
         self._exit_error: Exception | None = None
+
+    def _fail_pending(self, error: Exception) -> None:
+        """失败所有等待中的请求,避免调用方悬挂到超时。"""
+        for pending in list(self._pending.values()):
+            if not pending.done():
+                pending.set_exception(error)
+        self._pending.clear()
 
     # ------------------------------------------------------------------
     # 生命周期
@@ -92,11 +100,26 @@ class RpcClient:
                     self._handle_line(line)
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                pass
+            except Exception as error:
+                # 读取失败（子进程崩溃、管道断裂）时失败所有等待中的请求，
+                # 而不是静默吞掉让调用方空等超时。
+                self._exit_error = RuntimeError(
+                    f"Agent process stdout closed: {error}. Stderr: {self._stderr}"
+                )
+                self._fail_pending(self._exit_error)
+
+        async def _wait_for_exit() -> None:
+            code = await process.wait()
+            if self._process is not None:
+                # stop() 已把 _process 置 None 时不再覆盖其正常终止语义。
+                self._exit_error = RuntimeError(
+                    f"Agent process exited (code={code}). Stderr: {self._stderr}"
+                )
+                self._fail_pending(self._exit_error)
 
         self._reader_task = asyncio.create_task(_read_stdout())
         self._stderr_task = asyncio.create_task(_read_stderr())
+        self._exit_task = asyncio.create_task(_wait_for_exit())
 
     async def stop(self) -> None:
         """终止 RPC 子进程。"""
@@ -127,8 +150,16 @@ class RpcClient:
                     await process.wait()
                 except ProcessLookupError:
                     pass
+        if self._exit_task is not None:
+            self._exit_task.cancel()
+            try:
+                await self._exit_task
+            except asyncio.CancelledError:
+                pass
+            self._exit_task = None
         self._process = None
-        self._pending.clear()
+        # stop() 后等待中的请求立即失败,而不是悬挂。
+        self._fail_pending(RuntimeError("RPC client stopped"))
 
     def _build_command(self) -> list[str]:
         options = self._options

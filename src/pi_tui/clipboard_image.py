@@ -22,13 +22,21 @@ _WINDOWS_SCRIPT = (
     "[Console]::OpenStandardOutput().Write($ms.ToArray())}"
 )
 
+_MACOS_TMP_PATH = "/tmp/pi-clipboard-image.png"
+
+# osascript 无法直接向 stdout 输出二进制 PNG；改为写入固定临时文件，
+# 由 Python 侧读取并清理（对齐 TS clipboard-image.ts 的实现方式）。
 _MACOS_SCRIPT = (
-    'set png_path to (POSIX file (do shell script "mktemp /tmp/pi-clipboard-XXXX.png") as text)\n'
+    f'set png_path to "{_MACOS_TMP_PATH}"\n'
     "try\n"
-    "  set the clipboard to (read (clipboard info) as «class PNGf»)\n"
+    "  set png_data to (the clipboard as «class PNGf»)\n"
     "on error\n"
     "  return\n"
-    "end try"
+    "end try\n"
+    "set f to open for access (POSIX file png_path) with write permission\n"
+    "set eof of f to 0\n"
+    "write png_data to f\n"
+    "close access f"
 )
 
 
@@ -47,6 +55,8 @@ class ClipboardImage:
     @staticmethod
     async def read() -> bytes | None:
         """读取剪贴板图片（PNG bytes）；无图片/失败返回 None。"""
+        if sys.platform == "darwin":
+            return await _read_macos()
         data = await _run_command(ClipboardImage.build_command())
         if data:
             return data
@@ -72,6 +82,31 @@ class ClipboardImage:
         if not result["ok"]:
             raise ValueError(result["message"])
         return result["data"]
+
+
+async def _read_macos() -> bytes | None:
+    """macOS：osascript 写临时文件 → 读取并清理。"""
+    import os
+
+    path = _MACOS_TMP_PATH
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+    data = await _run_command(["osascript", "-e", _MACOS_SCRIPT])
+    if data:
+        return data
+    try:
+        with open(path, "rb") as f:
+            raw = f.read()
+    except OSError:
+        return None
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    return raw or None
 
 
 async def _run_command(args: list[str]) -> bytes | None:

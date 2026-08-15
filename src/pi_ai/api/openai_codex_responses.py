@@ -28,7 +28,7 @@ from ..types import (
 from ..utils._event_stream import AssistantMessageEventStream
 from ..utils.uuid import uuidv7
 from ..utils.cost import calculate_cost
-from ._shared import empty_usage, parse_tool_arguments
+from ._shared import close_async_client, empty_usage, parse_tool_arguments
 from .responses import responses_stream
 
 _DEFAULT_BASE_URL = "https://chatgpt.com/backend-api"
@@ -402,7 +402,10 @@ async def codex_fetch_deferred(
     headers = _codex_headers(api_key, opts)
     endpoint = (opts.get("base_url") or model.base_url or _DEFAULT_BASE_URL).rstrip("/")
     client = _codex_client(api_key, endpoint, headers)
-    response = await client.responses.retrieve(handle["id"])
+    try:
+        response = await client.responses.retrieve(handle["id"])
+    finally:
+        await close_async_client(client)
     content: list[Any] = []
     for item in response.output or []:
         if getattr(item, "type", None) == "message":
@@ -452,7 +455,10 @@ async def codex_cancel_deferred(
     headers = _codex_headers(api_key, opts)
     endpoint = (opts.get("base_url") or model.base_url or _DEFAULT_BASE_URL).rstrip("/")
     client = _codex_client(api_key, endpoint, headers)
-    await client.responses.cancel(handle["id"])
+    try:
+        await client.responses.cancel(handle["id"])
+    finally:
+        await close_async_client(client)
 
 
 __all__ = [

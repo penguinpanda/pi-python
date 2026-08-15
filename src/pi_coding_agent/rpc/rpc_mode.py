@@ -452,6 +452,8 @@ class RpcMessageHandler:
         message = cmd.get("message")
         if not isinstance(message, str) or not message.strip():
             return error_response(command_id, "prompt", "Message is required")
+        if self.session.is_streaming:
+            return error_response(command_id, "prompt", "Agent is busy streaming")
         images = _parse_images(cmd.get("images"))
 
         # 对齐 TS prompt preflight：preflight 成功才发 success；
@@ -1080,8 +1082,20 @@ async def run_rpc_mode(
                 text = text[:-1]
             await handle_line(text)
     finally:
+        # 客户端断开（stdin EOF）：中止并取消进行中的任务而非无限等待，
+        # 长 prompt/bash 不得拖住进程退出。
+        try:
+            await handler.session.abort()
+        except Exception:
+            pass
+        for task in list(handler._prompt_tasks):
+            if not task.done():
+                task.cancel()
         if handler._prompt_tasks:
             await asyncio.gather(*list(handler._prompt_tasks), return_exceptions=True)
+        for task in list(handler._bash_tasks):
+            if not task.done():
+                task.cancel()
         if handler._bash_tasks:
             await asyncio.gather(*list(handler._bash_tasks), return_exceptions=True)
         if unsubscribe is not None:

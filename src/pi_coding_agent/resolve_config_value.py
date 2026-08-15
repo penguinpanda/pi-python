@@ -160,6 +160,27 @@ def is_config_value_configured(config: str, env: dict[str, str] | None = None) -
     return not get_missing_config_value_env_var_names(config, env)
 
 
+def _windows_git_bash() -> str | None:
+    """查找 Git bash 可执行文件（排除 WSL 的 system32 bash.exe）。
+
+    WSL 的 bash.exe 无法配合 subprocess shell=True 使用（命令原样传给
+    /bin/bash 会得到 "/c: No such file or directory" 之类的失败）。
+    """
+    candidate = shutil.which("bash")
+    if candidate and "system32" not in candidate.lower():
+        return candidate
+    for base in (
+        os.environ.get("ProgramFiles", r"C:\Program Files"),
+        os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs"),
+    ):
+        for rel in (r"Git\bin\bash.exe", r"Git\usr\bin\bash.exe"):
+            path = os.path.join(base, rel)
+            if os.path.isfile(path):
+                return path
+    return None
+
+
 def _execute_command_uncached(command_config: str) -> str | None:
     """执行 `!command` 并返回 stdout（去首尾空白）。
 
@@ -171,18 +192,27 @@ def _execute_command_uncached(command_config: str) -> str | None:
     shell_path: str | None = None
     use_shell = True
     if os.name == "nt":
-        bash = shutil.which("bash")
+        bash = _windows_git_bash()
         if bash:
             shell_path = bash
     try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=10,
-            shell=use_shell,
-            executable=shell_path,
-        )
+        if shell_path is not None:
+            # Git bash:必须经 -c 执行(Windows 上 shell=True + executable
+            # 会把命令当脚本路径传给 bash,恒失败)。
+            result = subprocess.run(
+                [shell_path, "-c", command],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        else:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                shell=use_shell,
+            )
     except (OSError, subprocess.SubprocessError):
         return None
     if result.returncode != 0:
@@ -207,7 +237,7 @@ def resolve_config_value(config: str, env: dict[str, str] | None = None) -> str 
 
 
 def resolve_config_value_uncached(config: str, env: dict[str, str] | None = None) -> str | None:
-    """同 resolve_config_value，但命令结果不缓存（供或错解析使用）。"""
+    """同 resolve_config_value，但命令结果不缓存（需强制重执行的场景显式使用）。"""
     is_command, parts = _parse_config_value_reference(config)
     if is_command:
         return _execute_command_uncached(config)
@@ -217,8 +247,12 @@ def resolve_config_value_uncached(config: str, env: dict[str, str] | None = None
 def resolve_config_value_or_throw(
     config: str, description: str, env: dict[str, str] | None = None
 ) -> str:
-    """解析配置值，失败时抛出带描述的错误。"""
-    resolved = resolve_config_value_uncached(config, env)
+    """解析配置值，失败时抛出带描述的错误。
+
+    !command 走进程内缓存：认证解析（model_runtime）每次请求都会调用，
+    不缓存会导致 API key 的 shell 命令每个请求重复执行（副作用/延迟）。
+    """
+    resolved = resolve_config_value(config, env)
     if resolved is not None:
         return resolved
 

@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-import fcntl
 import os
 import select
 import sys
 
 import pytest
+
+# fcntl 为 POSIX 专有模块；Windows 上置 None，依赖它的测试显式 skip。
+try:
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None  # type: ignore[assignment]
 
 from pi_tui.engine.cells import line_from_text
 from pi_tui.engine.terminal import ScreenBuffer, Terminal
@@ -63,6 +68,8 @@ def test_screen_buffer_diff_and_reset() -> None:
 
 
 def test_terminal_query_size_fallback(monkeypatch) -> None:
+    if fcntl is None:
+        pytest.skip("fcntl is POSIX-only")
     monkeypatch.setattr(os, "name", "posix")
     fd = os.open(os.devnull, os.O_RDONLY)
     try:
@@ -80,8 +87,11 @@ def test_terminal_query_size_fallback(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_terminal_enter_exit_regular_and_noop(monkeypatch) -> None:
-    import termios
-    import tty
+    try:
+        import termios
+        import tty
+    except ImportError:
+        pytest.skip("termios is POSIX-only")
 
     monkeypatch.setattr(termios, "tcgetattr", lambda _fd: None)
     monkeypatch.setattr(tty, "setraw", lambda _fd: None)
@@ -160,8 +170,11 @@ def test_osc11_parse_and_read(monkeypatch) -> None:
 
 
 def test_query_terminal_background_posix(monkeypatch) -> None:
-    import termios
-    import tty
+    try:
+        import termios
+        import tty
+    except ImportError:
+        pytest.skip("termios is POSIX-only")
 
     monkeypatch.setattr(sys, "stdin", _FakeTtyIn())
     monkeypatch.setattr(sys, "stdout", _FakeTtyOut())
@@ -182,8 +195,11 @@ def test_query_terminal_background_posix(monkeypatch) -> None:
 
 
 def test_drain_pending_osc_response(monkeypatch) -> None:
-    import termios
-    import tty
+    try:
+        import termios
+        import tty
+    except ImportError:
+        pytest.skip("termios is POSIX-only")
 
     monkeypatch.setattr(sys, "stdin", _FakeTtyIn())
     monkeypatch.setattr(os, "name", "posix")

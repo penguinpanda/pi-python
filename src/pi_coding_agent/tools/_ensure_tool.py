@@ -21,6 +21,8 @@ _NETWORK_TIMEOUT_MS = 10_000
 _DOWNLOAD_TIMEOUT_MS = 120_000
 _RETRY_ATTEMPTS = 3
 _RETRY_BACKOFF_SECONDS = (0.5, 1.0, 2.0)
+# 归档下载大小上限（防磁盘耗尽）。
+_MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
 _T = TypeVar("_T")
 
 
@@ -187,6 +189,10 @@ async def _download_file(url: str, dest: Path) -> None:
         async with httpx.AsyncClient(timeout=_DOWNLOAD_TIMEOUT_MS / 1000) as client:
             async with client.stream("GET", url, follow_redirects=True) as response:
                 response.raise_for_status()
+                content_length = response.headers.get("content-length")
+                if content_length and content_length.isdigit():
+                    if int(content_length) > _MAX_ARCHIVE_BYTES:
+                        raise RuntimeError(f"Archive too large ({int(content_length)} bytes)")
                 with dest.open("wb") as handle:
                     async for chunk in response.aiter_bytes():
                         handle.write(chunk)
@@ -210,16 +216,29 @@ async def _with_retry(
     raise last_error
 
 
+def _assert_member_within(dest_dir: Path, member_name: str) -> None:
+    """校验归档成员解析后仍位于目标目录内（zip-slip 防护）。"""
+    dest_real = os.path.realpath(str(dest_dir))
+    target = os.path.realpath(os.path.join(dest_real, member_name))
+    if target != dest_real and not target.startswith(dest_real + os.sep):
+        raise RuntimeError(f"Archive member escapes destination: {member_name}")
+
+
 def _extract_archive(archive_path: Path, dest_dir: Path) -> None:
     if archive_path.name.endswith(".tar.gz") or archive_path.name.endswith(".tgz"):
         with tarfile.open(archive_path, "r:gz") as archive:
+            for member in archive.getmembers():
+                _assert_member_within(dest_dir, member.name)
             try:
                 archive.extractall(dest_dir, filter="data")
             except TypeError:
+                # Python < 3.12 无 filter；成员路径已在上面校验。
                 archive.extractall(dest_dir)
         return
     if archive_path.name.endswith(".zip"):
         with zipfile.ZipFile(archive_path) as archive:
+            for info in archive.infolist():
+                _assert_member_within(dest_dir, info.filename)
             archive.extractall(dest_dir)
         return
     raise RuntimeError(f"Unsupported archive format: {archive_path.name}")

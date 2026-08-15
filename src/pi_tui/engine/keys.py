@@ -206,14 +206,23 @@ class KeyParser:
                 del self.buffer[:1]
                 continue
             else:
-                char = chr(second)
-                event = KeyEvent(
-                    type="key",
-                    key=Key(
-                        name=normalize_key_name(f"alt+{char}"),
-                        char=char,
-                    ),
-                )
+                # 控制字节（\r=alt+enter、\x7f=alt+backspace 等）先查名字表，
+                # 否则 chr() 会得到不可匹配的 "alt+\r" 形式,默认绑定静默失效。
+                ctrl_name = _CTRL_NAMES.get(second)
+                if ctrl_name is not None:
+                    event = KeyEvent(
+                        type="key",
+                        key=Key(name=normalize_key_name(f"alt+{ctrl_name}")),
+                    )
+                else:
+                    char = chr(second)
+                    event = KeyEvent(
+                        type="key",
+                        key=Key(
+                            name=normalize_key_name(f"alt+{char}"),
+                            char=char,
+                        ),
+                    )
                 consumed = 2
             if event is None:
                 if final:

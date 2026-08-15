@@ -8,6 +8,58 @@ from pathlib import Path
 from pi_ai import ImageContent
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+# 文本注入大小上限（防止大文件/二进制被打进上下文）。
+MAX_TEXT_FILE_BYTES = 1_000_000
+MAX_IMAGE_FILE_BYTES = 20_000_000
+# 目录递归时忽略的常见目录名。
+_IGNORED_DIR_NAMES = {
+    ".git",
+    ".hg",
+    ".svn",
+    "node_modules",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    "dist",
+    "build",
+}
+# 已知二进制/压缩扩展：不做文本注入（未知扩展由内容嗅探兜底）。
+_KNOWN_BINARY_EXTENSIONS = {
+    ".exe",
+    ".dll",
+    ".so",
+    ".dylib",
+    ".zip",
+    ".gz",
+    ".tgz",
+    ".tar",
+    ".7z",
+    ".rar",
+    ".pdf",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".ppt",
+    ".pptx",
+    ".ico",
+    ".bin",
+    ".wasm",
+    ".pyc",
+    ".class",
+    ".jar",
+    ".mp3",
+    ".mp4",
+    ".avi",
+    ".mov",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".otf",
+}
 _TEXT_EXTENSIONS = {
     ".md",
     ".txt",
@@ -57,33 +109,46 @@ def _mime_type(path: Path) -> str:
 
 
 def _should_inject_text(path: Path) -> bool:
-    if path.suffix.lower() in _TEXT_EXTENSIONS:
-        return True
-    # 未知扩展：尝试按文本读取，失败则跳过。
-    return True
+    # 已知二进制/压缩扩展直接跳过；未知扩展由内容嗅探兜底。
+    return path.suffix.lower() not in _KNOWN_BINARY_EXTENSIONS
 
 
-def _read_text(path: Path) -> str | None:
-    try:
-        return path.read_text(encoding="utf-8", errors="replace")
-    except (OSError, UnicodeDecodeError):
-        return None
+def _is_binary(data: bytes) -> bool:
+    return b"\x00" in data[:8192]
 
 
-def _inject_file_text(path: Path) -> str | None:
-    content = _read_text(path)
-    if content is None:
-        return None
-    return f"### File: {path}\n\n{content}"
+def _inject_file_text(path: Path, data: bytes) -> str:
+    return f"### File: {path}\n\n{data.decode('utf-8', errors='replace')}"
 
 
-def _process_path(path: Path, texts: list[str], images: list[ImageContent]) -> None:
+def _process_path(
+    path: Path,
+    texts: list[str],
+    images: list[ImageContent],
+    *,
+    max_text_bytes: int = MAX_TEXT_FILE_BYTES,
+    max_image_bytes: int = MAX_IMAGE_FILE_BYTES,
+) -> None:
     if path.is_dir():
         for child in sorted(path.rglob("*")):
+            if any(part in _IGNORED_DIR_NAMES for part in child.parts):
+                continue
             if child.is_file():
-                _process_path(child, texts, images)
+                _process_path(
+                    child,
+                    texts,
+                    images,
+                    max_text_bytes=max_text_bytes,
+                    max_image_bytes=max_image_bytes,
+                )
+        return
+    try:
+        size = path.stat().st_size
+    except OSError:
         return
     if is_image_path(path):
+        if size > max_image_bytes:
+            return
         try:
             data = base64.b64encode(path.read_bytes()).decode("ascii")
         except OSError:
@@ -99,9 +164,15 @@ def _process_path(path: Path, texts: list[str], images: list[ImageContent]) -> N
         return
     if not _should_inject_text(path):
         return
-    injected = _inject_file_text(path)
-    if injected is not None:
-        texts.append(injected)
+    if size > max_text_bytes:
+        return
+    try:
+        raw_bytes = path.read_bytes()
+    except OSError:
+        return
+    if _is_binary(raw_bytes):
+        return
+    texts.append(_inject_file_text(path, raw_bytes))
 
 
 async def process_at_files(

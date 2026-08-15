@@ -34,6 +34,7 @@ def test_action_suspend_windows_unsupported(monkeypatch) -> None:
     assert "not supported on Windows" in app.message
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX SIGTSTP/SIGCONT only")
 @pytest.mark.asyncio
 async def test_action_suspend_posix_flow(monkeypatch) -> None:
     """POSIX：exit → SIGTSTP 挂起 → SIGCONT 恢复重绘。"""

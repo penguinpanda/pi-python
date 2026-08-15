@@ -7,6 +7,7 @@ token 经网关 /v1/oauth/token 交换。
 from __future__ import annotations
 
 import asyncio
+import html
 import time
 import urllib.parse
 import uuid
@@ -151,7 +152,8 @@ async def _wait_for_browser_code(state: str, signal: Any) -> str | None:
 
 
 async def _respond(writer: asyncio.StreamWriter, status: int, message: str) -> None:
-    body = f"<html><body><p>{message}</p></body></html>".encode("utf-8")
+    # error_description 等来自回调 query 的攻击者可控文本,必须转义。
+    body = f"<html><body><p>{html.escape(message)}</p></body></html>".encode("utf-8")
     reason = {200: "OK", 400: "Bad Request", 404: "Not Found"}.get(status, "OK")
     writer.write(
         f"HTTP/1.1 {status} {reason}\r\nContent-Type: text/html; charset=utf-8\r\n"
@@ -217,7 +219,12 @@ async def _login(interaction: AuthInteraction, gateway: str = "") -> OAuthCreden
             raise RuntimeError("Radius OAuth login was cancelled")
         parsed = urllib.parse.urlparse(pasted.strip())
         if parsed.scheme:
-            code = urllib.parse.parse_qs(parsed.query).get("code", [None])[0]
+            query = urllib.parse.parse_qs(parsed.query)
+            pasted_state = query.get("state", [None])[0]
+            if pasted_state is not None and pasted_state != state:
+                # 粘贴 URL 的 state 与当前 flow 不一致：拒绝旧登录 code。
+                raise RuntimeError("Radius OAuth login: pasted URL state mismatch")
+            code = query.get("code", [None])[0]
         else:
             code = pasted.strip() or None
     if not code:

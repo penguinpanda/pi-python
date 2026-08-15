@@ -12,6 +12,7 @@ scope：user（agentDir）/ project（项目 .pi，需信任）。
 from __future__ import annotations
 
 import asyncio
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,7 +54,8 @@ def parse_source(source: str) -> ParsedSource:
         if "@" in rest:
             url, ref = rest.rsplit("@", 1)
             rest = url
-        name = rest.rstrip("/").split("/")[-1].replace(".git", "")
+        # Windows 本地路径用 \ 分隔：与 / 一并处理。
+        name = re.split(r"[/\\]", rest.rstrip("/\\"))[-1].replace(".git", "")
         if not name:
             raise ValueError(f"Invalid install source: {value}")
         return ParsedSource(type="git", name=name, spec=rest, ref=ref)

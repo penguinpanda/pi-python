@@ -69,7 +69,8 @@ async def _load_examples(tmp_path) -> tuple[dict[str, object], object]:
         ]
     )
     assert not result.errors, [error.error for error in result.errors]
-    extensions = {extension.path.rsplit("/", 1)[-1]: extension for extension in result.extensions}
+    # Windows 上 extension.path 为反斜杠路径,用 Path.name 取基名。
+    extensions = {Path(extension.path).name: extension for extension in result.extensions}
     return extensions, result.runtime
 
 

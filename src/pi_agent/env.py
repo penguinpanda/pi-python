@@ -248,11 +248,15 @@ class PythonExecutionEnv:
         cwd: str,
         shell_path: str | None = None,
         shell_env: dict[str, str] | None = None,
+        *,
+        restrict_paths_to_cwd: bool = False,
     ) -> None:
         self.cwd = os.path.abspath(cwd)
         self._shell_path = shell_path
         self._shell_env = dict(shell_env) if shell_env else None
         self._active_processes: set[asyncio.subprocess.Process] = set()
+        # 工具路径解析时把写操作限制在 cwd 内（path_utils 读取）。
+        self.restrict_paths_to_cwd = restrict_paths_to_cwd
 
     # ------------------------------------------------------------------
     # 路径
@@ -270,7 +274,19 @@ class PythonExecutionEnv:
                 from urllib.parse import unquote, urlparse
 
                 parsed = urlparse(normalized)
-                normalized = unquote(parsed.path)
+                path_part = unquote(parsed.path)
+                if not path_part:
+                    # 非标准形式（file://C:\path）：netloc 承载路径。
+                    path_part = unquote(parsed.netloc)
+                if (
+                    os.name == "nt"
+                    and len(path_part) >= 3
+                    and path_part[0] == "/"
+                    and path_part[2] == ":"
+                ):
+                    # 标准 Windows 文件 URI（file:///C:/...）剥前导斜杠。
+                    path_part = path_part[1:]
+                normalized = path_part
             except Exception:
                 pass
         if os.path.isabs(normalized):

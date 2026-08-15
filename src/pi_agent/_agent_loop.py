@@ -1138,27 +1138,37 @@ async def _execute_tool_calls_parallel(
     - ToolResultMessage 消息在所有工具结束后按 assistant 原始顺序发出
     """
     entries: list[tuple[int, _ImmediateToolOutcome | asyncio.Task]] = []
-    for index, tc in enumerate(tool_calls):
-        _check_signal(signal)
+    try:
+        for index, tc in enumerate(tool_calls):
+            _check_signal(signal)
 
-        prepared = await _prepare_tool_call(tc, assistant_msg, context, config, signal)
-        if isinstance(prepared, _ImmediateToolOutcome):
-            await _emit_tool_lifecycle(
-                emit,
-                prepared.tc["id"],
-                prepared.tc["name"],
-                prepared.args,
-                prepared.result,
-                prepared.is_error,
-            )
-            entries.append((index, prepared))
-        else:
-            entries.append(
-                (
-                    index,
-                    asyncio.create_task(_execute_and_finalize(prepared, config, emit, signal)),
+            prepared = await _prepare_tool_call(tc, assistant_msg, context, config, signal)
+            if isinstance(prepared, _ImmediateToolOutcome):
+                await _emit_tool_lifecycle(
+                    emit,
+                    prepared.tc["id"],
+                    prepared.tc["name"],
+                    prepared.args,
+                    prepared.result,
+                    prepared.is_error,
                 )
-            )
+                entries.append((index, prepared))
+            else:
+                entries.append(
+                    (
+                        index,
+                        asyncio.create_task(_execute_and_finalize(prepared, config, emit, signal)),
+                    )
+                )
+    except BaseException:
+        # prepare 阶段异常/中止：取消已启动的并发工具任务，
+        # 避免工具继续执行产生副作用（bash 子进程、文件写入）。
+        pending = [t for _, t in entries if isinstance(t, asyncio.Task) and not t.done()]
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        raise
 
     ordered_results: list[_FinalizedToolOutcome | _ImmediateToolOutcome | None] = [None] * len(
         tool_calls

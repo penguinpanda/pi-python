@@ -6,6 +6,7 @@
 
 import asyncio
 import base64
+import html
 import json
 import time
 import uuid
@@ -284,8 +285,16 @@ async def _wait_for_browser_code(state: str, signal: Any) -> dict | None:
     return result if result["code"] else None
 
 
+def _looks_like_url(value: str) -> bool:
+    """判断粘贴内容是否为 URL（含 scheme）。"""
+    try:
+        return bool(urlparse(value.strip()).scheme)
+    except Exception:
+        return False
+
+
 def _respond_html(writer: asyncio.StreamWriter, status: int, message: str) -> None:
-    body = f"<html><body><p>{message}</p></body></html>".encode("utf-8")
+    body = f"<html><body><p>{html.escape(message)}</p></body></html>".encode("utf-8")
     reason = {200: "OK", 400: "Bad Request", 404: "Not Found"}.get(status, "OK")
     writer.write(
         f"HTTP/1.1 {status} {reason}\r\nContent-Type: text/html; charset=utf-8\r\n"
@@ -302,12 +311,20 @@ def _respond_html(writer: asyncio.StreamWriter, status: int, message: str) -> No
     asyncio.get_running_loop().create_task(_finish())
 
 
-def _extract_code_from_pasted(value: str) -> str | None:
-    """从手动粘贴的授权 URL 提取 code 参数（对齐 TS 手动粘贴回退）。"""
+def _extract_code_from_pasted(value: str, expected_state: str | None = None) -> str | None:
+    """从手动粘贴的授权 URL 提取 code 参数（对齐 TS 手动粘贴回退）。
+
+    粘贴的 URL 携带 state 且与当前 flow 不一致时返回 None，
+    拒绝旧登录 code 被误用（纯授权码粘贴无 state 可校验，由 PKCE 兜底）。
+    """
     try:
         parsed = urlparse(value.strip())
         if parsed.scheme:
-            return parse_qs(parsed.query).get("code", [None])[0]
+            query = parse_qs(parsed.query)
+            state = query.get("state", [None])[0]
+            if expected_state is not None and state is not None and state != expected_state:
+                return None
+            return query.get("code", [None])[0]
     except Exception:
         pass
     return None
@@ -353,7 +370,14 @@ async def _browser_login(interaction: AuthInteraction) -> OAuthCredential:
         pasted = manual_task.result() if not manual_task.cancelled() else None
         if pasted is None:
             raise RuntimeError("OpenAI Codex browser login was cancelled")
-        code = _extract_code_from_pasted(pasted) or pasted.strip()
+        parsed_code = _extract_code_from_pasted(pasted, flow["state"])
+        if parsed_code is not None:
+            code = parsed_code
+        elif _looks_like_url(pasted):
+            raise RuntimeError("OpenAI Codex browser login: pasted URL state mismatch")
+        else:
+            # 纯授权码粘贴：无 state 可校验，由 PKCE verifier 兜底。
+            code = pasted.strip()
     if not code:
         raise RuntimeError("OpenAI Codex browser login was cancelled")
     token = await exchange_authorization_code(code, flow["verifier"], BROWSER_REDIRECT_URI)

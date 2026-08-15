@@ -23,6 +23,11 @@ def _error_status(error: BaseException) -> int | None:
     status = getattr(error, "status", None)
     if status is None:
         status = getattr(error, "status_code", None)
+    if status is None:
+        # httpx.HTTPStatusError 不带顶层 status_code，经 response 间接携带。
+        response = getattr(error, "response", None)
+        if response is not None:
+            status = getattr(response, "status_code", None)
     if isinstance(status, int):
         return status
     return None
@@ -138,7 +143,10 @@ async def retry_provider_request(
             return await request()
         except _AbortError:
             raise
-        except BaseException as error:
+        except asyncio.CancelledError:
+            # 外部 task.cancel() 必须立即传播，不得被当作可重试错误吞掉重试。
+            raise
+        except Exception as error:
             if signal is not None and signal.is_set():
                 raise _AbortError("Request aborted") from None
             if retries_remaining <= 0 or not _is_retryable_provider_error(error):

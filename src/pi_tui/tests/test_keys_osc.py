@@ -58,6 +58,24 @@ def test_split_osc_sequence_waits_for_completion() -> None:
     assert not parser.buffer
 
 
+def test_esc_control_bytes_normalize_to_named_alt_keys() -> None:
+    """回归：ESC+控制字节(alt+enter/alt+backspace)解析为可匹配的键名。"""
+    events = parse_input(b"\x1b\r")
+    keys = [event.key for event in events if event.type == "key" and event.key is not None]
+    assert [key.name for key in keys] == ["alt+enter"]
+
+    events = parse_input(b"\x1b\x7f")
+    keys = [event.key for event in events if event.type == "key" and event.key is not None]
+    assert [key.name for key in keys] == ["alt+backspace"]
+
+
+def test_esc_plain_char_still_alt_prefixed() -> None:
+    """ESC+普通字符仍解析为 alt+<char>(原有行为)。"""
+    events = parse_input(b"\x1bx")
+    keys = [event.key for event in events if event.type == "key" and event.key is not None]
+    assert [key.name for key in keys] == ["alt+x"]
+
+
 def test_kitty_modifier_without_flags_still_parses() -> None:
     events = parse_input(b"\x1b[13;4u")
     keys = [event.key for event in events if event.type == "key" and event.key is not None]

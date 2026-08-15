@@ -138,12 +138,21 @@ class EventStream(Generic[T, R]):
         # 本质上就是 await 这个 Future。
         # --------------------------------------------------
         self._result: asyncio.Future[R] = asyncio.get_running_loop().create_future()
+        # 消费最终异常:流式任务被取消时 error(CancelledError) 会写进该
+        # Future,若消费方(如中止路径)从不 await result(),GC 会打印
+        # "Future exception was never retrieved"。done 回调统一 retrieve。
+        self._result.add_done_callback(self._consume_result_exception)
 
         # 判断结束事件
         self._is_complete = is_complete
 
         # 提取最终结果
         self._extract_result = extract_result
+
+    @staticmethod
+    def _consume_result_exception(future: asyncio.Future) -> None:
+        """retrieve 异常(对 cancelled future 同样有效),仅消费日志提示。"""
+        future.exception()
 
     # ------------------------------------------------------
     # Producer API

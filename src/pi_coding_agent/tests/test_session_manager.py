@@ -249,6 +249,15 @@ class TestSessionManagerCompaction:
 class TestSessionLayout:
     """per-cwd 目录布局与旧平铺文件迁移。"""
 
+    @staticmethod
+    def _cwd_dir_name(cwd: str) -> str:
+        """与仓库的目录编码一致（Windows 上 cwd 会被 absolutize 含盘符/反斜杠）。"""
+        import os
+
+        from pi_agent.session.v4.repo import _session_directory_name
+
+        return _session_directory_name(os.path.abspath(cwd))
+
     def test_create_uses_per_cwd_layout(self, tmp_path):
         mgr = SessionManager.create(
             cwd="/tmp/proj",
@@ -257,7 +266,7 @@ class TestSessionLayout:
         )
         assert mgr.session_path is not None
         relative = Path(mgr.session_path).relative_to(tmp_path)
-        assert relative.parts[0] == "--tmp-proj--"
+        assert relative.parts[0] == self._cwd_dir_name("/tmp/proj")
         assert relative.name.endswith("_sid1.jsonl")
         assert relative.name.count("_") >= 1
 
@@ -270,7 +279,7 @@ class TestSessionLayout:
         forked = mgr.fork(mgr.get_leaf_id())
         assert forked.session_path is not None
         relative = Path(forked.session_path).relative_to(tmp_path)
-        assert relative.parts[0] == "--tmp-proj--"
+        assert relative.parts[0] == self._cwd_dir_name("/tmp/proj")
 
     def test_list_sessions_scans_per_cwd_subdirs(self, tmp_path):
         import os
@@ -281,7 +290,7 @@ class TestSessionLayout:
         os.utime(newer.session_path, (2, 2))
         infos = SessionManager.list_sessions(tmp_path)
         assert [info.session_id for info in infos] == ["newer", "older"]
-        assert infos[0].cwd == "/tmp/b"
+        assert infos[0].cwd == os.path.abspath("/tmp/b")
 
 
 class TestEditMessage:

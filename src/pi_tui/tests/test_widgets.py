@@ -395,11 +395,15 @@ async def test_message_click_copies_on_release() -> None:
 
 
 def test_markdown_body_path_linkified(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("TERM_PROGRAM", "wezterm")
+    # 直接钉住能力探测（TMUX 等宿主环境变量会干扰 osc8_hyperlink_supported）。
+    import pi_tui.links as links_module
+
+    monkeypatch.setattr(links_module, "osc8_hyperlink_supported", lambda: True)
     target = tmp_path / "a.txt"
     target.write_text("x", encoding="utf-8")
     entry = MessageEntry("User", f"see {target} now")
-    lines = entry.render(80, 10)
+    # 宽渲染:80 列会把长 tmp 路径截断,截断后的路径 exists() 为 False。
+    lines = entry.render(200, 10)
     linked = [cell.link for line in lines for cell in line.cells if cell.link]
     assert linked and linked[0] == target.resolve().as_uri()
 

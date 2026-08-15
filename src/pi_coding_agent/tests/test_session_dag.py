@@ -161,7 +161,7 @@ class TestListAndLock:
         os.utime(newer.session_path, (2, 2))
         infos = SessionManager.list_sessions(tmp_path)
         assert [info.session_id for info in infos] == ["newer", "older"]
-        assert infos[0].cwd == "/tmp/b"
+        assert infos[0].cwd == os.path.abspath("/tmp/b")
 
     def test_with_lock(self, tmp_path):
         mgr = SessionManager.create(cwd="/tmp", sessions_dir=str(tmp_path))

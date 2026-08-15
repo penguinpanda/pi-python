@@ -26,6 +26,11 @@ async def _shell_available(env: PythonExecutionEnv) -> bool:
     return (await env._resolve_shell())[0]
 
 
+def _py_cmd() -> str:
+    """当前解释器路径(正斜杠形式):bash 双引号内反斜杠会被吃掉。"""
+    return sys.executable.replace("\\", "/")
+
+
 def _tool_context(env):
     class _Context:
         pass
@@ -513,7 +518,7 @@ class TestSessionEnvInjection:
         if not await _shell_available(env):
             pytest.skip("No bash shell available")
         result = await env.exec(
-            f"{sys.executable} -c \"import os;print(os.environ.get('PI_SESSION_ID',''))\"",
+            f"{_py_cmd()} -c \"import os;print(os.environ.get('PI_SESSION_ID',''))\"",
             ShellExecOptions(unset_env=["PI_SESSION_ID"]),
         )
         assert result[0] is True
@@ -527,7 +532,7 @@ class TestSessionEnvInjection:
         if not await _shell_available(env):
             pytest.skip("No bash shell available")
         command = (
-            f"{sys.executable} -c \"import os;print(os.environ.get('PI_SESSION_ID','')"
+            f"{_py_cmd()} -c \"import os;print(os.environ.get('PI_SESSION_ID','')"
             "+'|'+os.environ.get('PI_PROVIDER',''))\""
         )
         tool = create_bash_tool(BashToolOptions(expose_session_environment=False))
@@ -542,7 +547,7 @@ class TestSessionEnvInjection:
         if not await _shell_available(env):
             pytest.skip("No bash shell available")
         command = (
-            f"{sys.executable} -c \"import os;print(os.environ.get('PI_SESSION_ID','')"
+            f"{_py_cmd()} -c \"import os;print(os.environ.get('PI_SESSION_ID','')"
             "+'|'+os.environ.get('PI_PROVIDER',''))\""
         )
         tool = create_bash_tool(

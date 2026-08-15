@@ -247,6 +247,24 @@ def _preprocess_latex(
     source: str,
 ) -> tuple[str, dict[int, str], set[int]]:
     """提取 LaTeX 数学为占位符；渲染失败或 pending 时保留原文。"""
+    # 围栏保护：围栏代码块内的 $ 先以哨兵替换，处理后按行号还原，
+    # 避免代码里的 shell 变量被 LaTeX 占位符改写。
+    lines = source.split("\n")
+    protected: list[tuple[int, str]] = []
+    in_fence = False
+    for index, line in enumerate(lines):
+        stripped = line.lstrip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            if "$" in line:
+                protected.append((index, line))
+                lines[index] = line.replace("$", "\u0001")
+            continue
+        if in_fence and "$" in line:
+            protected.append((index, line))
+            lines[index] = line.replace("$", "\u0001")
+    source = "\n".join(lines)
+
     latex_map: dict[int, str] = {}
     block_ids: set[int] = set()
 
@@ -272,7 +290,11 @@ def _preprocess_latex(
         for match in pattern.finditer(source):
             result.append(source[position : match.start()])
             placeholder = add(match.group(1).strip(), True)
-            result.append(placeholder if placeholder is not None else match.group(0))
+            if placeholder is not None:
+                # 保持行数不变，围栏还原的行号索引才稳定。
+                result.append(placeholder + "\n" * match.group(0).count("\n"))
+            else:
+                result.append(match.group(0))
             position = match.end()
         result.append(source[position:])
         source = "".join(result)
@@ -312,6 +334,14 @@ def _preprocess_latex(
         output.append(placeholder if placeholder is not None else raw)
         position = closing_index + len(closing)
     source = "".join(output)
+
+    # 还原围栏行。
+    if protected:
+        lines = source.split("\n")
+        for index, original in protected:
+            if index < len(lines):
+                lines[index] = original
+        source = "\n".join(lines)
     return source, latex_map, block_ids
 
 

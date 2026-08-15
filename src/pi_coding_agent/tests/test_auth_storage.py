@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 
 import pytest
@@ -36,7 +37,9 @@ def test_migrate_auth_to_auth_json(tmp_path, monkeypatch):
     assert auth["github"] == {"type": "oauth", "token": "gho_x", "account": "me"}
     assert auth["openai"] == {"type": "api_key", "key": "sk-abc"}
     assert auth["deepseek"] == {"type": "api_key", "key": "sk-def"}
-    assert (tmp_path / "auth.json").stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":
+        # Windows 的 chmod 不设置权限位(见 auth_storage 注释),仅 POSIX 断言 0600。
+        assert (tmp_path / "auth.json").stat().st_mode & 0o777 == 0o600
     assert not (tmp_path / "oauth.json").exists()
     assert (tmp_path / "oauth.json.migrated").exists()
     settings = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))

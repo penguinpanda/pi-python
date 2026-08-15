@@ -642,7 +642,9 @@ async def _run_auth_command(args: list[str]) -> int:
         if len(args) > 1 and args[1] == "list":
             return await _auth_list()
         if len(args) > 1 and args[1] in ("print-api-key", "print-bearer-token"):
-            return await _auth_print(args[1], args[2:])
+            # 归一化为内部 kind（_auth_print 的 --min-expiry 检查依赖该值）。
+            kind = "api_key" if args[1] == "print-api-key" else "bearer_token"
+            return await _auth_print(kind, args[2:])
         print(
             'Unknown auth command. Use "pi auth list", "pi auth print-api-key" '
             'or "pi auth print-bearer-token".',

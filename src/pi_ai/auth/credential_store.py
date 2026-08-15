@@ -6,6 +6,7 @@
 
 import asyncio
 import json
+import os
 
 from filelock import FileLock
 from pathlib import Path
@@ -13,6 +14,10 @@ from typing import Any
 
 from . import ApiKeyCredential
 from .types import Credential, CredentialInfo, credential_type
+
+
+# Windows 无 O_NOFOLLOW；POSIX 上用于拒绝 symlink 目标。
+_O_NOFOLLOW: int = getattr(os, "O_NOFOLLOW", 0)
 
 
 def _to_raw(credential: Credential) -> dict[str, Any]:
@@ -105,11 +110,26 @@ class FileCredentialStore:
     def _save(self, data: dict[str, Any]) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._path.with_suffix(self._path.suffix + ".tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        # 凭证文件仅限本人读写（对齐 TS chmodSync(0o600)）。
-        tmp.chmod(0o600)
-        tmp.replace(self._path)
+        # 原子创建：O_EXCL 防并发覆盖，O_NOFOLLOW 防 symlink 攻击，
+        # 初始权限即 0600，消除 open+chmod 之间的可读窗口。
+        # 上一次崩溃遗留的 tmp 先清掉（unlink 只删链接本身，不会跟随目标）。
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_NOFOLLOW, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            # 凭证文件仅限本人读写（对齐 TS chmodSync(0o600)）。
+            # Windows 上 chmod 不收紧 ACL，实际防线为目录 ACL。
+            tmp.chmod(0o600)
+            os.replace(tmp, self._path)
+        finally:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
         self._path.chmod(0o600)
 
     async def read(self, provider_id: str) -> Credential | None:

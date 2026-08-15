@@ -70,13 +70,19 @@ def create_read_tool(cwd: str) -> AgentTool:
 
 
 def create_write_tool(cwd: str) -> AgentTool:
-    """创建 write 工具（复用 pi_agent 实现，绑定本地执行环境）。"""
-    return _bind_env(_create_pi_write_tool(), PythonExecutionEnv(cwd))
+    """创建 write 工具（复用 pi_agent 实现，绑定本地执行环境）。
+
+    写入限制在工作目录内（restrict_paths_to_cwd）；read 保持全盘可读。
+    """
+    return _bind_env(_create_pi_write_tool(), PythonExecutionEnv(cwd, restrict_paths_to_cwd=True))
 
 
 def create_edit_tool(cwd: str) -> AgentTool:
-    """创建 edit 工具（复用 pi_agent 实现，绑定本地执行环境）。"""
-    return _bind_env(_create_pi_edit_tool(), PythonExecutionEnv(cwd))
+    """创建 edit 工具（复用 pi_agent 实现，绑定本地执行环境）。
+
+    写入限制在工作目录内（restrict_paths_to_cwd）。
+    """
+    return _bind_env(_create_pi_edit_tool(), PythonExecutionEnv(cwd, restrict_paths_to_cwd=True))
 
 
 def create_bash_tool(

@@ -48,6 +48,7 @@ OpenAI API 类型
 仅负责不同数据结构之间的转换。
 """
 
+import inspect
 import json
 from typing import Any, cast
 
@@ -413,6 +414,25 @@ def build_error_message(
         diagnostics=[create_assistant_message_diagnostic("provider_error", error)],
         timestamp=now_ms(),
     )
+
+
+async def close_async_client(client: Any) -> None:
+    """尽力关闭异步 HTTP 客户端（AsyncOpenAI/httpx 等）。
+
+    每次请求新建的 AsyncOpenAI 客户端若不显式 close，其底层 httpx
+    连接池不会随 GC 可靠释放，长生命周期进程会每请求泄漏一条连接池。
+    对无 close 方法或 close 不可等待的对象静默跳过（测试桩兼容）。
+    """
+    close = getattr(client, "close", None)
+    if not callable(close):
+        return
+    try:
+        result = close()
+        if inspect.isawaitable(result):
+            await result
+    except Exception:
+        # 关闭失败不得掩盖原始请求错误。
+        pass
 
 
 def extract_text(content_blocks: list[ContentBlock]) -> str:

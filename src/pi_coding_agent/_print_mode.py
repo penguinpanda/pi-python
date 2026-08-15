@@ -59,8 +59,12 @@ def _install_signal_handlers(dispose: Callable[[], Any]) -> list[tuple[int, Any]
 
         return _handler
 
-    for sig, code in ((signal.SIGTERM, 143), (signal.SIGHUP, 129)):
-        if sig == signal.SIGHUP and sys.platform == "win32":
+    # Windows 无 SIGHUP；用 getattr 兼容（直接引用会在 Windows 抛 AttributeError）。
+    sighup = getattr(signal, "SIGHUP", None)
+    for sig, code in ((signal.SIGTERM, 143), (sighup, 129)):
+        if sig is None:
+            continue
+        if sig == sighup and sys.platform == "win32":
             continue
         handler = _make_handler(code)
         try:

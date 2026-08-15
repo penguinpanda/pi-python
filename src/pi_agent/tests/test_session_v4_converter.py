@@ -143,6 +143,15 @@ def test_compaction_mutation_retained_tail() -> None:
     assert mutation["entry"]["details"] == {"readFiles": ["a.py"]}
     assert mutation["entry"]["usage"] == {"input": 1}
 
+    # 回归：retainedTail 存在且后续有条目（真实压缩会话）时不得抛
+    # UnboundLocalError，且保留条目自带 retainedTail 而非推导。
+    preserved = converter._compaction_mutation(
+        entry,
+        3,
+        [{"id": "tail", "type": "message", "message": {"role": "user", "content": "tail"}}],
+    )
+    assert preserved["entry"]["retainedTail"] == [{"role": "user", "content": "x"}]
+
     derived = converter._compaction_mutation(
         {
             "type": "compaction",

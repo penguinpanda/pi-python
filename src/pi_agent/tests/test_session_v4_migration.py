@@ -228,7 +228,10 @@ class TestLazyConversion:
     async def test_list_reports_v3_then_open_converts(self, tmp_path):
         repo = JsonlSessionRepo(str(tmp_path / "sessions"))
         cwd = str(tmp_path / "project")
-        cwd_dir = tmp_path / "sessions" / ("--" + cwd.replace("/", "-")[1:] + "--")
+        # 与仓库的目录编码保持一致（Windows 含盘符/反斜杠，手拼会产出非法字符）。
+        from pi_agent.session.v4.repo import _session_directory_name
+
+        cwd_dir = tmp_path / "sessions" / _session_directory_name(cwd)
         cwd_dir.mkdir(parents=True)
         path = str(cwd_dir / "2026-08-10T00-00-00_v3-session.jsonl")
         Path(path).write_text("".join(_v3_lines(cwd)), encoding="utf-8")

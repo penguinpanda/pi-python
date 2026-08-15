@@ -93,6 +93,7 @@ from ..types import (
 )
 from ._shared import (
     build_error_message,
+    close_async_client,
     empty_usage,
     parse_tool_arguments,
     to_responses_tools,
@@ -684,6 +685,7 @@ async def responses_stream(
         生成最终 AssistantMessage
         """
 
+        client: Any = None
         try:
             # 创建 OpenAI SDK 客户端。
             #
@@ -1277,6 +1279,9 @@ async def responses_stream(
             err_msg = build_error_message(model, exc)
             stream.push({"type": "error", "reason": "error", "error": err_msg})
             # stream.end(err_msg)
+
+        finally:
+            await close_async_client(client)
 
     track_background_task(_run())
     return stream
