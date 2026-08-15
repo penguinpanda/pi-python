@@ -61,9 +61,10 @@ class TestModelsRegistry:
     def test_get_models_all(self):
         models = create_default_models()
         all_models = models.get_models()
-        # 4 openai (GPT-5 系列) + 2 deepseek (v4) + 8 qwen
-        # + 16 qwen-token-plan + 16 qwen-token-plan-cn + 7 ollama + 1 faux + 2 google + 2 vertex + 1 mistral + 4 azure + 2 github-copilot + 273 openrouter + 3 ant-ling + 7 openai-codex + 3 bedrock
-        assert len(all_models) == 351
+        # 内置静态目录 + 从生成 TS 目录反推的直连模型 overlay。
+        # 除原有 351 个外，nvidia/moonshotai/xiaomi/zai/xai 等 provider
+        # 现在也带静态能力元数据，总计 418。
+        assert len(all_models) == 418
 
     def test_get_models_by_provider(self):
         models = create_default_models()

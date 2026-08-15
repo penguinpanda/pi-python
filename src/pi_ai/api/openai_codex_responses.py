@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import dataclass, field
 from types import SimpleNamespace
 
 import httpx
@@ -141,6 +142,87 @@ def _codex_websocket_headers(
     return headers
 
 
+@dataclass(slots=True)
+class _CodexWebSocketCacheEntry:
+    url: str
+    headers: dict[str, str]
+    options: dict[str, Any]
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    ws: Any = None
+    last_request_body: dict[str, Any] | None = None
+    last_response_id: str | None = None
+    last_response_items: list[dict[str, Any]] = field(default_factory=list)
+
+
+_codex_websocket_cache: dict[str, _CodexWebSocketCacheEntry] = {}
+_CODEX_WEBSOCKET_CACHE_MAX_ENTRIES = 64
+
+
+def _json_key(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+
+
+def _request_bodies_match_except_input(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    left = {k: v for k, v in left.items() if k not in ("input", "previous_response_id")}
+    right = {k: v for k, v in right.items() if k not in ("input", "previous_response_id")}
+    return _json_key(left) == _json_key(right)
+
+
+def _build_cached_websocket_body(
+    entry: _CodexWebSocketCacheEntry,
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    """能安全增量时发送 previous_response_id + 输入 delta（对齐 TS）。"""
+    if entry.last_request_body is None or not entry.last_response_id:
+        return dict(body)
+    if not _request_bodies_match_except_input(entry.last_request_body, body):
+        entry.last_request_body = None
+        entry.last_response_id = None
+        entry.last_response_items = []
+        return dict(body)
+    baseline = [*entry.last_request_body.get("input", []), *entry.last_response_items]
+    current = list(body.get("input", []))
+    if len(current) < len(baseline):
+        return dict(body)
+    prefix = current[: len(baseline)]
+    if _json_key(prefix) != _json_key(baseline):
+        return dict(body)
+    return {
+        **body,
+        "previous_response_id": entry.last_response_id,
+        "input": current[len(baseline) :],
+    }
+
+
+async def _get_or_create_websocket_cache_entry(
+    session_id: str,
+    url: str,
+    headers: dict[str, str],
+    options: dict[str, Any],
+) -> _CodexWebSocketCacheEntry:
+    entry = _codex_websocket_cache.get(session_id)
+    if entry is not None and (entry.url != url or _json_key(entry.headers) != _json_key(headers)):
+        if entry.ws is not None:
+            try:
+                await entry.ws.close()
+            except Exception:
+                pass
+        _codex_websocket_cache.pop(session_id, None)
+        entry = None
+    if entry is None:
+        if len(_codex_websocket_cache) >= _CODEX_WEBSOCKET_CACHE_MAX_ENTRIES:
+            for old_entry in list(_codex_websocket_cache.values()):
+                if old_entry.ws is not None:
+                    try:
+                        await old_entry.ws.close()
+                    except Exception:
+                        pass
+            _codex_websocket_cache.clear()
+        entry = _CodexWebSocketCacheEntry(url=url, headers=headers, options=options)
+        _codex_websocket_cache[session_id] = entry
+    return entry
+
+
 class _CodexWebSocketResponses:
     def __init__(
         self,
@@ -190,14 +272,20 @@ class _CodexWebSocketEvents:
         headers: dict[str, str],
         body: dict[str, Any],
         options: dict[str, Any],
+        cache_entry: _CodexWebSocketCacheEntry | None = None,
+        full_body: dict[str, Any] | None = None,
     ) -> None:
         self._url = url
         self._headers = headers
         self._body = body
+        self._full_body = full_body or body
         self._options = options
         self._events = False
         self._ws: Any = None
         self._closed = False
+        self._cache_entry = cache_entry
+        self._keep_alive = False
+        self._lock_released = False
 
     def __aiter__(self) -> "_CodexWebSocketEvents":
         return self
@@ -242,37 +330,93 @@ class _CodexWebSocketEvents:
                 try:
                     return _to_event_obj(event)
                 finally:
+                    self._record_terminal(event)
                     await self.aclose()
                     self._closed = True
             return _to_event_obj(event)
 
+    def _record_terminal(self, event: dict[str, Any]) -> None:
+        entry = self._cache_entry
+        if entry is None:
+            return
+        if event.get("type") not in ("response.completed", "response.done"):
+            # incomplete/failed 不能作为 cached continuation 基线；连接也不复用。
+            entry.last_request_body = None
+            entry.last_response_id = None
+            entry.last_response_items = []
+            entry.ws = None
+            self._keep_alive = False
+            return
+        response = event.get("response")
+        if isinstance(response, dict):
+            response_id = response.get("id")
+            if isinstance(response_id, str) and response_id:
+                entry.last_response_id = response_id
+            output = response.get("output")
+            entry.last_response_items = (
+                [item for item in output if isinstance(item, dict)]
+                if isinstance(output, list)
+                else []
+            )
+        entry.last_request_body = dict(self._full_body)
+        entry.ws = self._ws
+        self._keep_alive = True
+
+    def _release_lock(self) -> None:
+        entry = self._cache_entry
+        if entry is not None and not self._lock_released:
+            entry.lock.release()
+            self._lock_released = True
+
     async def _open(self) -> None:
         import websockets
 
-        timeout_ms = int(self._options.get("websocket_connect_timeout_ms") or 15000)
+        entry = self._cache_entry
+        if entry is not None and entry.ws is not None:
+            self._ws = entry.ws
+        else:
+            timeout_ms = int(self._options.get("websocket_connect_timeout_ms") or 15000)
+            try:
+                self._ws = await websockets.connect(
+                    self._url,
+                    additional_headers=self._headers,
+                    open_timeout=timeout_ms / 1000.0,
+                )
+            except Exception as exc:
+                self._ws = None
+                raise _CodexWsConnectError(f"Codex WebSocket connect failed: {exc}") from exc
+            if entry is not None:
+                entry.ws = self._ws
         try:
-            self._ws = await websockets.connect(
-                self._url,
-                additional_headers=self._headers,
-                open_timeout=timeout_ms / 1000.0,
-            )
             await self._ws.send(json.dumps({"type": "response.create", **self._body}))
         except Exception as exc:
             # 连接/发送阶段失败（未产生任何事件）：可回退 SSE
             # （对齐 TS websocketStarted=false）。
-            if self._ws is not None:
-                try:
-                    await self._ws.close()
-                except Exception:
-                    pass
-                self._ws = None
+            try:
+                await self._ws.close()
+            except Exception:
+                pass
+            if entry is not None and entry.ws is self._ws:
+                entry.ws = None
+            self._ws = None
             raise _CodexWsConnectError(f"Codex WebSocket connect failed: {exc}") from exc
         self._events = True
 
     async def aclose(self) -> None:
+        entry = self._cache_entry
+        if self._keep_alive:
+            # cached connection 保留给同 session 的下一次请求。
+            self._release_lock()
+            return
         if getattr(self, "_ws", None) is not None:
-            await self._ws.close()
+            try:
+                await self._ws.close()
+            except Exception:
+                pass
+            if entry is not None and entry.ws is self._ws:
+                entry.ws = None
             self._ws = None
+        self._release_lock()
 
 
 def _zstd_compress(data: bytes) -> bytes | None:
@@ -394,13 +538,32 @@ async def _websocket_stream(
         cast(StreamOptions, opts),
         request_model_id=model.id,
     )
-    events = _CodexWebSocketEvents(
-        url=ws_url,
-        headers=ws_headers,
-        body=kwargs,
-        options=opts,
+    use_cached_context = opts.get("transport") in ("websocket-cached", "auto") and bool(
+        opts.get("session_id")
     )
-    await events.connect()
+    cache_entry = None
+    if use_cached_context:
+        cache_entry = await _get_or_create_websocket_cache_entry(
+            request_id, ws_url, ws_headers, opts
+        )
+        await cache_entry.lock.acquire()
+    try:
+        request_body = (
+            _build_cached_websocket_body(cache_entry, kwargs) if cache_entry is not None else kwargs
+        )
+        events = _CodexWebSocketEvents(
+            url=ws_url,
+            headers=ws_headers,
+            body=request_body,
+            options=opts,
+            cache_entry=cache_entry,
+            full_body=kwargs,
+        )
+        await events.connect()
+    except BaseException:
+        if cache_entry is not None:
+            cache_entry.lock.release()
+        raise
 
     def _ws_factory(
         _api_key: str,

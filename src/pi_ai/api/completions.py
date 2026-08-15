@@ -46,6 +46,7 @@ Provider 不需要关心 OpenAI SDK 的数据结构，
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable
 from typing import Any, cast
 
@@ -86,6 +87,11 @@ from ._shared import (
     parse_tool_arguments,
     to_openai_messages,
     to_openai_tools,
+)
+from .constrained_sampling import (
+    GrammarToolInputJsonBuffer,
+    append_grammar_tool_input_json_delta,
+    create_grammar_tool_input_properties,
 )
 from .simple_options import clamp_max_tokens_to_context
 from .transform_messages import normalize_tool_call_id, transform_messages
@@ -327,13 +333,25 @@ async def chat_completions_stream(
             # 将规范化后的 SDK Message
             #
             # 转换成 OpenAI Message。
-            messages = to_openai_messages(transformed_messages, model, compat)
+            grammar_tool_input_properties = create_grammar_tool_input_properties(
+                context.tools,
+                bool(compat.get("supportsOpenAIGrammarTools", False)),
+            )
+            messages = to_openai_messages(
+                transformed_messages,
+                model,
+                compat,
+                grammar_tool_input_properties,
+            )
 
             # Tool 定义转换为 OpenAI Tool Schema。
             tools = (
                 to_openai_tools(
                     context.tools,
                     supports_strict_mode=bool(compat.get("supportsStrictMode", True)),
+                    supports_openai_grammar_tools=bool(
+                        compat.get("supportsOpenAIGrammarTools", False)
+                    ),
                 )
                 if context.tools
                 else None
@@ -604,9 +622,16 @@ async def chat_completions_stream(
             # key → {"block_index", "id", "name", "raw_arguments"}
             tool_call_states: dict[int, dict[str, Any]] = {}
             tool_call_order: list[int] = []
+            pending_reasoning_details: dict[str, str] = {}
             # 无 index/id 回退 key：负值递减，与协议 index 命名空间隔离
             # （避免混合协议下 len(order) 与后续 index=0 冲突）。
             fallback_tool_key = -1
+
+            def _apply_reasoning_detail(state: dict[str, Any], serialized: str) -> None:
+                """把 encrypted reasoning detail 挂到匹配的 tool call block。"""
+                tool_block = cast(ToolCall, content_blocks[state["block_index"]])
+                tool_block["thought_signature"] = serialized
+                state["thought_signature"] = serialized
 
             def _new_fallback_key() -> int:
                 nonlocal fallback_tool_key
@@ -664,8 +689,29 @@ async def chat_completions_stream(
                 for key in tool_call_order:
                     state = tool_call_states[key]
                     tool_block = cast(ToolCall, content_blocks[state["block_index"]])
-                    tool_block["raw_arguments"] = state["raw_arguments"]
-                    tool_block["arguments"] = parse_tool_arguments(state["raw_arguments"])
+                    custom_input = state.get("custom_input")
+                    if isinstance(custom_input, dict):
+                        prop = custom_input["property"]
+                        value = custom_input["input"]
+                        buffer = custom_input["buffer"]
+                        if not buffer.closed:
+                            delta_out = append_grammar_tool_input_json_delta(
+                                buffer, prop, value, True
+                            )
+                            if delta_out:
+                                stream.push(
+                                    ToolCallDeltaEvent(
+                                        type="toolcall_delta",
+                                        content_index=state["block_index"],
+                                        delta=delta_out,
+                                        partial=_partial(),
+                                    )
+                                )
+                        tool_block["raw_arguments"] = json.dumps({prop: value}, ensure_ascii=False)
+                        tool_block["arguments"] = {prop: value}
+                    else:
+                        tool_block["raw_arguments"] = state["raw_arguments"]
+                        tool_block["arguments"] = parse_tool_arguments(state["raw_arguments"])
                     stream.push(
                         ToolCallEndEvent(
                             type="toolcall_end",
@@ -796,16 +842,21 @@ async def chat_completions_stream(
 
                 # Tool Calling 增量。
                 #
-                # Tool 参数可能被拆分成多个 Chunk，
-                #
-                # 因此需要不断拼接原始字符串，
-                # 块结束时再解析为 JSON。
+                # 标准 function call 与 grammar/custom tool 两种协议共用
+                # 同一按 index/id 路由的累积状态。
                 if delta.tool_calls:
                     for tc in delta.tool_calls:
                         tc_index = getattr(tc, "index", None)
-                        tc_id = tc.id or None
-                        tc_name = tc.function.name if tc.function else None
-                        tc_args = tc.function.arguments if tc.function else None
+                        tc_id = getattr(tc, "id", None) or None
+                        tc_custom = getattr(tc, "custom", None)
+                        if tc_custom is not None:
+                            tc_name = getattr(tc_custom, "name", None)
+                            custom_delta = getattr(tc_custom, "input", None)
+                            tc_args = None
+                        else:
+                            tc_name = tc.function.name if tc.function else None
+                            tc_args = tc.function.arguments if tc.function else None
+                            custom_delta = None
 
                         # 定位该工具调用的累积状态。
                         state: dict[str, Any] | None = None
@@ -838,13 +889,19 @@ async def chat_completions_stream(
                                 )
                             else:
                                 state_key = _new_fallback_key()
+                            grammar_property = grammar_tool_input_properties.get(tc_name or "")
+                            initial_custom_input = custom_delta or ""
                             content_blocks.append(
                                 ToolCall(
                                     type="toolCall",
                                     id=tc_id or "",
                                     name=tc_name or "",
                                     raw_arguments="",
-                                    arguments=None,
+                                    arguments=(
+                                        {grammar_property: initial_custom_input}
+                                        if grammar_property is not None
+                                        else None
+                                    ),
                                 )
                             )
                             state = {
@@ -853,6 +910,12 @@ async def chat_completions_stream(
                                 "name": tc_name or "",
                                 "raw_arguments": "",
                             }
+                            if grammar_property is not None:
+                                state["custom_input"] = {
+                                    "property": grammar_property,
+                                    "input": initial_custom_input,
+                                    "buffer": GrammarToolInputJsonBuffer(),
+                                }
                             tool_call_states[state_key] = state
                             tool_call_order.append(state_key)
                             stream.push(
@@ -866,7 +929,7 @@ async def chat_completions_stream(
                         tool_block = cast(ToolCall, content_blocks[state["block_index"]])
 
                         # 工具名称可能延迟到达。
-                        if tc_name:
+                        if tc_name and not state["name"]:
                             state["name"] = tc_name
                             tool_block["name"] = tc_name
 
@@ -874,8 +937,29 @@ async def chat_completions_stream(
                         if tc_id and tc_id != state["id"]:
                             state["id"] = tc_id
                             tool_block["id"] = tc_id
+                            pending = pending_reasoning_details.pop(tc_id, None)
+                            if pending:
+                                _apply_reasoning_detail(state, pending)
 
-                        if tc_args:
+                        custom_input = state.get("custom_input")
+                        if isinstance(custom_input, dict) and custom_delta is not None:
+                            prop = custom_input["property"]
+                            next_input = custom_input["input"] + custom_delta
+                            delta_out = append_grammar_tool_input_json_delta(
+                                custom_input["buffer"], prop, next_input, False
+                            )
+                            custom_input["input"] = next_input
+                            tool_block["arguments"] = {prop: next_input}
+                            if delta_out:
+                                stream.push(
+                                    ToolCallDeltaEvent(
+                                        type="toolcall_delta",
+                                        content_index=state["block_index"],
+                                        delta=delta_out,
+                                        partial=_partial(),
+                                    )
+                                )
+                        elif tc_args:
                             state["raw_arguments"] += tc_args
                             tool_block["raw_arguments"] = state["raw_arguments"]
                             stream.push(
@@ -886,6 +970,33 @@ async def chat_completions_stream(
                                     partial=_partial(),
                                 )
                             )
+
+                # encrypted reasoning details 可能先于/后于对应 tool call 到达。
+                reasoning_details = getattr(delta, "reasoning_details", None)
+                if isinstance(reasoning_details, list):
+                    for detail in reasoning_details:
+                        if not isinstance(detail, dict):
+                            continue
+                        if detail.get("type") != "reasoning.encrypted":
+                            continue
+                        detail_id = detail.get("id")
+                        data = detail.get("data")
+                        if (
+                            not isinstance(detail_id, str)
+                            or not detail_id
+                            or not isinstance(data, str)
+                            or not data
+                        ):
+                            continue
+                        serialized = json.dumps(detail, ensure_ascii=False)
+                        state = next(
+                            (s for s in tool_call_states.values() if s["id"] == detail_id),
+                            None,
+                        )
+                        if state is not None:
+                            _apply_reasoning_detail(state, serialized)
+                        else:
+                            pending_reasoning_details[detail_id] = serialized
 
             # 所有 Chunk 已处理完成，
             #

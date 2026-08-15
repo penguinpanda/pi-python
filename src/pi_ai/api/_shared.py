@@ -67,13 +67,18 @@ from ..types import (
 from ..utils.diagnostics import create_assistant_message_diagnostic
 from ..utils.sanitize_unicode import sanitize_surrogates
 from .compat_runtime import requires_reasoning_content_on_assistant_messages
-from .constrained_sampling import resolve_json_schema_strict_sampling
+from .constrained_sampling import (
+    get_grammar_tool_input,
+    resolve_grammar_constrained_sampling,
+    resolve_json_schema_strict_sampling,
+)
 
 
 def to_openai_messages(
     messages: list[Message],
     model: Model,
     compat: dict[str, Any] | None = None,
+    grammar_tool_input_properties: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """
     将 SDK Message
@@ -240,21 +245,40 @@ def to_openai_messages(
                 if asst_block["type"] == "text":
                     text_parts.append(sanitize_surrogates(asst_block["text"]))
                 elif asst_block["type"] == "toolCall":
-                    tool_calls.append(
-                        {
-                            "id": asst_block["id"],
-                            "type": "function",
-                            "function": {
-                                "name": asst_block["name"],
-                                "arguments": json.dumps(
-                                    asst_block["arguments"]
-                                    if asst_block["arguments"] is not None
-                                    else {},
-                                    ensure_ascii=False,
-                                ),
-                            },
-                        }
-                    )
+                    grammar_property = (grammar_tool_input_properties or {}).get(asst_block["name"])
+                    if grammar_property is not None:
+                        tool_calls.append(
+                            {
+                                "id": asst_block["id"],
+                                "type": "custom",
+                                "custom": {
+                                    "name": asst_block["name"],
+                                    "input": get_grammar_tool_input(
+                                        asst_block["name"],
+                                        asst_block["arguments"]
+                                        if asst_block["arguments"] is not None
+                                        else {},
+                                        grammar_property,
+                                    ),
+                                },
+                            }
+                        )
+                    else:
+                        tool_calls.append(
+                            {
+                                "id": asst_block["id"],
+                                "type": "function",
+                                "function": {
+                                    "name": asst_block["name"],
+                                    "arguments": json.dumps(
+                                        asst_block["arguments"]
+                                        if asst_block["arguments"] is not None
+                                        else {},
+                                        ensure_ascii=False,
+                                    ),
+                                },
+                            }
+                        )
                 elif asst_block["type"] == "thinking":
                     # DeepSeek 等要求把 reasoning_content 原样回传；
                     # 其余 provider 跳过 thinking 块。
@@ -265,6 +289,21 @@ def to_openai_messages(
             # 使用 tool_calls 字段。
             if tool_calls:
                 oai_msg["tool_calls"] = tool_calls
+                reasoning_details: list[dict[str, Any]] = []
+                for tool_block in asst_msg["content"]:
+                    if tool_block.get("type") != "toolCall":
+                        continue
+                    signature = tool_block.get("thought_signature")
+                    if not isinstance(signature, str) or not signature:
+                        continue
+                    try:
+                        detail = json.loads(signature)
+                    except (ValueError, TypeError):
+                        continue
+                    if isinstance(detail, dict) and detail:
+                        reasoning_details.append(detail)
+                if reasoning_details:
+                    oai_msg["reasoning_details"] = reasoning_details
             if text_parts:
                 oai_msg["content"] = "\n".join(text_parts)
             if requires_reasoning_content_on_assistant_messages(model) and thinking_parts:
@@ -336,6 +375,7 @@ def to_openai_tools(
     tools: list[Tool],
     *,
     supports_strict_mode: bool = True,
+    supports_openai_grammar_tools: bool = False,
 ) -> list[dict[str, Any]]:
     """
     将 SDK Tool
@@ -355,6 +395,23 @@ def to_openai_tools(
     """
     result: list[dict[str, Any]] = []
     for t in tools:
+        grammar = resolve_grammar_constrained_sampling(t, supports_openai_grammar_tools)
+        if grammar is not None:
+            result.append(
+                {
+                    "type": "custom",
+                    "custom": {
+                        "name": t.name,
+                        "description": t.description,
+                        "format": {
+                            "type": "grammar",
+                            "syntax": grammar.format,
+                            "definition": grammar.definition,
+                        },
+                    },
+                }
+            )
+            continue
         strict = resolve_json_schema_strict_sampling(t, supports_strict_mode)
         function_schema: dict[str, Any] = {
             "name": t.name,

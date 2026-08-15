@@ -353,6 +353,8 @@ def _build_responses_request_kwargs(
         kwargs["tools"] = tools
     if opts.get("tool_choice") is not None:
         kwargs["tool_choice"] = opts["tool_choice"]
+    if opts.get("service_tier") is not None:
+        kwargs["service_tier"] = opts["service_tier"]
     temperature = opts.get("temperature")
     if temperature is not None:
         kwargs["temperature"] = temperature
@@ -441,6 +443,32 @@ def _parse_response_usage(resp: Any, model: Model) -> Usage:
         usage["reasoning"] = reasoning_tokens
     calculate_cost(model, usage)
     return usage
+
+
+def _service_tier_cost_multiplier(
+    model: Model,
+    service_tier: str | None,
+) -> float:
+    if service_tier == "flex":
+        return 0.5
+    if service_tier == "priority":
+        return 2.5 if model.id == "gpt-5.5" else 2.0
+    return 1.0
+
+
+def _apply_service_tier_pricing(
+    usage: Usage,
+    service_tier: str | None,
+    model: Model,
+) -> None:
+    """按 service tier 调整 usage cost（对齐 TS applyServiceTierPricing）。"""
+    multiplier = _service_tier_cost_multiplier(model, service_tier)
+    if multiplier == 1.0:
+        return
+    cost = usage["cost"]
+    for key in ("input", "output", "cache_read", "cache_write"):
+        cost[key] *= multiplier
+    cost["total"] = cost["input"] + cost["output"] + cost["cache_read"] + cost["cache_write"]
 
 
 def _to_responses_input(
@@ -1538,6 +1566,11 @@ async def responses_stream(
                         output_text = getattr(resp, "output_text", "")
                         _apply_terminal_output_text(output_text)
                         usage = _parse_response_usage(resp, model)
+                        service_tier = getattr(resp, "service_tier", None) or opts.get(
+                            "service_tier"
+                        )
+                        if service_tier:
+                            _apply_service_tier_pricing(usage, str(service_tier), model)
                         status = getattr(resp, "status", None)
                         raw_stop_reason = status if isinstance(status, str) else None
                         stop_reason = "stop"
@@ -1549,6 +1582,11 @@ async def responses_stream(
                         _backfill_reasoning_signatures(resp)
                         response_id = getattr(resp, "id", None) or response_id
                         usage = _parse_response_usage(resp, model)
+                        service_tier = getattr(resp, "service_tier", None) or opts.get(
+                            "service_tier"
+                        )
+                        if service_tier:
+                            _apply_service_tier_pricing(usage, str(service_tier), model)
                         incomplete = getattr(resp, "incomplete_details", None)
                         reason = getattr(incomplete, "reason", "") or ""
                         raw_stop_reason = f"incomplete.{reason}" if reason else "incomplete"

@@ -246,6 +246,93 @@ async def test_codex_websocket_stream_integration(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_websocket_cached_reuses_connection_with_delta(monkeypatch) -> None:
+    """websocket-cached 同 session 应复用连接并发送 previous_response_id + input delta。"""
+    from pi_ai.api.openai_codex_responses import _codex_websocket_cache
+
+    _codex_websocket_cache.clear()
+    sent: list[dict] = []
+
+    class _FakeConn:
+        def __init__(self) -> None:
+            self._queue: asyncio.Queue[dict] = asyncio.Queue()
+
+        async def send(self, data: str) -> None:
+            sent.append(json.loads(data))
+
+        async def recv(self) -> str:
+            return json.dumps(await self._queue.get())
+
+        async def close(self) -> None:
+            pass
+
+    conn = _FakeConn()
+    output1 = [
+        {
+            "type": "message",
+            "id": "msg1",
+            "status": "completed",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "Hello", "annotations": []}],
+        }
+    ]
+    for event in (
+        {"type": "response.output_text.delta", "delta": "Hello"},
+        {
+            "type": "response.completed",
+            "response": {"id": "resp-1", "output_text": "Hello", "output": output1, "usage": None},
+        },
+        {"type": "response.output_text.delta", "delta": "Again"},
+        {
+            "type": "response.completed",
+            "response": {
+                "id": "resp-2",
+                "output_text": "Again",
+                "output": [],
+                "usage": None,
+            },
+        },
+    ):
+        conn._queue.put_nowait(event)
+
+    async def fake_connect(*args, **kwargs):  # type: ignore[no-untyped-def]
+        return conn
+
+    monkeypatch.setattr("websockets.connect", fake_connect)
+    options = {"transport": "websocket-cached", "api_key": "k", "session_id": "cache-session"}
+    first = await openai_codex_responses.openai_codex_responses_stream(
+        _model(), _context(), "k", "", options
+    )
+    msg1 = await first.collect()
+    assert msg1["content"][0]["text"] == "Hello"
+
+    context2 = Context(
+        messages=[
+            *_context().messages,
+            {
+                "role": "assistant",
+                "api": "openai-codex-responses",
+                "provider": "openai-codex",
+                "model": "gpt-5.4",
+                "content": [
+                    {"type": "text", "text": "Hello", "text_signature": '{"v":1,"id":"msg1"}'}
+                ],
+                "timestamp": 0,
+            },
+            {"role": "user", "content": "again", "timestamp": 0},
+        ]
+    )
+    second = await openai_codex_responses.openai_codex_responses_stream(
+        _model(), context2, "k", "", options
+    )
+    await second.collect()
+    assert len(sent) == 2
+    assert sent[1]["previous_response_id"] == "resp-1"
+    assert sent[1]["input"] == [{"role": "user", "content": "again"}]
+    _codex_websocket_cache.clear()
+
+
+@pytest.mark.asyncio
 async def test_websocket_connect_failure_falls_back_to_sse(monkeypatch) -> None:
     """WS 连接阶段失败回退 SSE；同会话后续请求直接 SSE（对齐 TS fallback 会话记忆）。"""
     from pi_ai.api.openai_codex_responses import (
