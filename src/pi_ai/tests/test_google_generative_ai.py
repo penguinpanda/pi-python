@@ -93,6 +93,38 @@ async def test_google_tool_stream(monkeypatch) -> None:
     assert message["stop_reason"] == "tool_call"
 
 
+@pytest.mark.asyncio
+async def test_google_stream_captures_thought_signature_on_later_part(monkeypatch) -> None:
+    """thoughtSignature 出现在 thought 段末尾 part 时也必须被捕获（多轮续传依赖）。"""
+    signature = "c2lnbmF0dXJl"
+    sse = (
+        'data: {"candidates":[{"content":{"parts":['
+        f'{{"text":"step one","thought":true}},'
+        f'{{"text":"step two","thought":true,"thoughtSignature":"{signature}"}}'
+        ']},"finishReason":"STOP"}],'
+        '"usageMetadata":{"promptTokenCount":10,"cachedContentTokenCount":0,'
+        '"candidatesTokenCount":2,"totalTokenCount":12}}\n\n'
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=sse, headers={"content-type": "text/event-stream"})
+
+    monkeypatch.setattr(
+        google_generative_ai,
+        "_AsyncClient",
+        lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(handler), **kwargs),
+    )
+    stream = google_generative_ai.google_generative_ai_stream(
+        _model(), _context(), "sk-test", "https://generativelanguage.googleapis.com/v1beta"
+    )
+    events = [event async for event in stream]
+    message = events[-1]["message"]
+    thinking = [b for b in message["content"] if b["type"] == "thinking"]
+    assert thinking
+    assert thinking[0]["thinking_signature"] == signature
+    assert thinking[0]["thinking"] == "step onestep two"
+
+
 def test_google_strict_tool_sampling_detection() -> None:
     assert _supports_google_strict_tool_sampling("gemini-2.5-flash") is False
     assert _supports_google_strict_tool_sampling("gemini-3-pro") is True

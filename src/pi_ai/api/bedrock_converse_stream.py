@@ -381,7 +381,7 @@ def _build_thinking_fields(model: Model, opts: dict[str, Any]) -> dict[str, Any]
     thinking_display 控制返回方式（默认 summarized，GovCloud 忽略）。
     """
     reasoning = opts.get("reasoning")
-    if not reasoning or not model.reasoning:
+    if not reasoning or reasoning == "off" or not model.reasoning:
         return None
     defaults: dict[str, int] = {
         "minimal": 1024,

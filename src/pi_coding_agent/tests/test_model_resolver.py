@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pi_ai import Models
-from pi_ai.providers.deepseek import deepseek_provider
+from pi_ai import create_default_models
 from pi_ai.providers.faux import FAUX_MODEL, faux_provider
 from pi_ai.providers.openai import openai_provider
 
@@ -21,9 +21,13 @@ from pi_coding_agent.model_runtime import ModelRuntime
 async def _make_runtime(providers=None) -> ModelRuntime:
     store = AuthStorage.in_memory()
     models = Models(credentials=store)
+    # deepseek 模型由 create_default_models() 统一合并生成目录，
+    # 单独调用工厂不再携带模型（provider_map 依赖模型列表）。
+    default_models = create_default_models()
+    deepseek = default_models.get_provider("deepseek")
     for provider in providers or [
         openai_provider(),
-        deepseek_provider(),
+        deepseek,
         faux_provider().provider,
     ]:
         models.add_provider(provider)

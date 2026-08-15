@@ -11,6 +11,7 @@ Unit tests for providers — openai_provider() / deepseek_provider() 工厂。
 
 from pi_ai._types import Model, ModelCost
 from pi_ai.auth import EnvApiKeyAuth
+from pi_ai import create_default_models
 from pi_ai.providers import (
     OLLAMA_MODELS,
     OPENAI_MODELS,
@@ -95,7 +96,8 @@ class TestDeepSeekProvider:
         assert auth.env_vars == ["DEEPSEEK_API_KEY"]
 
     def test_model_list(self):
-        provider = deepseek_provider()
+        # 生成目录模型由 create_default_models() 统一合并（工厂不再重复加载）。
+        provider = create_default_models().get_provider("deepseek")
         models = provider.get_models()
         assert _model_ids(models) == [
             "deepseek-v4-flash",
@@ -103,7 +105,7 @@ class TestDeepSeekProvider:
         ]
 
     def test_model_metadata(self):
-        provider = deepseek_provider()
+        provider = create_default_models().get_provider("deepseek")
         by_id = {m.id: m for m in provider.get_models()}
 
         v4_flash = by_id["deepseek-v4-flash"]
@@ -221,7 +223,9 @@ class TestModelConstants:
         ]
 
     def test_deepseek_models_from_generated_catalog(self):
-        assert _model_ids(deepseek_provider().get_models()) == [
+        # 生成目录模型由 create_default_models() 统一合并（工厂不再重复加载）。
+        provider = create_default_models().get_provider("deepseek")
+        assert _model_ids(provider.get_models()) == [
             "deepseek-v4-flash",
             "deepseek-v4-pro",
         ]
@@ -250,7 +254,8 @@ class TestModelConstants:
         ]
 
     def test_all_models_have_provider_and_api(self):
-        for model in OPENAI_MODELS + OLLAMA_MODELS + deepseek_provider().get_models():
+        deepseek_models = create_default_models().get_provider("deepseek").get_models()
+        for model in OPENAI_MODELS + OLLAMA_MODELS + deepseek_models:
             assert model.provider in ("openai", "deepseek", "ollama")
             assert model.api in ("openai-completions", "openai-responses")
 
@@ -503,7 +508,11 @@ class TestQwenTokenPlanProviders:
         assert cn_auth.env_vars == ["QWEN_TOKEN_PLAN_CN_API_KEY"]
 
     def test_model_catalog(self):
-        for provider in (qwen_token_plan_provider(), qwen_token_plan_cn_provider()):
+        models = create_default_models()
+        for provider in (
+            models.get_provider("qwen-token-plan"),
+            models.get_provider("qwen-token-plan-cn"),
+        ):
             ids = _model_ids(provider.get_models())
             assert ids == sorted(ids), provider.id
             for expected in self.TEXT_MODELS:
@@ -512,8 +521,9 @@ class TestQwenTokenPlanProviders:
                 assert excluded not in ids, f"{provider.id} includes {excluded}"
 
     def test_both_regions_share_catalog_with_distinct_endpoints(self):
-        intl = qwen_token_plan_provider()
-        cn = qwen_token_plan_cn_provider()
+        models = create_default_models()
+        intl = models.get_provider("qwen-token-plan")
+        cn = models.get_provider("qwen-token-plan-cn")
         assert _model_ids(intl.get_models()) == _model_ids(cn.get_models())
         intl_by_id = {m.id: m for m in intl.get_models()}
         cn_by_id = {m.id: m for m in cn.get_models()}
@@ -522,7 +532,9 @@ class TestQwenTokenPlanProviders:
             assert cn_by_id[model_id].base_url == QWEN_TOKEN_PLAN_CN_BASE_URL
 
     def test_model_metadata(self):
-        by_id = {m.id: m for m in qwen_token_plan_provider().get_models()}
+        by_id = {
+            m.id: m for m in create_default_models().get_provider("qwen-token-plan").get_models()
+        }
 
         qwen38 = by_id["qwen3.8-max"]
         assert qwen38.provider == "qwen-token-plan"

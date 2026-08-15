@@ -37,8 +37,12 @@ def _azure_root(base_url: str) -> str:
         or host.endswith(".ai.azure.com")
     )
     path = parsed.path.rstrip("/")
-    if is_azure_host and path in ("", "/", "/openai", "/openai/v1/responses"):
-        path = "/openai/v1"
+    if is_azure_host and path in ("", "/", "/openai", "/openai/v1", "/openai/v1/responses"):
+        # azure_endpoint 必须传资源根：openai SDK 会按
+        # azure_endpoint + "/openai/" + url 拼接（responses 不在
+        # deployments 端点表内）；传 /openai/v1 会生成
+        # /openai/v1/openai/responses 双段路径。
+        path = ""
     return urlunparse((parsed.scheme, parsed.netloc, path, "", "", ""))
 
 

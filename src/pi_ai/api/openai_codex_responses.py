@@ -166,6 +166,12 @@ class _CodexWebSocketClient:
         events: "_CodexWebSocketEvents | None" = None,
     ) -> None:
         self.responses = _CodexWebSocketResponses(url, headers, options, events)
+        self._events = events
+
+    async def close(self) -> None:
+        """关闭底层 WebSocket（responses.py 的 finally 兜底路径）。"""
+        if self._events is not None:
+            await self._events.aclose()
 
 
 class _CodexWebSocketEvents:
@@ -203,6 +209,10 @@ class _CodexWebSocketEvents:
                     self._ws.recv(),
                     timeout=float(self._options.get("timeout_ms") or 300000) / 1000.0,
                 )
+            except asyncio.CancelledError:
+                # 消费方取消：必须关闭连接再传播，否则 socket 泄漏。
+                await self.aclose()
+                raise
             except Exception as exc:
                 await self.aclose()
                 # 已开始事件流后的传输失败：不回退（对齐 TS websocketStarted → throw）。

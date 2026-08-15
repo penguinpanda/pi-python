@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 from ..models import Models
 from ..providers import (
     deepseek_provider,
@@ -38,6 +40,20 @@ from ..providers import (
     qwen_token_plan_cn_provider,
     qwen_token_plan_provider,
 )
+from ..types import Model
+
+
+def _apply_codex_compat(model: Model) -> Model:
+    """OpenAI Codex 模型统一开启 tool search（延迟导入避免循环）。"""
+    from ..providers.openai_codex import apply_codex_compat
+
+    return apply_codex_compat(model)
+
+
+# 合并生成目录后按 provider 应用的模型后处理（生成目录元数据之上的运行时修正）。
+_GENERATED_MODEL_POSTPROCESS: dict[str, Callable[[Model], Model]] = {
+    "openai-codex": _apply_codex_compat,
+}
 
 
 def create_default_models() -> Models:
@@ -103,4 +119,7 @@ def _apply_generated_models(models: Models) -> None:
             continue
         merged = {model.id: model for model in provider.models}
         merged.update({model.id: model for model in generated_models})
+        postprocess = _GENERATED_MODEL_POSTPROCESS.get(provider_id)
+        if postprocess is not None:
+            merged = {model_id: postprocess(model) for model_id, model in merged.items()}
         provider.models = list(merged.values())

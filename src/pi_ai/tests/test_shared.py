@@ -209,6 +209,33 @@ class TestToOpenaiMessages:
         assert result[0]["tool_call_id"] == "call_1"
         assert result[0]["content"] == "42 results found."
 
+    def test_tool_result_message_keeps_images_for_vision_models(self):
+        """视觉模型经 completions 时，toolResult 中的图片不得被丢弃。"""
+        messages: list[Message] = [
+            {  # type: ignore[typeddict-unknown-key]
+                "role": "toolResult",
+                "tool_call_id": "call_1",
+                "tool_name": "vision",
+                "content": [
+                    {"type": "text", "text": "screenshot:"},
+                    {"type": "image", "url": None, "data": "aGVsbG8=", "mime_type": "image/png"},
+                ],
+            }
+        ]
+        vision_model = Model(
+            id="gpt-5-chat-latest",
+            provider="openai",
+            api="openai-completions",
+            input=["text", "image"],
+            output=["text"],
+        )
+        result = to_openai_messages(messages, vision_model)
+        assert result[0]["role"] == "tool"
+        assert result[0]["content"] == [
+            {"type": "text", "text": "screenshot:"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,aGVsbG8="}},
+        ]
+
     def test_multiple_messages(self):
         messages: list[Message] = [
             {"role": "system", "content": "System prompt"},  # type: ignore[typeddict-unknown-key]

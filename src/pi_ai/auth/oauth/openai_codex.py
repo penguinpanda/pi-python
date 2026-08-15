@@ -376,7 +376,10 @@ async def _browser_login(interaction: AuthInteraction) -> OAuthCredential:
         else:
             callback_task.cancel()
             await asyncio.gather(callback_task, return_exceptions=True)
-        pasted = manual_task.result() if not manual_task.cancelled() else None
+        # callback 未提供 code：等待手动粘贴（await 未完成任务；
+        # 对已完成任务立即返回，避免对 pending 任务调 result() 抛
+        # InvalidStateError）。
+        pasted = await manual_task
         if pasted is None:
             raise RuntimeError("OpenAI Codex browser login was cancelled")
         parsed_code = _extract_code_from_pasted(pasted, flow["state"])

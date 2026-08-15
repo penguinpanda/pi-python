@@ -108,3 +108,10 @@ def test_parse_streaming_json_long_integer_not_truncated():
 
     huge = '{"a": ' + "9" * 5000 + "}"
     assert parse_streaming_json(huge) == {}
+
+
+def test_parse_streaming_json_non_finite_exponent_not_truncated():
+    """1e999 不得回退为 1e99 这类数量级错误的值。"""
+    from pi_ai.utils.json_parse import parse_streaming_json
+
+    assert parse_streaming_json('{"a": 1e999}') == {}

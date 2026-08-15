@@ -556,6 +556,12 @@ def google_generative_ai_stream(
                             thinking_block = cast(ThinkingContent, content_blocks[index])
                             text = part["text"]
                             thinking_block["thinking"] += text
+                            # thoughtSignature 按 Gemini 协议出现在 thought 段
+                            # 末尾的 part：逐 part 更新签名，避免只在块创建时
+                            # 捕获而丢失（多轮续传依赖该签名回显）。
+                            signature = part.get("thoughtSignature")
+                            if signature:
+                                thinking_block["thinking_signature"] = signature
                             stream.push(
                                 ThinkingDeltaEvent(
                                     type="thinking_delta",

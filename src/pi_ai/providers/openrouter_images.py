@@ -34,10 +34,17 @@ def _build_params(model: ImagesModel, context: ImagesContext) -> dict[str, Any]:
         if item["type"] == "text":
             content.append({"type": "text", "text": item["text"]})
         else:
+            # URL 图片直接透传；base64 图片拼 data URI（mime 缺失给默认值），
+            # 避免生成 "data:None;base64,None" 损坏 payload。
+            url: str | None
+            if item.get("data"):
+                url = f"data:{item.get('mime_type') or 'image/png'};base64,{item['data']}"
+            else:
+                url = item.get("url")
             content.append(
                 {
                     "type": "image_url",
-                    "image_url": {"url": f"data:{item['mime_type']};base64,{item['data']}"},
+                    "image_url": {"url": url},
                 }
             )
     modalities = ["image", "text"] if "text" in model.output else ["image"]

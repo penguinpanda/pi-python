@@ -39,6 +39,20 @@ def test_build_params_text_and_image():
     assert content[1]["image_url"]["url"] == "data:image/png;base64,aGk="
 
 
+def test_build_params_url_only_image_passthrough():
+    """URL 图片直接透传，不得拼出 data:None;base64,None 损坏 payload。"""
+    model = _image_model()
+    context: ImagesContext = {
+        "input": [
+            {"type": "image", "mime_type": None, "data": None, "url": "https://x/y.png"},
+        ]
+    }
+    params = openrouter_images._build_params(model, context)
+    content = params["messages"][0]["content"]
+    assert content[0]["type"] == "image_url"
+    assert content[0]["image_url"]["url"] == "https://x/y.png"
+
+
 @pytest.mark.asyncio
 async def test_generate_images_success(monkeypatch):
     async def handler(request: httpx.Request) -> httpx.Response:

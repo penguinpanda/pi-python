@@ -431,7 +431,8 @@ class Provider:
         """
 
         stream = await self.stream(model, context, options)
-        return await stream.result()
+        # collect() 边消费边等待：result() 不排空队列，长流会全量缓冲。
+        return await stream.collect()
 
     async def stream_simple(
         self,
@@ -468,7 +469,7 @@ class Provider:
     ) -> AssistantMessage:
         """completeSimple 分发。"""
         stream = await self.stream_simple(model, context, options)
-        return await stream.result()
+        return await stream.collect()
 
     async def fetch_deferred(
         self,

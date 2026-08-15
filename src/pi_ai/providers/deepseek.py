@@ -32,14 +32,8 @@ DeepSeek Provider。
 from __future__ import annotations
 
 from ..auth import env_api_key_auth
-from ..models.generated import load_generated_models
 from ..provider import Provider, create_provider
 from ..types import Model
-
-
-def _load_deepseek_models() -> list[Model]:
-    """从自动生成的模型目录加载 DeepSeek 模型（唯一数据源）。"""
-    return load_generated_models().get("deepseek", [])
 
 
 def deepseek_provider(models: list[Model] | None = None) -> Provider:
@@ -50,7 +44,8 @@ def deepseek_provider(models: list[Model] | None = None) -> Provider:
 
         • Provider ID
 
-        • 模型列表（默认来自生成目录，可传入自定义列表覆盖）
+        • 模型列表（默认空，由 create_default_models() 统一合并生成目录；
+          可传入自定义列表覆盖）
 
         • API Key 认证
 
@@ -77,7 +72,7 @@ def deepseek_provider(models: list[Model] | None = None) -> Provider:
         #
         # 环境变量读取。
         auth=env_api_key_auth("DeepSeek API key", ["DEEPSEEK_API_KEY"]),
-        models=models if models is not None else _load_deepseek_models(),
+        models=models or [],
         # DeepSeek 兼容 OpenAI Chat Completions API。
         api_kind="completions",
         # DeepSeek OpenAI Compatible API 地址。

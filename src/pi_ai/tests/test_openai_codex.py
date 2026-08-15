@@ -10,7 +10,7 @@ import httpx
 import pytest
 import zstandard
 
-from pi_ai import Models, create_default_models
+from pi_ai import create_default_models
 from pi_ai.api import openai_codex_responses
 from pi_ai.api.api_provider_registry import get_api_provider
 from pi_ai.api.openai_codex_responses import (
@@ -42,17 +42,17 @@ def test_openai_codex_api_and_provider_registered() -> None:
 def test_openai_codex_provider_has_oauth() -> None:
     provider = openai_codex_provider()
     assert getattr(provider.auth, "oauth", None) is not None
-    assert provider.get_models()
+    # 模型由 create_default_models() 统一合并生成目录。
+    assert create_default_models().get_provider("openai-codex").get_models()
 
 
 def test_openai_codex_models_enable_tool_search() -> None:
-    provider = openai_codex_provider()
+    provider = create_default_models().get_provider("openai-codex")
     assert all((model.compat or {}).get("supportsToolSearch") for model in provider.get_models())
 
 
 def test_openai_codex_provider_supports_deferred() -> None:
-    models = Models()
-    models.add_provider(openai_codex_provider())
+    models = create_default_models()
     model = models.get_model("openai-codex", "gpt-5.4")
     assert model is not None
     assert models.supports_deferred(model) is True

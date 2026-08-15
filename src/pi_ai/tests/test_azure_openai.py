@@ -48,7 +48,8 @@ async def test_azure_stream_builds_client_and_deployment(monkeypatch) -> None:
     assert call_kwargs["request_model_id"] == "deploy1"
     factory = call_kwargs["client_factory"]
     factory("k", "", timeout=1.0, max_retries=2, headers=None)
-    assert captured["azure_endpoint"] == "https://res.openai.azure.com/openai/v1"
+    # azure_endpoint 传资源根：SDK 拼 /openai/<url>，避免 /openai/v1/openai/ 双段。
+    assert captured["azure_endpoint"] == "https://res.openai.azure.com"
     assert captured["azure_deployment"] == "deploy1"
     assert captured["api_version"] == "v1"
 

@@ -149,6 +149,36 @@ class TestAssistantMessageEventStream:
         assert result["stop_reason"] == "stop"
 
     @pytest.mark.asyncio
+    async def test_collect_drains_events_and_returns_result(self):
+        """collect() 排空中间事件并返回最终结果（complete() 路径防全量缓冲）。"""
+        stream = AssistantMessageEventStream()
+        msg = AssistantMessage(
+            role="assistant",
+            content=[{"type": "text", "text": "Hello"}],
+            api="openai-completions",
+            provider="deepseek",
+            model="deepseek-chat",
+            usage={"input": 10, "output": 5, "cache_read": 0, "cache_write": 0, "total_tokens": 15},
+            stop_reason="stop",
+            error_message=None,
+            timestamp=0,
+        )
+        for _i in range(100):
+            stream.push(
+                {
+                    "type": "text_delta",
+                    "content_index": 0,
+                    "delta": "x",
+                    "partial": msg,
+                }
+            )
+        stream.push({"type": "done", "reason": "stop", "message": msg})
+
+        result = await stream.collect()
+        assert result["stop_reason"] == "stop"
+        assert stream._queue.qsize() == 0
+
+    @pytest.mark.asyncio
     async def test_error_event(self):
         stream = AssistantMessageEventStream()
         err_msg = AssistantMessage(

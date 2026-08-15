@@ -454,7 +454,8 @@ class Models:
         """
 
         stream = await self.stream(model, context, options)
-        return await stream.result()
+        # collect() 边消费边等待：result() 不排空队列，长流会全量缓冲。
+        return await stream.collect()
 
     async def stream_simple(
         self,
@@ -494,7 +495,7 @@ class Models:
     ) -> AssistantMessage:
         """completeSimple：等待整个流结束，返回最终 AssistantMessage。"""
         stream = await self.stream_simple(model, context, options)
-        return await stream.result()
+        return await stream.collect()
 
     def supports_deferred(self, model: Model) -> bool:
         """模型所属 Provider 是否支持挂起响应。"""
@@ -612,11 +613,14 @@ class Models:
         overrides: dict[str, Any] | None = None,
     ) -> list[Model]:
         """返回已配置认证的 provider 的模型列表。"""
-        providers = (
-            [self._providers[provider_id]]
-            if provider_id is not None and provider_id in self._providers
-            else list(self._providers.values())
-        )
+        if provider_id is not None:
+            if provider_id not in self._providers:
+                # 与 get_models(provider_id) 一致：未知 provider 返回空，
+                # 而不是回退为全部 provider 的模型。
+                return []
+            providers = [self._providers[provider_id]]
+        else:
+            providers = list(self._providers.values())
         available: list[Model] = []
         for provider in providers:
             if await self.check_auth(provider.id, overrides) is not None:

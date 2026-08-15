@@ -9,6 +9,7 @@ from pi_ai import (
     Context,
     create_default_models,
     openai_provider,
+    faux_provider,
 )
 from pi_ai.auth import env_api_key_auth, InMemoryCredentialStore, ApiKeyCredential, resolve_api_key
 
@@ -48,6 +49,14 @@ class TestModelsRegistry:
         assert models.get_provider("qwen-token-plan-cn") is not None
         assert models.get_provider("ollama") is not None
         assert models.get_provider("faux") is not None
+
+    @pytest.mark.asyncio
+    async def test_get_available_unknown_provider_returns_empty(self):
+        """未知 provider_id 返回 []，不得回退为全部 provider 的模型。"""
+        models = Models()
+        models.add_provider(faux_provider().provider)
+        assert await models.get_available("no-such-provider") == []
+        assert [m.id for m in await models.get_available()] == ["faux-1"]
 
     def test_get_models_all(self):
         models = create_default_models()

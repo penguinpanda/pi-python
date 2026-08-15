@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pi_ai.auth import EnvApiKeyAuth
 from pi_ai.auth.oauth.openrouter import open_router_oauth
-from pi_ai.models.generated import load_generated_models
 from pi_ai.provider import Provider, create_provider
 
 
@@ -22,7 +21,8 @@ def openrouter_provider() -> Provider:
         id="openrouter",
         name="OpenRouter",
         auth=_OpenRouterAuth(),  # type: ignore[arg-type]
-        models=load_generated_models().get("openrouter", []),
+        # 模型由 create_default_models() 统一合并生成目录。
+        models=[],
         base_url="https://openrouter.ai/api/v1",
         api_kind="completions",
     )

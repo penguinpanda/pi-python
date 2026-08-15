@@ -485,6 +485,35 @@ class TestCompletionsStream:
         assert [e["content_index"] for e in events if e["type"] == "toolcall_end"] == [0, 1]
 
     @pytest.mark.asyncio
+    async def test_mixed_index_protocol_no_state_collision(self):
+        """先无 index 后有 index=0 的混合协议：两个调用不得合并/吞并。"""
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "two tools?"}])
+        chunks = [
+            _chunk(
+                tool_calls=[_tool_call(None, "call_1", "tool_a", '{"x":')],
+                finish_reason=None,
+            ),
+            _chunk(
+                tool_calls=[_tool_call(0, "call_2", "tool_b", '{"y":')],
+                finish_reason=None,
+            ),
+            _chunk(tool_calls=[_tool_call(None, "call_1", None, "1}")], finish_reason=None),
+            _chunk(tool_calls=[_tool_call(0, None, None, "2}")], finish_reason="tool_calls"),
+        ]
+        client = _mock_client(chunks)
+
+        events, _ = await _collect_events(model, context, client)
+        msg = events[-1]["message"]
+        blocks = [b for b in msg["content"] if b["type"] == "toolCall"]
+        assert len(blocks) == 2
+        by_id = {b["id"]: b for b in blocks}
+        assert by_id["call_1"]["raw_arguments"] == '{"x":1}'
+        assert by_id["call_1"]["arguments"] == {"x": 1}
+        assert by_id["call_2"]["raw_arguments"] == '{"y":2}'
+        assert by_id["call_2"]["arguments"] == {"y": 2}
+
+    @pytest.mark.asyncio
     async def test_usage_extraction(self):
         model = _make_model()
         context = Context(messages=[{"role": "user", "content": "Hi"}])

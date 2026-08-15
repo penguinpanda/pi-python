@@ -43,18 +43,12 @@ qwen-token-plan.ts / qwen-token-plan-cn.ts）。
 from __future__ import annotations
 
 from ..auth import env_api_key_auth
-from ..models.generated import load_generated_models
 from ..provider import Provider, create_provider
 from ..types import Model
 
 # Token Plan 专用端点（OpenAI 兼容模式）。
 QWEN_TOKEN_PLAN_BASE_URL = "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
 QWEN_TOKEN_PLAN_CN_BASE_URL = "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
-
-
-def _load_token_plan_models(provider_id: str) -> list[Model]:
-    """从自动生成的模型目录加载 Token Plan 模型（唯一数据源）。"""
-    return load_generated_models().get(provider_id, [])
 
 
 def qwen_token_plan_provider(models: list[Model] | None = None) -> Provider:
@@ -65,7 +59,8 @@ def qwen_token_plan_provider(models: list[Model] | None = None) -> Provider:
 
         • Provider ID
 
-        • 模型列表（默认来自生成目录，可传入自定义列表覆盖）
+        • 模型列表（默认空，由 create_default_models() 统一合并生成目录；
+          可传入自定义列表覆盖）
 
         • API Key 认证
 
@@ -85,7 +80,7 @@ def qwen_token_plan_provider(models: list[Model] | None = None) -> Provider:
         id="qwen-token-plan",
         name="Qwen Token Plan",
         auth=env_api_key_auth("Qwen Token Plan API key", ["QWEN_TOKEN_PLAN_API_KEY"]),
-        models=models if models is not None else _load_token_plan_models("qwen-token-plan"),
+        models=models or [],
         api_kind="completions",
         base_url=QWEN_TOKEN_PLAN_BASE_URL,
     )
@@ -109,7 +104,7 @@ def qwen_token_plan_cn_provider(models: list[Model] | None = None) -> Provider:
         id="qwen-token-plan-cn",
         name="Qwen Token Plan CN",
         auth=env_api_key_auth("Qwen Token Plan CN API key", ["QWEN_TOKEN_PLAN_CN_API_KEY"]),
-        models=models if models is not None else _load_token_plan_models("qwen-token-plan-cn"),
+        models=models or [],
         api_kind="completions",
         base_url=QWEN_TOKEN_PLAN_CN_BASE_URL,
     )

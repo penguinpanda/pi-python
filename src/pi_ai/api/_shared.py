@@ -264,16 +264,38 @@ def to_openai_messages(
         # tool
         elif role == "toolResult":
             tr_msg = cast(ToolResultMessage, msg)
-            content_str = ""
+            tool_text_parts: list[str] = []
+            image_parts: list[dict[str, Any]] = []
             for block in tr_msg["content"]:
                 if block["type"] == "text":
-                    content_str += block["text"]
+                    tool_text_parts.append(block["text"])
+                elif block["type"] == "image" and model.input and "image" in model.input:
+                    # 与 user 分支一致：视觉模型保留工具结果图片。
+                    tool_image_part: dict[str, Any] = {"type": "image_url"}
+                    if block.get("url"):
+                        tool_image_part["image_url"] = {"url": block["url"]}
+                    elif block.get("data"):
+                        tool_image_part["image_url"] = {
+                            "url": (
+                                f"data:{block.get('mime_type', 'image/png')};base64,{block['data']}"
+                            )
+                        }
+                    image_parts.append(tool_image_part)
 
+            if image_parts:
+                tool_content: Any = image_parts
+                if tool_text_parts:
+                    tool_content = [
+                        {"type": "text", "text": "\n".join(tool_text_parts)},
+                        *image_parts,
+                    ]
+            else:
+                tool_content = "\n".join(tool_text_parts)
             result.append(
                 {
                     "role": "tool",
                     "tool_call_id": tr_msg["tool_call_id"],
-                    "content": content_str,
+                    "content": tool_content,
                 }
             )
 

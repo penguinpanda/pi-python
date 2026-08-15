@@ -519,6 +519,14 @@ async def chat_completions_stream(
             # key → {"block_index", "id", "name", "raw_arguments"}
             tool_call_states: dict[int, dict[str, Any]] = {}
             tool_call_order: list[int] = []
+            # 无 index/id 回退 key：负值递减，与协议 index 命名空间隔离
+            # （避免混合协议下 len(order) 与后续 index=0 冲突）。
+            fallback_tool_key = -1
+
+            def _new_fallback_key() -> int:
+                nonlocal fallback_tool_key
+                fallback_tool_key -= 1
+                return fallback_tool_key
 
             # Token 使用统计。
             usage: Usage = empty_usage()
@@ -689,6 +697,9 @@ async def chat_completions_stream(
                         state: dict[str, Any] | None = None
                         if isinstance(tc_index, int) and tc_index >= 0:
                             state = tool_call_states.get(tc_index)
+                            if state is not None and tc_id and state["id"] and state["id"] != tc_id:
+                                # index 被复用但 id 不同（混合协议）：视为新调用。
+                                state = None
                             if state is None and tc_id is not None:
                                 state = next(
                                     (s for s in tool_call_states.values() if s["id"] == tc_id),
@@ -705,11 +716,14 @@ async def chat_completions_stream(
                         if state is None:
                             # 新工具调用：结束当前 text/thinking 块并新建块。
                             _end_current_block()
-                            state_key = (
-                                tc_index
-                                if isinstance(tc_index, int) and tc_index >= 0
-                                else len(tool_call_order)
-                            )
+                            if isinstance(tc_index, int) and tc_index >= 0:
+                                state_key = (
+                                    tc_index
+                                    if tc_index not in tool_call_states
+                                    else _new_fallback_key()
+                                )
+                            else:
+                                state_key = _new_fallback_key()
                             content_blocks.append(
                                 ToolCall(
                                     type="toolCall",

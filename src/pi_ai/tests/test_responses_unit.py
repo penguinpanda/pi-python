@@ -766,6 +766,71 @@ class TestResponsesStream:
         assert msg["content"][2]["text"] == "After"
 
     @pytest.mark.asyncio
+    async def test_parallel_function_calls_serial(self):
+        """串行协议（OpenAI 实际行为）下多个 function_call 参数各自正确。"""
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+
+        def _fc(call_id, item_id):
+            return SimpleNamespace(type="function_call", call_id=call_id, id=item_id, name="tool")
+
+        events = [
+            _event("response.output_item.added", item=_fc("call_1", "fc_1")),
+            _event("response.function_call_arguments.delta", delta='{"x":'),
+            _event("response.function_call_arguments.delta", delta="1}"),
+            _event("response.function_call_arguments.done"),
+            _event("response.output_item.added", item=_fc("call_2", "fc_2")),
+            _event("response.function_call_arguments.delta", delta='{"y":'),
+            _event("response.function_call_arguments.delta", delta="2}"),
+            _event("response.function_call_arguments.done"),
+            _event("response.output_item.done", item=_fc("call_2", "fc_2")),
+            _event("response.completed", response=SimpleNamespace(output_text="", usage=None)),
+        ]
+        client = _mock_client(events)
+
+        collected, stream = await _collect_events(model, context, client)
+        msg = await stream.result()
+        blocks = {b["id"]: b for b in msg["content"] if b["type"] == "toolCall"}
+        assert blocks["call_1|fc_1"]["raw_arguments"] == '{"x":1}'
+        assert blocks["call_1|fc_1"]["arguments"] == {"x": 1}
+        assert blocks["call_2|fc_2"]["raw_arguments"] == '{"y":2}'
+        assert blocks["call_2|fc_2"]["arguments"] == {"y": 2}
+
+    @pytest.mark.asyncio
+    async def test_parallel_function_calls_interleaved_added(self):
+        """交错 added：前一个调用不得被提前结束，done 按 added 顺序（FIFO）收尾。"""
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+
+        def _fc(call_id, item_id):
+            return SimpleNamespace(type="function_call", call_id=call_id, id=item_id, name="tool")
+
+        events = [
+            _event("response.output_item.added", item=_fc("call_1", "fc_1")),
+            _event("response.output_item.added", item=_fc("call_2", "fc_2")),
+            _event("response.function_call_arguments.delta", delta='{"x":'),
+            _event("response.function_call_arguments.delta", delta="1}"),
+            _event("response.function_call_arguments.delta", delta='{"y":'),
+            _event("response.function_call_arguments.delta", delta="2}"),
+            _event("response.function_call_arguments.done"),
+            _event("response.function_call_arguments.done"),
+            _event("response.output_item.done", item=_fc("call_2", "fc_2")),
+            _event("response.completed", response=SimpleNamespace(output_text="", usage=None)),
+        ]
+        client = _mock_client(events)
+
+        collected, stream = await _collect_events(model, context, client)
+        msg = await stream.result()
+        # 两个调用都保留（前一个不再被提前清空）。
+        tool_blocks = [b for b in msg["content"] if b["type"] == "toolCall"]
+        assert len(tool_blocks) == 2
+        assert tool_blocks[0]["id"] == "call_1|fc_1"
+        assert tool_blocks[1]["id"] == "call_2|fc_2"
+        # 每个调用恰好一个 toolcall_end（done 按 FIFO 各结束一个块）。
+        ends = [e for e in collected if e["type"] == "toolcall_end"]
+        assert len(ends) == 2
+
+    @pytest.mark.asyncio
     async def test_completed_no_response(self):
         """completed 事件没有 response 对象时不应崩溃。"""
         model = _make_model()

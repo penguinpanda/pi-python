@@ -189,6 +189,8 @@ def test_thinking_fields() -> None:
         )
         is None
     )
+    # reasoning="off" 必须禁用 thinking，不得生成 budget_tokens=0 的非法配置。
+    assert _build_thinking_fields(model, {"reasoning": "off"}) is None
 
 
 def test_bedrock_api_registered() -> None:

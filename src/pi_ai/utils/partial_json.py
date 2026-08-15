@@ -53,6 +53,10 @@ def _number_prefix_length(token: str) -> int:
         except ValueError as exc:
             if "Exceeds the limit" in str(exc):
                 return 0
+            if "non-finite" in str(exc):
+                # 完整数字无法表示（1e999 → inf）：不得回退到较短前缀
+                # 产生数量级错误的值。
+                return 0
             continue
         except TypeError:
             continue

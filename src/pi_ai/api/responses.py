@@ -828,10 +828,14 @@ async def responses_stream(
             current_index: int | None = None
             current_kind: str | None = None
 
-            # 当前 toolCall 的流式状态。
-            current_tool_id: str = ""
-            current_tool_name: str = ""
-            current_raw_args: str = ""
+            # 并行工具调用状态：双段 ID → {block_index, raw_arguments, name}。
+            #
+            # function_call_arguments.delta 无归属信息（协议按 item 串行下发），
+            # 追加到最后一个 added 的调用；done 按 added 顺序（FIFO）结束，
+            # 避免 done 事件错误结束"当前"块导致前一个调用参数提前清空。
+            tool_call_states: dict[str, dict[str, Any]] = {}
+            pending_tool_call_ids: list[str] = []
+            last_tool_call_id: str | None = None
 
             # Token 使用统计。
             usage: Usage = empty_usage()
@@ -855,7 +859,7 @@ async def responses_stream(
 
             def _end_current_block() -> None:
                 """结束当前累积块并发射对应的 *_end 事件。"""
-                nonlocal current_kind, current_index, current_tool_id
+                nonlocal current_kind, current_index
                 if current_kind == "text" and current_index is not None:
                     text_block = cast(TextContent, content_blocks[current_index])
                     stream.push(
@@ -876,21 +880,32 @@ async def responses_stream(
                             partial=_partial(),
                         )
                     )
-                elif current_kind == "toolCall" and current_index is not None:
-                    tool_block = cast(ToolCall, content_blocks[current_index])
-                    tool_block["raw_arguments"] = current_raw_args
-                    tool_block["arguments"] = parse_tool_arguments(current_raw_args)
-                    stream.push(
-                        ToolCallEndEvent(
-                            type="toolcall_end",
-                            content_index=current_index,
-                            tool_call=tool_block,
-                            partial=_partial(),
-                        )
-                    )
                 current_kind = None
                 current_index = None
-                current_tool_id = ""
+
+            def _end_tool_call(state_id: str) -> None:
+                """结束指定的工具调用块并发射 toolcall_end（幂等）。"""
+                nonlocal current_kind, current_index, last_tool_call_id
+                state = tool_call_states.pop(state_id, None)
+                if state is None:
+                    return
+                if state_id in pending_tool_call_ids:
+                    pending_tool_call_ids.remove(state_id)
+                tool_block = cast(ToolCall, content_blocks[state["block_index"]])
+                tool_block["raw_arguments"] = state["raw_arguments"]
+                tool_block["arguments"] = parse_tool_arguments(state["raw_arguments"])
+                stream.push(
+                    ToolCallEndEvent(
+                        type="toolcall_end",
+                        content_index=state["block_index"],
+                        tool_call=tool_block,
+                        partial=_partial(),
+                    )
+                )
+                if current_kind == "toolCall" and current_index == state["block_index"]:
+                    current_kind = None
+                    current_index = None
+                    last_tool_call_id = None
 
             def _backfill_reasoning_signatures(response: Any) -> None:
                 """终态 response 补回 reasoning.encrypted_content（对齐 TS）。"""
@@ -1002,25 +1017,33 @@ async def responses_stream(
                 elif event_type == "response.output_item.added":
                     item = getattr(event, "item", None)
                     if item and getattr(item, "type", None) == "function_call":
-                        _end_current_block()
+                        # 并行 function_call 不提前结束前一个调用
+                        # （其参数增量/结束事件仍可能到达）。
+                        if current_kind in ("text", "thinking"):
+                            _end_current_block()
                         current_kind = "toolCall"
                         call_id = getattr(item, "call_id", "") or ""
                         item_id = getattr(item, "id", None) or ""
                         # 保存完整双段 ID（call_id|fc_item_id），
                         # 供后续轮次回放时的跨 provider 规范化。
-                        current_tool_id = f"{call_id}|{item_id}" if item_id else call_id
-                        current_tool_name = getattr(item, "name", "") or ""
-                        current_raw_args = ""
+                        state_id = f"{call_id}|{item_id}" if item_id else call_id
+                        last_tool_call_id = state_id
                         content_blocks.append(
                             ToolCall(
                                 type="toolCall",
-                                id=current_tool_id,
-                                name=current_tool_name,
+                                id=state_id,
+                                name=getattr(item, "name", "") or "",
                                 raw_arguments="",
                                 arguments=None,
                             )
                         )
                         current_index = len(content_blocks) - 1
+                        tool_call_states[state_id] = {
+                            "block_index": current_index,
+                            "raw_arguments": "",
+                            "name": getattr(item, "name", "") or "",
+                        }
+                        pending_tool_call_ids.append(state_id)
                         stream.push(
                             ToolCallStartEvent(
                                 type="toolcall_start",
@@ -1032,11 +1055,19 @@ async def responses_stream(
                 # Tool 参数增量。
                 elif event_type == "response.function_call_arguments.delta":
                     delta = getattr(event, "delta", "")
-                    current_raw_args += delta
+                    if last_tool_call_id is not None and last_tool_call_id in tool_call_states:
+                        state = tool_call_states[last_tool_call_id]
+                        state["raw_arguments"] += delta
+                        index = state["block_index"]
+                        cast(ToolCall, content_blocks[index])["raw_arguments"] = state[
+                            "raw_arguments"
+                        ]
+                    else:
+                        index = current_index or 0
                     stream.push(
                         ToolCallDeltaEvent(
                             type="toolcall_delta",
-                            content_index=current_index or 0,
+                            content_index=index,
                             delta=delta,
                             partial=_partial(),
                         )
@@ -1044,7 +1075,11 @@ async def responses_stream(
 
                 # Tool 参数结束。
                 elif event_type == "response.function_call_arguments.done":
-                    _end_current_block()
+                    # done 按 added 顺序（FIFO）匹配：串行协议下队首即当前调用。
+                    if pending_tool_call_ids:
+                        _end_tool_call(pending_tool_call_ids[0])
+                    else:
+                        _end_current_block()
 
                 # 输出项完成。
                 #
@@ -1052,6 +1087,15 @@ async def responses_stream(
                 elif event_type == "response.output_item.done":
                     item = getattr(event, "item", None)
                     item_type = getattr(item, "type", None) if item else None
+
+                    # function_call 项完成：按双段 ID 结束对应块
+                    # （兼容未发 arguments.done 的端点）。
+                    if item_type == "function_call":
+                        call_id = getattr(item, "call_id", "") or ""
+                        item_id = getattr(item, "id", None) or ""
+                        state_id = f"{call_id}|{item_id}" if item_id else call_id
+                        if state_id in tool_call_states:
+                            _end_tool_call(state_id)
 
                     # 服务端 web_search 项：保留完整原始 item 供 stateless 回放。
                     if item_type == "web_search_call" and web_search_enabled:
@@ -1251,6 +1295,9 @@ async def responses_stream(
             #
             # 结束最后一个块（若有）。
             _end_current_block()
+            # 残留未收到 done 事件的工具调用（兼容端点）统一收尾。
+            for state_id in list(pending_tool_call_ids):
+                _end_tool_call(state_id)
 
             msg = AssistantMessage(
                 role="assistant",

@@ -144,7 +144,9 @@ async def _login(interaction: AuthInteraction) -> OAuthCredential:
             else:
                 callback_task.cancel()
                 await asyncio.gather(callback_task, return_exceptions=True)
-            manual = manual_task.result() if not manual_task.cancelled() else None
+            # callback 未提供 code：等待手动粘贴（避免对 pending 任务调
+            # result() 抛 InvalidStateError）。
+            manual = await manual_task
         else:
             manual = await interaction.prompt(manual_prompt)
     finally:

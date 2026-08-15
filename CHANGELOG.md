@@ -276,6 +276,28 @@
 
 ### Fixed
 
+- provider 工厂不再各自加载 `load_generated_models()`：统一由
+  `create_default_models()` 合并一次（避免同一份 JSON 重复读盘解析）；
+  OpenAI Codex 的 `supportsToolSearch` 后处理移到合并阶段（`_apply_generated_models`）
+- 修复 responses 并行 function_call 参数串线：按双段 ID 维护 per-item 状态，
+  `function_call_arguments.done` 按 added 顺序（FIFO）结束对应调用，
+  前一个调用不再被提前清空/错误结束
+- 修复 Codex WebSocket 取消路径连接泄漏：`_CodexWebSocketClient` 实现
+  `close()` 转发到 events；`__anext__` 的 `CancelledError` 先关闭连接再传播
+- 修复 OAuth 浏览器登录在端口被占/授权拒绝时抛 `InvalidStateError`：
+  手动粘贴回退改为 `await manual_task`（openai_codex / openrouter / radius）
+- 修复 Azure Responses URL 双 `/openai` 路径段：`azure_endpoint` 归一化为
+  资源根（SDK 拼 `/openai/<url>`），`/openai/v1` 不再被重复拼接
+- `AssistantMessageEventStream` 新增 `collect()`（边消费边等待）；
+  `complete()` / `complete_simple()` 改用其排空队列，避免长流全量缓冲
+- 修复 Google 流式 `thoughtSignature` 只在块创建时捕获：逐 part 更新签名
+  （Gemini 签名位于 thought 段末尾 part）
+- 修复 Bedrock `reasoning="off"` 生成 `budget_tokens: 0` 非法配置：直接禁用
+- `to_openai_messages` 的 toolResult 保留图片（视觉模型，与 user 分支一致）
+- 修复 `parse_streaming_json` 对 `1e999` 回退为 `1e99` 的数量级错误值；
+  completions 混合 index 协议下工具调用 state 不再互相吞并（负值回退 key 隔离）
+- `Models.get_available(未知 provider)` 返回 `[]` 而非全部模型；
+  openrouter_images URL 图片直接透传（不再拼 `data:None;base64,None`）
 - 选择器/对话框在流式输出刷新时消失：overlay 的 rect 是视口坐标却按文档绝对行合成，流式输出使文档增长、视口滚动后 overlay 被滚出视口；现在按 `viewport_top` 平移后合成，滚动期间保持可见
 - `/model` 回车无反应：补全激活时回车只接受补全不提交文本；现在输入完整命令（补全值与文本一致）或补全列表为空时回车直接提交，与 TS `onSubmit` 语义一致（选择器立即打开）
 - 模型输出期间 `/model` 无反应：模型选择器改用可用性快照打开（此前 `get_available()` 触发 provider 认证网络检查，流式期间迟迟不返回）

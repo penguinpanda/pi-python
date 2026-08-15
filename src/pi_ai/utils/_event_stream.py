@@ -418,3 +418,14 @@ class AssistantMessageEventStream(EventStream[AssistantMessageEvent, AssistantMe
                 e["message"] if e["type"] == "done" else cast(ErrorEvent, e)["error"]
             ),
         )
+
+    async def collect(self) -> AssistantMessage:
+        """迭代并丢弃全部事件后返回最终结果。
+
+        result() 只等待结束事件、不排空队列：长流下中间事件（每个
+        text/thinking/tool delta）会全量驻留内存。collect() 边消费边等待，
+        complete() 路径应使用它避免全量缓冲。
+        """
+        async for _ in self:
+            pass
+        return await self.result()
