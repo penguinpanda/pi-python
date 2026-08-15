@@ -58,9 +58,13 @@ def _provider(
     name: str,
     base_url: str,
     env_key: str,
+    *,
+    models_base_url: str | None = None,
 ) -> Provider:
+    fetch_base_url = models_base_url or base_url
+
     async def fetch(context: RefreshModelsContext) -> list[Model]:
-        return await _fetch_openai_models(provider_id, base_url, env_key, context)
+        return await _fetch_openai_models(provider_id, fetch_base_url, env_key, context)
 
     return create_provider(
         id=provider_id,
@@ -81,7 +85,7 @@ def together_provider() -> Provider:
     return _provider(
         "together",
         "Together AI",
-        "https://api.together.xyz/v1",
+        "https://api.together.ai/v1",
         "TOGETHER_API_KEY",
     )
 
@@ -99,8 +103,9 @@ def fireworks_provider() -> Provider:
     return _provider(
         "fireworks",
         "Fireworks AI",
-        "https://api.fireworks.ai/inference/v1",
+        "https://api.fireworks.ai/inference",
         "FIREWORKS_API_KEY",
+        models_base_url="https://api.fireworks.ai/inference/v1",
     )
 
 
@@ -126,7 +131,7 @@ def baseten_provider() -> Provider:
     return _provider(
         "baseten",
         "Baseten",
-        "https://model-apis.baseten.co/v1",
+        "https://inference.baseten.co/v1",
         "BASETEN_API_KEY",
     )
 
@@ -135,7 +140,7 @@ def moonshotai_provider() -> Provider:
     return _provider(
         "moonshotai",
         "Moonshot AI",
-        "https://api.moonshot.cn/v1",
+        "https://api.moonshot.ai/v1",
         "MOONSHOT_API_KEY",
     )
 
@@ -153,7 +158,7 @@ def zai_provider() -> Provider:
     return _provider(
         "zai",
         "Z.ai",
-        "https://api.lingyiwanwu.com/v1",
+        "https://api.z.ai/api/coding/paas/v4",
         "ZAI_API_KEY",
     )
 

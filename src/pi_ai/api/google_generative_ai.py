@@ -44,6 +44,7 @@ from ..utils.provider_retry import retry_provider_request
 from ..utils.sanitize_unicode import sanitize_surrogates
 from .constrained_sampling import resolve_json_schema_strict_sampling
 from ._shared import build_error_message, empty_usage
+from .transform_messages import transform_messages
 from .simple_options import clamp_max_tokens_to_context
 
 _AsyncClient = httpx.AsyncClient
@@ -200,12 +201,25 @@ def _resolve_thought_signature(is_same_provider_and_model: bool, signature: Any)
     return signature if _is_valid_thought_signature(signature) else None
 
 
+def _supports_multimodal_function_response(model_id: str) -> bool:
+    """Gemini 3+ 支持 functionResponse.parts 内嵌图片；其余走独立 user 图片消息。"""
+    major = _gemini_major_version(model_id)
+    return major is None or major >= 3
+
+
 def _to_google_contents(context: Context, model: Any) -> list[dict[str, Any]]:
     model_id: str = model.id if hasattr(model, "id") else str(model)
     model_provider: str | None = getattr(model, "provider", None)
+    model_input = list(getattr(model, "input", None) or [])
     include_id = _requires_tool_call_id(model_id)
+    # 跨 provider 工具 ID 规范化 / 孤立 tool call 修复 / 图片降级。
+    messages = transform_messages(
+        context.messages,
+        model,
+        lambda id_, _model, _source: _normalize_tool_call_id(id_),
+    )
     contents: list[dict[str, Any]] = []
-    for msg in context.messages:
+    for msg in messages:
         role = msg["role"]
         if role == "user":
             content = cast(Any, msg["content"])
@@ -290,17 +304,63 @@ def _to_google_contents(context: Context, model: Any) -> list[dict[str, Any]]:
                 contents.append({"role": "model", "parts": assistant_parts})
         elif role == "toolResult":
             tool_msg = cast(Any, msg)
-            text = "".join(
+            text = "\n".join(
                 block.get("text") or "" for block in tool_msg["content"] if block["type"] == "text"
+            )
+            images = [
+                block
+                for block in tool_msg["content"]
+                if block.get("type") == "image" and block.get("data")
+            ]
+            has_text = len(text) > 0
+            has_images = bool(images) and "image" in model_input
+            response_value = sanitize_surrogates(
+                text if has_text else "(see attached image)" if has_images else ""
             )
             function_response: dict[str, Any] = {
                 "name": tool_msg["tool_name"],
-                "response": {"error" if tool_msg.get("is_error") else "output": text},
+                "response": {("error" if tool_msg.get("is_error") else "output"): response_value},
             }
+            if has_images and _supports_multimodal_function_response(model_id):
+                function_response["parts"] = [
+                    {
+                        "inlineData": {
+                            "mimeType": image.get("mime_type") or "image/png",
+                            "data": image["data"],
+                        }
+                    }
+                    for image in images
+                ]
             if include_id and tool_msg.get("tool_call_id"):
                 function_response["id"] = _normalize_tool_call_id(tool_msg["tool_call_id"])
             tool_parts = [{"functionResponse": function_response}]
-            contents.append({"role": "user", "parts": tool_parts})
+            last_content = contents[-1] if contents else None
+            if (
+                last_content is not None
+                and last_content.get("role") == "user"
+                and any(part.get("functionResponse") for part in last_content.get("parts", []))
+            ):
+                last_content["parts"].extend(tool_parts)
+            else:
+                contents.append({"role": "user", "parts": tool_parts})
+            if has_images and not _supports_multimodal_function_response(model_id):
+                contents.append(
+                    {
+                        "role": "user",
+                        "parts": [
+                            {"text": "Tool result image:"},
+                            *[
+                                {
+                                    "inlineData": {
+                                        "mimeType": image.get("mime_type") or "image/png",
+                                        "data": image["data"],
+                                    }
+                                }
+                                for image in images
+                            ],
+                        ],
+                    }
+                )
     return contents
 
 
@@ -453,8 +513,18 @@ def google_generative_ai_stream(
             current_index = None
 
         try:
+            if opts.get("signal") is not None and opts["signal"].is_set():
+                raise RuntimeError("Request was aborted")
             if not api_key:
                 raise RuntimeError(f"No API key for provider: {model.provider}")
+            nonlocal payload
+            on_payload = opts.get("on_payload")
+            if on_payload is not None:
+                next_payload = on_payload(payload, model)
+                if asyncio.iscoroutine(next_payload):
+                    next_payload = await next_payload
+                if next_payload is not None:
+                    payload = next_payload
             base = (base_url or model.base_url or _DEFAULT_BASE_URL).rstrip("/")
             url = f"{base}/models/{model.id}:streamGenerateContent?alt=sse"
             headers: dict[str, str] = {
@@ -478,7 +548,12 @@ def google_generative_ai_stream(
                     self.headers = headers
 
             async def _open_stream():
-                client = _AsyncClient(timeout=timeout_ms / 1000)
+                provided_client = opts.get("http_client")
+                client = (
+                    provided_client
+                    if provided_client is not None
+                    else _AsyncClient(timeout=timeout_ms / 1000)
+                )
                 try:
                     response = await client.send(
                         client.build_request("POST", url, headers=headers, json=payload),
@@ -512,8 +587,16 @@ def google_generative_ai_stream(
                 max_retry_delay_ms=cast(int | None, max_retry_delay),
                 signal=opts.get("signal"),
             )
+            on_response = opts.get("on_response")
+            if on_response is not None:
+                await on_response(
+                    {"status": response.status_code, "headers": dict(response.headers)},
+                    model,
+                )
             stream.push(StartEvent(type="start", partial=_partial()))
             async for chunk in read_google_sse(response.aiter_bytes()):
+                if opts.get("signal") is not None and opts["signal"].is_set():
+                    raise RuntimeError("Request was aborted")
                 response_id = response_id or chunk.get("responseId")
                 candidate = (chunk.get("candidates") or [{}])[0]
                 if candidate.get("finishReason"):
@@ -655,8 +738,18 @@ def google_generative_ai_stream(
             stream.error(asyncio.CancelledError())
             raise
         except Exception as exc:
+            aborted = opts.get("signal") is not None and opts["signal"].is_set()
             err_msg = build_error_message(model, exc)
-            stream.push({"type": "error", "reason": "error", "error": err_msg})
+            if aborted:
+                err_msg["stop_reason"] = "aborted"
+                err_msg["error_message"] = "Request was aborted"
+            stream.push(
+                {
+                    "type": "error",
+                    "reason": "aborted" if aborted else "error",
+                    "error": err_msg,
+                }
+            )
         finally:
             # 取消/异常路径也必须关闭流式响应与客户端（httpx 无 __del__，
             # 否则每次中止都泄漏一个持有连接池的 AsyncClient）。

@@ -259,6 +259,9 @@ class Provider:
     # None 时使用默认客户端（openai SDK / httpx）。
     http_client: AsyncHTTPClient | None = None
 
+    # credential-aware 模型过滤（对齐 TS Provider.filterModels）。
+    filter_models: Callable[[list[Model], Any], list[Model]] | None = None
+
     def get_models(self) -> list[Model]:
         """
         返回 Provider 支持的所有模型。
@@ -310,7 +313,10 @@ class Provider:
         if result is not None:
             auth = result.auth
             request_options["api_key"] = auth.get("api_key") or ""
-            request_options["base_url"] = auth.get("base_url") or self.base_url or ""
+            if auth.get("base_url"):
+                request_options["base_url"] = auth["base_url"]
+            elif "base_url" not in request_options:
+                request_options["base_url"] = self.base_url or ""
             headers = auth.get("headers")
             if headers:
                 merged_headers = dict(
@@ -507,6 +513,7 @@ def create_provider(
     | None = None,
     cancel_deferred_fn: Callable[[Model, DeferredHandle, dict[str, Any]], Awaitable[None]]
     | None = None,
+    filter_models: Callable[[list[Model], Any], list[Model]] | None = None,
 ) -> Provider:
     """
     创建 Provider。
@@ -547,6 +554,7 @@ def create_provider(
         _stream_fn=stream_fn,
         _deferred_fn=deferred_fn,
         _cancel_deferred_fn=cancel_deferred_fn,
+        filter_models=filter_models,
     )
 
     if fetch_models is not None:

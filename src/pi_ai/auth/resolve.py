@@ -156,6 +156,13 @@ async def resolve_provider_auth(
     auth = getattr(provider, "auth", None)
     overrides = overrides or {}
 
+    # 自定义认证（Bedrock ambient credentials、Cloudflare account/gateway 等）
+    # 优先走其异步 resolve_auth。该类实现可自行读取 credential store、
+    # AuthContext 与调用方 overrides，且允许返回不含 api_key 的 ambient auth。
+    resolve_auth = getattr(auth, "resolve_auth", None)
+    if callable(resolve_auth):
+        return await resolve_auth(credentials, auth_context, overrides)
+
     explicit_key = overrides.get("api_key")
     if explicit_key:
         if auth is not None and hasattr(auth, "resolve"):

@@ -325,6 +325,7 @@ class TestCompletionsStream:
             timeout: float = 120.0,
             max_retries: int = 2,
             headers=None,
+            http_client=None,
         ):
             captured["timeout"] = timeout
             captured["max_retries"] = max_retries
@@ -360,6 +361,7 @@ class TestCompletionsStream:
             timeout: float = 120.0,
             max_retries: int = 2,
             headers=None,
+            http_client=None,
         ):
             captured["timeout"] = timeout
             captured["max_retries"] = max_retries
@@ -387,8 +389,11 @@ class TestCompletionsStream:
         client = _mock_client(chunks)
 
         events, _ = await _collect_events(model, context, client)
-        assert [e["type"] for e in events] == ["start", "done"]
-        assert events[-1]["message"]["content"] == []
+        # 对齐 TS：supportsFinishReason 默认 true，无 finish_reason 必须以
+        # error 事件结束，而不是静默成功。
+        assert [e["type"] for e in events] == ["start", "error"]
+        assert events[-1]["error"]["content"] == []
+        assert "finish_reason" in events[-1]["error"]["error_message"]
 
     @pytest.mark.asyncio
     async def test_delta_none_skipped(self):
@@ -404,7 +409,9 @@ class TestCompletionsStream:
         client = _mock_client(chunks)
 
         events, _ = await _collect_events(model, context, client)
-        assert [e["type"] for e in events] == ["start", "done"]
+        # 对齐 TS：delta=None 且无 finish_reason 的流不能静默成功。
+        assert [e["type"] for e in events] == ["start", "error"]
+        assert "finish_reason" in events[-1]["error"]["error_message"]
 
     @pytest.mark.asyncio
     async def test_tool_call_accumulation(self):
@@ -745,7 +752,9 @@ class TestCompletionsStream:
         assert kwargs["stream"] is True
         assert kwargs["stream_options"] == {"include_usage": True}
         assert kwargs["temperature"] == 0.5
-        assert kwargs["max_tokens"] == 100
+        # 无显式 maxTokensField compat 的 DeepSeek 按 TS detectCompat
+        # 使用 max_completion_tokens。
+        assert kwargs["max_completion_tokens"] == 100
         # System Prompt 作为第一条 message。
         assert kwargs["messages"][0] == {"role": "system", "content": "You are helpful"}
         assert kwargs["messages"][1] == {"role": "user", "content": "Hi"}
@@ -774,9 +783,9 @@ class TestCompletionsStream:
 
         kwargs = client.chat.completions.create.call_args.kwargs
         assert "temperature" not in kwargs
-        # 对齐 TS buildBaseOptions：max_tokens 始终发送收敛后的值
-        # （context_window=0 → 不收敛，返回模型默认 max_tokens 4096）。
-        assert kwargs["max_tokens"] == 4096
+        # 对齐 TS detectCompat：DeepSeek 无显式 compat 时使用
+        # max_completion_tokens；context_window=0 时返回模型默认 4096。
+        assert kwargs["max_completion_tokens"] == 4096
         assert "tools" not in kwargs
 
     @pytest.mark.asyncio
@@ -800,7 +809,7 @@ class TestCompletionsStream:
 
         kwargs = client.chat.completions.create.call_args.kwargs
         # available = 10000 - 1000 - 4096 = 4904
-        assert kwargs["max_tokens"] == 4_904
+        assert kwargs["max_completion_tokens"] == 4_904
 
     @pytest.mark.asyncio
     async def test_error_event(self):
@@ -858,7 +867,7 @@ class TestOpenaiMessagesReasoningContent:
         assert result[0]["content"] == "answer"
 
     def test_other_models_skip_thinking_blocks(self):
-        model = _make_model()
+        model = _make_model(provider="openai")
         messages = [self._assistant()]
         result = to_openai_messages(messages, model)  # type: ignore[arg-type]
         assert "reasoning_content" not in result[0]

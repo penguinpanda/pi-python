@@ -21,6 +21,11 @@ from ..types import (
     Usage,
     now_ms,
 )
+from ..auth import EnvApiKeyAuth
+from ..auth.oauth.openrouter import open_router_oauth
+from ..images_models import ImagesProvider, create_images_provider
+from ..models.image_models import OPENROUTER_IMAGE_MODELS
+from ..utils.cost import calculate_cost
 
 _AsyncClient = httpx.AsyncClient
 
@@ -64,7 +69,7 @@ def _parse_usage(raw: dict[str, Any], model: ImagesModel) -> Usage:
     cache_read = max(0, cached - cache_write)
     input_tokens = max(0, prompt_tokens - cache_read - cache_write)
     output_tokens = int(raw.get("completion_tokens", 0) or 0)
-    return Usage(
+    usage = Usage(
         input=input_tokens,
         output=output_tokens,
         cache_read=cache_read,
@@ -72,6 +77,8 @@ def _parse_usage(raw: dict[str, Any], model: ImagesModel) -> Usage:
         total_tokens=input_tokens + output_tokens + cache_read + cache_write,
         cost={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0},
     )
+    calculate_cost(model, usage)
+    return usage
 
 
 def _image_url_value(value: Any) -> str | None:
@@ -115,15 +122,19 @@ async def generate_images(
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
-        request_headers = opts.get("headers") or {}
-        for name, value in request_headers.items():
+        for name, value in (model.headers or {}).items():
             if value is not None:
                 headers[name] = value
+        request_headers = opts.get("headers") or {}
+        for header_name, header_value in request_headers.items():
+            if isinstance(header_value, str):
+                headers[header_name] = header_value
 
+        endpoint = (getattr(model, "base_url", "") or OPENROUTER_BASE_URL).rstrip("/")
         timeout_ms = opts.get("timeout_ms") or 120000
         async with _AsyncClient(timeout=timeout_ms / 1000) as client:
             response = await client.post(
-                f"{OPENROUTER_BASE_URL}/chat/completions",
+                f"{endpoint}/chat/completions",
                 headers=headers,
                 json=params,
             )
@@ -176,4 +187,28 @@ async def generate_images(
         return output
 
 
-__all__ = ["generate_images", "OPENROUTER_BASE_URL"]
+class _OpenRouterImagesAuth:
+    oauth = open_router_oauth
+    display_name = "OpenRouter API key"
+    env_vars = ["OPENROUTER_API_KEY"]
+
+    def resolve(self, credential=None):  # type: ignore[no-untyped-def]
+        return EnvApiKeyAuth(self.display_name, self.env_vars).resolve(credential)
+
+
+def openrouter_images_provider() -> ImagesProvider:
+    """内置 OpenRouter 图片 provider（对齐 TS openrouterImagesProvider）。"""
+    return create_images_provider(
+        id="openrouter",
+        name="OpenRouter",
+        auth=_OpenRouterImagesAuth(),  # type: ignore[arg-type]
+        models=OPENROUTER_IMAGE_MODELS,
+        api=generate_images,
+    )
+
+
+__all__ = [
+    "generate_images",
+    "OPENROUTER_BASE_URL",
+    "openrouter_images_provider",
+]

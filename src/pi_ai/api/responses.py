@@ -117,6 +117,7 @@ from ..utils.prompt_cache import (
     clamp_openai_prompt_cache_key,
     resolve_cache_retention,
 )
+from ..utils.sanitize_unicode import sanitize_surrogates
 from ..utils.deferred_tools import split_deferred_tools
 
 
@@ -187,7 +188,9 @@ def _convert_tool_result_output(
     - 视觉模型且含图片：返回 input_text + input_image 数组。
     """
 
-    text_result = "\n".join(b["text"] for b in content if b.get("type") == "text")
+    text_result = "\n".join(
+        sanitize_surrogates(b["text"]) for b in content if b.get("type") == "text"
+    )
     images = [b for b in content if b.get("type") == "image"]
     has_text = len(text_result) > 0
 
@@ -217,6 +220,7 @@ def _create_client(
     timeout: float = 180.0,
     max_retries: int = 2,
     headers: dict[str, str | None] | None = None,
+    http_client: Any | None = None,
 ) -> AsyncOpenAI:
     """
     创建 AsyncOpenAI 客户端。
@@ -242,6 +246,8 @@ def _create_client(
         kwargs["base_url"] = base_url.rstrip("/")
     if headers:
         kwargs["default_headers"] = {k: v for k, v in headers.items() if v is not None}
+    if http_client is not None:
+        kwargs["http_client"] = http_client
 
     return AsyncOpenAI(**kwargs)
 
@@ -342,20 +348,36 @@ def _build_responses_request_kwargs(
     }
     include_system_prompt = opts.get("include_system_prompt", True)
     if include_system_prompt and context.system_prompt:
-        kwargs["instructions"] = context.system_prompt
+        kwargs["instructions"] = sanitize_surrogates(context.system_prompt)
     if tools:
         kwargs["tools"] = tools
+    if opts.get("tool_choice") is not None:
+        kwargs["tool_choice"] = opts["tool_choice"]
     temperature = opts.get("temperature")
     if temperature is not None:
         kwargs["temperature"] = temperature
     # max_output_tokens 收敛到模型上下文窗口内（对齐 TS buildBaseOptions）：
     # 未指定时使用模型默认 max_tokens，始终发送收敛后的值。
     requested = opts.get("max_tokens")
-    kwargs["max_output_tokens"] = clamp_max_tokens_to_context(
-        model,
-        context,
-        requested if requested is not None else model.max_tokens,
+    # OpenAI Responses 拒绝 max_output_tokens < 16（上游 issue #6265）。
+    # clamp 到上下文窗口后再抬到最低可接受值，避免长上下文/极小 max_tokens
+    # 时生成 1 这类必然 400 的请求。
+    kwargs["max_output_tokens"] = max(
+        16,
+        clamp_max_tokens_to_context(
+            model,
+            context,
+            requested if requested is not None else model.max_tokens,
+        ),
     )
+    # 每请求 sampling_params 逐键覆盖 Model.samplingParams，经 extra_body
+    # 原样合并到请求体（TS buildParams 最后的 Object.assign 语义）。
+    sampling_params = dict(model.sampling_params or {})
+    sampling_params.update(cast(dict[str, Any], opts.get("sampling_params") or {}))
+    if sampling_params:
+        kwargs["extra_body"] = dict(kwargs.get("extra_body") or {})
+        kwargs["extra_body"].update(sampling_params)
+
     reasoning = _build_responses_reasoning(
         model,
         opts.get("reasoning"),
@@ -376,6 +398,9 @@ def _build_responses_request_kwargs(
         supports_long = supports_long_cache_retention(model)
         if cache_retention != "none":
             kwargs["prompt_cache_key"] = clamp_openai_prompt_cache_key(opts.get("session_id"))
+        else:
+            # 显式禁用隐式 prompt cache（TS prompt_cache_options.mode=explicit）。
+            kwargs["prompt_cache_options"] = {"mode": "explicit"}
         if cache_retention == "long" and supports_long:
             kwargs["prompt_cache_retention"] = "24h"
     return kwargs, web_search_enabled
@@ -492,7 +517,7 @@ def _to_responses_input(
             #
             # 可以在对话任意位置出现
             # System Message。
-            items.append({"role": "system", "content": msg["content"]})
+            items.append({"role": "system", "content": sanitize_surrogates(msg["content"])})
 
         # User Message。
         #
@@ -510,13 +535,15 @@ def _to_responses_input(
         elif role == "user":
             content = msg["content"]
             if isinstance(content, str):
-                items.append({"role": "user", "content": content})
+                items.append({"role": "user", "content": sanitize_surrogates(content)})
             else:
                 # Multi-part user content
                 parts: list[dict[str, Any]] = []
                 for block in content:
                     if block["type"] == "text":
-                        parts.append({"type": "input_text", "text": block["text"]})
+                        parts.append(
+                            {"type": "input_text", "text": sanitize_surrogates(block["text"])}
+                        )
                     elif block["type"] == "image" and (
                         model is None or "image" in (model.input or [])
                     ):
@@ -605,7 +632,7 @@ def _to_responses_input(
                         "content": [
                             {
                                 "type": "output_text",
-                                "text": block["text"],
+                                "text": sanitize_surrogates(block["text"]),
                                 "annotations": [],
                             }
                         ],
@@ -781,7 +808,28 @@ async def responses_stream(
             # 由 openai SDK 内置处理，指数退避封顶 60s。
             # （max_retry_delay_ms 暂不生效：SDK 客户端不接受该参数。）
             timeout_ms = opts.get("timeout_ms")
-            request_headers = dict(opts.get("headers") or {})
+            request_headers: dict[str, str | None] = dict(model.headers or {})
+            for name, value in (opts.get("headers") or {}).items():
+                if value is None:
+                    request_headers.pop(name, None)
+                else:
+                    request_headers[name] = value
+            cache_retention = resolve_cache_retention(opts.get("cache_retention"), opts.get("env"))
+            if opts.get("session_id") and cache_retention != "none":
+                affinity = compat_value(model, "sessionAffinityFormat", "")
+                if not affinity:
+                    affinity = (
+                        "openrouter"
+                        if model.provider == "openrouter"
+                        or "openrouter.ai" in (model.base_url or "")
+                        else "openai"
+                    )
+                if affinity == "openrouter":
+                    request_headers["x-session-id"] = opts["session_id"]
+                else:
+                    if affinity == "openai":
+                        request_headers["session_id"] = opts["session_id"]
+                    request_headers["x-client-request-id"] = opts["session_id"]
             if model.provider == "github-copilot":
                 # 动态头（对齐 TS buildCopilotDynamicHeaders）。
                 request_headers.update(
@@ -806,6 +854,7 @@ async def responses_stream(
                     timeout=timeout_ms / 1000.0 if timeout_ms else 180.0,
                     max_retries=opts.get("max_retries", 2),
                     headers=resolved_headers,
+                    http_client=opts.get("http_client"),
                 )
             # 请求参数构造（与 Codex WebSocket 路径共享，保证 body 一致）。
             kwargs, web_search_enabled = _build_responses_request_kwargs(
@@ -816,33 +865,69 @@ async def responses_stream(
                 request_model_id=request_model_id,
             )
 
+            if opts.get("signal") is not None and opts["signal"].is_set():
+                raise RuntimeError("Request was aborted")
+
+            on_payload = opts.get("on_payload")
+            if on_payload is not None:
+                next_kwargs = on_payload(kwargs, model)
+                if asyncio.iscoroutine(next_kwargs):
+                    next_kwargs = await next_kwargs
+                if next_kwargs is not None:
+                    kwargs = next_kwargs
+
             # 发起流式请求。
             #
-            # 返回异步 Event Stream。
-            response = await client.responses.create(**kwargs)
+            # 返回异步 Event Stream。需要 on_response 时用 raw wrapper。
+            on_response = opts.get("on_response")
+            if on_response is not None:
+                raw = await client.responses.with_raw_response.create(**kwargs)
+                http_response = getattr(raw, "http_response", None)
+                if http_response is not None:
+                    await on_response(
+                        {
+                            "status": http_response.status_code,
+                            "headers": dict(http_response.headers),
+                        },
+                        model,
+                    )
+                response = raw.parse()
+            else:
+                response = await client.responses.create(**kwargs)
 
             # 最终 AssistantMessage.content。
             content_blocks: list[ContentBlock] = []
 
-            # 当前正在累积的内容块（text / thinking / toolCall）。
-            current_index: int | None = None
-            current_kind: str | None = None
+            # ------------------------------------------------------------------
+            # 按 Responses 协议的 output_index 维护输出槽位（对齐 TS outputSlots）。
+            # 兼容两类端点：
+            #   * 标准端点：所有增量都带 output_index，严格按槽位累积；
+            #   * 非标准/旧端点：无 output_index 时退回“当前块”串行累积。
+            # ------------------------------------------------------------------
+            slots: dict[int, dict[str, Any]] = {}
 
-            # 并行工具调用状态：双段 ID → {block_index, raw_arguments, name}。
-            #
-            # function_call_arguments.delta 无归属信息（协议按 item 串行下发），
-            # 追加到最后一个 added 的调用；done 按 added 顺序（FIFO）结束，
-            # 避免 done 事件错误结束"当前"块导致前一个调用参数提前清空。
-            tool_call_states: dict[str, dict[str, Any]] = {}
+            # 并行工具调用状态：
+            #   state_id（call_id|item_id）→ {block_index, raw_arguments, name}
+            tool_states: dict[str, dict[str, Any]] = {}
+            tool_state_by_index: dict[int, str] = {}
+            tool_state_by_item_id: dict[str, str] = {}
             pending_tool_call_ids: list[str] = []
             last_tool_call_id: str | None = None
+
+            # 无 output_index 端点使用的串行 fallback 块。
+            fallback_index: int | None = None
+            fallback_kind: str | None = None
 
             # Token 使用统计。
             usage: Usage = empty_usage()
             stop_reason: StopReason = "stop"
+            raw_stop_reason: str | None = None
+            response_id: str | None = None
             responses_items: list[dict[str, Any]] = []
             reasoning_blocks_by_id: dict[str, dict[str, Any]] = {}
+            saw_terminal_response_event = False
             failed = False
+            error_message: str | None = None
 
             def _partial() -> AssistantMessage:
                 """构造当前累积状态的 partial AssistantMessage 快照。"""
@@ -857,43 +942,200 @@ async def responses_stream(
                     timestamp=now_ms(),
                 )
 
-            def _end_current_block() -> None:
-                """结束当前累积块并发射对应的 *_end 事件。"""
-                nonlocal current_kind, current_index
-                if current_kind == "text" and current_index is not None:
-                    text_block = cast(TextContent, content_blocks[current_index])
+            def _end_fallback_block() -> None:
+                """结束无 output_index 端点的串行 fallback 块。"""
+                nonlocal fallback_kind, fallback_index
+                if fallback_kind == "text" and fallback_index is not None:
+                    text_block = cast(TextContent, content_blocks[fallback_index])
                     stream.push(
                         TextEndEvent(
                             type="text_end",
-                            content_index=current_index,
+                            content_index=fallback_index,
                             content=text_block["text"],
                             partial=_partial(),
                         )
                     )
-                elif current_kind == "thinking" and current_index is not None:
-                    thinking_block = cast(ThinkingContent, content_blocks[current_index])
+                elif fallback_kind == "thinking" and fallback_index is not None:
+                    thinking_block = cast(ThinkingContent, content_blocks[fallback_index])
                     stream.push(
                         ThinkingEndEvent(
                             type="thinking_end",
-                            content_index=current_index,
+                            content_index=fallback_index,
                             content=thinking_block["thinking"],
                             partial=_partial(),
                         )
                     )
-                current_kind = None
-                current_index = None
+                fallback_kind = None
+                fallback_index = None
 
-            def _end_tool_call(state_id: str) -> None:
-                """结束指定的工具调用块并发射 toolcall_end（幂等）。"""
-                nonlocal current_kind, current_index, last_tool_call_id
-                state = tool_call_states.pop(state_id, None)
+            def _new_text_block() -> int:
+                content_blocks.append(TextContent(type="text", text=""))
+                index = len(content_blocks) - 1
+                stream.push(
+                    TextStartEvent(
+                        type="text_start",
+                        content_index=index,
+                        partial=_partial(),
+                    )
+                )
+                return index
+
+            def _new_thinking_block() -> int:
+                content_blocks.append(ThinkingContent(type="thinking", thinking=""))
+                index = len(content_blocks) - 1
+                stream.push(
+                    ThinkingStartEvent(
+                        type="thinking_start",
+                        content_index=index,
+                        partial=_partial(),
+                    )
+                )
+                return index
+
+            def _begin_fallback(kind: str) -> int:
+                """返回 fallback 块索引；块类型变化时先结束旧块。"""
+                nonlocal fallback_kind, fallback_index
+                if fallback_kind != kind:
+                    _end_fallback_block()
+                    fallback_kind = kind
+                    fallback_index = _new_text_block() if kind == "text" else _new_thinking_block()
+                assert fallback_index is not None
+                return fallback_index
+
+            def _slot(output_index: Any, kind: str, create: bool) -> dict[str, Any] | None:
+                """按 output_index 取 slot；不存在且 create=True 时创建。"""
+                if not isinstance(output_index, int) or output_index < 0:
+                    return None
+                slot = slots.get(output_index)
+                if slot is None and create:
+                    if kind == "text":
+                        block_index = _new_text_block()
+                    elif kind == "thinking":
+                        block_index = _new_thinking_block()
+                    else:
+                        return None
+                    slot = {"kind": kind, "block_index": block_index}
+                    slots[output_index] = slot
+                if slot is None or slot.get("kind") != kind:
+                    return None
+                return slot
+
+            def _text_block_index(event: Any, *, create: bool = True) -> int | None:
+                slot = _slot(getattr(event, "output_index", None), "text", create)
+                if slot is not None:
+                    return cast(int, slot["block_index"])
+                if create:
+                    return _begin_fallback("text")
+                return None
+
+            def _thinking_block_index(event: Any, *, create: bool = True) -> int | None:
+                slot = _slot(getattr(event, "output_index", None), "thinking", create)
+                if slot is not None:
+                    return cast(int, slot["block_index"])
+                if create:
+                    return _begin_fallback("thinking")
+                return None
+
+            def _state_id_from_item(item: Any) -> str:
+                call_id = getattr(item, "call_id", "") or ""
+                item_id = getattr(item, "id", None) or ""
+                return f"{call_id}|{item_id}" if item_id else call_id
+
+            def _find_tool_state_by_event(event: Any) -> dict[str, Any] | None:
+                output_index = getattr(event, "output_index", None)
+                if isinstance(output_index, int) and output_index in tool_state_by_index:
+                    state_id = tool_state_by_index[output_index]
+                    if state_id in tool_states:
+                        return tool_states[state_id]
+                item_id = getattr(event, "item_id", None)
+                if isinstance(item_id, str) and item_id in tool_state_by_item_id:
+                    state_id = tool_state_by_item_id[item_id]
+                    if state_id in tool_states:
+                        return tool_states[state_id]
+                if last_tool_call_id is not None and last_tool_call_id in tool_states:
+                    return tool_states[last_tool_call_id]
+                return None
+
+            def _remove_tool_state(state_id: str) -> None:
+                nonlocal fallback_kind, fallback_index, last_tool_call_id
+                state = tool_states.pop(state_id, None)
                 if state is None:
                     return
                 if state_id in pending_tool_call_ids:
                     pending_tool_call_ids.remove(state_id)
+                for index, candidate in list(tool_state_by_index.items()):
+                    if candidate == state_id:
+                        tool_state_by_index.pop(index, None)
+                for item_id, candidate in list(tool_state_by_item_id.items()):
+                    if candidate == state_id:
+                        tool_state_by_item_id.pop(item_id, None)
+                for index, slot in list(slots.items()):
+                    if (
+                        slot.get("kind") == "toolCall"
+                        and slot.get("block_index") == state["block_index"]
+                    ):
+                        slots.pop(index, None)
+                        break
+                if fallback_kind == "toolCall" and fallback_index == state["block_index"]:
+                    fallback_kind = None
+                    fallback_index = None
+                if last_tool_call_id == state_id:
+                    last_tool_call_id = None
+
+            def _append_tool_delta(state_id: str, delta: str) -> None:
+                state = tool_states.get(state_id)
+                if state is None:
+                    return
+                state["raw_arguments"] += delta
+                block_index = state["block_index"]
+                cast(ToolCall, content_blocks[block_index])["raw_arguments"] = state[
+                    "raw_arguments"
+                ]
+                stream.push(
+                    ToolCallDeltaEvent(
+                        type="toolcall_delta",
+                        content_index=block_index,
+                        delta=delta,
+                        partial=_partial(),
+                    )
+                )
+
+            def _finalize_tool_call(
+                state_id: str, authoritative_arguments: str | None = None
+            ) -> None:
+                """结束指定工具调用并发射 toolcall_end（幂等）。"""
+                nonlocal fallback_kind, fallback_index, last_tool_call_id
+                state = tool_states.pop(state_id, None)
+                if state is None:
+                    return
+                if state_id in pending_tool_call_ids:
+                    pending_tool_call_ids.remove(state_id)
+                for index, candidate in list(tool_state_by_index.items()):
+                    if candidate == state_id:
+                        tool_state_by_index.pop(index, None)
+                for item_id, candidate in list(tool_state_by_item_id.items()):
+                    if candidate == state_id:
+                        tool_state_by_item_id.pop(item_id, None)
+                for index, slot in list(slots.items()):
+                    if (
+                        slot.get("kind") == "toolCall"
+                        and slot.get("block_index") == state["block_index"]
+                    ):
+                        slots.pop(index, None)
+                        break
+                if fallback_kind == "toolCall" and fallback_index == state["block_index"]:
+                    fallback_kind = None
+                    fallback_index = None
+                if last_tool_call_id == state_id:
+                    last_tool_call_id = None
+                raw = (
+                    authoritative_arguments
+                    if authoritative_arguments is not None
+                    else state["raw_arguments"]
+                )
                 tool_block = cast(ToolCall, content_blocks[state["block_index"]])
-                tool_block["raw_arguments"] = state["raw_arguments"]
-                tool_block["arguments"] = parse_tool_arguments(state["raw_arguments"])
+                tool_block["raw_arguments"] = raw
+                tool_block["arguments"] = parse_tool_arguments(raw)
                 stream.push(
                     ToolCallEndEvent(
                         type="toolcall_end",
@@ -902,10 +1144,50 @@ async def responses_stream(
                         partial=_partial(),
                     )
                 )
-                if current_kind == "toolCall" and current_index == state["block_index"]:
-                    current_kind = None
-                    current_index = None
-                    last_tool_call_id = None
+
+            def _new_tool_call(item: Any, output_index: Any) -> None:
+                nonlocal fallback_kind, fallback_index, last_tool_call_id
+                state_id = _state_id_from_item(item)
+                item_id = getattr(item, "id", None) or ""
+                initial_arguments = getattr(item, "arguments", None)
+                raw_arguments = initial_arguments if isinstance(initial_arguments, str) else ""
+                content_blocks.append(
+                    ToolCall(
+                        type="toolCall",
+                        id=state_id,
+                        name=getattr(item, "name", "") or "",
+                        raw_arguments=raw_arguments,
+                        arguments=None,
+                    )
+                )
+                block_index = len(content_blocks) - 1
+                tool_states[state_id] = {
+                    "block_index": block_index,
+                    "raw_arguments": raw_arguments,
+                    "name": getattr(item, "name", "") or "",
+                }
+                if isinstance(output_index, int) and output_index >= 0:
+                    tool_state_by_index[output_index] = state_id
+                    slots[output_index] = {
+                        "kind": "toolCall",
+                        "block_index": block_index,
+                        "state_id": state_id,
+                    }
+                if item_id:
+                    tool_state_by_item_id[item_id] = state_id
+                pending_tool_call_ids.append(state_id)
+                last_tool_call_id = state_id
+                if not (isinstance(output_index, int) and output_index >= 0):
+                    _end_fallback_block()
+                    fallback_kind = "toolCall"
+                    fallback_index = block_index
+                stream.push(
+                    ToolCallStartEvent(
+                        type="toolcall_start",
+                        content_index=block_index,
+                        partial=_partial(),
+                    )
+                )
 
             def _backfill_reasoning_signatures(response: Any) -> None:
                 """终态 response 补回 reasoning.encrypted_content（对齐 TS）。"""
@@ -929,55 +1211,141 @@ async def responses_stream(
                     stored["encrypted_content"] = encrypted
                     block["thinking_signature"] = json.dumps(stored, ensure_ascii=False)
 
-            def _begin_text() -> int:
-                """确保当前块为文本块，返回 content_index。"""
-                nonlocal current_kind, current_index
-                if current_kind != "text":
-                    _end_current_block()
-                    current_kind = "text"
-                    content_blocks.append(TextContent(type="text", text=""))
-                    current_index = len(content_blocks) - 1
-                    stream.push(
-                        TextStartEvent(
-                            type="text_start",
-                            content_index=current_index,
-                            partial=_partial(),
-                        )
+            def _finalize_reasoning_item(item: Any, event: Any) -> None:
+                """按 item 完成 reasoning 块并持久化 thinking_signature。"""
+                nonlocal fallback_kind, fallback_index
+                output_index = getattr(event, "output_index", None)
+                slot = _slot(output_index, "thinking", True)
+                if slot is not None:
+                    block_index = cast(int, slot["block_index"])
+                else:
+                    block_index = _begin_fallback("thinking")
+                block = cast(dict[str, Any], content_blocks[block_index])
+                summary = getattr(item, "summary", None) or []
+                content = getattr(item, "content", None) or []
+                summary_text = "\n\n".join(getattr(p, "text", "") or "" for p in summary)
+                content_text = "\n\n".join(getattr(p, "text", "") or "" for p in content)
+                delta_text = block["thinking"]
+                block["thinking"] = summary_text or content_text or delta_text
+                raw_item = _to_jsonable(item)
+                if (
+                    isinstance(raw_item, dict)
+                    and not raw_item.get("content")
+                    and not raw_item.get("encrypted_content")
+                    and delta_text
+                ):
+                    raw_item["content"] = [
+                        {
+                            "type": "reasoning_text",
+                            "text": delta_text,
+                            "annotations": [],
+                        }
+                    ]
+                block["thinking_signature"] = json.dumps(raw_item, ensure_ascii=False)
+                item_id = raw_item.get("id") if isinstance(raw_item, dict) else None
+                if isinstance(item_id, str) and item_id:
+                    reasoning_blocks_by_id[item_id] = block
+                stream.push(
+                    ThinkingEndEvent(
+                        type="thinking_end",
+                        content_index=block_index,
+                        content=block["thinking"],
+                        partial=_partial(),
                     )
-                return current_index  # type: ignore[return-value]
+                )
+                if slot is not None:
+                    slots.pop(cast(int, output_index), None)
+                elif fallback_kind == "thinking" and fallback_index == block_index:
+                    fallback_kind = None
+                    fallback_index = None
 
-            def _begin_thinking() -> int:
-                """确保当前块为思考块，返回 content_index。"""
-                nonlocal current_kind, current_index
-                if current_kind != "thinking":
-                    _end_current_block()
-                    current_kind = "thinking"
-                    content_blocks.append(ThinkingContent(type="thinking", thinking=""))
-                    current_index = len(content_blocks) - 1
-                    stream.push(
-                        ThinkingStartEvent(
-                            type="thinking_start",
-                            content_index=current_index,
-                            partial=_partial(),
-                        )
+            def _finalize_message_item(item: Any, event: Any) -> None:
+                """按 item 完成 text 块并持久化 text_signature。"""
+                nonlocal fallback_kind, fallback_index
+                output_index = getattr(event, "output_index", None)
+                slot = _slot(output_index, "text", True)
+                if slot is not None:
+                    block_index = cast(int, slot["block_index"])
+                else:
+                    block_index = _begin_fallback("text")
+                text_block = cast(TextContent, content_blocks[block_index])
+                content = getattr(item, "content", None) or []
+                authoritative = "".join(
+                    getattr(part, "text", "")
+                    if getattr(part, "type", None) == "output_text"
+                    else getattr(part, "refusal", "")
+                    for part in content
+                )
+                if authoritative:
+                    text_block["text"] = authoritative
+                item_id = getattr(item, "id", None)
+                if isinstance(item_id, str) and item_id:
+                    phase = getattr(item, "phase", None)
+                    text_block["text_signature"] = encode_text_signature_v1(
+                        item_id, phase if isinstance(phase, str) else None
                     )
-                return current_index  # type: ignore[return-value]
+                stream.push(
+                    TextEndEvent(
+                        type="text_end",
+                        content_index=block_index,
+                        content=text_block["text"],
+                        partial=_partial(),
+                    )
+                )
+                if slot is not None:
+                    slots.pop(cast(int, output_index), None)
+                elif fallback_kind == "text" and fallback_index == block_index:
+                    fallback_kind = None
+                    fallback_index = None
+
+            def _apply_terminal_output_text(output_text: str) -> None:
+                """response.completed.output_text 的权威覆盖（保持既有防重复逻辑）。"""
+                if not output_text:
+                    return
+                text_blocks = [block for block in content_blocks if block.get("type") == "text"]
+                if len(text_blocks) == 1:
+                    cast(TextContent, text_blocks[0])["text"] = output_text
+                    return
+                if text_blocks:
+                    # 多个 text 块（文本→工具→文本）：不覆盖，避免整段重复。
+                    return
+                _end_fallback_block()
+                content_blocks.append(TextContent(type="text", text=output_text))
+                index = len(content_blocks) - 1
+                stream.push(
+                    TextStartEvent(
+                        type="text_start",
+                        content_index=index,
+                        partial=_partial(),
+                    )
+                )
+                stream.push(
+                    TextEndEvent(
+                        type="text_end",
+                        content_index=index,
+                        content=output_text,
+                        partial=_partial(),
+                    )
+                )
 
             # 流开始事件。
             stream.push(StartEvent(type="start", partial=_partial()))
 
-            # 持续读取 Responses Event。
-            #
-            # 不同事件
-            #
-            # 分别处理。
             async for event in response:
+                if opts.get("signal") is not None and opts["signal"].is_set():
+                    raise RuntimeError("Request was aborted")
                 event_type = getattr(event, "type", None)
 
-                # 文本增量。
-                if event_type == "response.output_text.delta":
+                if event_type == "response.created":
+                    resp = getattr(event, "response", None)
+                    if resp is not None:
+                        response_id = getattr(resp, "id", None) or response_id
+
+                elif event_type == "response.output_text.delta":
                     delta = getattr(event, "delta", "")
-                    idx = _begin_text()
+                    idx = _text_block_index(event)
+                    if idx is None:
+                        continue
                     cast(TextContent, content_blocks[idx])["text"] += delta
                     stream.push(
                         TextDeltaEvent(
@@ -988,316 +1356,280 @@ async def responses_stream(
                         )
                     )
 
-                # 文本块完成（DeepSeek 可能只发 done 不发 delta）。
                 elif event_type == "response.output_text.done":
                     text = getattr(event, "text", "") or ""
                     if text:
-                        if current_kind == "text" and current_index is not None:
-                            cast(TextContent, content_blocks[current_index])["text"] = text
-                        else:
-                            idx = _begin_text()
+                        idx = _text_block_index(event)
+                        if idx is not None:
                             cast(TextContent, content_blocks[idx])["text"] = text
 
-                # 拒绝内容（refusal）并入文本输出。
                 elif event_type == "response.refusal.delta":
                     delta = getattr(event, "delta", "")
                     if delta:
-                        idx = _begin_text()
-                        cast(TextContent, content_blocks[idx])["text"] += delta
-                        stream.push(
-                            TextDeltaEvent(
-                                type="text_delta",
-                                content_index=idx,
-                                delta=delta,
-                                partial=_partial(),
+                        idx = _text_block_index(event)
+                        if idx is not None:
+                            cast(TextContent, content_blocks[idx])["text"] += delta
+                            stream.push(
+                                TextDeltaEvent(
+                                    type="text_delta",
+                                    content_index=idx,
+                                    delta=delta,
+                                    partial=_partial(),
+                                )
                             )
-                        )
 
-                # 新 Tool Call。
                 elif event_type == "response.output_item.added":
                     item = getattr(event, "item", None)
-                    if item and getattr(item, "type", None) == "function_call":
-                        # 并行 function_call 不提前结束前一个调用
-                        # （其参数增量/结束事件仍可能到达）。
-                        if current_kind in ("text", "thinking"):
-                            _end_current_block()
-                        current_kind = "toolCall"
-                        call_id = getattr(item, "call_id", "") or ""
-                        item_id = getattr(item, "id", None) or ""
-                        # 保存完整双段 ID（call_id|fc_item_id），
-                        # 供后续轮次回放时的跨 provider 规范化。
-                        state_id = f"{call_id}|{item_id}" if item_id else call_id
-                        last_tool_call_id = state_id
-                        content_blocks.append(
-                            ToolCall(
-                                type="toolCall",
-                                id=state_id,
-                                name=getattr(item, "name", "") or "",
-                                raw_arguments="",
-                                arguments=None,
-                            )
-                        )
-                        current_index = len(content_blocks) - 1
-                        tool_call_states[state_id] = {
-                            "block_index": current_index,
-                            "raw_arguments": "",
-                            "name": getattr(item, "name", "") or "",
-                        }
-                        pending_tool_call_ids.append(state_id)
-                        stream.push(
-                            ToolCallStartEvent(
-                                type="toolcall_start",
-                                content_index=current_index,
-                                partial=_partial(),
-                            )
-                        )
+                    if item is None:
+                        continue
+                    item_type = getattr(item, "type", None)
+                    output_index = getattr(event, "output_index", None)
+                    if item_type == "function_call":
+                        _new_tool_call(item, output_index)
+                    elif (
+                        item_type == "reasoning"
+                        and isinstance(output_index, int)
+                        and output_index >= 0
+                    ):
+                        # 仅有 output_index 的协议才在 added 阶段建 slot；
+                        # 无 index 的旧端点保持“delta 到来时再建块”的兼容行为。
+                        _slot(output_index, "thinking", True)
+                    elif (
+                        item_type == "message"
+                        and isinstance(output_index, int)
+                        and output_index >= 0
+                    ):
+                        _slot(output_index, "text", True)
 
-                # Tool 参数增量。
                 elif event_type == "response.function_call_arguments.delta":
                     delta = getattr(event, "delta", "")
-                    if last_tool_call_id is not None and last_tool_call_id in tool_call_states:
-                        state = tool_call_states[last_tool_call_id]
-                        state["raw_arguments"] += delta
-                        index = state["block_index"]
-                        cast(ToolCall, content_blocks[index])["raw_arguments"] = state[
-                            "raw_arguments"
-                        ]
-                    else:
-                        index = current_index or 0
-                    stream.push(
-                        ToolCallDeltaEvent(
-                            type="toolcall_delta",
-                            content_index=index,
-                            delta=delta,
-                            partial=_partial(),
-                        )
-                    )
+                    state = _find_tool_state_by_event(event)
+                    if state is not None:
+                        for state_id, candidate in list(tool_states.items()):
+                            if candidate is state:
+                                _append_tool_delta(state_id, delta)
+                                break
 
-                # Tool 参数结束。
                 elif event_type == "response.function_call_arguments.done":
-                    # done 按 added 顺序（FIFO）匹配：串行协议下队首即当前调用。
+                    output_index = getattr(event, "output_index", None)
+                    if isinstance(output_index, int) and output_index in tool_state_by_index:
+                        _finalize_tool_call(tool_state_by_index[output_index])
+                        continue
+                    item_id = getattr(event, "item_id", None)
+                    if isinstance(item_id, str) and item_id in tool_state_by_item_id:
+                        _finalize_tool_call(tool_state_by_item_id[item_id])
+                        continue
                     if pending_tool_call_ids:
-                        _end_tool_call(pending_tool_call_ids[0])
-                    else:
-                        _end_current_block()
+                        _finalize_tool_call(pending_tool_call_ids[0])
 
-                # 输出项完成。
-                #
-                # reasoning / message 等类型的完整 item 在此事件到达。
                 elif event_type == "response.output_item.done":
                     item = getattr(event, "item", None)
-                    item_type = getattr(item, "type", None) if item else None
+                    item_type = getattr(item, "type", None) if item is not None else None
 
-                    # function_call 项完成：按双段 ID 结束对应块
-                    # （兼容未发 arguments.done 的端点）。
                     if item_type == "function_call":
-                        call_id = getattr(item, "call_id", "") or ""
-                        item_id = getattr(item, "id", None) or ""
-                        state_id = f"{call_id}|{item_id}" if item_id else call_id
-                        if state_id in tool_call_states:
-                            _end_tool_call(state_id)
+                        state_id = _state_id_from_item(item)
+                        if state_id not in tool_states:
+                            output_index = getattr(event, "output_index", None)
+                            if (
+                                isinstance(output_index, int)
+                                and output_index in tool_state_by_index
+                            ):
+                                state_id = tool_state_by_index[output_index]
+                            else:
+                                item_id = getattr(item, "id", None) or ""
+                                state_id = tool_state_by_item_id.get(item_id, state_id)
+                        item_arguments = getattr(item, "arguments", None)
+                        authoritative = (
+                            item_arguments
+                            if isinstance(item_arguments, str) and item_arguments
+                            else None
+                        )
+                        if state_id in tool_states:
+                            _finalize_tool_call(state_id, authoritative)
 
-                    # 服务端 web_search 项：保留完整原始 item 供 stateless 回放。
                     if item_type == "web_search_call" and web_search_enabled:
                         raw_item = _to_jsonable(item)
                         if isinstance(raw_item, dict) and raw_item.get("id"):
                             responses_items.append(raw_item)
 
-                    # Reasoning 项：
-                    #
-                    # 捕获完整 item（含 id / summary / content /
-                    # encrypted_content）存入 thinking_signature，
-                    # 供后续轮次回放（对齐 TS openai-responses-shared）。
-                    if (
-                        item_type == "reasoning"
-                        and current_kind == "thinking"
-                        and current_index is not None
-                    ):
-                        block = cast(dict[str, Any], content_blocks[current_index])
-                        summary = getattr(item, "summary", None) or []
-                        content = getattr(item, "content", None) or []
-                        summary_text = "\n\n".join(getattr(p, "text", "") or "" for p in summary)
-                        content_text = "\n\n".join(getattr(p, "text", "") or "" for p in content)
-                        # DeepSeek 流式下 reasoning_text 通过 delta 下发，
-                        # output_item.done 的 item.content 可能为空；用已累积
-                        # 的 delta 文本补全回放项，否则下一轮会报
-                        # "reasoning_text ... must be passed back"。
-                        delta_text = block["thinking"]
-                        block["thinking"] = summary_text or content_text or delta_text
-                        raw_item = _to_jsonable(item)
-                        if (
-                            isinstance(raw_item, dict)
-                            and not raw_item.get("content")
-                            and not raw_item.get("encrypted_content")
-                            and delta_text
-                        ):
-                            raw_item["content"] = [
-                                {
-                                    "type": "reasoning_text",
-                                    "text": delta_text,
-                                    "annotations": [],
-                                }
-                            ]
-                        block["thinking_signature"] = json.dumps(raw_item, ensure_ascii=False)
-                        item_id = raw_item.get("id") if isinstance(raw_item, dict) else None
-                        if isinstance(item_id, str) and item_id:
-                            reasoning_blocks_by_id[item_id] = block
-                        stream.push(
-                            ThinkingEndEvent(
-                                type="thinking_end",
-                                content_index=current_index,
-                                content=block["thinking"],
-                                partial=_partial(),
-                            )
-                        )
-                        current_kind = None
-                        current_index = None
+                    if item_type == "reasoning":
+                        _finalize_reasoning_item(item, event)
 
-                    # 消息项：持久化 text_signature 供后续轮次回放。
-                    if (
-                        item_type == "message"
-                        and current_kind == "text"
-                        and current_index is not None
-                    ):
-                        item_id = getattr(item, "id", None)
-                        if isinstance(item_id, str) and item_id:
-                            phase = getattr(item, "phase", None)
-                            text_block = cast(TextContent, content_blocks[current_index])
-                            text_block["text_signature"] = encode_text_signature_v1(
-                                item_id, phase if isinstance(phase, str) else None
-                            )
+                    if item_type == "message":
+                        _finalize_message_item(item, event)
 
-                # 模型推理内容。
                 elif event_type == "response.reasoning_summary_part.added":
                     summary = getattr(event, "part", None)
                     if summary and getattr(summary, "type", None) == "summary_text":
                         text = getattr(summary, "text", "")
-                        idx = _begin_thinking()
-                        cast(ThinkingContent, content_blocks[idx])["thinking"] += text
+                        idx = _thinking_block_index(event)
+                        if idx is not None:
+                            cast(ThinkingContent, content_blocks[idx])["thinking"] += text
+                            stream.push(
+                                ThinkingDeltaEvent(
+                                    type="thinking_delta",
+                                    content_index=idx,
+                                    delta=text,
+                                    partial=_partial(),
+                                )
+                            )
+
+                elif event_type == "response.reasoning_summary_part.done":
+                    idx = _thinking_block_index(event)
+                    if idx is not None:
+                        cast(ThinkingContent, content_blocks[idx])["thinking"] += "\n\n"
                         stream.push(
                             ThinkingDeltaEvent(
                                 type="thinking_delta",
                                 content_index=idx,
-                                delta=text,
+                                delta="\n\n",
                                 partial=_partial(),
                             )
                         )
 
                 elif event_type == "response.reasoning_text.delta":
                     delta = getattr(event, "delta", "")
-                    idx = _begin_thinking()
-                    cast(ThinkingContent, content_blocks[idx])["thinking"] += delta
-                    stream.push(
-                        ThinkingDeltaEvent(
-                            type="thinking_delta",
-                            content_index=idx,
-                            delta=delta,
-                            partial=_partial(),
+                    idx = _thinking_block_index(event)
+                    if idx is not None:
+                        cast(ThinkingContent, content_blocks[idx])["thinking"] += delta
+                        stream.push(
+                            ThinkingDeltaEvent(
+                                type="thinking_delta",
+                                content_index=idx,
+                                delta=delta,
+                                partial=_partial(),
+                            )
                         )
-                    )
 
                 elif event_type == "response.reasoning_text.done":
                     text = getattr(event, "text", "") or ""
                     if text:
-                        if current_kind == "thinking" and current_index is not None:
-                            cast(ThinkingContent, content_blocks[current_index])["thinking"] = text
-                        else:
-                            idx = _begin_thinking()
+                        idx = _thinking_block_index(event)
+                        if idx is not None:
                             cast(ThinkingContent, content_blocks[idx])["thinking"] = text
 
                 elif event_type == "response.reasoning_summary_text.delta":
                     delta = getattr(event, "delta", "")
-                    idx = _begin_thinking()
-                    cast(ThinkingContent, content_blocks[idx])["thinking"] += delta
-                    stream.push(
-                        ThinkingDeltaEvent(
-                            type="thinking_delta",
-                            content_index=idx,
-                            delta=delta,
-                            partial=_partial(),
+                    idx = _thinking_block_index(event)
+                    if idx is not None:
+                        cast(ThinkingContent, content_blocks[idx])["thinking"] += delta
+                        stream.push(
+                            ThinkingDeltaEvent(
+                                type="thinking_delta",
+                                content_index=idx,
+                                delta=delta,
+                                partial=_partial(),
+                            )
                         )
-                    )
 
                 elif event_type == "response.reasoning_summary_text.done":
                     text = getattr(event, "text", "") or ""
                     if text:
-                        if current_kind == "thinking" and current_index is not None:
-                            cast(ThinkingContent, content_blocks[current_index])["thinking"] = text
-                        else:
-                            idx = _begin_thinking()
+                        idx = _thinking_block_index(event)
+                        if idx is not None:
                             cast(ThinkingContent, content_blocks[idx])["thinking"] = text
 
-                # 整个 Responses 请求结束。
                 elif event_type == "response.completed":
+                    saw_terminal_response_event = True
                     resp = getattr(event, "response", None)
                     if resp:
                         _backfill_reasoning_signatures(resp)
-                        # 权威输出文本：覆盖实时累积的 text 块；
-                        # 若尚未有 text 块（如仅 completed 事件），则新建。
+                        response_id = getattr(resp, "id", None) or response_id
                         output_text = getattr(resp, "output_text", "")
-                        if output_text:
-                            text_blocks = [
-                                block for block in content_blocks if block.get("type") == "text"
-                            ]
-                            if len(text_blocks) == 1:
-                                # output_text 是整段文本的权威值；已有 text 块时
-                                # 直接覆盖，避免 toolCall 结束后再次追加，导致回放时
-                                # function_call 与 function_call_output 之间插入
-                                # 多余 message item（DeepSeek 会报
-                                # "No tool output found for tool call ..."）。
-                                cast(TextContent, text_blocks[0])["text"] = output_text
-                            elif not text_blocks:
-                                _end_current_block()
-                                current_kind = "text"
-                                content_blocks.append(TextContent(type="text", text=output_text))
-                                current_index = len(content_blocks) - 1
-                                stream.push(
-                                    TextStartEvent(
-                                        type="text_start",
-                                        content_index=current_index,
-                                        partial=_partial(),
-                                    )
-                                )
-                                # 多个 text 块（文本→toolCall→文本）：各块已按
-                                # delta/done 累积自身文本，整体覆盖第一个块会把
-                                # 整段 output_text 重复进最终消息，跳过覆盖。
-                                stream.push(
-                                    TextEndEvent(
-                                        type="text_end",
-                                        content_index=current_index,
-                                        content=output_text,
-                                        partial=_partial(),
-                                    )
-                                )
-
+                        _apply_terminal_output_text(output_text)
                         usage = _parse_response_usage(resp, model)
+                        status = getattr(resp, "status", None)
+                        raw_stop_reason = status if isinstance(status, str) else None
+                        stop_reason = "stop"
 
-                # 请求提前结束（max_output_tokens / content_filter 等）。
                 elif event_type == "response.incomplete":
+                    saw_terminal_response_event = True
                     resp = getattr(event, "response", None)
                     if resp:
                         _backfill_reasoning_signatures(resp)
+                        response_id = getattr(resp, "id", None) or response_id
                         usage = _parse_response_usage(resp, model)
                         incomplete = getattr(resp, "incomplete_details", None)
                         reason = getattr(incomplete, "reason", "") or ""
-                        stop_reason = "length" if reason == "max_output_tokens" else "error"
+                        raw_stop_reason = f"incomplete.{reason}" if reason else "incomplete"
+                        if reason == "max_output_tokens":
+                            stop_reason = "length"
+                        else:
+                            stop_reason = "error"
+                            error_message = (
+                                f"Response incomplete: {reason}"
+                                if reason
+                                else "Response incomplete without a provider reason"
+                            )
 
-                # 请求失败：推送 error 事件，不再补 done。
                 elif event_type == "response.failed":
+                    saw_terminal_response_event = True
                     failed = True
                     resp = getattr(event, "response", None)
                     response_error = getattr(resp, "error", None) if resp else None
-                    message = getattr(response_error, "message", "") or "response failed"
-                    err_msg = build_error_message(model, RuntimeError(message))
-                    stream.push({"type": "error", "reason": "error", "error": err_msg})
+                    details = getattr(resp, "incomplete_details", None) if resp else None
+                    raw_stop_reason = getattr(resp, "status", None)
+                    if response_error is not None:
+                        code = getattr(response_error, "code", None) or "unknown"
+                        message = getattr(response_error, "message", None) or "no message"
+                        error_message = f"{code}: {message}"
+                    elif details is not None:
+                        reason = getattr(details, "reason", None)
+                        error_message = (
+                            f"incomplete: {reason}"
+                            if reason
+                            else "Unknown error (no error details in response)"
+                        )
+                    else:
+                        error_message = "Unknown error (no error details in response)"
 
-            # 所有事件已处理完成，
-            #
-            # 结束最后一个块（若有）。
-            _end_current_block()
-            # 残留未收到 done 事件的工具调用（兼容端点）统一收尾。
+                elif event_type == "error":
+                    saw_terminal_response_event = True
+                    failed = True
+                    code = getattr(event, "code", None)
+                    message = getattr(event, "message", None)
+                    error_message = (
+                        f"Error Code {code}: {message}"
+                        if code and message
+                        else (message or "Unknown error")
+                    )
+
+            # 所有事件处理完成：收尾所有仍打开的块。
+            _end_fallback_block()
             for state_id in list(pending_tool_call_ids):
-                _end_tool_call(state_id)
+                _finalize_tool_call(state_id)
+            for _output_index, slot in list(slots.items()):
+                if slot.get("kind") == "text":
+                    idx = slot["block_index"]
+                    stream.push(
+                        TextEndEvent(
+                            type="text_end",
+                            content_index=idx,
+                            content=cast(TextContent, content_blocks[idx])["text"],
+                            partial=_partial(),
+                        )
+                    )
+                elif slot.get("kind") == "thinking":
+                    idx = slot["block_index"]
+                    stream.push(
+                        ThinkingEndEvent(
+                            type="thinking_end",
+                            content_index=idx,
+                            content=cast(ThinkingContent, content_blocks[idx])["thinking"],
+                            partial=_partial(),
+                        )
+                    )
+            slots.clear()
+
+            if not saw_terminal_response_event:
+                raise RuntimeError("OpenAI Responses stream ended before a terminal response event")
+            if failed or stop_reason == "error":
+                raise RuntimeError(error_message or "OpenAI Responses stream failed")
+            if (
+                any(block.get("type") == "toolCall" for block in content_blocks)
+                and stop_reason == "stop"
+            ):
+                stop_reason = "tool_call"
 
             msg = AssistantMessage(
                 role="assistant",
@@ -1310,17 +1642,19 @@ async def responses_stream(
                 error_message=None,
                 timestamp=now_ms(),
             )
+            if response_id:
+                msg["response_id"] = response_id
+            if raw_stop_reason is not None:
+                msg["raw_stop_reason"] = raw_stop_reason
             if responses_items:
                 msg["responses_items"] = responses_items
-            if not failed:
-                stream.push(
-                    {
-                        "type": "done",
-                        "reason": cast(Any, stop_reason),
-                        "message": msg,
-                    }
-                )
-            # stream.end(msg)
+            stream.push(
+                {
+                    "type": "done",
+                    "reason": cast(Any, stop_reason),
+                    "message": msg,
+                }
+            )
 
         except asyncio.CancelledError:
             # 让 await stream.result() 抛出取消异常，而不是永久挂起。
@@ -1328,8 +1662,18 @@ async def responses_stream(
             raise
 
         except Exception as exc:
+            aborted = opts.get("signal") is not None and opts["signal"].is_set()
             err_msg = build_error_message(model, exc)
-            stream.push({"type": "error", "reason": "error", "error": err_msg})
+            if aborted:
+                err_msg["stop_reason"] = "aborted"
+                err_msg["error_message"] = "Request was aborted"
+            stream.push(
+                {
+                    "type": "error",
+                    "reason": "aborted" if aborted else "error",
+                    "error": err_msg,
+                }
+            )
             # stream.end(err_msg)
         finally:
             # 显式关闭客户端：openai SDK 依赖 __del__ 调度异步关闭，

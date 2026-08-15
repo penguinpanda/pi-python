@@ -31,6 +31,9 @@ REDIRECT_URI = f"http://{CALLBACK_HOST}:{CALLBACK_PORT}{CALLBACK_PATH}"
 TOKEN_EXPIRY_SKEW_SECONDS = 60
 OAUTH_CLIENT_ID = "pi-gateway"
 OAUTH_SCOPE = "gateway offline_access"
+OAUTH_DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code"
+LOGIN_METHOD_BROWSER = "browser"
+LOGIN_METHOD_DEVICE_CODE = "device-code"
 DEFAULT_AUTHORIZATION_ENDPOINT = "https://radius.pi.dev/oauth/authorize"
 
 
@@ -51,25 +54,30 @@ def normalize_gateway_url(value: str) -> str:
 
 
 async def _discover_authorization_endpoint(gateway: str) -> str:
-    """发现授权端点（对齐 TS discoverAuthorizationEndpoint 语义）。"""
+    """发现授权端点（对齐 TS：GET {gateway}/v1/oauth）。
+
+    兼容两种发现响应键（authorizationEndpoint / authorization_endpoint），
+    并校验 scheme/host 与网关一致，防止恶意网关把授权端点指向任意 URL。
+    """
     try:
         async with _AsyncClient(timeout=15) as client:
-            response = await client.get(f"{gateway}/.well-known/oauth-authorization-server")
+            response = await client.get(f"{gateway}/v1/oauth")
             if response.is_success:
                 data = response.json()
-                if isinstance(data, dict) and isinstance(data.get("authorization_endpoint"), str):
-                    endpoint = data["authorization_endpoint"]
-                    parsed_endpoint = urllib.parse.urlparse(endpoint)
-                    gateway_host = urllib.parse.urlparse(gateway).hostname
-                    is_loopback = parsed_endpoint.hostname in ("127.0.0.1", "localhost", "::1")
-                    # 校验 scheme/host 与网关一致：防止 MITM/恶意网关把
-                    # 授权端点指到任意 URL（钓鱼 + code 回调劫持）。
-                    if (
-                        parsed_endpoint.scheme in ("https", "http")
-                        and parsed_endpoint.hostname == gateway_host
-                        and (parsed_endpoint.scheme == "https" or is_loopback)
-                    ):
-                        return endpoint
+                if isinstance(data, dict):
+                    endpoint = data.get("authorizationEndpoint") or data.get(
+                        "authorization_endpoint"
+                    )
+                    if isinstance(endpoint, str):
+                        parsed_endpoint = urllib.parse.urlparse(endpoint)
+                        gateway_host = urllib.parse.urlparse(gateway).hostname
+                        is_loopback = parsed_endpoint.hostname in ("127.0.0.1", "localhost", "::1")
+                        if (
+                            parsed_endpoint.scheme in ("https", "http")
+                            and parsed_endpoint.hostname == gateway_host
+                            and (parsed_endpoint.scheme == "https" or is_loopback)
+                        ):
+                            return endpoint
     except (httpx.HTTPError, ValueError):
         pass
     return f"{gateway}/oauth/authorize"
@@ -105,23 +113,11 @@ async def _request_oauth_token(
             f"{': ' + detail if detail else ''}"
         )
     data = response.json()
-    if (
-        not isinstance(data, dict)
-        or not isinstance(data.get("access_token"), str)
-        or not isinstance(data.get("refresh_token"), str)
-    ):
-        raise RuntimeError("Radius OAuth token response missing fields")
-    credential: OAuthCredential = {
-        "type": "oauth",
-        "access": data["access_token"],
-        "refresh": data["refresh_token"],
-        "expires": int(time.time() * 1000)
-        + int(data.get("expires_in", 0) or 0) * 1000
-        - TOKEN_EXPIRY_SKEW_SECONDS * 1000,
-    }
-    if isinstance(data.get("scope"), str):
-        credential["scope"] = data["scope"]  # type: ignore[typeddict-unknown-key]
-    return credential
+    return (
+        _parse_oauth_token_response(data)
+        if isinstance(data, dict)
+        else _parse_oauth_token_response({})
+    )
 
 
 async def _wait_for_browser_code(state: str, signal: Any) -> str | None:
@@ -189,6 +185,148 @@ async def _respond(writer: asyncio.StreamWriter, status: int, message: str) -> N
     )
     await writer.drain()
     writer.close()
+
+
+async def _request_device_authorization(gateway: str, signal: Any) -> dict[str, Any]:
+    """Radius /v1/oauth/device 设备授权（对齐 TS requestDeviceAuthorization）。"""
+    try:
+        async with _AsyncClient(timeout=30) as client:
+            response = await client.post(
+                f"{gateway}/v1/oauth/device",
+                headers={
+                    "accept": "application/json",
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                content=urllib.parse.urlencode(
+                    {"client_id": OAUTH_CLIENT_ID, "scope": OAUTH_SCOPE}
+                ),
+            )
+    except httpx.HTTPError as exc:
+        if signal is not None and signal.is_set():
+            raise RuntimeError("Login cancelled") from exc
+        raise
+    if not response.is_success:
+        raise RuntimeError(
+            f"Radius OAuth device authorization failed (HTTP {response.status_code})"
+        )
+    data = response.json()
+    if not isinstance(data, dict):
+        raise RuntimeError("Radius OAuth device authorization response is invalid")
+    for field in ("device_code", "user_code", "verification_uri", "expires_in"):
+        if not data.get(field):
+            raise RuntimeError(
+                "Radius OAuth device authorization response is missing required fields"
+            )
+    return data
+
+
+async def _poll_device_token(gateway: str, device: dict[str, Any], signal: Any) -> OAuthCredential:
+    from .device_code import poll_oauth_device_code_flow
+
+    interval = device.get("interval")
+    interval_seconds = (
+        float(interval)
+        if isinstance(interval, (int, float)) and not isinstance(interval, bool) and interval > 0
+        else None
+    )
+
+    async def poll() -> dict[str, Any]:
+        try:
+            async with _AsyncClient(timeout=30) as client:
+                response = await client.post(
+                    f"{gateway}/v1/oauth/token",
+                    headers={
+                        "accept": "application/json",
+                        "content-type": "application/x-www-form-urlencoded",
+                    },
+                    content=urllib.parse.urlencode(
+                        {
+                            "grant_type": OAUTH_DEVICE_CODE_GRANT_TYPE,
+                            "client_id": OAUTH_CLIENT_ID,
+                            "device_code": device["device_code"],
+                        }
+                    ),
+                )
+        except httpx.HTTPError as exc:
+            if signal is not None and signal.is_set():
+                raise RuntimeError("Login cancelled") from exc
+            raise
+        if response.is_success:
+            data = response.json()
+            if not isinstance(data, dict):
+                return {"status": "failed", "message": "Invalid Radius token response"}
+            try:
+                value = _parse_oauth_token_response(data)
+            except RuntimeError as exc:
+                return {"status": "failed", "message": str(exc)}
+            return {"status": "complete", "value": value}
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+        error = body.get("error") if isinstance(body, dict) else None
+        if error == "authorization_pending":
+            return {"status": "pending"}
+        if error == "slow_down":
+            raw_interval = body.get("interval")
+            return {
+                "status": "slow_down",
+                "interval_seconds": raw_interval
+                if isinstance(raw_interval, (int, float)) and not isinstance(raw_interval, bool)
+                else None,
+            }
+        if error == "expired_token":
+            return {"status": "failed", "message": "Radius device code expired"}
+        if error in ("access_denied", "authorization_denied"):
+            return {"status": "failed", "message": "Radius device authorization was denied"}
+        return {
+            "status": "failed",
+            "message": f"Radius OAuth device token polling failed (HTTP {response.status_code})",
+        }
+
+    return await poll_oauth_device_code_flow(
+        poll,
+        interval_seconds=interval_seconds,
+        expires_in_seconds=int(device.get("expires_in") or 0),
+        wait_before_first_poll=True,
+        signal=signal,
+    )
+
+
+def _parse_oauth_token_response(data: dict[str, Any]) -> OAuthCredential:
+    if not isinstance(data.get("access_token"), str) or not isinstance(
+        data.get("refresh_token"), str
+    ):
+        raise RuntimeError("Radius OAuth token response missing fields")
+    credential: OAuthCredential = {
+        "type": "oauth",
+        "access": data["access_token"],
+        "refresh": data["refresh_token"],
+        "expires": int(time.time() * 1000)
+        + int(data.get("expires_in", 0) or 0) * 1000
+        - TOKEN_EXPIRY_SKEW_SECONDS * 1000,
+    }
+    if isinstance(data.get("scope"), str):
+        credential["scope"] = data["scope"]  # type: ignore[typeddict-unknown-key]
+    return credential
+
+
+async def _login_device_code(interaction: AuthInteraction, gateway: str) -> OAuthCredential:
+    device = await _request_device_authorization(gateway, interaction.signal)
+    interval = device.get("interval")
+    interaction.notify(
+        cast(
+            Any,
+            {
+                "type": "device_code",
+                "user_code": device["user_code"],
+                "verification_uri": device["verification_uri"],
+                "interval_seconds": int(interval) if isinstance(interval, (int, float)) else None,
+                "expires_in_seconds": int(device.get("expires_in") or 0),
+            },
+        )
+    )
+    return await _poll_device_token(gateway, device, interaction.signal)
 
 
 async def _login(interaction: AuthInteraction, gateway: str = "") -> OAuthCredential:
@@ -298,7 +436,30 @@ def create_radius_oauth(gateway: str) -> OAuthAuth:
         loginLabel = "Sign in with Radius"
 
         async def login(self, interaction: AuthInteraction) -> OAuthCredential:
-            return await _login(interaction, gateway)
+            login_method = await interaction.prompt(
+                cast(
+                    Any,
+                    {
+                        "type": "select",
+                        "message": "Sign in to Radius:",
+                        "options": [
+                            {
+                                "id": LOGIN_METHOD_BROWSER,
+                                "label": "Sign in with browser (recommended)",
+                            },
+                            {
+                                "id": LOGIN_METHOD_DEVICE_CODE,
+                                "label": "Sign in with device code (when signing in from another device)",
+                            },
+                        ],
+                    },
+                )
+            )
+            if login_method == LOGIN_METHOD_DEVICE_CODE:
+                return await _login_device_code(interaction, gateway)
+            if login_method == LOGIN_METHOD_BROWSER:
+                return await _login(interaction, gateway)
+            raise RuntimeError(f"Unknown Radius sign-in method: {login_method}")
 
         async def refresh(self, credential: OAuthCredential, signal: Any = None) -> OAuthCredential:
             return await _request_oauth_token(

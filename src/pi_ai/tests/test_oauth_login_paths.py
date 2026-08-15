@@ -144,7 +144,7 @@ async def test_radius_login_browser_callback(monkeypatch) -> None:
     class _GatewayInteraction(_Interaction):
         gateway = "https://radius.example.com"
 
-    interaction = _GatewayInteraction(prompt_value="unused")
+    interaction = _GatewayInteraction(prompt_value="browser")
     oauth = radius.create_radius_oauth("https://radius.example.com")
     credential = await oauth.login(interaction)
     assert credential["access"] == "radius-access"

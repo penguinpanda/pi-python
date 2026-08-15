@@ -105,6 +105,10 @@ class AsyncHTTPClient(Protocol):
         **kwargs: Any,
     ) -> Any: ...
 
+    def __aenter__(self) -> "AsyncHTTPClient": ...
+
+    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None: ...
+
 
 # Session 亲和性头格式
 SessionAffinityFormat = Literal["openai", "openai-nosession", "openrouter"]

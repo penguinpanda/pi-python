@@ -139,6 +139,8 @@ def model_to_dict(model: Model) -> dict[str, Any]:
         ),
         "reasoning": model.reasoning,
         "deprecated": model.deprecated,
+        "aliases": list(model.aliases),
+        "sampling_params": dict(model.sampling_params),
     }
 
 
@@ -179,6 +181,8 @@ def model_from_dict(data: dict[str, Any]) -> Model:
         thinking_level_map=data.get("thinking_level_map"),
         reasoning=bool(data.get("reasoning", False)),
         deprecated=bool(data.get("deprecated", False)),
+        aliases=list(data.get("aliases") or []),
+        sampling_params=dict(data.get("sampling_params") or {}),
     )
 
 

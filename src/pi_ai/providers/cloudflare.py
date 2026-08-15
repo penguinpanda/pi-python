@@ -13,6 +13,8 @@ from .openai_completions_providers import _fetch_openai_models
 
 
 class _CloudflareAuth:
+    env_vars = ["CLOUDFLARE_API_KEY"]
+
     def __init__(self, kind: str) -> None:
         self.kind = kind
 

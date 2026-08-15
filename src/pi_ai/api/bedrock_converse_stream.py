@@ -50,6 +50,8 @@ from ..utils.provider_env import get_provider_env_value
 from ._shared import build_error_message, empty_usage, parse_tool_arguments
 from .simple_options import clamp_max_tokens_to_context
 from ..utils.prompt_cache import resolve_cache_retention
+from ..utils.sanitize_unicode import sanitize_surrogates
+from .transform_messages import transform_messages
 
 _AsyncClient = httpx.AsyncClient
 _DEFAULT_REGION = "us-east-1"
@@ -103,6 +105,32 @@ def _resolve_bedrock_credentials(
 
 def _sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _encode_json_payload(payload: dict[str, Any]) -> bytes:
+    """按 httpx ``json=`` 的序列化规则编码 payload。
+
+    Bedrock SigV4 的 x-amz-content-sha256 必须对实际发送字节计算。
+    httpx 使用 ``ensure_ascii=False`` + 紧凑分隔符 + ``allow_nan=False``；
+    默认 ``json.dumps`` 会带空格并使用 ensure_ascii=True，签名必然不匹配。
+    """
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _is_reserved_bedrock_header(name: str) -> bool:
+    """SigV4/bearer 认证所需头不允许调用方覆盖（对齐 TS 的 reserved headers 过滤）。"""
+    lower = name.lower()
+    return (
+        lower == "authorization"
+        or lower == "host"
+        or lower == "content-type"
+        or lower.startswith("x-amz-")
+    )
 
 
 def _aws_sigv4_headers(
@@ -245,43 +273,104 @@ def _supports_prompt_caching(model: Model, env: dict | None) -> bool:
     return False
 
 
-def _to_bedrock_messages(context: Context) -> list[dict[str, Any]]:
+def _normalize_bedrock_tool_call_id(id_: str) -> str:
+    sanitized = "".join(ch if ch.isalnum() or ch in "_-" else "_" for ch in id_)
+    return sanitized[:64] if len(sanitized) > 64 else sanitized
+
+
+def _bedrock_image_block(block: dict[str, Any]) -> dict[str, Any]:
+    fmt = {
+        "image/png": "png",
+        "image/jpeg": "jpeg",
+        "image/gif": "gif",
+        "image/webp": "webp",
+    }.get(block.get("mime_type") or "image/png", "png")
+    return {"image": {"format": fmt, "source": {"bytes": block["data"]}}}
+
+
+def _bedrock_non_blank_text(text: str) -> str | None:
+    cleaned = sanitize_surrogates(text)
+    return cleaned if cleaned.strip() else None
+
+
+def _supports_thinking_signature(model: Model) -> bool:
+    # reasoningContent.reasoningText.signature 仅 Anthropic Claude 模型支持。
+    candidate = f"{model.id} {model.name}".lower()
+    return "claude" in candidate
+
+
+def _to_bedrock_messages(context: Context, model: Model | None = None) -> list[dict[str, Any]]:
+    if model is None:
+        # 向后兼容直接调用旧签名的测试/调用方。
+        model = Model(
+            id="bedrock",
+            provider="amazon-bedrock",
+            api="bedrock-converse-stream",
+            input=["text", "image"],
+            output=["text"],
+        )
+    transformed = transform_messages(
+        context.messages,
+        model,
+        lambda id_, _model, _source: _normalize_bedrock_tool_call_id(id_),
+    )
     messages: list[dict[str, Any]] = []
     i = 0
-    while i < len(context.messages):
-        msg = context.messages[i]
+    while i < len(transformed):
+        msg = transformed[i]
         role = msg["role"]
         if role == "user":
             content = cast(Any, msg["content"])
             if isinstance(content, str):
-                user_blocks: list[dict[str, Any]] = [{"text": content}]
+                user_blocks: list[dict[str, Any]] = [
+                    {"text": _bedrock_non_blank_text(content) or "<empty>"}
+                ]
             else:
                 user_blocks = []
                 for block in content:
                     if block["type"] == "text":
-                        user_blocks.append({"text": block["text"]})
+                        text = _bedrock_non_blank_text(block["text"])
+                        if text is not None:
+                            user_blocks.append({"text": text})
                     elif block["type"] == "image" and block.get("data"):
-                        fmt = {
-                            "image/png": "png",
-                            "image/jpeg": "jpeg",
-                            "image/gif": "gif",
-                            "image/webp": "webp",
-                        }.get(block.get("mime_type") or "image/png", "png")
-                        user_blocks.append(
-                            {
-                                "image": {
-                                    "format": fmt,
-                                    "source": {"bytes": block["data"]},
-                                }
-                            }
-                        )
+                        user_blocks.append(_bedrock_image_block(block))
+                if not user_blocks:
+                    user_blocks.append({"text": "<empty>"})
             messages.append({"role": "user", "content": user_blocks})
         elif role == "assistant":
             assistant_msg = cast(Any, msg)
+            if not assistant_msg.get("content"):
+                i += 1
+                continue
             assistant_blocks: list[dict[str, Any]] = []
-            for block in assistant_msg.get("content") or []:
+            for block in assistant_msg["content"]:
                 if block["type"] == "text":
-                    assistant_blocks.append({"text": block["text"]})
+                    text = _bedrock_non_blank_text(block.get("text", ""))
+                    if text is not None:
+                        assistant_blocks.append({"text": text})
+                elif block["type"] == "thinking":
+                    thinking = _bedrock_non_blank_text(block.get("thinking", ""))
+                    if thinking is None:
+                        continue
+                    signature = block.get("thinking_signature") or ""
+                    if _supports_thinking_signature(model) and signature.strip():
+                        assistant_blocks.append(
+                            {
+                                "reasoningContent": {
+                                    "reasoningText": {
+                                        "text": thinking,
+                                        "signature": signature,
+                                    }
+                                }
+                            }
+                        )
+                    elif _supports_thinking_signature(model):
+                        # 签名缺失时 Bedrock 会拒绝 reasoning block，回退纯文本。
+                        assistant_blocks.append({"text": thinking})
+                    else:
+                        assistant_blocks.append(
+                            {"reasoningContent": {"reasoningText": {"text": thinking}}}
+                        )
                 elif block["type"] == "toolCall":
                     assistant_blocks.append(
                         {
@@ -298,28 +387,15 @@ def _to_bedrock_messages(context: Context) -> list[dict[str, Any]]:
             # Bedrock 要求所有 tool results 合并进同一条 user 消息（对齐 TS）。
             tool_results: list[dict[str, Any]] = []
             j = i
-            while j < len(context.messages) and context.messages[j]["role"] == "toolResult":
-                tool_msg = cast(Any, context.messages[j])
+            while j < len(transformed) and transformed[j]["role"] == "toolResult":
+                tool_msg = cast(Any, transformed[j])
                 content_blocks: list[dict[str, Any]] = []
                 for block in tool_msg["content"]:
                     if block["type"] == "image" and block.get("data"):
-                        fmt = {
-                            "image/png": "png",
-                            "image/jpeg": "jpeg",
-                            "image/gif": "gif",
-                            "image/webp": "webp",
-                        }.get(block.get("mime_type") or "image/png", "png")
-                        content_blocks.append(
-                            {
-                                "image": {
-                                    "format": fmt,
-                                    "source": {"bytes": block["data"]},
-                                }
-                            }
-                        )
+                        content_blocks.append(_bedrock_image_block(block))
                     elif block["type"] == "text":
-                        text = (block.get("text") or "").strip()
-                        if text:
+                        text = _bedrock_non_blank_text(block.get("text", ""))
+                        if text is not None:
                             content_blocks.append({"text": text})
                 if not content_blocks:
                     content_blocks.append({"text": "<empty>"})
@@ -415,7 +491,7 @@ def bedrock_converse_stream(
 ) -> AssistantMessageEventStream:
     stream = AssistantMessageEventStream()
     opts = options or {}
-    messages = _to_bedrock_messages(context)
+    messages = _to_bedrock_messages(context, model)
     tools = _to_bedrock_tools(context)
     requested = opts.get("max_tokens")
     max_tokens = requested if requested is not None else model.max_tokens
@@ -517,6 +593,18 @@ def bedrock_converse_stream(
             )
 
         try:
+            if opts.get("signal") is not None and opts["signal"].is_set():
+                raise RuntimeError("Request was aborted")
+
+            nonlocal payload
+            on_payload = opts.get("on_payload")
+            if on_payload is not None:
+                next_payload = on_payload(payload, model)
+                if asyncio.iscoroutine(next_payload):
+                    next_payload = await next_payload
+                if next_payload is not None:
+                    payload = next_payload
+
             region = (
                 opts.get("region")
                 or get_provider_env_value("AWS_REGION", opts.get("env"))
@@ -529,6 +617,10 @@ def bedrock_converse_stream(
             headers: dict[str, str] = {
                 "accept": "application/vnd.amazon.eventstream",
             }
+            # SigV4 对“实际发送的 body 字节”签名。这里先按 httpx 的
+            # json=payload 序列化规则编码，随后用 content= 原样发送，
+            # 避免任何二次序列化差异。
+            payload_bytes = _encode_json_payload(payload)
             if token:
                 headers["Authorization"] = f"Bearer {token}"
             else:
@@ -544,7 +636,7 @@ def bedrock_converse_stream(
                 sig_headers = _aws_sigv4_headers(
                     method="POST",
                     url=endpoint,
-                    payload=json.dumps(payload).encode("utf-8"),
+                    payload=payload_bytes,
                     region=str(region),
                     access_key=access_key,
                     secret_key=secret_key,
@@ -552,18 +644,36 @@ def bedrock_converse_stream(
                 )
                 headers.update(sig_headers)
             for name, value in (opts.get("headers") or {}).items():
-                if value is not None:
+                if value is not None and not _is_reserved_bedrock_header(name):
                     headers[name] = value
+            headers["content-type"] = "application/json"
             timeout_ms = opts.get("timeout_ms") or 120000
-            async with _AsyncClient(timeout=timeout_ms / 1000) as client:
+            provided_client = opts.get("http_client")
+            client_context: Any = (
+                provided_client
+                if provided_client is not None
+                else _AsyncClient(timeout=timeout_ms / 1000)
+            )
+            async with client_context as client:
                 async with client.stream(
-                    "POST", endpoint, headers=headers, json=payload
+                    "POST",
+                    endpoint,
+                    headers=headers,
+                    content=payload_bytes,
                 ) as response:
                     if not response.is_success:
                         body = (await response.aread()).decode("utf-8", errors="replace")
                         raise RuntimeError(f"Bedrock API error ({response.status_code}): {body}")
+                    on_response = opts.get("on_response")
+                    if on_response is not None:
+                        await on_response(
+                            {"status": response.status_code, "headers": dict(response.headers)},
+                            model,
+                        )
                     stream.push(StartEvent(type="start", partial=_partial()))
                     async for event in read_bedrock_events(response.aiter_bytes()):
+                        if opts.get("signal") is not None and opts["signal"].is_set():
+                            raise RuntimeError("Request was aborted")
                         etype = event.pop("_event_type", "")
                         if etype == "messageStart":
                             continue
@@ -716,8 +826,18 @@ def bedrock_converse_stream(
             stream.error(asyncio.CancelledError())
             raise
         except Exception as exc:
+            aborted = opts.get("signal") is not None and opts["signal"].is_set()
             err_msg = build_error_message(model, exc)
-            stream.push({"type": "error", "reason": "error", "error": err_msg})
+            if aborted:
+                err_msg["stop_reason"] = "aborted"
+                err_msg["error_message"] = "Request was aborted"
+            stream.push(
+                {
+                    "type": "error",
+                    "reason": "aborted" if aborted else "error",
+                    "error": err_msg,
+                }
+            )
 
     track_background_task(_run())
     return stream

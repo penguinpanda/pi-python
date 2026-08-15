@@ -153,6 +153,55 @@ async def _poll_for_github_access_token(
     )
 
 
+def _parse_available_copilot_model_ids(raw: Any, allow_policy_fallback: bool) -> list[str]:
+    """解析 GET /models 响应中可用且支持 tool_calls 的模型 ID（对齐 TS）。"""
+    data = raw.get("data") if isinstance(raw, dict) else None
+    if not isinstance(data, list):
+        return []
+    picker: list[str] = []
+    policy: list[str] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        model_id = item.get("id")
+        if not isinstance(model_id, str):
+            continue
+        capabilities = item.get("capabilities")
+        supports = capabilities.get("supports") if isinstance(capabilities, dict) else {}
+        if isinstance(supports, dict) and supports.get("tool_calls") is False:
+            continue
+        item_policy = item.get("policy")
+        policy_state = item_policy.get("state") if isinstance(item_policy, dict) else None
+        if item.get("model_picker_enabled") is True and policy_state != "disabled":
+            picker.append(model_id)
+        if policy_state == "enabled":
+            policy.append(model_id)
+    return picker if picker or not allow_policy_fallback else policy
+
+
+async def fetch_available_copilot_model_ids(
+    token: str,
+    enterprise_domain: str | None = None,
+) -> list[str]:
+    """获取当前 Copilot 账户可用的模型 ID（失败返回 []，不阻断登录）。"""
+    try:
+        base_url = get_github_copilot_base_url(token, enterprise_domain)
+        headers = {
+            "Accept": "application/json",
+            "Authorization": f"Bearer {token}",
+            **COPILOT_HEADERS,
+            "X-GitHub-Api-Version": COPILOT_API_VERSION,
+        }
+        async with _AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{base_url}/models", headers=headers)
+        if not response.is_success:
+            return []
+        allow_policy_fallback = base_url == "https://api.individual.githubcopilot.com"
+        return _parse_available_copilot_model_ids(response.json(), allow_policy_fallback)
+    except Exception:
+        return []
+
+
 async def refresh_copilot_access_token(
     refresh_token: str,
     enterprise_domain: str | None = None,
@@ -208,6 +257,12 @@ async def _login(interaction: AuthInteraction) -> OAuthCredential:
     github_access_token = await _poll_for_github_access_token(domain, device, interaction.signal)
     credential = await refresh_copilot_access_token(github_access_token, enterprise_domain or None)
     interaction.notify({"type": "progress", "message": "Signed in to GitHub Copilot"})
+    # 对齐 TS：登录时拉取账户可用模型；失败不阻断登录，filter 会回退为全量。
+    available = await fetch_available_copilot_model_ids(
+        credential["access"], enterprise_domain or None
+    )
+    if available:
+        credential["available_model_ids"] = available  # type: ignore[typeddict-unknown-key]
     return credential
 
 
@@ -243,4 +298,5 @@ __all__ = [
     "get_base_url_from_token",
     "get_github_copilot_base_url",
     "refresh_copilot_access_token",
+    "fetch_available_copilot_model_ids",
 ]

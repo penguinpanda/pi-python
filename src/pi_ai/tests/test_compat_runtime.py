@@ -27,7 +27,9 @@ def test_compat_value_defaults():
 
 
 def test_max_tokens_field():
-    assert max_tokens_field(_model()) == "max_tokens"
+    # openai-completions 现在走 TS detectCompat；未知 provider 不是非标准
+    # 端点，因此默认 max_completion_tokens。
+    assert max_tokens_field(_model()) == "max_completion_tokens"
     assert max_tokens_field(_model({"maxTokensField": "max_tokens"})) == "max_tokens"
     assert (
         max_tokens_field(_model({"maxTokensField": "max_completion_tokens"}))

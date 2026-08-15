@@ -58,6 +58,8 @@ from .faux import (
     faux_thinking,
     faux_tool_call,
 )
+from .images import builtin_images_models, builtin_images_providers
+from .openrouter_images import openrouter_images_provider
 
 __all__ = [
     "google_provider",
@@ -115,4 +117,7 @@ __all__ = [
     "faux_text",
     "faux_thinking",
     "faux_tool_call",
+    "builtin_images_models",
+    "builtin_images_providers",
+    "openrouter_images_provider",
 ]

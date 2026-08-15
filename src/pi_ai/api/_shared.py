@@ -65,6 +65,7 @@ from ..types import (
     now_ms,
 )
 from ..utils.diagnostics import create_assistant_message_diagnostic
+from ..utils.sanitize_unicode import sanitize_surrogates
 from .compat_runtime import requires_reasoning_content_on_assistant_messages
 from .constrained_sampling import resolve_json_schema_strict_sampling
 
@@ -72,6 +73,7 @@ from .constrained_sampling import resolve_json_schema_strict_sampling
 def to_openai_messages(
     messages: list[Message],
     model: Model,
+    compat: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """
     将 SDK Message
@@ -135,6 +137,13 @@ def to_openai_messages(
     """
     # OpenAI Message 列表。
     result: list[dict[str, Any]] = []
+    last_role: str | None = None
+
+    def _cv(key: str, default: Any = None) -> Any:
+        if compat is None:
+            return default
+        value = compat.get(key)
+        return value if value is not None else default
 
     for msg in messages:
         role = msg["role"]
@@ -145,7 +154,7 @@ def to_openai_messages(
         # 直接转换。
         if role == "system":
             sys_msg = cast(SystemMessage, msg)
-            result.append({"role": "system", "content": sys_msg["content"]})
+            result.append({"role": "system", "content": sanitize_surrogates(sys_msg["content"])})
 
         # User Message
         #
@@ -165,15 +174,21 @@ def to_openai_messages(
         # 根据不同内容，
         # 转换为 OpenAI Message。
         elif role == "user":
+            if _cv("requiresAssistantAfterToolResult") and last_role == "toolResult":
+                result.append(
+                    {"role": "assistant", "content": "I have processed the tool results."}
+                )
             user_msg = cast(UserMessage, msg)
             content = user_msg["content"]
             if isinstance(content, str):
-                result.append({"role": "user", "content": content})
+                result.append({"role": "user", "content": sanitize_surrogates(content)})
+                last_role = "user"
+                continue
             else:
                 parts: list[dict[str, Any]] = []
                 for block in content:
                     if block["type"] == "text":
-                        parts.append({"type": "text", "text": block["text"]})
+                        parts.append({"type": "text", "text": sanitize_surrogates(block["text"])})
 
                     # 图片输入。
                     #
@@ -197,6 +212,7 @@ def to_openai_messages(
                     result.append({"role": "user", "content": parts[0]["text"]})
                 else:
                     result.append({"role": "user", "content": parts})
+            last_role = "user"
 
         # Assistant Message。
         #
@@ -212,14 +228,17 @@ def to_openai_messages(
         # 因为属于 Provider 内部信息。
         elif role == "assistant":
             asst_msg = cast(AssistantMessage, msg)
-            oai_msg: dict[str, Any] = {"role": "assistant", "content": None}
+            oai_msg: dict[str, Any] = {
+                "role": "assistant",
+                "content": "" if _cv("requiresAssistantAfterToolResult") else None,
+            }
             tool_calls: list[dict[str, Any]] = []
             text_parts: list[str] = []
             thinking_parts: list[str] = []
 
             for asst_block in asst_msg["content"]:
                 if asst_block["type"] == "text":
-                    text_parts.append(asst_block["text"])
+                    text_parts.append(sanitize_surrogates(asst_block["text"]))
                 elif asst_block["type"] == "toolCall":
                     tool_calls.append(
                         {
@@ -251,7 +270,15 @@ def to_openai_messages(
             if requires_reasoning_content_on_assistant_messages(model) and thinking_parts:
                 oai_msg["reasoning_content"] = "\n".join(thinking_parts)
 
+            # 对齐 TS：空 assistant 消息（既无 content 也无 tool_calls）会触发
+            # 部分 provider 400；仅显式传入 compat 时启用跳过。
+            has_content = bool(oai_msg.get("content"))
+            has_reasoning = bool(oai_msg.get("reasoning_content"))
+            if compat is not None and not has_content and not has_reasoning and not tool_calls:
+                continue
+
             result.append(oai_msg)
+            last_role = "assistant"
 
         # Tool 返回结果。
         #
@@ -268,7 +295,7 @@ def to_openai_messages(
             image_parts: list[dict[str, Any]] = []
             for block in tr_msg["content"]:
                 if block["type"] == "text":
-                    tool_text_parts.append(block["text"])
+                    tool_text_parts.append(sanitize_surrogates(block["text"]))
                 elif block["type"] == "image" and model.input and "image" in model.input:
                     # 与 user 分支一致：视觉模型保留工具结果图片。
                     tool_image_part: dict[str, Any] = {"type": "image_url"}
@@ -291,13 +318,16 @@ def to_openai_messages(
                     ]
             else:
                 tool_content = "\n".join(tool_text_parts)
-            result.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": tr_msg["tool_call_id"],
-                    "content": tool_content,
-                }
-            )
+            tool_msg: dict[str, Any] = {
+                "role": "tool",
+                "tool_call_id": tr_msg["tool_call_id"],
+                "content": tool_content,
+            }
+            if _cv("requiresToolResultName") and tr_msg.get("tool_name"):
+                tool_msg["name"] = tr_msg["tool_name"]
+            result.append(tool_msg)
+            last_role = "toolResult"
+            continue
 
     return result
 

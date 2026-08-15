@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from ..types.message import Usage
-from ..types.model import Model, ModelCostRates
+from ..types.model import ModelCostRates
 
 
-def calculate_cost(model: Model, usage: Usage) -> None:
+def calculate_cost(model: Any, usage: Usage) -> None:
     """按模型单价与本次请求 token 用量计算费用（$），原地更新 usage.cost。
 
     单价为 $/百万 token；分档按 input + cacheRead + cacheWrite 命中

@@ -27,6 +27,7 @@ from ..types import (
 )
 from ..utils._event_stream import AssistantMessageEventStream
 from ..utils.uuid import uuidv7
+from ..auth.oauth.openai_codex import get_account_id
 from ._shared import close_async_client, empty_usage, parse_tool_arguments
 from .responses import _build_responses_request_kwargs, _parse_response_usage, responses_stream
 
@@ -63,6 +64,7 @@ def _codex_headers(
     options: dict[str, Any],
     *,
     compressed: bool = False,
+    session_id: str | None = None,
 ) -> dict[str, str]:
     headers: dict[str, str] = {
         "Authorization": f"Bearer {api_key}",
@@ -70,12 +72,18 @@ def _codex_headers(
         "accept": "text/event-stream",
         "content-type": "application/json",
         "originator": "pi",
+        "User-Agent": "pi (python)",
     }
     if compressed:
         headers["content-encoding"] = "zstd"
-    account_id = options.get("chatgpt_account_id") or ""
+    # 对齐 TS：从 JWT 中提取 chatgpt-account-id。OAuth 凭据的 token
+    # 携带该 claim；显式 option 仍可覆盖。
+    account_id = options.get("chatgpt_account_id") or get_account_id(api_key) or ""
     if account_id:
         headers["chatgpt-account-id"] = account_id
+    if session_id:
+        headers["session-id"] = session_id
+        headers["x-client-request-id"] = session_id
     for name, value in (options.get("headers") or {}).items():
         if value is not None:
             headers[name] = value
@@ -326,7 +334,12 @@ async def openai_codex_responses_stream(
             if opts.get("session_id"):
                 _record_ws_failure(session_id)
 
-    codex_headers = _codex_headers(api_key, opts, compressed=True)
+    codex_headers = _codex_headers(
+        api_key,
+        opts,
+        compressed=True,
+        session_id=cast(str | None, opts.get("session_id")),
+    )
 
     def _factory(
         _api_key: str,

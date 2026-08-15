@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from typing import cast
+from typing import Any, cast
 
 from ..types import (
     AssistantMessage,
@@ -66,9 +66,14 @@ async def mistral_stream(
     base_url = opts.get("base_url") or model.base_url or "https://api.mistral.ai/v1"
     headers = dict(opts.get("headers") or {})
     session_id = opts.get("session_id")
-    if session_id and "x-affinity" not in headers:
+    cache_retention = opts.get("cache_retention")
+    if session_id and cache_retention != "none" and "x-affinity" not in headers:
         headers["x-affinity"] = session_id
     request_options = dict(opts)
+    if session_id and cache_retention != "none":
+        extra_body = dict(cast(dict[str, Any], request_options.get("extra_body")) or {})
+        extra_body.setdefault("prompt_cache_key", session_id)
+        request_options["extra_body"] = extra_body
     if headers:
         merged = dict(cast(dict[str, str | None] | None, request_options.get("headers")) or {})
         merged.update(headers)

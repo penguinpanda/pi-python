@@ -220,6 +220,11 @@ class StreamOptions(TypedDict, total=False):
     # Model.samplingParams，由各 API 实现翻译为协议字段（top_p / min_p 等）。
     sampling_params: NotRequired[dict[str, Any]]
 
+    # OpenAI 兼容 API 的工具选择策略 / service tier / 额外请求体字段。
+    tool_choice: NotRequired[Any]
+    service_tier: NotRequired[str]
+    extra_body: NotRequired[dict[str, Any]]
+
     # 可选的中止信号（asyncio.Event）。
     #
     # 支持流式中止的 Provider（例如 Faux Provider）

@@ -15,6 +15,7 @@ from .common import (
 )
 from .content import ImageContent, TextContent
 from .message import Usage
+from .model import ModelCost
 
 
 KnownImagesApi = Literal["openrouter-images"]
@@ -54,6 +55,8 @@ class ImagesModel:
     input: list[str] = field(default_factory=list)
     output: list[str] = field(default_factory=list)
     headers: dict[str, str] | None = None
+    base_url: str = ""
+    cost: ModelCost = field(default_factory=ModelCost)
 
 
 class ImagesOptions(TypedDict, total=False):

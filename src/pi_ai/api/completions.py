@@ -95,16 +95,17 @@ from .github_copilot_headers import (
 )
 from .compat_runtime import (
     compat_value,
+    detect_completions_compat,
     max_tokens_field,
     supports_long_cache_retention,
     supports_reasoning_effort,
-    supports_strict_mode,
     thinking_format,
 )
 from ..utils.prompt_cache import (
     clamp_openai_prompt_cache_key,
     resolve_cache_retention,
 )
+from ..utils.sanitize_unicode import sanitize_surrogates
 
 
 # 推理阶段至少为回答保留的 token 数（对齐 TS simple-options.ts MIN_ANSWER_TOKENS）。
@@ -158,6 +159,7 @@ def _create_client(
     timeout: float = 120.0,
     max_retries: int = 2,
     headers: dict[str, str | None] | None = None,
+    http_client: Any | None = None,
 ) -> AsyncOpenAI:
     """
     创建 AsyncOpenAI 客户端。
@@ -192,6 +194,8 @@ def _create_client(
     )
     if headers:
         kwargs["default_headers"] = {k: v for k, v in headers.items() if v is not None}
+    if http_client is not None:
+        kwargs["http_client"] = http_client
     return AsyncOpenAI(**kwargs)
 
 
@@ -276,8 +280,14 @@ async def chat_completions_stream(
             # retry-after / retry-after-ms / x-should-retry / 408/409/429/5xx
             # 由 openai SDK 内置处理，指数退避封顶 60s。
             # （max_retry_delay_ms 暂不生效：SDK 客户端不接受该参数。）
+            compat = detect_completions_compat(model)
             timeout_ms = opts.get("timeout_ms")
-            request_headers = dict(opts.get("headers") or {})
+            request_headers: dict[str, str | None] = dict(model.headers or {})
+            for name, value in (opts.get("headers") or {}).items():
+                if value is None:
+                    request_headers.pop(name, None)
+                else:
+                    request_headers[name] = value
             if model.provider == "github-copilot":
                 # 动态头（对齐 TS buildCopilotDynamicHeaders）：无这些头
                 # Copilot 请求（尤其图片）可能被拒。
@@ -287,12 +297,21 @@ async def chat_completions_stream(
                         has_images=has_copilot_vision_input(context.messages),
                     )
                 )
+            if compat.get("sendSessionAffinityHeaders") and opts.get("session_id"):
+                if compat.get("sessionAffinityFormat") == "openrouter":
+                    request_headers["x-session-id"] = opts["session_id"]
+                else:
+                    if compat.get("sessionAffinityFormat") == "openai":
+                        request_headers["session_id"] = opts["session_id"]
+                    request_headers["x-client-request-id"] = opts["session_id"]
+                    request_headers["x-session-affinity"] = opts["session_id"]
             client = _create_client(
                 api_key,
                 base_url,
                 timeout=timeout_ms / 1000.0 if timeout_ms else 120.0,
                 max_retries=opts.get("max_retries", 2),
                 headers=request_headers or None,
+                http_client=opts.get("http_client"),
             )
 
             # 跨 Provider 消息规范化。
@@ -308,13 +327,13 @@ async def chat_completions_stream(
             # 将规范化后的 SDK Message
             #
             # 转换成 OpenAI Message。
-            messages = to_openai_messages(transformed_messages, model)
+            messages = to_openai_messages(transformed_messages, model, compat)
 
             # Tool 定义转换为 OpenAI Tool Schema。
             tools = (
                 to_openai_tools(
                     context.tools,
-                    supports_strict_mode=supports_strict_mode(model),
+                    supports_strict_mode=bool(compat.get("supportsStrictMode", True)),
                 )
                 if context.tools
                 else None
@@ -322,9 +341,18 @@ async def chat_completions_stream(
 
             # Chat Completions API
             #
-            # System Prompt 作为第一条 message。
+            # System Prompt 作为第一条 message。推理模型在 provider
+            # 支持 developer role 时对齐 TS 使用 developer role。
             if context.system_prompt:
-                messages.insert(0, {"role": "system", "content": context.system_prompt})
+                role = (
+                    "developer"
+                    if model.reasoning and compat.get("supportsDeveloperRole")
+                    else "system"
+                )
+                messages.insert(
+                    0,
+                    {"role": role, "content": sanitize_surrogates(context.system_prompt)},
+                )
 
             # OpenAI Chat Completions 参数。
             #
@@ -339,14 +367,21 @@ async def chat_completions_stream(
                 "model": model.id,
                 "messages": messages,
                 "stream": True,
-                "stream_options": {"include_usage": True},
             }
+            if compat.get("supportsUsageInStreaming", True) is not False:
+                kwargs["stream_options"] = {"include_usage": True}
+            if compat.get("supportsStore"):
+                kwargs["store"] = False
 
             if tools:
                 kwargs["tools"] = tools
+                if compat.get("zaiToolStream"):
+                    kwargs["tool_stream"] = True
             temperature = opts.get("temperature")
             if temperature is not None:
                 kwargs["temperature"] = temperature
+            if opts.get("tool_choice") is not None:
+                kwargs["tool_choice"] = opts["tool_choice"]
             # max_tokens 收敛到模型上下文窗口内（对齐 TS buildBaseOptions）：
             # 未指定时使用模型默认 max_tokens，始终发送收敛后的值。
             requested = opts.get("max_tokens")
@@ -501,10 +536,60 @@ async def chat_completions_stream(
                     extra_body[extra_key] = kwargs.pop(extra_key)
                     kwargs["extra_body"] = extra_body
 
+            # OpenRouter / Vercel Gateway provider 路由偏好（TS buildParams）。
+            extra_body = dict(kwargs.pop("extra_body", {}) or {})
+            opts_extra_body = opts.get("extra_body")
+            if isinstance(opts_extra_body, dict):
+                extra_body.update(opts_extra_body)
+            open_router_routing = compat.get("openRouterRouting")
+            if isinstance(open_router_routing, dict) and open_router_routing:
+                extra_body["provider"] = open_router_routing
+            vercel_routing = compat.get("vercelGatewayRouting")
+            if isinstance(vercel_routing, dict):
+                gateway_options: dict[str, Any] = {}
+                if vercel_routing.get("only"):
+                    gateway_options["only"] = vercel_routing["only"]
+                if vercel_routing.get("order"):
+                    gateway_options["order"] = vercel_routing["order"]
+                if gateway_options:
+                    extra_body["providerOptions"] = {"gateway": gateway_options}
+
+            # 每请求 sampling_params 逐键覆盖 Model.samplingParams（TS 最后
+            # Object.assign）。经 extra_body 发送，与直接构造请求体等价。
+            sampling_params = dict(model.sampling_params or {})
+            sampling_params.update(cast(dict[str, Any], opts.get("sampling_params") or {}))
+            if sampling_params:
+                extra_body.update(sampling_params)
+            if extra_body:
+                kwargs["extra_body"] = extra_body
+
+            on_payload = opts.get("on_payload")
+            if on_payload is not None:
+                next_kwargs = on_payload(kwargs, model)
+                if asyncio.iscoroutine(next_kwargs):
+                    next_kwargs = await next_kwargs
+                if next_kwargs is not None:
+                    kwargs = next_kwargs
+
             # 发起流式请求。
             #
-            # 返回的是异步可迭代对象。
-            response = await client.chat.completions.create(**kwargs)
+            # 返回的是异步可迭代对象。需要 on_response 时使用 raw wrapper
+            # 拿到 HTTP response；否则保持普通 create 调用。
+            on_response = opts.get("on_response")
+            if on_response is not None:
+                raw = await client.chat.completions.with_raw_response.create(**kwargs)
+                http_response = getattr(raw, "http_response", None)
+                if http_response is not None:
+                    await on_response(
+                        {
+                            "status": http_response.status_code,
+                            "headers": dict(http_response.headers),
+                        },
+                        model,
+                    )
+                response = raw.parse()
+            else:
+                response = await client.chat.completions.create(**kwargs)
 
             # 最终 AssistantMessage.content。
             content_blocks: list[ContentBlock] = []
@@ -590,6 +675,13 @@ async def chat_completions_stream(
                         )
                     )
 
+            # 响应元数据（对齐 TS openai-completions）。
+            response_id: str | None = None
+            response_model: str | None = None
+            raw_stop_reason: str | None = None
+            has_finish_reason = False
+            error_message: str | None = None
+
             # 流开始事件。
             stream.push(StartEvent(type="start", partial=_partial()))
 
@@ -604,6 +696,16 @@ async def chat_completions_stream(
             # Usage
             # Finish Reason
             async for chunk in response:
+                if opts.get("signal") is not None and opts["signal"].is_set():
+                    raise RuntimeError("Request was aborted")
+                # OpenAI 文档：流式每个 chunk 携带相同 id；首个非空值即 response id。
+                chunk_id = getattr(chunk, "id", None)
+                if chunk_id:
+                    response_id = response_id or str(chunk_id)
+                chunk_model = getattr(chunk, "model", None)
+                if chunk_model and str(chunk_model) != model.id:
+                    response_model = response_model or str(chunk_model)
+
                 # 流式收尾 chunk 可能只带 usage、没有 choices（如 DashScope
                 # 兼容模式），必须在 choices 检查之前处理，否则 usage 会丢失。
                 if chunk.usage:
@@ -613,6 +715,18 @@ async def chat_completions_stream(
                     continue
 
                 choice = chunk.choices[0]
+
+                # 兼容 Moonshot 等把 usage 放在 choice.usage 的端点。
+                if not chunk.usage and getattr(choice, "usage", None):
+                    usage = _parse_chunk_usage(choice.usage, model)
+
+                # Finish reason 必须先于 delta 处理：部分端点收尾 chunk 的
+                # delta 为 None/空对象，旧实现会 continue 导致 reason 丢失。
+                if choice.finish_reason:
+                    has_finish_reason = True
+                    raw_stop_reason = str(choice.finish_reason)
+                    stop_reason, error_message = _map_stop_reason_with_message(choice.finish_reason)
+
                 delta = choice.delta
 
                 if delta is None:
@@ -773,16 +887,29 @@ async def chat_completions_stream(
                                 )
                             )
 
-                # Finish reason
-                if choice.finish_reason:
-                    stop_reason = choice.finish_reason
-
             # 所有 Chunk 已处理完成，
             #
             # 结束最后一个块（若有）。
             _end_current_block()
             # 并行工具调用在流结束时统一收尾。
             _finalize_tool_blocks()
+
+            # 中止信号（TS 在流结束后统一检查）。
+            if opts.get("signal") is not None and opts["signal"].is_set():
+                raise RuntimeError("Request was aborted")
+
+            if stop_reason == "error":
+                raise RuntimeError(error_message or "Provider returned an error stop reason")
+
+            supports_finish = bool(compat_value(model, "supportsFinishReason", True))
+            if not has_finish_reason:
+                if supports_finish:
+                    raise RuntimeError("Stream ended without finish_reason")
+                stop_reason = (
+                    "tool_call"
+                    if any(block.get("type") == "toolCall" for block in content_blocks)
+                    else "stop"
+                )
 
             # 构造最终 AssistantMessage。
             msg = AssistantMessage(
@@ -792,14 +919,16 @@ async def chat_completions_stream(
                 provider=model.provider,
                 model=model.id,
                 usage=usage,
-                stop_reason=_map_stop_reason(stop_reason),
+                stop_reason=stop_reason,
                 error_message=None,
                 timestamp=now_ms(),
             )
-            # reason 取映射后的 stop_reason。
-            #
-            # content_filter 等映射为 "error" 的罕见情况
-            # 仍以 done 事件结束（保持既有行为）。
+            if response_id:
+                msg["response_id"] = response_id
+            if response_model:
+                msg["response_model"] = response_model
+            if raw_stop_reason is not None:
+                msg["raw_stop_reason"] = raw_stop_reason
             stream.push(
                 {
                     "type": "done",
@@ -807,7 +936,6 @@ async def chat_completions_stream(
                     "message": msg,
                 }
             )
-            # stream.end(msg)
 
         except asyncio.CancelledError:
             # 让 await stream.result() 抛出取消异常，而不是永久挂起。
@@ -815,8 +943,18 @@ async def chat_completions_stream(
             raise
 
         except Exception as exc:
+            aborted = opts.get("signal") is not None and opts["signal"].is_set()
             err_msg = build_error_message(model, exc)
-            stream.push({"type": "error", "reason": "error", "error": err_msg})
+            if aborted:
+                err_msg["stop_reason"] = "aborted"
+                err_msg["error_message"] = "Request was aborted"
+            stream.push(
+                {
+                    "type": "error",
+                    "reason": "aborted" if aborted else "error",
+                    "error": err_msg,
+                }
+            )
             # stream.end(err_msg)
         finally:
             # 显式关闭客户端：openai SDK 依赖 __del__ 调度异步关闭，
@@ -834,10 +972,13 @@ async def chat_completions_stream(
 
 
 def _map_stop_reason(reason: str) -> StopReason:
-    """
-    将 OpenAI Finish Reason
+    """兼容旧调用：返回映射后的 stop reason。"""
+    return _map_stop_reason_with_message(reason)[0]
 
-    转换为 SDK 内部 Stop Reason。
+
+def _map_stop_reason_with_message(reason: str) -> tuple[StopReason, str | None]:
+    """
+    将 OpenAI Finish Reason 转换为 SDK 内部 Stop Reason 与错误说明。
 
         stop / end          → stop
         length              → length
@@ -849,14 +990,17 @@ def _map_stop_reason(reason: str) -> StopReason:
         其他                 → error
     """
     if not reason:
-        return "stop"
+        return "stop", None
     mapping = {
-        "stop": "stop",
-        "end": "stop",
-        "length": "length",
-        "tool_calls": "tool_call",
-        "function_call": "tool_call",
-        "content_filter": "error",
-        "network_error": "error",
+        "stop": ("stop", None),
+        "end": ("stop", None),
+        "length": ("length", None),
+        "tool_calls": ("tool_call", None),
+        "function_call": ("tool_call", None),
+        "content_filter": ("error", "Provider finish_reason: content_filter"),
+        "network_error": ("error", "Provider finish_reason: network_error"),
     }
-    return cast(StopReason, mapping.get(reason, "error"))
+    mapped = mapping.get(reason)
+    if mapped is not None:
+        return cast(tuple[StopReason, str | None], mapped)
+    return "error", f"Provider finish_reason: {reason}"

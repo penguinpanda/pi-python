@@ -2,10 +2,24 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pi_ai.auth import EnvApiKeyAuth
 from pi_ai.auth.oauth.github_copilot import github_copilot_oauth
 from pi_ai.provider import Provider, create_provider
 from pi_ai.types import Model
+
+
+def _filter_copilot_models(models: list[Model], credential: Any) -> list[Model]:
+    """OAuth 登录后按 availableModelIds 过滤（对齐 TS filterModels）。"""
+    if not isinstance(credential, dict) or credential.get("type") != "oauth":
+        return models
+    available = credential.get("available_model_ids")
+    if not isinstance(available, list) or not all(isinstance(x, str) for x in available):
+        return models
+    allowed = set(available)
+    return [model for model in models if model.id in allowed]
+
 
 GITHUB_COPILOT_MODELS: list[Model] = [
     Model(
@@ -48,6 +62,7 @@ def github_copilot_provider() -> Provider:
         models=GITHUB_COPILOT_MODELS,
         base_url="https://api.individual.githubcopilot.com",
         api_kind="completions",
+        filter_models=_filter_copilot_models,
     )
 
 

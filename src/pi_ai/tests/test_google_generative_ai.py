@@ -371,6 +371,7 @@ def test_thought_signature_echo_and_thought_true() -> None:
             {
                 "role": "assistant",
                 "provider": "google",
+                "api": "google-generative-ai",
                 "model": "gemini-3-pro",
                 "content": [
                     {

@@ -14,6 +14,7 @@ from pi_ai.api import bedrock_converse_stream
 from pi_ai.api.api_provider_registry import get_api_provider
 from pi_ai.api.bedrock_converse_stream import (
     _aws_sigv4_headers,
+    _encode_json_payload,
     _resolve_bedrock_credentials,
     _to_bedrock_messages,
     _build_thinking_fields,
@@ -203,6 +204,31 @@ def test_parse_eventstream_messages() -> None:
     assert remainder == b""
     assert messages[0]["_event_type"] == "contentBlockDelta"
     assert messages[0]["type"] == "contentBlockDelta"
+
+
+def test_encode_json_payload_matches_httpx_wire_format() -> None:
+    """SigV4 的 payload 字节必须与 httpx json= 的序列化完全一致。"""
+    import json as _json
+    from httpx import _content
+
+    payload = {"modelId": "x", "messages": [{"role": "user", "content": [{"text": "中文"}]}]}
+    encoded = _encode_json_payload(payload)
+    _, stream = _content.encode_json(payload)
+    assert encoded == b"".join(stream)
+    assert encoded != _json.dumps(payload).encode("utf-8")
+
+
+def test_bedrock_provider_accepts_ambient_aws_credentials(monkeypatch) -> None:
+    from pi_ai.providers.amazon_bedrock import amazon_bedrock_provider
+
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKID")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "SECRET")
+    monkeypatch.delenv("AWS_BEARER_TOKEN_BEDROCK", raising=False)
+    provider = amazon_bedrock_provider()
+    resolved = provider.auth.resolve(None)
+    assert resolved is not None
+    assert resolved.api_key == ""
+    assert resolved.source == "AWS access keys"
 
 
 def test_aws_sigv4_headers() -> None:

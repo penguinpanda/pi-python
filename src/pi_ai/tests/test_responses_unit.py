@@ -614,7 +614,6 @@ class TestResponsesStream:
 
         collected, _ = await _collect_events(model, context, client)
         assert [e["type"] for e in collected] == ["start", "done"]
-        assert collected[-1]["message"]["content"] == []
 
     @pytest.mark.asyncio
     async def test_tool_call_flow(self):
@@ -666,6 +665,112 @@ class TestResponsesStream:
                 "arguments": {"city": "Beijing"},
             }
         ]
+        # 对齐 TS：存在 toolCall 时 stop_reason 必须是 tool_call。
+        assert msg["stop_reason"] == "tool_call"
+
+    @pytest.mark.asyncio
+    async def test_parallel_function_calls_by_output_index(self):
+        """并行 function_call 增量必须按 output_index/item_id 路由，不能串线。"""
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "go"}])
+        events = [
+            _event(
+                "response.output_item.added",
+                output_index=0,
+                item=SimpleNamespace(type="function_call", call_id="c1", id="fc1", name="one"),
+            ),
+            _event(
+                "response.output_item.added",
+                output_index=1,
+                item=SimpleNamespace(type="function_call", call_id="c2", id="fc2", name="two"),
+            ),
+            _event(
+                "response.function_call_arguments.delta",
+                output_index=1,
+                item_id="fc2",
+                delta='{"b":2}',
+            ),
+            _event(
+                "response.function_call_arguments.done",
+                output_index=1,
+                item_id="fc2",
+                arguments='{"b":2}',
+            ),
+            _event(
+                "response.function_call_arguments.delta",
+                output_index=0,
+                item_id="fc1",
+                delta='{"a":1}',
+            ),
+            _event(
+                "response.function_call_arguments.done",
+                output_index=0,
+                item_id="fc1",
+                arguments='{"a":1}',
+            ),
+            _event("response.completed", response=SimpleNamespace(output_text="", usage=None)),
+        ]
+        client = _mock_client(events)
+        collected, _ = await _collect_events(model, context, client)
+        msg = collected[-1]["message"]
+        blocks = {b["id"]: b for b in msg["content"] if b["type"] == "toolCall"}
+        assert blocks["c1|fc1"]["arguments"] == {"a": 1}
+        assert blocks["c2|fc2"]["arguments"] == {"b": 2}
+
+    @pytest.mark.asyncio
+    async def test_function_call_item_done_uses_authoritative_arguments(self):
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "go"}])
+        events = [
+            _event(
+                "response.output_item.added",
+                output_index=0,
+                item=SimpleNamespace(type="function_call", call_id="c1", id="fc1", name="one"),
+            ),
+            _event(
+                "response.output_item.done",
+                output_index=0,
+                item=SimpleNamespace(
+                    type="function_call", call_id="c1", id="fc1", name="one", arguments='{"a":1}'
+                ),
+            ),
+            _event("response.completed", response=SimpleNamespace(output_text="", usage=None)),
+        ]
+        collected, _ = await _collect_events(model, context, _mock_client(events))
+        msg = collected[-1]["message"]
+        assert msg["content"][0]["arguments"] == {"a": 1}
+        assert msg["content"][0]["raw_arguments"] == '{"a":1}'
+
+    @pytest.mark.asyncio
+    async def test_reasoning_item_without_delta_is_preserved(self):
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "go"}])
+        events = [
+            _event(
+                "response.output_item.added",
+                output_index=0,
+                item=SimpleNamespace(type="reasoning", id="rs1", summary=[], content=[]),
+            ),
+            _event(
+                "response.output_item.done",
+                output_index=0,
+                item=SimpleNamespace(
+                    type="reasoning",
+                    id="rs1",
+                    summary=[SimpleNamespace(type="summary_text", text="think")],
+                    content=[],
+                    encrypted_content="enc",
+                ),
+            ),
+            _event(
+                "response.completed", response=SimpleNamespace(output_text="answer", usage=None)
+            ),
+        ]
+        collected, _ = await _collect_events(model, context, _mock_client(events))
+        msg = collected[-1]["message"]
+        kinds = [b["type"] for b in msg["content"]]
+        assert kinds == ["thinking", "text"]
+        assert msg["content"][0]["thinking_signature"].endswith('"encrypted_content": "enc"}')
 
     @pytest.mark.asyncio
     async def test_output_item_non_function_ignored(self):
@@ -693,7 +798,6 @@ class TestResponsesStream:
 
         collected, _ = await _collect_events(model, context, client)
         assert [e["type"] for e in collected] == ["start", "done"]
-        assert collected[-1]["message"]["content"] == []
 
     @pytest.mark.asyncio
     async def test_completed_usage(self):
@@ -924,7 +1028,8 @@ class TestResponsesStream:
 
         collected, _ = await _collect_events(model, context, client)
         assert [e["type"] for e in collected] == ["start", "error"]
-        assert collected[-1]["error"]["error_message"] == "boom"
+        # 对齐 TS：error.code 缺失时使用 "unknown" 前缀。
+        assert collected[-1]["error"]["error_message"] == "unknown: boom"
 
     @pytest.mark.asyncio
     async def test_empty_stream(self):
@@ -933,8 +1038,10 @@ class TestResponsesStream:
         client = _mock_client([])
 
         collected, _ = await _collect_events(model, context, client)
-        assert [e["type"] for e in collected] == ["start", "done"]
-        assert collected[-1]["message"]["content"] == []
+        # 对齐 TS：没有 terminal response event 时必须以 error 事件结束。
+        assert [e["type"] for e in collected] == ["start", "error"]
+        assert collected[-1]["error"]["content"] == []
+        assert "terminal response event" in collected[-1]["error"]["error_message"]
 
     @pytest.mark.asyncio
     async def test_request_kwargs(self):
@@ -1054,6 +1161,7 @@ class TestResponsesStream:
             timeout: float = 180.0,
             max_retries: int = 2,
             headers=None,
+            http_client=None,
         ):
             captured["timeout"] = timeout
             captured["max_retries"] = max_retries
@@ -1087,6 +1195,7 @@ class TestResponsesStream:
             timeout: float = 180.0,
             max_retries: int = 2,
             headers=None,
+            http_client=None,
         ):
             captured["timeout"] = timeout
             captured["max_retries"] = max_retries

@@ -120,6 +120,8 @@ from .providers import (
     FAUX_MODEL,
     OLLAMA_MODELS,
     OPENAI_MODELS,
+    builtin_images_models,
+    builtin_images_providers,
     deepseek_provider,
     faux_assistant_message,
     faux_provider,
@@ -128,6 +130,7 @@ from .providers import (
     faux_tool_call,
     ollama_provider,
     openai_provider,
+    openrouter_images_provider,
 )
 from .providers.all import create_default_models
 from .utils import (
@@ -188,6 +191,9 @@ __all__ = [
     "deepseek_provider",
     "ollama_provider",
     "faux_provider",
+    "builtin_images_models",
+    "builtin_images_providers",
+    "openrouter_images_provider",
     # Model lists
     "OPENAI_MODELS",
     "OLLAMA_MODELS",

@@ -624,7 +624,12 @@ class Models:
         available: list[Model] = []
         for provider in providers:
             if await self.check_auth(provider.id, overrides) is not None:
-                available.extend(provider.get_models())
+                models = provider.get_models()
+                credential = await self._credentials.read(provider.id)
+                filter_models = getattr(provider, "filter_models", None)
+                if callable(filter_models):
+                    models = filter_models(models, credential)
+                available.extend(models)
         available.sort(key=lambda model: (model.provider, model.id))
         return available
 
