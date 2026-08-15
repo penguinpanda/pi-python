@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import inspect
 import json
 import os
@@ -278,6 +279,7 @@ class PiTuiApp(App):
                 session.extension_runner,
                 slash_registry=self._slash_registry,
                 keybindings_manager=self._keybindings,
+                action_handler_registrar=self.register_action_handler,
             )
             extension_registry.apply()
             from .ui_context import TuiUIContext
@@ -306,6 +308,7 @@ class PiTuiApp(App):
             reload_all=self._reload_all,
             trust_manager=trust_manager,
             session_manager=getattr(self._session, "session_manager", None),
+            settings_manager=self._settings_manager,
         )
         self._slash_context.rebuild_session = self._apply_rebuilt_session
         self._autocomplete_provider = self._build_autocomplete_provider()
@@ -1185,9 +1188,8 @@ class PiTuiApp(App):
     # 编辑器
     # ------------------------------------------------------------------
 
-    def on_pi_editor_submitted(self, message: PiEditor.Submitted) -> None:
-        text = message.text
-        self._hide_slash_completion()
+    def _submit_text(self, text: str) -> None:
+        """按文本分发提交(斜杠命令 / shell / prompt)。"""
         if text.startswith("/"):
             self._run_task(self._exec_slash(text))
         elif text.startswith("!"):
@@ -1196,6 +1198,11 @@ class PiTuiApp(App):
         else:
             self._editor.add_to_history(text)
             self._run_task(self._send_prompt(text))
+
+    def on_pi_editor_submitted(self, message: PiEditor.Submitted) -> None:
+        text = message.text
+        self._hide_slash_completion()
+        self._submit_text(text)
 
     def on_pi_editor_autocomplete_requested(
         self,
@@ -1352,11 +1359,25 @@ class PiTuiApp(App):
         self._render_slash_completion()
 
     def on_pi_editor_completion_submit_requested(self, message) -> None:
-        if not self._completion_items:
+        if not self._completion_items or not (
+            0 <= self._completion_index < len(self._completion_items)
+        ):
+            # 无补全项:回车按文本提交(对齐 TS onSubmit 语义)。
+            text = self._editor.text.strip()
+            self._hide_slash_completion()
+            if text:
+                self._editor.clear()
+                self._submit_text(text)
             return
-        if not (0 <= self._completion_index < len(self._completion_items)):
+        value = str(self._completion_items[self._completion_index].get("value", "")).strip()
+        stripped = self._editor.text.strip()
+        if value == stripped or value == stripped.lstrip("/"):
+            # 已输入完整命令(补全值与文本一致,命令补全值不含前导斜杠):
+            # 直接提交,不再要求第二次回车(对齐 TS onSubmit 语义)。
+            self._hide_slash_completion()
+            self._editor.clear()
+            self._submit_text(stripped)
             return
-        value = str(self._completion_items[self._completion_index].get("value", ""))
         self._insert_completion(value)
         self._hide_slash_completion()
 
@@ -1365,8 +1386,22 @@ class PiTuiApp(App):
 
     async def _send_prompt(self, text: str) -> None:
         self._set_status(self._working_message)
+        images: list | None = None
+        if self._pending_image is not None:
+            # 粘贴的图片随下一条 prompt 附加(发送后清除)。
+            images = [
+                {
+                    "type": "image",
+                    "data": base64.b64encode(self._pending_image).decode("ascii"),
+                    "mime_type": "image/png",
+                }
+            ]
+            self._pending_image = None
         try:
-            await self._session.prompt(text)
+            if images is not None:
+                await self._session.prompt(text, images)
+            else:
+                await self._session.prompt(text)
         except Exception as exc:
             self._notify(f"Prompt failed: {exc}")
 
@@ -1529,7 +1564,15 @@ class PiTuiApp(App):
         self._run_task(self._open_model_selector())
 
     async def _open_model_selector(self) -> None:
-        models = await self._model_runtime.get_available()
+        # 优先使用已维护的可用性快照:get_available() 会触发 provider 认证
+        # 网络检查,模型输出期间打开选择器会迟迟无反应。
+        models = self._model_runtime.get_available_snapshot()
+        if not models:
+            try:
+                models = await self._model_runtime.get_available()
+            except Exception as exc:
+                self._notify(f"Failed to load models: {exc}")
+                return
         if not models:
             self._notify("No models available")
             return
@@ -2232,6 +2275,7 @@ class PiTuiApp(App):
                     new_runner,
                     slash_registry=registry,
                     keybindings_manager=self._keybindings,
+                    action_handler_registrar=self.register_action_handler,
                 ).apply()
             self._slash_registry = registry
             self._slash_context.slash_registry = registry

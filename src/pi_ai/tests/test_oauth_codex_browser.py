@@ -29,11 +29,17 @@ def test_create_authorization_flow_url() -> None:
 
 
 def test_extract_code_from_pasted() -> None:
-    assert _extract_code_from_pasted(f"{BROWSER_REDIRECT_URI}?code=abc123&state=x") == (
-        "abc123",
-        "x",
+    assert _extract_code_from_pasted(f"{BROWSER_REDIRECT_URI}?code=abc123&state=x") == "abc123"
+    assert _extract_code_from_pasted("plain-code") is None
+    # 回归：粘贴 URL 的 state 与当前 flow 不一致时拒绝。
+    assert (
+        _extract_code_from_pasted(f"{BROWSER_REDIRECT_URI}?code=abc123&state=stale", "fresh")
+        is None
     )
-    assert _extract_code_from_pasted("plain-code") == (None, None)
+    assert (
+        _extract_code_from_pasted(f"{BROWSER_REDIRECT_URI}?code=abc123&state=fresh", "fresh")
+        == "abc123"
+    )
 
 
 class _Interaction:
@@ -47,10 +53,9 @@ class _Interaction:
 
     async def prompt(self, prompt):
         self.prompt_calls.append(prompt)
-        from urllib.parse import parse_qs, urlparse
-
-        # 回贴授权 URL 时 state 必须与本次 flow 一致（否则登录被拒绝）。
-        state = parse_qs(urlparse(self.notified["url"]).query)["state"][0]
+        # 与当前 flow 的 state 一致(从 auth_url 通知中解析)。
+        parsed = urllib.parse.urlparse(self.notified["url"])
+        state = urllib.parse.parse_qs(parsed.query)["state"][0]
         return f"{BROWSER_REDIRECT_URI}?code=pasted-code&state={state}"
 
 

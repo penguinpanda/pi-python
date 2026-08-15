@@ -47,6 +47,8 @@ class App:
                 terminal = FakeTerminal(size=size)
         self.terminal = terminal
         self.keybindings = keybindings or KeybindingsManager()
+        # action_id → handler 注册表:扩展等无法在宿主类上定义 action_* 方法的场景。
+        self._action_handlers: dict[str, Any] = {}
         self.ui_mode = ui_mode if ui_mode != "fullscreen" else "fullscreen"
         self._running = False
         self._events: asyncio.Queue[KeyEvent | None] = asyncio.Queue()
@@ -173,6 +175,10 @@ class App:
         frame = render_layout_frame(self.screen, width, None, self.request_render)
         self._layout_frame = frame
         lines = frame.lines
+        # overlay.rect 是视口坐标（overlay manager 按终端尺寸锚定），
+        # 而本函数合成的是完整文档行列表（随流式输出增长、视口滚动）。
+        # 平移 viewport_top 后 patch，选择器/对话框在滚动时保持可见。
+        viewport_top = self._regular_viewport_top
         for overlay in self._overlays:
             if not overlay.visible:
                 continue
@@ -182,12 +188,12 @@ class App:
             overlay_lines = overlay.render(overlay_width, overlay_height)
             # 主屏文档比视口短时仍要容纳 overlay（对话框/选择器），
             # 对齐 TS TuiMainScreen.compositeOverlays 的 padding 行为。
-            needed = row + overlay_height
+            needed = row + viewport_top + overlay_height
             base_style = getattr(self.screen, "base_style", None)
             while len(lines) < needed:
                 lines.append(blank_line(width, base_style))
             for index, line in enumerate(overlay_lines):
-                target_row = row + index
+                target_row = row + viewport_top + index
                 if 0 <= target_row < len(lines):
                     target = lines[target_row]
                     if target.shared:
@@ -503,6 +509,10 @@ class App:
             return
         self._dispatch_binding(key)
 
+    def register_action_handler(self, action_id: str, handler: Any) -> None:
+        """注册 action_id 对应的处理器(供扩展快捷键等动态绑定使用)。"""
+        self._action_handlers[action_id] = handler
+
     def _dispatch_binding(self, key: Key) -> None:
         name = key.name
         action_id = self.keybindings.resolve(name)
@@ -519,6 +529,8 @@ class App:
         if binding is None:
             return
         action = getattr(self, f"action_{binding.action}", None)
+        if action is None:
+            action = self._action_handlers.get(action_id)
         if action is None:
             return
         result = action()

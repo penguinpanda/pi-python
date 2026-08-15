@@ -334,3 +334,5 @@ class TuiUIContext:
         finally:
             if not future.done():
                 future.cancel()
+                # 消费取消异常,避免无人 retrieve 的 Future 日志。
+                future.exception()

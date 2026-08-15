@@ -276,6 +276,26 @@
 
 ### Fixed
 
+- 选择器/对话框在流式输出刷新时消失：overlay 的 rect 是视口坐标却按文档绝对行合成，流式输出使文档增长、视口滚动后 overlay 被滚出视口；现在按 `viewport_top` 平移后合成，滚动期间保持可见
+- `/model` 回车无反应：补全激活时回车只接受补全不提交文本；现在输入完整命令（补全值与文本一致）或补全列表为空时回车直接提交，与 TS `onSubmit` 语义一致（选择器立即打开）
+- 模型输出期间 `/model` 无反应：模型选择器改用可用性快照打开（此前 `get_available()` 触发 provider 认证网络检查，流式期间迟迟不返回）
+- `EventStream` 的结果 Future 增加 done 回调统一 retrieve 异常：流式任务被取消写入 `CancelledError` 且无人 `await result()` 时不再打印 "Future exception was never retrieved"；扩展 `ctx.ui.custom` 的取消路径同样消费异常
+- TUI 测试 flake：`test_tui_app` 的补全断言由固定 `sleep(0.2)` 改为条件轮询等待（慢机器上 debounce/异步补全未返回导致间歇失败）
+- `!command` Windows 执行：排除 WSL 的 system32 bash（`shell=True` 下恒失败）并改用 `bash -c` 显式执行 Git bash（此前 `shell=True + executable` 会把命令当脚本路径，Windows 上所有 `!command` 均失败）；`_resolve_path` 的 `file://` 解析支持 Windows 盘符形式（`file:///C:/...` 与 `file://C:\path`）
+- Windows 测试可移植性：bash 工具测试将 `sys.executable` 转正斜杠嵌入命令；`parse_source` 的 git 源目录名推导兼容反斜杠/盘符路径；会话布局/排序断言改为平台无关期望（`_session_directory_name`/`os.path.abspath`）；`_ensure_tool` 测试按平台使用 `.exe` 后缀；`test_auth_storage` 的 0600 断言仅在 POSIX 检查；`!command` 测试在 Windows 有 Git bash 时用 bash 语法；扩展 parity 测试按 `Path.name` 取基名；POSIX suspend 测试在 Windows 跳过；linkify 测试钉住能力探测
+- pi_tui 测试：`test_terminal_extra.py` 对 fcntl/termios 加平台守卫，Windows 下 POSIX 专有用例跳过、平台无关用例照常运行（此前裸 `import fcntl` 导致 Windows 全量收集中断）
+- pi_ai OAuth：loopback 回调页对 error_description 等攻击者可控文本做 HTML 转义；手动粘贴 URL 的 state 与当前 flow 不一致时拒绝（openai-codex / openrouter / radius）
+- pi_agent：工具路径解析支持 `restrict_paths_to_cwd` 开关，coding-agent 的 write/edit 工具启用，越界写入被拒（read 保持全盘可读）
+- pi_coding_agent：`@path` 注入增加大小上限（文本 1MiB / 图片 20MiB）、二进制嗅探与 `.git`/`node_modules` 等目录忽略；`_ensure_tool` 归档提取校验成员路径（zip-slip 防护）并限制下载大小
+- pi_coding_agent：`/settings key=value` 经 SettingsManager 写入（项目信任门控 + FileLock + 迁移），未信任项目拒绝写入
+- pi_ai 重试：请求执行中被取消的 `CancelledError` 不再被当作可重试错误吞掉；`HTTPStatusError` 经 `response.status_code` 探测，400/401 不再误判为可重试
+- pi_ai Google 通道：重试选项统一读取 snake_case `max_retries`/`max_retry_delay_ms`（兼容 camelCase），生产路径重试不再恒为 0
+- pi_ai：每次请求新建的 AsyncOpenAI/AsyncAzureOpenAI 客户端在流结束/失败/取消时显式 close，消除长进程连接池泄漏
+- pi_ai 安全：凭证文件原子创建（`O_EXCL|O_NOFOLLOW` + 初始 0600），消除 symlink/TOCTOU 窗口；CLI secret 提示改用 getpass 不回显
+- pi_agent：v3→v4 迁移修复 compaction 条目带 retainedTail 且后续有条目时的 UnboundLocalError；并行工具批次 prepare 异常/中止时取消已启动任务；harness abort 不再重复发 agent_end/settled 或合成空失败消息
+- pi_coding_agent：Windows 下 print 模式不再因 `signal.SIGHUP` 缺失崩溃；`auth print-bearer-token --min-expiry` 的 kind 比较修正；RPC 客户端在子进程退出/管道断裂/stop 时立即失败等待中请求；RPC 服务端 prompt 加 busy 守卫、客户端断开时中止而非等待
+- pi_coding_agent：`!command` 认证值走进程内缓存（每次请求不再重复执行 shell 命令）；扩展快捷键经 action handler 注册表真正触发；`/llama` handler 参数顺序修正；剪贴板图片随下一条 prompt 附加发送
+- pi_tui：ESC+控制字节组合键解析为可匹配键名（alt+enter/alt+backspace 生效）；LaTeX 预处理跳过围栏代码块；macOS 剪贴板脚本改为写临时文件输出 PNG
 - Markdown 表格换行单元格保留补位空格，换行后的 `│` 与首行/边框保持对齐
 - Markdown 表格在终端宽度过窄时不再变成空行：按 token 行号从源文本回退
   到原始 Markdown 表格（对齐 TS `token.raw` 回退）

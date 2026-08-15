@@ -498,11 +498,18 @@ def google_generative_ai_stream(
                 return client, response
 
             # 对齐 TS retryGoogleRequest：408/409/429/5xx 指数退避重试（可中断）。
-            max_retries = opts.get("maxRetries")
+            # StreamOptions 声明为 snake_case；camelCase 仅为兼容 settings 层旧键名
+            # （TypedDict 未声明的键经 get 返回 object，需 cast 后判别）。
+            max_retries: object = opts.get("max_retries")
+            if max_retries is None:
+                max_retries = opts.get("maxRetries")
+            max_retry_delay: object = opts.get("max_retry_delay_ms")
+            if max_retry_delay is None:
+                max_retry_delay = opts.get("maxRetryDelayMs")
             client, response = await retry_provider_request(
                 _open_stream,
                 max_retries=int(max_retries) if isinstance(max_retries, (int, float)) else 0,
-                max_retry_delay_ms=cast(int | None, opts.get("maxRetryDelayMs")),
+                max_retry_delay_ms=cast(int | None, max_retry_delay),
                 signal=opts.get("signal"),
             )
             stream.push(StartEvent(type="start", partial=_partial()))

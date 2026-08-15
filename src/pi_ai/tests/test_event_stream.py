@@ -3,6 +3,7 @@ Unit tests for EventStream.
 """
 
 import asyncio
+import gc
 
 import pytest
 
@@ -10,6 +11,20 @@ from pi_ai.utils._event_stream import AssistantMessageEventStream, EventStream
 from pi_ai._types import (
     AssistantMessage,
 )
+
+
+def test_unretrieved_cancelled_result_does_not_log(capsys) -> None:
+    """回归：流式任务被取消写 CancelledError 且无人 await result() 时，
+    不再打印 "Future exception was never retrieved"。"""
+
+    async def _main() -> None:
+        stream = AssistantMessageEventStream()
+        stream.error(asyncio.CancelledError())
+
+    asyncio.run(_main())
+    gc.collect()
+    captured = capsys.readouterr()
+    assert "never retrieved" not in captured.err
 
 
 class TestEventStream:

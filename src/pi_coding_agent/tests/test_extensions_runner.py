@@ -276,6 +276,34 @@ class TestRegistrations:
         assert slash_registry.get("greet") is not None
         assert keybindings.resolve("ctrl+k") is not None
 
+    def test_registry_shortcut_handler_wired_to_registrar(self):
+        """带 handler 的快捷键必须注册到 action handler registrar。"""
+        from pi_tui.keybindings import KeybindingsManager
+
+        extension = Extension(path="<inline>", resolved_path="<inline>")
+
+        def handler():
+            return None
+
+        extension.shortcuts["ctrl+alt+p"] = type(
+            "S",
+            (),
+            {
+                "shortcut": "ctrl+alt+p",
+                "description": "Plan",
+                "handler": handler,
+                "extension_path": "x",
+            },
+        )()
+        runner = ExtensionRunner([extension], cwd="/tmp")
+        registered: dict = {}
+        ExtensionRegistry(
+            runner,
+            keybindings_manager=KeybindingsManager(),
+            action_handler_registrar=lambda action_id, fn: registered.__setitem__(action_id, fn),
+        ).apply()
+        assert callable(registered.get("ext.ctrl_alt_p"))
+
     def test_registry_passthrough(self, tmp_path):
         extension = _make_extension()
         extension.commands["cmd"] = type(

@@ -407,3 +407,11 @@ async def test_auth_print_api_key_and_min_expiry(monkeypatch, capsys):
     # 缺 --model 报错
     code = await _cli._auth_print("api_key", [])
     assert code == 1
+
+    # 回归：CLI 入口传 "print-bearer-token" 时 --min-expiry 必须被接受
+    # （此前 kind 比较用错值，唯一合法子命令也恒被拒）。
+    code = await _cli._run_auth_command(
+        ["auth", "print-bearer-token", "--model", "m", "--min-expiry", "30m"]
+    )
+    assert code == 0
+    assert captured["overrides"] == {"min_oauth_validity_ms": 1_800_000}

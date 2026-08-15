@@ -56,6 +56,7 @@ class SlashContext:
         reload_all: Callable[[], Any] | None = None,
         trust_manager=None,
         session_manager=None,
+        settings_manager=None,
     ) -> None:
         self.session = session
         self.model_runtime = model_runtime
@@ -83,6 +84,8 @@ class SlashContext:
         # 项目信任管理器（/trust 用；TUI 注入）。
         self.trust_manager = trust_manager
         self.session_manager = session_manager
+        # 设置管理器（/settings 写入走其信任门控与锁；TUI 注入）。
+        self.settings_manager = settings_manager
 
     def notify(self, message: str) -> None:
         self._notify(message)
@@ -485,15 +488,25 @@ def register_builtin_commands(registry: SlashCommandRegistry) -> None:
                 parsed = json.loads(value.strip())
             except ValueError:
                 parsed = value.strip()
+            key = key.strip()
+            manager = context.settings_manager
+            if manager is not None:
+                # 走 SettingsManager：项目信任门控 + FileLock + 迁移(原子写)。
+                try:
+                    manager.set_project_setting(key, parsed)
+                except RuntimeError as exc:
+                    return str(exc)
+                return f"Saved {key} = {parsed}"
+            # 回退：无 SettingsManager(非 TUI 宿主)时保持旧行为。
             path = get_project_settings_path(cwd)
             data = _load_json(path)
-            data[key.strip()] = parsed
+            data[key] = parsed
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(
                 json.dumps(data, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
-            return f"Saved {key.strip()} = {parsed} to {path}"
+            return f"Saved {key} = {parsed} to {path}"
         merged = load_settings(cwd)
         return (
             f"Settings (global: {get_settings_path()}, project: {get_project_settings_path(cwd)}):\n"

@@ -93,6 +93,7 @@ from ..types import (
 )
 from ._shared import (
     build_error_message,
+    close_async_client,
     empty_usage,
     parse_tool_arguments,
     to_responses_tools,
@@ -771,6 +772,7 @@ async def responses_stream(
         生成最终 AssistantMessage
         """
 
+        client: Any = None
         try:
             client: Any = None
             # 创建 OpenAI SDK 客户端。
@@ -1286,11 +1288,7 @@ async def responses_stream(
         finally:
             # 显式关闭客户端：openai SDK 依赖 __del__ 调度异步关闭，
             # 取消/异常路径与循环引用场景下可能永不执行（连接池泄漏）。
-            if client is not None:
-                try:
-                    await client.close()
-                except Exception:
-                    pass
+            await close_async_client(client)
 
     track_background_task(_run())
     return stream

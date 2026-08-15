@@ -30,6 +30,11 @@ from pi_coding_agent.prompt_templates import PromptTemplate
 from pi_coding_agent.skills import Skill
 
 
+def _py_cmd() -> str:
+    """当前解释器路径(正斜杠形式):bash 双引号内反斜杠会被吃掉。"""
+    return sys.executable.replace("\\", "/")
+
+
 def _make_session(
     tmp_path: Path,
     runner: ExtensionRunner | None,
@@ -860,7 +865,7 @@ async def test_bash_tool_session_env_and_spawn_hook(tmp_path):
         "call_1",
         {
             "command": (
-                f"{sys.executable} -c \"import os;print(os.environ.get('PI_SESSION_ID','')"
+                f"{_py_cmd()} -c \"import os;print(os.environ.get('PI_SESSION_ID','')"
                 "+'|'+os.environ.get('CI',''))\""
             )
         },

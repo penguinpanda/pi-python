@@ -25,6 +25,11 @@ from pi_coding_agent.tools import (
 )
 
 
+def _py_cmd() -> str:
+    """当前解释器路径(正斜杠形式):bash 双引号内反斜杠会被吃掉。"""
+    return sys.executable.replace("\\", "/")
+
+
 class TestReadTool:
     """测试 read 工具。"""
 
@@ -275,10 +280,11 @@ async def test_bash_prepends_bin_dir_to_path(tmp_path, monkeypatch):
     tool = coding_tools.create_bash_tool(str(tmp_path))
     result = await tool.execute(
         "tc1",
-        {"command": f"{sys.executable} -c \"import os;print(os.environ.get('PATH',''))\""},
+        {"command": f"{_py_cmd()} -c \"import os;print(os.environ.get('PATH',''))\""},
     )
     text = result.content[0]["text"].strip()
-    assert text.split(os.pathsep)[0] == str(bin_dir)
+    # Git bash 启动时会把自己的 mingw64/bin 前置到 PATH,只断言 bin_dir 已加入。
+    assert str(bin_dir) in text.split(os.pathsep)
 
 
 @pytest.mark.asyncio
@@ -292,8 +298,7 @@ async def test_bash_spawn_hook_rewrites_command_cwd_and_env(tmp_path):
     def hook(ctx):
         return {
             "command": (
-                f'{sys.executable} -c "import os;'
-                "print(os.environ.get('PI_SPAWN','')+'|'+os.getcwd())\""
+                f"{_py_cmd()} -c \"import os;print(os.environ.get('PI_SPAWN','')+'|'+os.getcwd())\""
             ),
             "cwd": str(other_dir),
             "env": {**ctx["env"], "PI_SPAWN": "hooked"},

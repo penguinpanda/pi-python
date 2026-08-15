@@ -45,7 +45,7 @@ def create_extension(pi: ExtensionAPI):
         },
     )
 
-    async def _llama_command(args: str, ctx) -> None:
+    async def _llama_command(ctx, args: str) -> None:
         if ctx.mode != "tui":
             ctx.ui.notify("/llama is available in interactive mode", "warning")
             return

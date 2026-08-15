@@ -31,6 +31,10 @@ Thumbs.db
 .env
 bak/
 work/
+pi-test-*/
+pi-probe-*/
+pi-p-*/
+pi-tmp-tests/
 docs/nd_upload/
 .pi/
 src/pi_evals/.eval/

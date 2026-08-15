@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import platform
 import tarfile
 from pathlib import Path
 
@@ -11,8 +12,13 @@ import pytest
 from pi_coding_agent.tools import _ensure_tool
 
 
+def _binary_name(name: str) -> str:
+    """与 get_tool_path/_download_tool 一致的平台二进制名（Windows 加 .exe）。"""
+    return name + (".exe" if platform.system() == "Windows" else "")
+
+
 def test_get_tool_path_prefers_cached_binary(tmp_path: Path) -> None:
-    binary = tmp_path / "fd"
+    binary = tmp_path / _binary_name("fd")
     binary.write_bytes(b"#!/bin/sh\n")
     binary.chmod(0o755)
     assert _ensure_tool.get_tool_path("fd", bin_dir=tmp_path) == str(binary)
@@ -47,7 +53,7 @@ async def test_ensure_tool_offline_returns_none(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_ensure_tool_returns_cached_path(tmp_path: Path) -> None:
-    binary = tmp_path / "fd"
+    binary = tmp_path / _binary_name("fd")
     binary.write_bytes(b"#!/bin/sh\n")
     binary.chmod(0o755)
     result = await _ensure_tool.ensure_tool("fd", bin_dir=tmp_path)
@@ -59,7 +65,7 @@ async def test_download_tool_extracts_and_caches(tmp_path: Path, monkeypatch) ->
     async def fake_download(_url: str, dest: Path) -> None:
         with tarfile.open(dest, "w:gz") as archive:
             payload = b"#!/bin/sh\n"
-            info = tarfile.TarInfo("fd-v1.0.0-x86_64-unknown-linux-gnu/fd")
+            info = tarfile.TarInfo(f"fd-v1.0.0-x86_64-unknown-linux-gnu/{_binary_name('fd')}")
             info.size = len(payload)
             info.mode = 0o755
             archive.addfile(info, io.BytesIO(payload))
@@ -78,6 +84,6 @@ async def test_download_tool_extracts_and_caches(tmp_path: Path, monkeypatch) ->
         get_asset_name=lambda _version, _plat, _arch: "fd-test.tar.gz",
     )
     result = await _ensure_tool._download_tool(config, tmp_path)
-    assert result == str(tmp_path / "fd")
-    assert (tmp_path / "fd").is_file()
+    assert result == str(tmp_path / _binary_name("fd"))
+    assert (tmp_path / _binary_name("fd")).is_file()
     assert not (tmp_path / "fd-test.tar.gz").exists()

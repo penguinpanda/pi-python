@@ -45,6 +45,11 @@ def test_parse_source() -> None:
     assert (npm.type, npm.name) == ("npm", "pi-extension-example")
     git = parse_source("git:https://github.com/x/y.git@v1")
     assert (git.type, git.name, git.ref) == ("git", "y", "v1")
+    # 回归：Windows 本地路径（反斜杠/盘符）的 git 源目录名推导。
+    git_win = parse_source("git:C:\\Users\\me\\upstream")
+    assert (git_win.type, git_win.name) == ("git", "upstream")
+    git_win_trailing = parse_source("git:C:\\Users\\me\\upstream.git\\")
+    assert git_win_trailing.name == "upstream"
     local = parse_source("/tmp/my-dir")
     assert (local.type, local.name) == ("local", "my-dir")
 

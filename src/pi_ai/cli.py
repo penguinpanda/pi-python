@@ -16,6 +16,7 @@ OAuth 引擎见 pi_ai.auth.oauth（builtin_oauth_providers）。
 
 import asyncio
 import os
+import getpass
 import sys
 
 from pathlib import Path
@@ -61,6 +62,9 @@ class _CliAuthInteraction:
                     print("Invalid selection.")
         placeholder = prompt.get("placeholder")
         suffix = f" ({placeholder})" if placeholder else ""
+        if prompt.get("type") == "secret":
+            # API key 等秘密输入不回显（cloudflare 等 provider 使用）。
+            return getpass.getpass(f"{prompt.get('message', '')}{suffix}: ")
         return input(f"{prompt.get('message', '')}{suffix}: ")
 
     def notify(self, event: AuthEvent) -> None:

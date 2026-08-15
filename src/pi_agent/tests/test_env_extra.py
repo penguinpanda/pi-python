@@ -63,13 +63,17 @@ def test_result_helpers_and_error_mapping(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_resolve_path_home_and_file_url(monkeypatch, tmp_path: Path) -> None:
     env = _env(tmp_path)
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    # Windows 的 expanduser 使用 USERPROFILE 而非 HOME。
+    monkeypatch.setenv("USERPROFILE", str(home))
 
     tilde = await env.absolute_path("~/file.txt")
     assert tilde[0] is True
-    assert tilde[1] == str(tmp_path / "home" / "file.txt")
+    assert tilde[1] == str(home / "file.txt")
 
-    file_url = await env.absolute_path(f"file://{tmp_path / 'a b' / 'x.txt'}")
+    # 标准文件 URI（Windows 为 file:///C:/...，POSIX 为 file:///tmp/...）。
+    file_url = await env.absolute_path((tmp_path / "a b" / "x.txt").as_uri())
     assert file_url[0] is True
     assert file_url[1] == str(tmp_path / "a b" / "x.txt")
 
@@ -171,10 +175,11 @@ async def test_exec_cancellation_kills_process(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_cleanup_kills_active_process(tmp_path: Path) -> None:
     env = _env(tmp_path)
+    # 用当前解释器睡眠,避免依赖 sh(Windows 无 sh)。
     process = await asyncio.create_subprocess_exec(
-        "sh",
+        sys.executable,
         "-c",
-        "sleep 30",
+        "import time; time.sleep(30)",
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
     )

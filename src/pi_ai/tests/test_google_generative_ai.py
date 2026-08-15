@@ -278,6 +278,34 @@ async def test_google_request_retries_on_429(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_google_request_retries_on_429_snake_case_options(monkeypatch) -> None:
+    """snake_case max_retries（StreamOptions 声明键名）同样触发重试。"""
+    attempts: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(1)
+        if len(attempts) < 2:
+            return httpx.Response(429, headers={"retry-after-ms": "10"})
+        return httpx.Response(200, text=_text_sse(), headers={"content-type": "text/event-stream"})
+
+    monkeypatch.setattr(
+        google_generative_ai,
+        "_AsyncClient",
+        lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(handler), **kwargs),
+    )
+    stream = google_generative_ai.google_generative_ai_stream(
+        _model(),
+        _context(),
+        "sk-test",
+        "https://generativelanguage.googleapis.com/v1beta",
+        {"max_retries": 2, "max_retry_delay_ms": 1000},
+    )
+    events = [event async for event in stream]
+    assert events[-1]["type"] == "done"
+    assert len(attempts) == 2
+
+
+@pytest.mark.asyncio
 async def test_google_request_no_retry_without_max_retries(monkeypatch) -> None:
     """默认 maxRetries=0：429 不重试，直接 error 事件。"""
     attempts: list[int] = []

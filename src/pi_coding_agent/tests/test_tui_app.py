@@ -54,6 +54,17 @@ def _make_app(
     )
 
 
+async def _wait_until(condition, timeout: float = 3.0, interval: float = 0.02) -> bool:
+    """轮询等待异步条件成立（替代固定 sleep，避免慢机器上的时序 flake）。"""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        if condition():
+            return True
+        await asyncio.sleep(interval)
+    return False
+
+
 async def _run(app: PiTuiApp, term: FakeTerminal, actions=None) -> None:
     """启动应用，执行 actions(term, app)，然后退出。"""
     task = asyncio.create_task(app.run_async())
@@ -100,14 +111,44 @@ async def test_typing_and_submit_calls_prompt() -> None:
 
 
 @pytest.mark.asyncio
+async def test_pending_image_attached_to_next_prompt() -> None:
+    """粘贴图片后,下一条 prompt 附带 base64 图片并清除 pending。"""
+    import base64
+
+    term = FakeTerminal(size=(100, 30))
+    session = _make_session()
+    session.expand_prompt.side_effect = lambda text: text
+    app = _make_app(term, session)
+
+    async def actions(_term, _app) -> None:
+        _app._pending_image = b"PNGDATA"
+        term.feed_text("look at this")
+        await asyncio.sleep(0.1)
+        term.feed(b"\r")
+        await asyncio.sleep(0.2)
+        session.prompt.assert_called_once()
+        text_arg, images_arg = session.prompt.call_args[0]
+        assert text_arg == "look at this"
+        assert images_arg == [
+            {
+                "type": "image",
+                "data": base64.b64encode(b"PNGDATA").decode("ascii"),
+                "mime_type": "image/png",
+            }
+        ]
+        assert _app._pending_image is None
+
+    await _run(app, term, actions)
+
+
+@pytest.mark.asyncio
 async def test_slash_autocomplete_inline_and_submit() -> None:
     term = FakeTerminal(size=(100, 30))
     app = _make_app(term)
 
     async def actions(_term, _app) -> None:
         term.feed_text("/mo")
-        await asyncio.sleep(0.2)
-        assert _app._completion_items
+        assert await _wait_until(lambda: bool(_app._completion_items))
         values = [item["value"] for item in _app._completion_items]
         assert values[0] == "model"
         assert _app._editor.completion_active is True
@@ -146,8 +187,7 @@ async def test_completion_navigate_and_hide() -> None:
 
     async def actions(_term, _app) -> None:
         term.feed_text("/mo")
-        await asyncio.sleep(0.2)
-        assert _app._completion_items
+        assert await _wait_until(lambda: bool(_app._completion_items))
         _app.on_pi_editor_completion_navigate_requested(SimpleNamespace(delta=1))
         assert _app._completion_index == 1
         _app.on_pi_editor_completion_hide_requested(SimpleNamespace())

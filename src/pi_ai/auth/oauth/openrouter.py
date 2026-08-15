@@ -6,6 +6,7 @@ OpenRouter 授权码换取的是永久 API key（refresh 返回原凭证）。
 """
 
 import asyncio
+import html
 import sys
 import urllib.parse
 import uuid
@@ -30,25 +31,33 @@ CALLBACK_READ_TIMEOUT = 10.0
 FALLBACK_CALLBACK_URL = f"http://{CALLBACK_HOST}:1457{CALLBACK_PATH}"
 
 
-def _parse_authorization_input(value: str | None) -> tuple[str | None, str | None]:
-    """从用户输入提取 (授权码, state)（URL / code= 串 / 原始码）。"""
+def _parse_authorization_input(value: str | None, expected_state: str | None = None) -> str | None:
+    """从用户输入提取授权码（URL / code= 串 / 原始码）。
+
+    URL/code= 串携带 state 且与当前 flow 不一致时返回 None，
+    拒绝旧登录 code 被误用（纯授权码粘贴无 state 可校验，由 PKCE 兜底）。
+    """
     if not isinstance(value, str):
-        return None, None
+        return None
     trimmed = value.strip()
     if not trimmed:
-        return None, None
+        return None
     if trimmed.startswith(("http://", "https://")):
         parsed = urllib.parse.urlparse(trimmed)
         query = urllib.parse.parse_qs(parsed.query)
-        code = query.get("code")
         state = query.get("state")
-        return (code[0] if code else None), (state[0] if state else None)
+        if expected_state is not None and state and state[0] != expected_state:
+            return None
+        code = query.get("code")
+        return code[0] if code else None
     if "code=" in trimmed:
         params = urllib.parse.parse_qs(trimmed)
-        code = params.get("code")
         state = params.get("state")
-        return (code[0] if code else None), (state[0] if state else None)
-    return trimmed, None
+        if expected_state is not None and state and state[0] != expected_state:
+            return None
+        code = params.get("code")
+        return code[0] if code else None
+    return trimmed
 
 
 async def exchange_authorization_code(code: str, verifier: str) -> OAuthCredential:
@@ -143,10 +152,7 @@ async def _login(interaction: AuthInteraction) -> OAuthCredential:
     if not manual:
         raise RuntimeError("OpenRouter login cancelled")
 
-    pasted_code, pasted_state = _parse_authorization_input(manual)
-    if pasted_state is not None and pasted_state != state:
-        raise RuntimeError("OpenRouter login failed: state mismatch in pasted URL")
-    code = pasted_code
+    code = _parse_authorization_input(manual, state)
     if not code:
         raise RuntimeError("Missing authorization code")
     interaction.notify({"type": "progress", "message": "Exchanging authorization code..."})
@@ -253,7 +259,7 @@ async def _noop() -> None:
 
 
 async def _respond_openrouter(writer: asyncio.StreamWriter, status: int, message: str) -> None:
-    body = f"<html><body><p>{message}</p></body></html>".encode("utf-8")
+    body = f"<html><body><p>{html.escape(message)}</p></body></html>".encode("utf-8")
     reason = {200: "OK", 400: "Bad Request", 404: "Not Found", 500: "Internal Server Error"}.get(
         status, "OK"
     )
