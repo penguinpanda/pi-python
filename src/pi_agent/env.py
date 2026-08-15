@@ -10,9 +10,11 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import shutil
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Literal, Protocol, Tuple, TypeAlias
 
@@ -38,6 +40,21 @@ def get_or_throw(result: Result) -> Any:
     if ok_flag:
         return value
     raise value
+
+
+def get_or_undefined(result: Result) -> Any | None:
+    """返回成功值；失败返回 None（getOrUndefined）。"""
+    ok_flag, value = result
+    return value if ok_flag else None
+
+
+def to_error(value: Any) -> "FileError | ExecutionError":
+    """把任意值规范化为基础错误（toError 的 Python 子集）。"""
+    if isinstance(value, (FileError, ExecutionError)):
+        return value
+    if isinstance(value, BaseException):
+        return to_file_error(value)
+    return FileError("unknown", str(value))
 
 
 FileErrorCode = Literal[
@@ -240,6 +257,36 @@ class ExecutionEnv(FileSystem, Shell, Protocol):
 # ---------------------------------------------------------------------------
 
 
+async def _kill_process_tree(process: asyncio.subprocess.Process) -> None:
+    """终止进程及其子进程（对齐 TS killProcessTree）。"""
+    if process.pid is None:
+        return
+    if os.name == "nt":
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "taskkill",
+                "/F",
+                "/T",
+                "/PID",
+                str(process.pid),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.wait()
+        except BaseException:
+            pass
+    else:
+        killpg = getattr(os, "killpg", None)
+        if killpg is not None:
+            try:
+                killpg(process.pid, 9)
+            except BaseException:
+                try:
+                    process.kill()
+                except BaseException:
+                    pass
+
+
 class PythonExecutionEnv:
     """Python 平台 ExecutionEnv（pathlib + asyncio subprocess）。"""
 
@@ -330,9 +377,10 @@ class PythonExecutionEnv:
         try:
             # Read as bytes first to preserve original line endings (\r\n, \r, \n).
             # Path.read_text() would apply universal newline conversion,
-            # losing \r before \n.
+            # losing \r before \n. Invalid UTF-8 sequences are replaced with
+            # U+FFFD (Node Buffer.toString("utf8") behaviour).
             data = await asyncio.to_thread(Path(resolved).read_bytes)
-            return (True, data.decode("utf-8"))
+            return (True, data.decode("utf-8", errors="replace"))
         except BaseException as error:
             return (False, to_file_error(error, resolved))
 
@@ -348,6 +396,8 @@ class PythonExecutionEnv:
             return (True, [])
         try:
             content = await asyncio.to_thread(Path(resolved).read_text, encoding="utf-8")
+            if content == "":
+                return (True, [])
             lines = content.split("\n")
             if content.endswith("\n"):
                 lines.pop()
@@ -426,7 +476,7 @@ class PythonExecutionEnv:
             return (
                 True,
                 FileInfo(
-                    name=os.path.basename(resolved.rstrip("/\\")) or resolved,
+                    name=(os.path.basename(resolved.rstrip("/\\")) or ""),
                     path=resolved,
                     kind=kind,
                     size=stats.st_size,
@@ -496,13 +546,34 @@ class PythonExecutionEnv:
     async def remove(self, path: str, options: dict[str, Any] | None = None) -> Result:
         resolved = self._resolve_path(path)
         options = options or {}
+        recursive = bool(options.get("recursive", False))
+        force = bool(options.get("force", False))
         try:
             target = Path(resolved)
-            if target.is_dir():
-                shutil.rmtree(resolved, ignore_errors=options.get("force", False))
+            if target.is_symlink():
+                await asyncio.to_thread(target.unlink, missing_ok=force)
+            elif target.is_dir():
+                if recursive:
+                    try:
+                        await asyncio.to_thread(shutil.rmtree, resolved)
+                    except FileNotFoundError:
+                        if not force:
+                            raise
+                else:
+                    entries = await asyncio.to_thread(os.listdir, resolved)
+                    if entries:
+                        return (
+                            False,
+                            FileError("is_directory", "Directory is not empty", resolved),
+                        )
+                    await asyncio.to_thread(target.rmdir)
             else:
-                await asyncio.to_thread(target.unlink, missing_ok=options.get("force", False))
+                await asyncio.to_thread(target.unlink, missing_ok=force)
             return (True, None)
+        except FileNotFoundError as error:
+            if force:
+                return (True, None)
+            return (False, to_file_error(error, resolved))
         except BaseException as error:
             return (False, to_file_error(error, resolved))
 
@@ -535,11 +606,12 @@ class PythonExecutionEnv:
     async def create_temp_file(self, options: dict[str, Any] | None = None) -> Result:
         options = options or {}
         try:
-            fd, file_path = tempfile.mkstemp(
-                prefix=options.get("prefix", ""),
-                suffix=options.get("suffix", ""),
+            tmp_dir = await asyncio.to_thread(tempfile.mkdtemp, prefix="tmp-")
+            file_path = os.path.join(
+                tmp_dir,
+                f"{options.get('prefix', '')}{uuid.uuid4().hex}{options.get('suffix', '')}",
             )
-            os.close(fd)
+            Path(file_path).touch()
             return (True, file_path)
         except BaseException as error:
             return (False, to_file_error(error))
@@ -587,6 +659,9 @@ class PythonExecutionEnv:
             )
         if os.path.exists("/bin/bash"):
             return (True, "/bin/bash")
+        bash = shutil.which("bash")
+        if bash:
+            return (True, bash)
         sh = shutil.which("sh")
         if sh:
             return (True, sh)
@@ -597,10 +672,23 @@ class PythonExecutionEnv:
         if options.abort_signal is not None and options.abort_signal.is_set():
             return (False, ExecutionError("aborted", "aborted"))
         timeout = options.timeout
-        if timeout is not None and (timeout <= 0 or not isinstance(timeout, (int, float))):
+        if timeout is not None and (
+            not isinstance(timeout, (int, float))
+            or isinstance(timeout, bool)
+            or not math.isfinite(timeout)
+            or timeout <= 0
+        ):
             return (
                 False,
                 ExecutionError("timeout", "Invalid timeout: must be a finite number of seconds"),
+            )
+        if timeout is not None and timeout > (2**31 - 1) / 1000:
+            return (
+                False,
+                ExecutionError(
+                    "timeout",
+                    f"Invalid timeout: maximum is {(2**31 - 1) / 1000} seconds",
+                ),
             )
 
         cwd = self._resolve_path(options.cwd) if options.cwd else self.cwd
@@ -609,7 +697,7 @@ class PythonExecutionEnv:
                 False,
                 ExecutionError(
                     "spawn_error",
-                    f"Working directory does not exist: {cwd}",
+                    f"Working directory does not exist: {cwd}\nCannot execute bash commands.",
                 ),
             )
 
@@ -619,7 +707,7 @@ class PythonExecutionEnv:
         shell = shell_result[1]
 
         env = dict(os.environ) if options.inherit_env else {}
-        if self._shell_env:
+        if options.inherit_env and self._shell_env:
             env.update(self._shell_env)
         for key in options.unset_env or []:
             env.pop(key, None)
@@ -657,53 +745,31 @@ class PythonExecutionEnv:
                 start_new_session=start_new_session,
             )
         except BaseException as error:
-            return (False, to_execution_error(error))
+            return (False, ExecutionError("spawn_error", str(error), error))
 
         self._active_processes.add(process)
 
-        async def _kill_tree() -> None:
-            if process.pid is None:
-                return
-            if os.name == "nt":
+        def _wrap_callback(callback: Callable[[str], None] | None) -> Callable[[str], None]:
+            def _on_chunk(chunk: str) -> None:
                 try:
-                    proc = await asyncio.create_subprocess_exec(
-                        "taskkill",
-                        "/F",
-                        "/T",
-                        "/PID",
-                        str(process.pid),
-                        stdout=asyncio.subprocess.DEVNULL,
-                        stderr=asyncio.subprocess.DEVNULL,
+                    if callback:
+                        callback(chunk)
+                except BaseException as error:
+                    nonlocal callback_error
+                    callback_error = (
+                        error
+                        if isinstance(error, ExecutionError)
+                        else ExecutionError("callback_error", str(error), error)
                     )
-                    await proc.wait()
-                except BaseException:
-                    pass
-            else:
-                killpg = getattr(os, "killpg", None)
-                if killpg is not None:
-                    try:
-                        killpg(process.pid, 9)
-                    except BaseException:
-                        try:
-                            process.kill()
-                        except BaseException:
-                            pass
+                    # 对齐 TS nodejs.ts 的 onAbort：callback 异常时立即终止子进程，
+                    # 避免 exec 一直等到命令自然结束。
+                    asyncio.get_running_loop().create_task(_kill_process_tree(process))
+                    raise
 
-        def _on_stdout(chunk: str) -> None:
-            try:
-                if options.on_stdout:
-                    options.on_stdout(chunk)
-            except BaseException as error:
-                nonlocal callback_error
-                callback_error = (
-                    error
-                    if isinstance(error, ExecutionError)
-                    else ExecutionError("callback_error", str(error), error)
-                )
-                # 对齐 TS nodejs.ts 的 onAbort：callback 异常时立即终止子进程，
-                # 避免 exec 一直等到命令自然结束。
-                asyncio.get_running_loop().create_task(_kill_tree())
-                raise
+            return _on_chunk
+
+        _on_stdout = _wrap_callback(options.on_stdout)
+        _on_stderr = _wrap_callback(options.on_stderr)
 
         abort_waiter: asyncio.Task | None = None
         abort_signal = options.abort_signal
@@ -711,7 +777,7 @@ class PythonExecutionEnv:
 
             async def _on_abort() -> None:
                 await abort_signal.wait()
-                await _kill_tree()
+                await _kill_process_tree(process)
 
             abort_waiter = asyncio.create_task(_on_abort())
 
@@ -728,7 +794,7 @@ class PythonExecutionEnv:
                     callback(text)
 
         stdout_task = asyncio.create_task(_reader(process.stdout, stdout_chunks, _on_stdout))
-        stderr_task = asyncio.create_task(_reader(process.stderr, stderr_chunks, options.on_stderr))
+        stderr_task = asyncio.create_task(_reader(process.stderr, stderr_chunks, _on_stderr))
 
         try:
             if timeout is not None:
@@ -736,19 +802,33 @@ class PythonExecutionEnv:
                     exit_code = await asyncio.wait_for(process.wait(), timeout=timeout)
                 except asyncio.TimeoutError:
                     timed_out = True
-                    await _kill_tree()
+                    await _kill_process_tree(process)
                     exit_code = None
             else:
                 exit_code = await process.wait()
         except asyncio.CancelledError:
             # 外层任务被取消时必须终止子进程，否则会遗留孤儿进程，
             # 且后续 cleanup() 无法回收（进程已从 _active_processes 丢弃）。
-            await _kill_tree()
+            await _kill_process_tree(process)
             raise
         finally:
             # shield 保证在任务已被取消时收尾逻辑（join reader、cancel abort
-            # waiter、移除进程句柄）仍然执行。
-            await asyncio.shield(asyncio.gather(stdout_task, stderr_task, return_exceptions=True))
+            # waiter、移除进程句柄）仍然执行。子进程退出后给 reader 100ms
+            # 宽限排空管道；后台孙进程仍持有管道时取消 reader 而不是挂死。
+            try:
+                await asyncio.shield(
+                    asyncio.wait_for(
+                        asyncio.gather(stdout_task, stderr_task, return_exceptions=True),
+                        timeout=0.1,
+                    )
+                )
+            except asyncio.TimeoutError:
+                for task in (stdout_task, stderr_task):
+                    if not task.done():
+                        task.cancel()
+                await asyncio.shield(
+                    asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+                )
             if abort_waiter is not None:
                 abort_waiter.cancel()
                 try:
@@ -763,14 +843,15 @@ class PythonExecutionEnv:
             return (False, ExecutionError("timeout", f"timeout:{options.timeout}"))
         if options.abort_signal is not None and options.abort_signal.is_set():
             return (False, ExecutionError("aborted", "aborted"))
-        return (True, ShellResult("".join(stdout_chunks), "".join(stderr_chunks), exit_code or 0))
+        normalized_exit_code = 0 if exit_code is None or exit_code < 0 else exit_code
+        return (
+            True,
+            ShellResult("".join(stdout_chunks), "".join(stderr_chunks), normalized_exit_code),
+        )
 
     async def cleanup(self) -> None:
         for process in list(self._active_processes):
-            try:
-                process.kill()
-            except BaseException:
-                pass
+            await _kill_process_tree(process)
         self._active_processes.clear()
 
 

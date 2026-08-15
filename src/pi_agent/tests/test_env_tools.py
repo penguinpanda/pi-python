@@ -255,18 +255,18 @@ class TestReadTool:
         assert result.content[0]["text"] is not None
 
     @pytest.mark.asyncio
-    async def test_read_not_found_includes_no_disk_search_guidance(self, tmp_path):
-        """回归（P19）：read 找不到文件时提示不要全盘搜索。"""
+    async def test_read_not_found_propagates_file_error(self, tmp_path):
+        """read 找不到文件时原样传播 FileError（对齐 TS read.ts）。"""
         env = PythonExecutionEnv(str(tmp_path))
         tool = create_read_tool()
-        with pytest.raises(ValueError) as excinfo:
+        with pytest.raises(FileError) as excinfo:
             await tool.execute("t1", {"path": "missing.txt"}, None, None, _tool_context(env))
-        assert "do not search the whole disk" in str(excinfo.value)
+        assert excinfo.value.code == "not_found"
 
-    def test_read_description_scoped_to_working_directory(self):
+    def test_read_description_has_no_working_directory_guidance(self):
         tool = create_read_tool()
-        assert "current working directory" in tool.description
-        assert "do not search the whole disk" in tool.description
+        assert "current working directory" not in tool.description
+        assert "do not search the whole disk" not in tool.description
 
     @pytest.mark.asyncio
     async def test_read_offset_beyond_end_raises(self, tmp_path):
@@ -376,10 +376,10 @@ class TestEditTool:
 
 
 class TestBashTool:
-    def test_bash_description_scoped_to_working_directory(self):
+    def test_bash_description_has_no_working_directory_guidance(self):
         tool = create_bash_tool()
         assert "current working directory" in tool.description
-        assert "do not scan the whole disk" in tool.description
+        assert "do not scan the whole disk" not in tool.description
 
     @pytest.mark.asyncio
     async def test_bash_echo(self, tmp_path):

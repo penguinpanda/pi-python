@@ -69,7 +69,15 @@ def truncate_head(
 
     if total_lines <= max_lines and total_bytes <= max_bytes:
         return TruncationResult(
-            content, False, None, total_lines, total_bytes, total_lines, total_bytes
+            content,
+            False,
+            None,
+            total_lines,
+            total_bytes,
+            total_lines,
+            total_bytes,
+            max_lines=max_lines,
+            max_bytes=max_bytes,
         )
 
     first_line_bytes = utf8_byte_length(lines[0]) if lines else 0
@@ -83,6 +91,8 @@ def truncate_head(
             output_lines=0,
             output_bytes=0,
             first_line_exceeds_limit=True,
+            max_lines=max_lines,
+            max_bytes=max_bytes,
         )
 
     output_lines_arr: list[str] = []
@@ -107,6 +117,8 @@ def truncate_head(
         total_bytes=total_bytes,
         output_lines=len(output_lines_arr),
         output_bytes=utf8_byte_length(output_content),
+        max_lines=max_lines,
+        max_bytes=max_bytes,
     )
 
 
@@ -139,7 +151,15 @@ def truncate_tail(
 
     if total_lines <= max_lines and total_bytes <= max_bytes:
         return TruncationResult(
-            content, False, None, total_lines, total_bytes, total_lines, total_bytes
+            content,
+            False,
+            None,
+            total_lines,
+            total_bytes,
+            total_lines,
+            total_bytes,
+            max_lines=max_lines,
+            max_bytes=max_bytes,
         )
 
     output_lines_arr: list[str] = []
@@ -174,10 +194,20 @@ def truncate_tail(
         output_lines=len(output_lines_arr),
         output_bytes=utf8_byte_length(output_content),
         last_line_partial=last_line_partial,
+        max_lines=max_lines,
+        max_bytes=max_bytes,
     )
 
 
+def _utf16_length(text: str) -> int:
+    return len(text.encode("utf-16-le", errors="replace")) // 2
+
+
 def truncate_line(line: str, max_chars: int = GREP_MAX_LINE_LENGTH) -> tuple[str, bool]:
-    if len(line) <= max_chars:
+    """截断单行；字符计数按 UTF-16 单元（对齐 JS line.length）。"""
+    if _utf16_length(line) <= max_chars:
         return line, False
-    return f"{line[:max_chars]}... [truncated]", True
+    prefix = line
+    while prefix and _utf16_length(prefix) > max_chars:
+        prefix = prefix[:-1]
+    return f"{prefix}... [truncated]", True

@@ -264,8 +264,9 @@ finalize _finalize_tool_call：
 from __future__ import annotations
 
 import asyncio
+import inspect
 from dataclasses import dataclass
-from typing import cast
+from typing import Any, cast
 
 from pi_ai.types import (
     AssistantMessage,
@@ -277,6 +278,7 @@ from pi_ai.types import (
     TextContent,
     ToolCall,
     ToolResultMessage,
+    Model,
     now_ms,
 )
 from pi_ai.utils.retry import (
@@ -302,7 +304,9 @@ from ._types import (
     BeforeToolCallContext,
     BeforeToolCallResult,
     PrepareNextTurnContext,
+    ShouldStopAfterTurnContext,
     StreamFn,
+    ThinkingLevel,
 )
 
 
@@ -600,6 +604,7 @@ async def _run_loop(
     tools = list(context.tools) if context.tools else []
     loop_new_messages: list[AgentMessage] = list(new_messages) if new_messages is not None else []
     current_model = config.model
+    current_thinking_level = config.thinking_level
     first = first_turn
 
     # 首轮开始前轮询一次 steering 队列（用户可能在等待期间已 steer()）
@@ -637,7 +642,14 @@ async def _run_loop(
 
             # -- 流式获取助手回复 --
             assistant_msg = await _stream_assistant_response(
-                turn_context, config, emit, signal, stream_fn, aborted_sink=messages
+                turn_context,
+                config,
+                emit,
+                signal,
+                stream_fn,
+                aborted_sink=messages,
+                model=current_model,
+                thinking_level=current_thinking_level,
             )
             messages.append(assistant_msg)
             loop_new_messages.append(assistant_msg)
@@ -652,8 +664,8 @@ async def _run_loop(
                         "tool_results": [],
                     }
                 )
-                await emit({"type": "agent_end", "messages": messages})
-                return messages
+                await emit({"type": "agent_end", "messages": loop_new_messages})
+                return loop_new_messages
 
             # -- 提取工具调用 --
             tool_calls: list[ToolCall] = cast(
@@ -665,9 +677,11 @@ async def _run_loop(
             has_more_tool_calls = False
 
             if tool_calls:
-                # 截断保护：stop_reason="length" 时参数可能不完整
+                # 截断保护：stop_reason="length" 时参数可能不完整。
+                # TS 对每个调用补发 tool_execution_start/end，并让模型重新发起。
                 if stop_reason == "length":
-                    tool_results = _fail_tool_calls_from_truncated(tool_calls)
+                    tool_results = await _fail_tool_calls_from_truncated(tool_calls, emit)
+                    has_more_tool_calls = True
                 else:
                     tool_context = AgentContext(
                         system_prompt=context.system_prompt,
@@ -732,20 +746,30 @@ async def _run_loop(
                         tools = list(context.tools) if context.tools else []
                     if _update.model is not None:
                         current_model = _update.model
-                        # 下一次 LLM 调用读取 config.model（_stream_assistant_response 不感知
-                        # 局部 current_model），此处同步以让 prepare_next_turn 的模型替换生效。
-                        config.model = current_model
+                    if _update.thinking_level is not None:
+                        # TS：thinkingLevel === "off" 时 reasoning 置为 undefined。
+                        current_thinking_level = _update.thinking_level
 
             # -- should_stop_after_turn --
             if config.should_stop_after_turn is not None:
-                raw_stop = config.should_stop_after_turn(turn_context)
+                stop_ctx = ShouldStopAfterTurnContext(
+                    message=assistant_msg,
+                    tool_results=list(tool_results),
+                    context=AgentContext(
+                        system_prompt=context.system_prompt,
+                        messages=messages,
+                        tools=tools,
+                    ),
+                    new_messages=list(loop_new_messages),
+                )
+                raw_stop = config.should_stop_after_turn(stop_ctx)
                 if asyncio.iscoroutine(raw_stop):
                     should_stop = await raw_stop
                 else:
                     should_stop = raw_stop
                 if should_stop:
-                    await emit({"type": "agent_end", "messages": messages})
-                    return messages
+                    await emit({"type": "agent_end", "messages": loop_new_messages})
+                    return loop_new_messages
 
             # -- 轮询 steering 队列（趁 agent 还在工作时注入引导消息）--
             if config.get_steering_messages is not None:
@@ -761,8 +785,8 @@ async def _run_loop(
         # 无更多消息，退出
         break
 
-    await emit({"type": "agent_end", "messages": messages})
-    return messages
+    await emit({"type": "agent_end", "messages": loop_new_messages})
+    return loop_new_messages
 
 
 # ============================================================================
@@ -777,6 +801,9 @@ async def _stream_assistant_response(
     signal: asyncio.Event | None,
     stream_fn: StreamFn,
     aborted_sink: list[AgentMessage] | None = None,
+    *,
+    model: Model | None = None,
+    thinking_level: ThinkingLevel | None = None,
 ) -> AssistantMessage:
     """
     负责一次 LLM 推理过程。
@@ -813,21 +840,30 @@ async def _stream_assistant_response(
 
     """
 
-    # 1. transformContext（可选）
+    # 1. transformContext（可选；TS 第二参数为 AbortSignal）
     agent_messages = list(context.messages)
     if config.transform_context is not None:
-        agent_messages = await config.transform_context(agent_messages)
+        raw_transform = _call_with_signal(config.transform_context, agent_messages, signal)
+        if asyncio.iscoroutine(raw_transform):
+            raw_transform = await raw_transform
+        if raw_transform is not None:
+            agent_messages = list(raw_transform)
 
     # 2. convertToLlm（必须）
     llm_messages = config.convert_to_llm(agent_messages)
 
-    # 3. get_api_key（可选，支持同步 / 异步回调，对齐 TS Promise<string|undefined>）
+    active_model = model or config.model
+
+    # 3. get_api_key（可选，支持同步 / 异步回调，对齐 TS Promise<string|undefined>；
+    # 未解析到时回退到 config.api_key）。
     api_key: str | None = None
     if config.get_api_key is not None:
-        raw_key = config.get_api_key(config.model.provider)
+        raw_key = config.get_api_key(active_model.provider)
         if asyncio.iscoroutine(raw_key):
             raw_key = await raw_key
         api_key = raw_key
+    if not api_key:
+        api_key = config.api_key
 
     # 4. 构建 LLM context
     from pi_ai import Context as LlmContext
@@ -840,6 +876,8 @@ async def _stream_assistant_response(
 
     # 5. 调用 LLM（带应用层重试）。
     options: SimpleStreamOptions = SimpleStreamOptions()
+    if signal is not None:
+        options["signal"] = signal
     if api_key is not None:
         options["api_key"] = api_key
 
@@ -854,14 +892,20 @@ async def _stream_assistant_response(
         options["thinking_budgets"] = config.thinking_budgets
     if config.transport is not None:
         options["transport"] = config.transport
-    if config.thinking_level is not None:
-        options["reasoning"] = config.thinking_level
+    if config.on_payload is not None:
+        options["on_payload"] = config.on_payload
+    if config.on_response is not None:
+        options["on_response"] = config.on_response
+    if config.max_retry_delay_ms is not None:
+        options["max_retry_delay_ms"] = config.max_retry_delay_ms
+    # TS：thinkingLevel === "off" 映射为 reasoning undefined（不传该键）。
+    if thinking_level is not None and thinking_level != "off":
+        options["reasoning"] = thinking_level
 
-    # retry_policy 为 None 时使用默认策略（enabled=True, max_retries=3）。
-    # 显式传入 RetryPolicy(enabled=False) 可关闭重试。
+    # retry_policy 为 None 时不重试（对齐 TS agent-loop：直接调用 streamFunction）。
     retry_policy = config.retry_policy
     if retry_policy is None:
-        retry_policy = RetryPolicy()
+        retry_policy = RetryPolicy(enabled=False, max_retries=0, base_delay_ms=1000)
 
     async def _produce() -> AssistantMessage:
         """单次 LLM 调用：流式消费并发射 message_start/update。
@@ -870,7 +914,7 @@ async def _stream_assistant_response(
         避免失败尝试被提交到状态）。
         中止 / 意外异常时补发对应 message_end 后向上传播（保持现状）。
         """
-        response = await stream_fn(config.model, llm_context, options)
+        response = await stream_fn(active_model, llm_context, options)
 
         # 6. 迭代事件流。
         #
@@ -884,12 +928,12 @@ async def _stream_assistant_response(
         temp_msg: AssistantMessage = {
             "role": "assistant",
             "content": [],
-            "api": config.model.api,
-            "provider": config.model.provider,
-            "model": config.model.id,
+            "api": active_model.api,
+            "provider": active_model.provider,
+            "model": active_model.id,
             "timestamp": now_ms(),
         }
-        await emit({"type": "message_start", "message": temp_msg})
+        added_partial = False
 
         def _finalize() -> AssistantMessage:
             """构建最终消息：优先使用 DoneEvent/ErrorEvent 的完整消息。"""
@@ -915,6 +959,8 @@ async def _stream_assistant_response(
 
                 if event_type == "start":
                     temp_msg = cast(StartEvent, event)["partial"]
+                    added_partial = True
+                    await emit({"type": "message_start", "message": temp_msg})
 
                 elif event_type in (
                     "text_start",
@@ -959,6 +1005,8 @@ async def _stream_assistant_response(
             final_stop_reason = "aborted"
             final_error_message = "Aborted"
             result = _finalize()
+            if not added_partial:
+                await emit({"type": "message_start", "message": result})
             if aborted_sink is not None:
                 aborted_sink.append(result)
             await emit({"type": "message_end", "message": result})
@@ -968,6 +1016,8 @@ async def _stream_assistant_response(
             final_stop_reason = "error"
             final_error_message = str(exc)
             result = _finalize()
+            if not added_partial:
+                await emit({"type": "message_start", "message": result})
             await emit({"type": "message_end", "message": result})
             raise
         else:
@@ -977,7 +1027,10 @@ async def _stream_assistant_response(
                 if _final_msg is not None:
                     final_stop_reason = _final_msg.get("stop_reason", "stop")
                     final_error_message = _final_msg.get("error_message")
-            return _finalize()
+            result = _finalize()
+            if not added_partial:
+                await emit({"type": "message_start", "message": result})
+            return result
 
     # 重试回调 → AgentEvent（异步 emit）
     async def _on_retry_scheduled(
@@ -1079,6 +1132,7 @@ async def _execute_tool_calls_sequential(
 
     for tc in tool_calls:
         _check_signal(signal)
+        await _emit_tool_start(tc, emit)
 
         prepared = await _prepare_tool_call(tc, assistant_msg, context, config, signal)
         if isinstance(prepared, _ImmediateToolOutcome):
@@ -1101,7 +1155,7 @@ async def _execute_tool_calls_sequential(
             continue
 
         executed = await _execute_tool_call(prepared, emit, signal)
-        finalized = await _finalize_tool_call(prepared, executed, config)
+        finalized = await _finalize_tool_call(prepared, executed, config, signal)
         await _emit_tool_lifecycle(
             emit,
             finalized.tc["id"],
@@ -1141,6 +1195,7 @@ async def _execute_tool_calls_parallel(
     try:
         for index, tc in enumerate(tool_calls):
             _check_signal(signal)
+            await _emit_tool_start(tc, emit)
 
             prepared = await _prepare_tool_call(tc, assistant_msg, context, config, signal)
             if isinstance(prepared, _ImmediateToolOutcome):
@@ -1242,7 +1297,7 @@ async def _prepare_tool_call(
     if tool_def is None:
         # 工具未找到 → 立即错误
         error_result = AgentToolResult(
-            content=[TextContent(type="text", text=f"Tool '{tc_name}' not found.")],
+            content=[TextContent(type="text", text=f"Tool {tc_name} not found")],
             details={"error": "tool_not_found"},
         )
         return _ImmediateToolOutcome(tc, args, error_result, is_error=True)
@@ -1277,14 +1332,14 @@ async def _prepare_tool_call(
             args=args,
             context=context,
         )
-        raw_before = config.before_tool_call(before_ctx)
+        raw_before = _call_with_signal(config.before_tool_call, before_ctx, signal)
         before_result: BeforeToolCallResult | None
         if asyncio.iscoroutine(raw_before):
             before_result = cast(BeforeToolCallResult | None, await raw_before)
         else:
             before_result = cast(BeforeToolCallResult | None, raw_before)
         if before_result is not None and before_result.block:
-            block_msg = f"Tool '{tc_name}' blocked: {before_result.reason}"
+            block_msg = before_result.reason or "Tool execution was blocked"
             blocked_result = AgentToolResult(
                 content=[TextContent(type="text", text=block_msg)],
                 details={"blocked": True, "reason": before_result.reason},
@@ -1318,15 +1373,6 @@ async def _execute_tool_call(
         if replaced is not None:
             args = replaced
 
-    await emit(
-        {
-            "type": "tool_execution_start",
-            "tool_call_id": tc_id,
-            "tool_name": tc_name,
-            "args": args,
-        }
-    )
-
     pending_updates: list[asyncio.Task] = []
 
     def _on_update(partial: AgentToolResult) -> None:
@@ -1346,7 +1392,7 @@ async def _execute_tool_call(
                         "tool_call_id": tc_id,
                         "tool_name": tc_name,
                         "args": args,
-                        "result": partial,
+                        "partial_result": partial,
                     },
                 )
             )
@@ -1393,7 +1439,7 @@ async def _execute_and_finalize(
 ) -> _FinalizedToolOutcome:
     """并行路径的单个工具：执行 → finalize → 发 tool_execution_end（完成顺序）。"""
     executed = await _execute_tool_call(prepared, emit, signal)
-    finalized = await _finalize_tool_call(prepared, executed, config)
+    finalized = await _finalize_tool_call(prepared, executed, config, signal)
     await _emit_tool_lifecycle(
         emit,
         finalized.tc["id"],
@@ -1409,6 +1455,7 @@ async def _finalize_tool_call(
     prepared: _PreparedToolCall,
     executed: _ExecutedToolOutcome,
     config: AgentLoopConfig,
+    signal: asyncio.Event | None,
 ) -> _FinalizedToolOutcome:
     """完成阶段：afterToolCall 字段级覆盖（finalizeExecutedToolCall）。"""
     result = executed.result
@@ -1423,7 +1470,7 @@ async def _finalize_tool_call(
             is_error=is_error,
             context=prepared.context,
         )
-        raw_after = config.after_tool_call(after_ctx)
+        raw_after = _call_with_signal(config.after_tool_call, after_ctx, signal)
         after_result: AfterToolCallResult | None
         if asyncio.iscoroutine(raw_after):
             after_result = cast(AfterToolCallResult | None, await raw_after)
@@ -1503,28 +1550,36 @@ def _find_tool(tools: list, name: str):
     return None
 
 
-def _fail_tool_calls_from_truncated(
+async def _fail_tool_calls_from_truncated(
     tool_calls: list[ToolCall],
+    emit: AgentEventSink,
 ) -> list[ToolResultMessage]:
-    """截断保护：stop_reason="length" 时将所有工具标记为错误。"""
+    """截断保护：stop_reason="length" 时将所有工具标记为错误。
+
+    对齐 TS failToolCallsFromTruncatedMessage：每个调用都发 start/end，
+    并返回 terminate=false，让循环回填错误结果后再次请求模型。
+    """
     results: list[ToolResultMessage] = []
     for tc in tool_calls:
-        tc_id = tc["id"]
-        tc_name = tc["name"]
+        await _emit_tool_start(tc, emit)
         error_text = (
-            f"Tool call arguments may be truncated because the model response "
-            f"reached its max output length. Tool '{tc_name}' was not executed."
+            f'Tool call "{tc["name"]}" was not executed: the response hit the output '
+            "token limit, so its arguments may be truncated. Re-issue the tool call "
+            "with complete arguments."
         )
-        results.append(
-            ToolResultMessage(
-                role="toolResult",
-                tool_call_id=tc_id,
-                tool_name=tc_name,
-                content=[TextContent(type="text", text=error_text)],
-                is_error=True,
-                timestamp=now_ms(),
-            )
+        error_result = AgentToolResult(
+            content=[TextContent(type="text", text=error_text)],
+            details={},
         )
+        await _emit_tool_lifecycle(
+            emit,
+            tc["id"],
+            tc["name"],
+            tc.get("arguments") or {},
+            error_result,
+            True,
+        )
+        results.append(_make_tool_result_message(tc["id"], tc["name"], error_result, True))
     return results
 
 
@@ -1543,9 +1598,41 @@ def _make_tool_result_message(
         "is_error": is_error,
         "timestamp": now_ms(),
     }
+    if result.details is not None:
+        msg["details"] = result.details
+    if result.usage is not None:
+        msg["usage"] = result.usage
     if result.added_tool_names:
         msg["added_tool_names"] = list(result.added_tool_names)
     return msg
+
+
+async def _emit_tool_start(tc: ToolCall, emit: AgentEventSink) -> None:
+    """发出 tool_execution_start 事件（prepare 之前，对齐 TS）。"""
+    await emit(
+        {
+            "type": "tool_execution_start",
+            "tool_call_id": tc["id"],
+            "tool_name": tc["name"],
+            "args": tc.get("arguments"),
+        }
+    )
+
+
+def _call_with_signal(
+    fn: Any,
+    arg: Any,
+    signal: asyncio.Event | None,
+) -> Any:
+    """按 hook 是否声明第二参数决定是否传入 AbortSignal。"""
+    if signal is None:
+        return fn(arg)
+    try:
+        signature = inspect.signature(fn)
+        signature.bind(arg, signal)
+    except (TypeError, ValueError):
+        return fn(arg)
+    return fn(arg, signal)
 
 
 async def _emit_tool_lifecycle(

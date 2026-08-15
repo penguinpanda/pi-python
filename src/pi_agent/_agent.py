@@ -48,10 +48,17 @@ from ._types import (
     ToolExecutionMode,
 )
 
-from pi_ai.types import AssistantMessage, ThinkingBudgets, Transport
+from pi_ai.types import AssistantMessage, ThinkingBudgets, Transport, Usage
 
 # 监听器签名：async (event, signal) → None；同步监听器返回 None 也支持
 AgentListener = Callable[[AgentEvent, asyncio.Event | None], Awaitable[None] | None]
+
+DEFAULT_MODEL = Model(
+    id="unknown",
+    provider="unknown",
+    api="unknown",
+    name="Unknown model",
+)
 
 # ---------------------------------------------------------------------------
 # PendingMessageQueue（双消息队列的，双重嵌套循环的输入源）
@@ -144,8 +151,12 @@ class AgentOptions:
         # 推理 token 预算与传输协议（透传给 StreamOptions / SimpleStreamOptions）
         thinking_budgets: ThinkingBudgets | None = None,
         transport: Transport | None = None,
-        # 重试策略。None = 默认启用（enabled=True, max_retries=3, base_delay_ms=2000）；
-        # 传入 RetryPolicy(enabled=False) 可关闭重试。
+        # 流选项透传（SimpleStreamOptions 子集）
+        api_key: str | None = None,
+        on_payload: Any = None,
+        on_response: Any = None,
+        max_retry_delay_ms: int | None = None,
+        # 重试策略。None = 不重试（对齐 TS agent-loop）。
         retry_policy: RetryPolicy | None = None,
     ):
         self.system_prompt = system_prompt
@@ -169,6 +180,10 @@ class AgentOptions:
         self.cache_retention = cache_retention
         self.thinking_budgets = thinking_budgets
         self.transport = transport
+        self.api_key = api_key
+        self.on_payload = on_payload
+        self.on_response = on_response
+        self.max_retry_delay_ms = max_retry_delay_ms
         self.retry_policy = retry_policy
 
 
@@ -193,7 +208,7 @@ class Agent:
         # -- 内部状态 --
         self._state = AgentState(
             system_prompt=opts.system_prompt,
-            model=opts.model,  # type: ignore[arg-type]
+            model=opts.model or DEFAULT_MODEL,
             thinking_level=opts.thinking_level,
         )
         self._state.tools = opts.tools
@@ -218,6 +233,10 @@ class Agent:
         self.cache_retention: CacheRetention | None = opts.cache_retention
         self.thinking_budgets: ThinkingBudgets | None = opts.thinking_budgets
         self.transport: Transport | None = opts.transport
+        self.api_key: str | None = opts.api_key
+        self.on_payload: Any = opts.on_payload
+        self.on_response: Any = opts.on_response
+        self.max_retry_delay_ms: int | None = opts.max_retry_delay_ms
         self.retry_policy: RetryPolicy | None = opts.retry_policy
 
         # -- 双消息队列（steering / follow-up）--
@@ -289,9 +308,7 @@ class Agent:
                 await self._run_prompt(queued_follow_up)
                 return
 
-            raise RuntimeError(
-                "Cannot continue: last message is an assistant message. Use prompt() instead."
-            )
+            raise RuntimeError("Cannot continue from message role: assistant")
 
         await self._run_continue()
 
@@ -477,40 +494,24 @@ class Agent:
             self._settled.set()
 
     async def _emit_failure_agent_end(self, exc: BaseException) -> None:
-        """异常路径收尾：合成 error assistant 消息并发出 agent_end。
-
-        对齐 TS agent.ts handleRunFailure 的 failure message：当 state 末条
-        消息不是 error 响应时（异常发生在 loop 管线之外，如 steering / 事件
-        桥接），补发一条 error assistant 消息，让下游 compaction / retry
-        状态机识别本轮以错误结束，而非把崩溃误判为正常结束。
-        """
+        """异常路径收尾：按 TS handleRunFailure 固定四连发事件。"""
         self._state.error_message = str(exc)
-        messages = self._state._messages
-        last = messages[-1] if messages else None
-        has_error_tail = (
-            last is not None
-            and last.get("role") == "assistant"
-            and last.get("stop_reason") == "error"
-        )
-        if not has_error_tail:
-            model = self._state.model
-            error_msg: AssistantMessage = {
-                "role": "assistant",
-                "content": [],
-                "api": model.api if model is not None else "",
-                "provider": model.provider if model is not None else "",
-                "model": model.id if model is not None else "",
-                "timestamp": now_ms(),
-                "stop_reason": "error",
-                "error_message": str(exc),
-            }
-            await self._process_event({"type": "message_end", "message": error_msg})
-        await self._process_event(
-            {
-                "type": "agent_end",
-                "messages": list(self._state._messages),
-            }
-        )
+        model = self._state.model
+        error_msg: AssistantMessage = {
+            "role": "assistant",
+            "content": [TextContent(type="text", text="")],
+            "api": model.api,
+            "provider": model.provider,
+            "model": model.id,
+            "timestamp": now_ms(),
+            "stop_reason": "error",
+            "error_message": str(exc),
+            "usage": _empty_usage(),
+        }
+        await self._process_event({"type": "message_start", "message": error_msg})
+        await self._process_event({"type": "message_end", "message": error_msg})
+        await self._process_event({"type": "turn_end", "message": error_msg, "tool_results": []})
+        await self._process_event({"type": "agent_end", "messages": [error_msg]})
 
     # ------------------------------------------------------------------
     # 内部：桥接
@@ -542,7 +543,7 @@ class Agent:
                 if self.prepare_next_turn_with_context is not None:
                     return self.prepare_next_turn_with_context(ctx)
                 if self.prepare_next_turn is not None:
-                    return self.prepare_next_turn(ctx.context)
+                    return cast(Any, self.prepare_next_turn)(self._abort)
                 return None
 
             prepare_next_turn = _prepare_next_turn
@@ -554,7 +555,7 @@ class Agent:
             convert_to_llm=self.convert_to_llm,
             transform_context=_maybe_async(self.transform_context),
             get_api_key=self.get_api_key,
-            should_stop_after_turn=self.should_stop_after_turn,
+            should_stop_after_turn=cast(Any, self.should_stop_after_turn),
             prepare_next_turn=prepare_next_turn,
             before_tool_call=self.before_tool_call,
             after_tool_call=self.after_tool_call,
@@ -564,6 +565,10 @@ class Agent:
             thinking_budgets=self.thinking_budgets,
             transport=self.transport,
             thinking_level=self._state.thinking_level,
+            api_key=self.api_key,
+            on_payload=self.on_payload,
+            on_response=self.on_response,
+            max_retry_delay_ms=self.max_retry_delay_ms,
             retry_policy=self.retry_policy,
             get_steering_messages=_get_steering,
             get_follow_up_messages=self._get_follow_up_messages,
@@ -636,11 +641,10 @@ def _normalize_input(
         return list(input)
 
     if isinstance(input, str):
+        content: list = [TextContent(type="text", text=input)]
         if images:
-            content: list = [TextContent(type="text", text=input)]
             content.extend(images)
-            return [UserMessage(role="user", content=content, timestamp=now_ms())]
-        return [UserMessage(role="user", content=input, timestamp=now_ms())]
+        return [UserMessage(role="user", content=content, timestamp=now_ms())]
 
     # 单条 AgentMessage
     return [input]
@@ -661,6 +665,18 @@ def _default_convert_to_llm(
         if role in ("user", "assistant", "toolResult"):
             result.append(cast(Message, m))
     return result
+
+
+def _empty_usage() -> Usage:
+    """空 usage（对齐 TS EMPTY_USAGE）。"""
+    return {
+        "input": 0,
+        "output": 0,
+        "cache_read": 0,
+        "cache_write": 0,
+        "total_tokens": 0,
+        "cost": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0},
+    }
 
 
 def _maybe_async(fn: Callable | None) -> Any:

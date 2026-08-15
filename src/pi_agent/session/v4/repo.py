@@ -44,7 +44,8 @@ def _session_directory_name(cwd: str) -> str:
 def _session_file_name(created_at: int, session_id: str) -> str:
     iso = (
         datetime.fromtimestamp(created_at / 1000, tz=timezone.utc)
-        .isoformat()
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
         .replace(":", "-")
         .replace(".", "-")
     )
@@ -217,7 +218,12 @@ class JsonlSessionRepo:
             "id": session_id,
             "createdAt": created_at,
             "cwd": cwd,
-            "parentSessionId": options.get("parentSessionId") or source_metadata["id"],
+            "parentSessionId": cast(
+                str,
+                options.get("parentSessionId")
+                if options.get("parentSessionId") is not None
+                else source_metadata["id"],
+            ),
         }
         if fork_options.get("metadata") is not None:
             assert_json_serializable(fork_options["metadata"])

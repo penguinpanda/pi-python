@@ -20,11 +20,12 @@ def test_substitute_args_positional_and_all():
     assert substitute_args("$9", ["a"]) == ""
 
 
-def test_substitute_args_defaults_and_slices():
-    assert substitute_args("${1:-fallback}", []) == "fallback"
-    assert substitute_args("${@:-none}", []) == "none"
-    assert substitute_args("${ARGUMENTS:-none}", []) == "none"
-    assert substitute_args("${2:-fb}", ["a"]) == "fb"
+def test_substitute_args_slices_and_literal_default_syntax():
+    # TS 不支持 ${...:-default}；保留为字面量。
+    assert substitute_args("${1:-fallback}", []) == "${1:-fallback}"
+    assert substitute_args("${@:-none}", []) == "${@:-none}"
+    assert substitute_args("${ARGUMENTS:-none}", []) == "${ARGUMENTS:-none}"
+    assert substitute_args("${2:-fb}", ["a"]) == "${2:-fb}"
     assert substitute_args("${@:2}", ["a", "b", "c"]) == "b c"
     assert substitute_args("${@:2:1}", ["a", "b", "c"]) == "b"
     assert substitute_args("${@:0}", ["a", "b"]) == "a b"

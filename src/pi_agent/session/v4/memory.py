@@ -208,7 +208,12 @@ class InMemorySessionRepo:
         metadata: SessionMetadata = {
             "id": session_id,
             "createdAt": _now_ms(),
-            "parentSessionId": options.get("parentSessionId") or source["id"],
+            "parentSessionId": cast(
+                str,
+                options.get("parentSessionId")
+                if options.get("parentSessionId") is not None
+                else source["id"],
+            ),
         }
         storage = source_storage.fork(metadata, options)
         self._sessions[session_id] = storage

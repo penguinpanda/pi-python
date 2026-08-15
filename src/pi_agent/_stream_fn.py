@@ -22,8 +22,5 @@ def set_default_stream_fn(stream_fn: StreamFn | None) -> None:
 def get_default_stream_fn() -> StreamFn:
     """获取全局默认流函数。未设置时抛 RuntimeError。"""
     if _default_stream_fn is None:
-        raise RuntimeError(
-            "No default stream function configured. "
-            "Call pi_agent.set_default_stream_fn(models.stream) at startup."
-        )
+        raise RuntimeError("Pass streamFn explicitly or call setDefaultStreamFn().")
     return _default_stream_fn

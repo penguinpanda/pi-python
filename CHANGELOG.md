@@ -308,6 +308,13 @@
 - pi_tui 测试：`test_terminal_extra.py` 对 fcntl/termios 加平台守卫，Windows 下 POSIX 专有用例跳过、平台无关用例照常运行（此前裸 `import fcntl` 导致 Windows 全量收集中断）
 - pi_ai OAuth：loopback 回调页对 error_description 等攻击者可控文本做 HTML 转义；手动粘贴 URL 的 state 与当前 flow 不一致时拒绝（openai-codex / openrouter / radius）
 - pi_agent：工具路径解析支持 `restrict_paths_to_cwd` 开关，coding-agent 的 write/edit 工具启用，越界写入被拒（read 保持全盘可读）
+- pi_agent parity：`stop_reason="length"` 截断工具调用后继续循环让模型重新发起；`agent_end`/循环返回本次新增消息；主循环默认不重试；`tool_execution_start` 在 prepare 前发出；`prepare_next_turn.thinking_level` 生效且 `off` 不传 `reasoning`
+- pi_agent parity：工具结果落盘 `details`/`usage`；`tool_execution_update` 统一为 `partial_result`；`should_stop_after_turn` 接收 `ShouldStopAfterTurnContext`；before/after/transform hooks 支持 signal；legacy `prepare_next_turn` 收到 abort signal；补齐 `on_payload`/`on_response`/`max_retry_delay_ms`/`api_key` 透传与默认模型兜底
+- pi_agent harness：model/thinking_level/active_tools 配置变更持久化到会话路径；`navigateTree` 对 user/custom 目标落到父条目并返回 editor_text；`session_before_tree` 摘要对象携带 details/usage；空条目集不再生成分支摘要；补齐 timeout_ms、turn 级 thinking level、错误码映射与 abort 多错聚合
+- pi_agent compaction：二次压缩重建上次 retainedTail，旧尾不再丢失；摘要输入先经 `convertToLlm`；bashExecution 使用 TS 文本格式；移除 `custom_message` 死字面量；新增 `generate_summary` 与工具函数 re-export
+- pi_agent session v4：JSONL 写入 message/usage camelCase 线格式（内存仍为 snake_case）；会话文件名毫秒 + `Z`；seq/timestamp 限制在 JS 安全整数范围；fork `parentSessionId=""` 不再回退
+- pi_agent tools/env：`edit` unified patch 修复双倍换行；`generate_diff_string` 折叠上下文；read 默认不注入图像处理器并原样传播 `FileError`；`remove` 遵守 `recursive`/`force` 语义；UTF-8 替换解码、空文件行、stderr 回调错误、spawn_error、超时上界、进程树清理、stdio 100ms 宽限等对齐 TS
+- pi_agent skills/templates/proxy：模板名恒取文件名、解析符号链接、补 `parse_command_args`/`map_prompt_template`；技能名空值回退目录名、加载结果可直接格式化；proxy 请求与消息序列化转 camelCase 并补 `samplingParams`/`toolUse→tool_call`/`raw_arguments` 映射
 - pi_coding_agent：`@path` 注入增加大小上限（文本 1MiB / 图片 20MiB）、二进制嗅探与 `.git`/`node_modules` 等目录忽略；`_ensure_tool` 归档提取校验成员路径（zip-slip 防护）并限制下载大小
 - pi_coding_agent：`/settings key=value` 经 SettingsManager 写入（项目信任门控 + FileLock + 迁移），未信任项目拒绝写入
 - pi_ai 重试：请求执行中被取消的 `CancelledError` 不再被当作可重试错误吞掉；`HTTPStatusError` 经 `response.status_code` 探测，400/401 不再误判为可重试

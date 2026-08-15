@@ -265,6 +265,31 @@ def generate_unified_patch(
 ) -> str:
     old_lines = old_content.split("\n")
     new_lines = new_content.split("\n")
+    old_has_final_newline = bool(old_lines) and old_lines[-1] == ""
+    new_has_final_newline = bool(new_lines) and new_lines[-1] == ""
+    if old_has_final_newline:
+        old_lines.pop()
+    if new_has_final_newline:
+        new_lines.pop()
+
+    if old_lines == new_lines and old_has_final_newline != new_has_final_newline:
+        final_newline_output: list[str] = [
+            f"--- {path}\n",
+            f"+++ {path}\n",
+            f"@@ -1,{len(old_lines)} +1,{len(new_lines)} @@\n",
+        ]
+        for line in old_lines[:-1]:
+            final_newline_output.append(f" {line}\n")
+        if old_lines:
+            last_line = old_lines[-1]
+            final_newline_output.append(f"-{last_line}\n")
+            if not old_has_final_newline:
+                final_newline_output.append("\\ No newline at end of file\n")
+            final_newline_output.append(f"+{last_line}\n")
+            if not new_has_final_newline:
+                final_newline_output.append("\\ No newline at end of file\n")
+        return "".join(final_newline_output)
+
     diff = difflib.unified_diff(
         old_lines,
         new_lines,
@@ -273,7 +298,30 @@ def generate_unified_patch(
         lineterm="\n",
         n=context_lines,
     )
-    return "".join(line + "\n" for line in diff)
+
+    output: list[str] = []
+    last_old_line = old_lines[-1] if old_lines else None
+    last_new_line = new_lines[-1] if new_lines else None
+    for line in diff:
+        if line.endswith("\n"):
+            output.append(line)
+            continue
+        prefix = line[:1]
+        body = line[1:]
+        output.append(line + "\n")
+        if not old_has_final_newline and prefix in (" ", "-") and body == last_old_line:
+            output.append("\\ No newline at end of file\n")
+        if not new_has_final_newline and prefix in (" ", "+") and body == last_new_line:
+            output.append("\\ No newline at end of file\n")
+    return "".join(output)
+
+
+def _split_diff_part(value: str) -> list[str]:
+    """Split one diffLines part; drop the trailing synthetic empty element."""
+    raw = value.split("\n")
+    if raw and raw[-1] == "":
+        raw.pop()
+    return raw
 
 
 def generate_diff_string(
@@ -281,20 +329,37 @@ def generate_diff_string(
     new_content: str,
     context_lines: int = 4,
 ) -> dict[str, Any]:
-    """生成带行号的展示用 diff（对齐 TS generateDiffString）。"""
-    differ = difflib.SequenceMatcher(
-        a=old_content.split("\n"), b=new_content.split("\n"), autojunk=False
-    )
+    """生成带行号的展示用 diff（逐分支对齐 TS generateDiffString）。"""
+    old_all = old_content.split("\n")
+    new_all = new_content.split("\n")
+    old_has_final_newline = bool(old_all) and old_all[-1] == ""
+    new_has_final_newline = bool(new_all) and new_all[-1] == ""
+    old_lines = old_all[:-1] if old_has_final_newline else old_all
+    new_lines = new_all[:-1] if new_has_final_newline else new_all
+
+    if old_lines == new_lines and old_has_final_newline != new_has_final_newline:
+        # Diff.diffLines 把末尾 newline 差异编码为最后一行的 replace。
+        last = len(old_lines)
+        parts = [
+            ("equal", 0, last - 1, 0, last - 1),
+            ("replace", last - 1, last, last - 1, last),
+        ]
+    else:
+        differ = difflib.SequenceMatcher(a=old_lines, b=new_lines, autojunk=False)
+        parts = list(differ.get_opcodes())
+
     output: list[str] = []
     old_line_num = 1
     new_line_num = 1
+    last_was_change = False
     first_changed_line: int | None = None
-    width = max(len(str(len(old_content.split("\n")))), len(str(len(new_content.split("\n")))))
+    width = max(len(str(len(old_all))), len(str(len(new_all))))
+    for part_index, (tag, i1, i2, j1, j2) in enumerate(parts):
+        old_block = old_lines[i1:i2]
+        new_block = new_lines[j1:j2]
+        is_change = tag in ("replace", "delete", "insert")
 
-    for tag, i1, i2, j1, j2 in differ.get_opcodes():
-        old_block = old_content.split("\n")[i1:i2]
-        new_block = new_content.split("\n")[j1:j2]
-        if tag in ("replace", "delete", "insert"):
+        if is_change:
             if first_changed_line is None:
                 first_changed_line = new_line_num
             for line in old_block:
@@ -303,9 +368,64 @@ def generate_diff_string(
             for line in new_block:
                 output.append(f"+{str(new_line_num).rjust(width)} {line}")
                 new_line_num += 1
-        else:  # equal
-            for line in old_block:
+            last_was_change = True
+            continue
+
+        raw = old_block
+        next_part_is_change = part_index < len(parts) - 1 and parts[part_index + 1][0] in (
+            "replace",
+            "delete",
+            "insert",
+        )
+        has_leading_change = last_was_change
+        has_trailing_change = next_part_is_change
+
+        if has_leading_change and has_trailing_change:
+            if len(raw) <= context_lines * 2:
+                for line in raw:
+                    output.append(f" {str(old_line_num).rjust(width)} {line}")
+                    old_line_num += 1
+                    new_line_num += 1
+            else:
+                leading = raw[:context_lines]
+                trailing = raw[-context_lines:]
+                skipped = len(raw) - len(leading) - len(trailing)
+                for line in leading:
+                    output.append(f" {str(old_line_num).rjust(width)} {line}")
+                    old_line_num += 1
+                    new_line_num += 1
+                output.append(f" {'':{width}} ...")
+                old_line_num += skipped
+                new_line_num += skipped
+                for line in trailing:
+                    output.append(f" {str(old_line_num).rjust(width)} {line}")
+                    old_line_num += 1
+                    new_line_num += 1
+        elif has_leading_change:
+            shown = raw[:context_lines]
+            skipped = len(raw) - len(shown)
+            for line in shown:
                 output.append(f" {str(old_line_num).rjust(width)} {line}")
                 old_line_num += 1
                 new_line_num += 1
+            if skipped > 0:
+                output.append(f" {'':{width}} ...")
+                old_line_num += skipped
+                new_line_num += skipped
+        elif has_trailing_change:
+            skipped = max(0, len(raw) - context_lines)
+            if skipped > 0:
+                output.append(f" {'':{width}} ...")
+                old_line_num += skipped
+                new_line_num += skipped
+            for line in raw[skipped:]:
+                output.append(f" {str(old_line_num).rjust(width)} {line}")
+                old_line_num += 1
+                new_line_num += 1
+        else:
+            old_line_num += len(raw)
+            new_line_num += len(raw)
+
+        last_was_change = False
+
     return {"diff": "\n".join(output), "firstChangedLine": first_changed_line}

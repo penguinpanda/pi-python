@@ -79,7 +79,8 @@ async def test_agent_forwards_thinking_level_to_stream_options():
     agent.stream_function = capturing_stream
     await agent.prompt(UserMessage(role="user", content="hi"))
     await agent.wait_for_idle()
-    assert captured["options"].get("reasoning") == "off"
+    # TS：thinkingLevel="off" 映射为 reasoning undefined（不传该键）。
+    assert "reasoning" not in captured["options"]
 
 
 def _make_counting_stream_fn(messages: list[AssistantMessage]) -> StreamFn:
@@ -494,12 +495,14 @@ class TestLengthTruncation:
             tools=[tool],
         )
 
-        # 模拟 length 截断响应
+        # 模拟 length 截断响应，第二次 LLM 返回纯文本。
         final = faux_assistant_message(
             [faux_tool_call("search", {"q": "incomplete"}, tool_call_id="tc-1")],
             stop_reason="length",
         )
-        stream_fn = _make_stream_fn(final)
+        text_final = _make_llm_text_response("recovered")
+        core = _make_faux([final, text_final])
+        stream_fn = core.stream
 
         config = AgentLoopConfig(
             model=_make_model(),
@@ -508,13 +511,18 @@ class TestLengthTruncation:
 
         result, events = await _collect_events(prompts, context, config, stream_fn)
 
-        # 工具不应被实际执行（无 tool_execution_start）
-        tool_start = _find_events(events, "tool_execution_start")
-        assert len(tool_start) == 0
+        # 每个截断调用都发 start/end，但工具不会执行。
+        assert len(_find_events(events, "tool_execution_start")) == 1
+        assert len(_find_events(events, "tool_execution_end")) == 1
+        assert core.call_count == 2
 
-        # 结果中包含 toolResult 消息（错误结果）
+        # 结果中包含 toolResult 消息（错误结果）与恢复后的 assistant 文本。
         tool_results = [m for m in result if m.get("role") == "toolResult"]
         assert len(tool_results) == 1
+        assert "was not executed: the response hit the output token limit" in str(
+            tool_results[0]["content"]
+        )
+        assert result[-1]["role"] == "assistant"
 
 
 class TestHooks:
@@ -549,9 +557,9 @@ class TestHooks:
 
         result, events = await _collect_events(prompts, context, config, stream_fn)
 
-        # 工具不应被实际执行
+        # 工具不应被实际执行；TS 在 prepare 前已发 start。
         tool_start = _find_events(events, "tool_execution_start")
-        assert len(tool_start) == 0
+        assert len(tool_start) == 1
 
         # 工具结果应是 is_error=true
         tool_end = _find_events(events, "tool_execution_end")
@@ -815,10 +823,11 @@ class TestRunAgentLoopContinue:
             stream_fn=stream_fn,
         )
 
-        # 验证事件序列
+        # 验证事件序列；返回值为本次新增消息（对齐 TS newMessages）。
         assert len(_find_events(events, "agent_start")) == 1
         assert len(_find_events(events, "agent_end")) == 1
-        assert len(result) >= 2
+        assert len(result) == 1
+        assert result[0].get("role") == "assistant"
 
 
 class TestToolLifecycle:
@@ -861,9 +870,10 @@ class TestToolLifecycle:
         result, events = await _collect_events(prompts, context, config, stream_fn)
 
         assert seen_args == [{"q": "replaced"}]
-        # tool_execution_start 事件也应携带替换后的参数
+        # tool_execution_start 在 prepare 前发出，携带模型原始参数；
+        # before_execute 替换后的参数由 execute 收到。
         tool_start = _find_events(events, "tool_execution_start")
-        assert tool_start[0]["args"] == {"q": "replaced"}
+        assert tool_start[0]["args"] == {"q": "original"}
 
     @pytest.mark.asyncio
     async def test_after_execute_replaces_result(self):

@@ -14,7 +14,7 @@ from pi_agent import (
     AgentToolResult,
     BeforeToolCallContext,
 )
-from pi_agent._agent_loop import _execute_tool_call
+from pi_agent._agent_loop import _emit_tool_start, _execute_tool_call
 from pi_agent._types import AgentTool
 from pi_agent.compaction import CompactionPreparation, CompactionSettings
 from pi_ai import Context, Model, Models, TextContent
@@ -940,6 +940,7 @@ async def test_tool_execution_update_event(tmp_path):
     async def emit(event):
         events.append(event)
 
+    await _emit_tool_start(prepared.tc, emit)
     await _execute_tool_call(prepared, emit, None)
     types = [event.get("type") for event in events]
     assert "tool_execution_start" in types

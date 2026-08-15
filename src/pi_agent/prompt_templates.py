@@ -13,7 +13,7 @@ import re
 from typing import Any
 
 from .env import ExecutionEnv
-from .skills import _basename, _parse_frontmatter
+from .skills import _basename, _parse_frontmatter, _resolve_kind
 
 
 class PromptTemplateDiagnostic:
@@ -36,19 +36,9 @@ def substitute_args(content: str, args: list[str]) -> str:
     all_args = " ".join(args)
 
     def _replace(match: re.Match[str]) -> str:
-        default_target = match.group(1)
-        default_value = match.group(2)
-        slice_start = match.group(3)
-        slice_length = match.group(4)
-        simple = match.group(5)
-
-        if default_target is not None:
-            if default_target in ("@", "ARGUMENTS"):
-                value = all_args
-            else:
-                index = int(default_target) - 1
-                value = args[index] if 0 <= index < len(args) else ""
-            return value if value else (default_value or "")
+        slice_start = match.group(1)
+        slice_length = match.group(2)
+        simple = match.group(3)
 
         if slice_start is not None:
             start = int(slice_start) - 1
@@ -65,18 +55,20 @@ def substitute_args(content: str, args: list[str]) -> str:
         return args[index] if 0 <= index < len(args) else ""
 
     return re.sub(
-        r"\$\{(\d+|ARGUMENTS|@):-([^}]*)\}|\$\{@:(\d+)(?::(\d+))?\}|\$(ARGUMENTS|@|\d+)",
+        r"\$\{@:(\d+)(?::(\d+))?\}|\$(ARGUMENTS|@|\d+)",
         _replace,
         content,
     )
 
 
 def format_prompt_template_invocation(
-    name: str,
-    content: str,
+    template_or_name: Any,
+    content: str = "",
     args: list[str] | None = None,
 ) -> str:
-    return substitute_args(content, args or [])
+    if isinstance(template_or_name, str):
+        return substitute_args(content, args or [])
+    return substitute_args(template_or_name.content, args or [])
 
 
 async def _load_template_from_file(
@@ -95,13 +87,11 @@ async def _load_template_from_file(
         return None, diagnostics
     description = frontmatter.get("description")
     if not isinstance(description, str) or not description:
-        # 对齐 TS：frontmatter 缺 description 时取正文首行（截 60 字符）。
-        first_line = next((line.strip() for line in body.split("\n") if line.strip()), "")
+        # 对齐 TS：frontmatter 缺 description 时取正文首个非空行（不 strip）。
+        first_line = next((line for line in body.split("\n") if line.strip()), "")
         description = first_line[:60] + ("..." if len(first_line) > 60 else "")
-    name = frontmatter.get("name")
-    if not isinstance(name, str) or not name:
-        base = _basename(file_path)
-        name = base[: -len(".md")] if base.endswith(".md") else base
+    base = _basename(file_path)
+    name = base[: -len(".md")] if base.lower().endswith(".md") else base
     return {
         "name": name,
         "content": body,
@@ -120,7 +110,8 @@ async def _load_templates_from_dir(
         diagnostics.append(PromptTemplateDiagnostic("list_failed", str(list_result[1]), directory))
         return templates, diagnostics
     for entry in sorted(list_result[1], key=lambda e: e.name):
-        if entry.kind != "file" or not entry.name.endswith(".md"):
+        kind = await _resolve_kind(env, entry, diagnostics)  # type: ignore[arg-type]
+        if kind != "file" or not entry.name.endswith(".md"):
             continue
         template, template_diagnostics = await _load_template_from_file(env, entry.path)
         if template:
@@ -142,11 +133,12 @@ async def load_prompt_templates(
             if info[1].code != "not_found":
                 diagnostics.append(PromptTemplateDiagnostic("file_info_failed", str(info[1]), path))
             continue
-        if info[1].kind == "directory":
+        kind = await _resolve_kind(env, info[1], diagnostics)  # type: ignore[arg-type]
+        if kind == "directory":
             result, result_diagnostics = await _load_templates_from_dir(env, info[1].path)
             templates.extend(result)
             diagnostics.extend(result_diagnostics)
-        elif info[1].kind == "file" and info[1].name.endswith(".md"):
+        elif kind == "file" and info[1].name.endswith(".md"):
             template, template_diagnostics = await _load_template_from_file(env, info[1].path)
             if template:
                 templates.append(template)
@@ -157,13 +149,43 @@ async def load_prompt_templates(
 async def load_sourced_prompt_templates(
     env: ExecutionEnv,
     inputs: list[dict[str, Any]],
+    map_prompt_template=None,
 ) -> dict[str, Any]:
     templates: list[dict[str, Any]] = []
     diagnostics: list[dict[str, Any]] = []
     for input_item in inputs:
         result = await load_prompt_templates(env, input_item["path"])
         for template in result["promptTemplates"]:
-            templates.append({"promptTemplate": template, "source": input_item["source"]})
+            mapped = (
+                map_prompt_template(template, input_item["source"])
+                if map_prompt_template is not None
+                else template
+            )
+            templates.append({"promptTemplate": mapped, "source": input_item["source"]})
         for diagnostic in result["diagnostics"]:
             diagnostics.append({**vars(diagnostic), "source": input_item["source"]})
     return {"promptTemplates": templates, "diagnostics": diagnostics}
+
+
+def parse_command_args(args_string: str) -> list[str]:
+    """简单 shell 风格引号解析（逐字对齐 TS parseCommandArgs）。"""
+    args: list[str] = []
+    current = ""
+    in_quote: str | None = None
+    for char in args_string:
+        if in_quote:
+            if char == in_quote:
+                in_quote = None
+            else:
+                current += char
+        elif char in ('"', "'"):
+            in_quote = char
+        elif char in (" ", "\t"):
+            if current:
+                args.append(current)
+                current = ""
+        else:
+            current += char
+    if current:
+        args.append(current)
+    return args

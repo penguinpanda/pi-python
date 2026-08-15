@@ -235,6 +235,15 @@ class Result(Generic[T, E]):
     def get_or_none(self) -> T | None:
         return self.value if self.ok else None
 
+    def is_err(self) -> bool:
+        return not self.ok
+
+    def to_error(self) -> E | None:
+        return self.error if not self.ok else None
+
+    def match_error(self) -> E | None:
+        return self.to_error()
+
 
 def ok(value: T) -> Result[T, Any]:
     return Result(ok=True, value=value)
@@ -658,9 +667,18 @@ class SessionBeforeCompactResult:
 
 
 @dataclass(slots=True)
+class SessionBeforeTreeSummary:
+    """session_before_tree hook 返回的摘要对象（对齐 TS）。"""
+
+    summary: str
+    details: Any = None
+    usage: Usage | None = None
+
+
+@dataclass(slots=True)
 class SessionBeforeTreeResult:
     cancel: bool = False
-    summary: Any = None
+    summary: SessionBeforeTreeSummary | str | None = None
     custom_instructions: str | None = None
     replace_instructions: bool | None = None
     label: str | None = None
@@ -745,6 +763,10 @@ class AgentHarnessOptions(Generic[TContext]):
     follow_up_mode: QueueMode = "one-at-a-time"
     retry: RetryPolicy | None = None
     telemetry_context: Any = None
+    tool_execution: ToolExecutionMode = "parallel"
+    drive: bool = False
+    to_provider_messages: Any = None
+    entry_projectors: dict[str, Any] | None = None
 
 
 __all__ = [
@@ -796,6 +818,7 @@ __all__ = [
     "ToolResultPatch",
     "SessionBeforeCompactResult",
     "SessionBeforeTreeResult",
+    "SessionBeforeTreeSummary",
     "AbortResult",
     "CompactResult",
     "NavigateTreeResult",

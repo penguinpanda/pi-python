@@ -17,13 +17,15 @@ import os
 
 from pi_agent import AgentTool
 from pi_agent.tools import BashToolOptions
-from pi_agent.env import PythonExecutionEnv
+from pi_agent.env import FileError, PythonExecutionEnv
 from pi_agent.tools import (
+    ReadToolOptions,
     create_bash_tool as _create_pi_bash_tool,
     create_edit_tool as _create_pi_edit_tool,
     create_read_tool as _create_pi_read_tool,
     create_write_tool as _create_pi_write_tool,
 )
+from pi_agent.tools.image_pipeline import process_image
 
 from .._config import get_bin_dir
 from ._find import create_find_tool
@@ -66,7 +68,31 @@ def _bind_env(tool: AgentTool, env: PythonExecutionEnv) -> AgentTool:
 
 def create_read_tool(cwd: str) -> AgentTool:
     """创建 read 工具（复用 pi_agent 实现，绑定本地执行环境）。"""
-    return _bind_env(_create_pi_read_tool(), PythonExecutionEnv(cwd))
+    tool = _bind_env(
+        _create_pi_read_tool(ReadToolOptions(image_processor=process_image)),
+        PythonExecutionEnv(cwd),
+    )
+    tool.description += (
+        " Only operate on files inside the current working directory. If a file is "
+        "not found, report that to the user; do not search the whole disk "
+        "(e.g. find /, grep -r /, locate)."
+    )
+    original_execute = tool.execute
+
+    async def execute(tool_call_id, params, signal=None, on_update=None, context=None):
+        try:
+            return await original_execute(tool_call_id, params, signal, on_update, context)
+        except FileError as exc:
+            if exc.code == "not_found":
+                raise ValueError(
+                    f"{exc} The file is not in the working directory. Report this to "
+                    "the user directly; do not search the whole disk "
+                    "(e.g. find /, grep -r /, locate)."
+                ) from exc
+            raise
+
+    tool.execute = execute
+    return tool
 
 
 def create_write_tool(cwd: str) -> AgentTool:

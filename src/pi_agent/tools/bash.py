@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from typing import Any
 
@@ -43,7 +44,12 @@ class BashToolOptions:
 def _validate_timeout(timeout: float | None) -> None:
     if timeout is None:
         return
-    if not isinstance(timeout, (int, float)) or timeout <= 0:
+    if (
+        not isinstance(timeout, (int, float))
+        or isinstance(timeout, bool)
+        or not math.isfinite(timeout)
+        or timeout <= 0
+    ):
         raise ValueError("Invalid timeout: must be a finite number of seconds")
     if timeout > _MAX_TIMEOUT_SECONDS:
         raise ValueError(f"Invalid timeout: maximum is {_MAX_TIMEOUT_SECONDS} seconds")
@@ -216,9 +222,7 @@ def create_bash_tool(options: BashToolOptions | None = None) -> AgentTool:
             f"Execute a bash command in the current working directory. Returns stdout and stderr. "
             f"Output is truncated to last {DEFAULT_MAX_LINES} lines or {DEFAULT_MAX_BYTES // 1024}KB "
             "(whichever is hit first). If truncated, full output is saved to a temp file. "
-            "Optionally provide a timeout in seconds. Prefer commands scoped to the "
-            "working directory; do not scan the whole disk (e.g. find /, grep -r /, "
-            "locate) and avoid modifying files outside it."
+            "Optionally provide a timeout in seconds."
         ),
         input_schema={
             "type": "object",

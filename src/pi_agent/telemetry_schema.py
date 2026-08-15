@@ -6,7 +6,9 @@ Schema 定义由 agent 自身持有，不再委托 `pi_telemetry`；运行时仍
 
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable, Literal, TypeAlias
+import inspect
+
+from typing import Any, Callable, Literal, TypeAlias, cast
 
 from pi_telemetry import SpanOptions, TelemetryContext, TelemetrySpan
 
@@ -567,12 +569,33 @@ HarnessSpanName: TypeAlias = Literal[
 
 async def start_ai_span(
     telemetry_context: TelemetryContext,
-    attributes: dict[str, Any],
-    callback: Callable[[TelemetrySpan], Awaitable[Any]],
+    name_or_attributes: AiSpanName | dict[str, Any],
+    attributes_or_callback: dict[str, Any] | Callable[[TelemetrySpan], Any] | None = None,
+    callback: Callable[[TelemetrySpan], Any] | None = None,
+    *,
+    name: AiSpanName = "pi.ai.request",
 ) -> Any:
+    """启动 ai span。兼容 Python 旧签名与 TS 的 (ctx, name, attrs, cb)。"""
+    if isinstance(name_or_attributes, str):
+        span_name = cast(AiSpanName, name_or_attributes)
+        span_attributes = cast(dict[str, Any], attributes_or_callback or {})
+        span_callback = cast(Callable[[TelemetrySpan], Any], callback)
+    else:
+        span_name = name
+        span_attributes = name_or_attributes
+        span_callback = cast(Callable[[TelemetrySpan], Any], attributes_or_callback)
+    if span_name != "pi.ai.request":
+        raise ValueError("Ai spans must use the pi.ai.request name")
+
+    async def _callback(span: TelemetrySpan) -> Any:
+        result = span_callback(span)
+        if inspect.isawaitable(result):
+            return await result
+        return result
+
     return await telemetry_context.start_span(
-        SpanOptions(name="pi.ai.request", attributes=attributes),
-        callback,
+        SpanOptions(name=span_name, attributes=span_attributes),
+        _callback,
     )
 
 
@@ -580,11 +603,17 @@ async def start_harness_span(
     telemetry_context: TelemetryContext,
     name: HarnessSpanName,
     attributes: dict[str, Any],
-    callback: Callable[[TelemetrySpan], Awaitable[Any]],
+    callback: Callable[[TelemetrySpan], Any],
 ) -> Any:
+    async def _callback(span: TelemetrySpan) -> Any:
+        result = callback(span)
+        if inspect.isawaitable(result):
+            return await result
+        return result
+
     return await telemetry_context.start_span(
         SpanOptions(name=name, attributes=attributes),
-        callback,
+        _callback,
     )
 
 

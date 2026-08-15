@@ -1,7 +1,7 @@
 """提示模板加载与展开（对齐 TS core/prompt-templates.ts）。
 
 coding-agent 层负责发现/加载 .md 模板并解析参数；
-参数替换委托给 pi_agent.prompt_templates.substitute_args。
+参数替换在 coding-agent 层实现（TS core/prompt-templates.ts 支持 ${...:-default}）。
 """
 
 from __future__ import annotations
@@ -10,7 +10,6 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from pi_agent.prompt_templates import substitute_args
 
 from ._config import get_agent_dir
 from .frontmatter import parse_frontmatter
@@ -28,6 +27,46 @@ class PromptTemplate:
     content: str
     file_path: str
     source: str  # "user" | "project" | "path"
+
+
+def substitute_args(content: str, args: list[str]) -> str:
+    """替换模板参数（对齐 TS coding-agent core/prompt-templates.ts）。"""
+    all_args = " ".join(args)
+
+    def _replace(match: re.Match[str]) -> str:
+        default_target = match.group(1)
+        default_value = match.group(2)
+        slice_start = match.group(3)
+        slice_length = match.group(4)
+        simple = match.group(5)
+
+        if default_target is not None:
+            if default_target in ("@", "ARGUMENTS"):
+                value = all_args
+            else:
+                index = int(default_target) - 1
+                value = args[index] if 0 <= index < len(args) else ""
+            return value if value else (default_value or "")
+
+        if slice_start is not None:
+            start = int(slice_start) - 1
+            if start < 0:
+                start = 0
+            if slice_length is not None:
+                return " ".join(args[start : start + int(slice_length)])
+            return " ".join(args[start:])
+
+        if simple in ("ARGUMENTS", "@"):
+            return all_args
+
+        index = int(simple) - 1
+        return args[index] if 0 <= index < len(args) else ""
+
+    return re.sub(
+        r"\$\{(\d+|ARGUMENTS|@):-([^}]*)\}|\$\{@:(\d+)(?::(\d+))?\}|\$(ARGUMENTS|@|\d+)",
+        _replace,
+        content,
+    )
 
 
 def parse_command_args(args_string: str) -> list[str]:

@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import re
 from typing import Any, Awaitable, Callable, Generic, Literal, TypeVar, cast
 
 from pi_ai import RetryCallbacks, RetryPolicy
@@ -31,9 +30,14 @@ from pi_telemetry import NOOP_TELEMETRY_CONTEXT, SpanOptions, TelemetryContext
 
 from ._agent_loop import run_agent_loop
 from ._messages import convert_to_llm
-from .branch_summarization import collect_entries_for_branch_summary, generate_branch_summary
+from .branch_summarization import (
+    BranchSummaryError,
+    collect_entries_for_branch_summary,
+    generate_branch_summary,
+)
 from .compaction import (
     DEFAULT_COMPACTION_SETTINGS,
+    CompactionError,
     CompactionSettings,
     compact as run_compaction,
     prepare_compaction,
@@ -92,6 +96,8 @@ from ._types import (
     StreamFn,
     ThinkingLevel,
 )
+from .session.v4.context import SessionContextBuildOptions
+from .session.v4.types import SessionError
 from .telemetry_schema import start_harness_span
 
 TContext = TypeVar("TContext")
@@ -105,6 +111,31 @@ TContext = TypeVar("TContext")
 # ============================================================================
 # 辅助
 # ============================================================================
+
+
+def _normalize_images_option(
+    images: list[ImageContent] | dict[str, Any] | None,
+) -> list[ImageContent] | None:
+    """兼容 legacy images 列表与 TS 的 {{images}} 选项对象。"""
+    if images is None:
+        return None
+    if isinstance(images, dict):
+        value = images.get("images")
+        return list(value) if isinstance(value, list) else None
+    return list(images)
+
+
+def _message_content_text(content: Any) -> str:
+    """从消息 content 提取纯文本（对齐 TS contentText(content, "")）。"""
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    return "".join(
+        str(block.get("text", ""))
+        for block in content
+        if isinstance(block, dict) and block.get("type") == "text"
+    )
 
 
 def _create_user_message(
@@ -123,8 +154,6 @@ def _create_failure_message(
     aborted: bool,
 ) -> AssistantMessage:
     message = str(error) if error is not None else "Unknown error"
-    if error is not None and isinstance(error, Exception) and not error.args:
-        message = type(error).__name__
     return {
         "role": "assistant",
         "content": [TextContent(type="text", text="")],
@@ -161,8 +190,16 @@ def _normalize_harness_error(
 ) -> AgentHarnessError:
     if isinstance(error, AgentHarnessError):
         return error
+    if isinstance(error, SessionError):
+        code = "session"
+    elif isinstance(error, CompactionError):
+        code = "compaction"
+    elif isinstance(error, BranchSummaryError):
+        code = "branch_summary"
+    else:
+        code = fallback_code
     return AgentHarnessError(
-        cast(Any, fallback_code),
+        cast(Any, code),
         str(error) if error is not None else "Unknown error",
         cause=error,
     )
@@ -184,23 +221,18 @@ def _format_skill_invocation(
 
 
 def _format_template_invocation(content: str, args: list[str]) -> str:
-    """模板参数替换（简化版，Phase 4.5 将移植完整模板系统）。
+    """模板参数替换（委托 pi_agent.prompt_templates，与 TS 一致）。"""
+    from .prompt_templates import substitute_args
 
-    支持 $1..$9、$@ / $ARGUMENTS、${@:N}、${@:N:L}（1-based）。
-    """
-    result = content
-    for index, arg in enumerate(args, start=1):
-        result = result.replace(f"${index}", arg)
-    joined = "\n".join(args)
-    result = result.replace("$@", joined).replace("$ARGUMENTS", joined)
+    return substitute_args(content, args)
 
-    def _slice(match: re.Match[str]) -> str:
-        start = int(match.group(1)) - 1
-        end = int(match.group(2)) if match.group(2) else len(args)
-        return "\n".join(args[start:end])
 
-    result = re.sub(r"\$\{@:(\d+)(?::(\d+))?\}", _slice, result)
-    return result
+class _AggregateError(Exception):
+    """Python 3.10 兼容的聚合错误（语义等价 ExceptionGroup 子集）。"""
+
+    def __init__(self, message: str, errors: list[BaseException]) -> None:
+        super().__init__(message)
+        self.exceptions = list(errors)
 
 
 class _TurnState:
@@ -276,6 +308,10 @@ class AgentHarness(Generic[TContext]):
             else AgentHarnessStreamOptions()
         )
         self._retry_policy: RetryPolicy | None = options.retry
+        self._tool_execution = options.tool_execution
+        self._drive = options.drive
+        self._to_provider_messages = options.to_provider_messages or convert_to_llm
+        self._entry_projectors = options.entry_projectors or {}
         self._telemetry: TelemetryContext = options.telemetry_context or NOOP_TELEMETRY_CONTEXT
 
         # 工具注册表 + 激活列表
@@ -304,6 +340,7 @@ class AgentHarness(Generic[TContext]):
         # Save-point（2.4）：运行期间的变更先记 pending，边界处 flush
         self._pending_mutations: int = 0
         self._pending_message_writes: list[AgentMessage] = []
+        self._pending_session_writes: list[dict[str, Any]] = []
 
         # 生命周期
         self._is_shutdown = False
@@ -488,7 +525,9 @@ class AgentHarness(Generic[TContext]):
 
     async def _create_turn_state(self) -> _TurnState:
         self._assert_not_shut_down()
-        context = await self._session.build_context()
+        context = await self._session.build_context(
+            SessionContextBuildOptions(entry_projectors=self._entry_projectors)
+        )
         messages = list(context["messages"])
         resources = self._get_resources()
         tool_context = await self._resolve_tool_context()
@@ -535,6 +574,7 @@ class AgentHarness(Generic[TContext]):
         model: Any,
         session_id: str,
         options: Any,
+        thinking_level: ThinkingLevel | None = None,
     ) -> dict[str, Any]:
         request_options = await self._emit_before_provider_request(
             model,
@@ -552,8 +592,10 @@ class AgentHarness(Generic[TContext]):
             merged["cache_retention"] = request_options.cache_retention
         if request_options.transport is not None:
             merged["transport"] = request_options.transport
-        if self._thinking_level != "off":
-            merged["reasoning"] = self._thinking_level
+        if request_options.timeout_ms is not None:
+            merged["timeout_ms"] = request_options.timeout_ms
+        if thinking_level is not None and thinking_level != "off":
+            merged["reasoning"] = thinking_level
 
         async def _on_payload(payload: Any, request_model: Any) -> Any:
             return await self._emit_before_provider_payload(request_model, payload)
@@ -568,7 +610,9 @@ class AgentHarness(Generic[TContext]):
     def _create_stream_fn(self, get_turn_state: Callable[[], _TurnState]) -> StreamFn:
         async def _stream(model: Any, context: Any, options: Any = None) -> Any:
             turn_state = get_turn_state()
-            merged = await self._apply_request_options(model, turn_state.session_id, options)
+            merged = await self._apply_request_options(
+                model, turn_state.session_id, options, turn_state.thinking_level
+            )
             return await self.models.stream_simple(
                 model, context, cast(SimpleStreamOptions, merged)
             )
@@ -577,7 +621,9 @@ class AgentHarness(Generic[TContext]):
 
     def _create_summary_stream_fn(self) -> StreamFn:
         async def _stream(model: Any, context: Any, options: Any = None) -> Any:
-            merged = await self._apply_request_options(model, await self._get_session_id(), options)
+            merged = await self._apply_request_options(
+                model, await self._get_session_id(), options, self._thinking_level
+            )
             return await self.models.stream_simple(
                 model, context, cast(SimpleStreamOptions, merged)
             )
@@ -747,7 +793,8 @@ class AgentHarness(Generic[TContext]):
         turn_state = get_turn_state()
         return AgentLoopConfig(
             model=turn_state.model,
-            convert_to_llm=convert_to_llm,
+            convert_to_llm=self._to_provider_messages,
+            tool_execution=self._tool_execution,
             transform_context=self._transform_context,
             before_tool_call=self._before_tool_call,
             after_tool_call=self._after_tool_call,
@@ -808,6 +855,15 @@ class AgentHarness(Generic[TContext]):
         while self._pending_message_writes:
             message = self._pending_message_writes.pop(0)
             await self._session.append_message(message)
+        while self._pending_session_writes:
+            write = self._pending_session_writes.pop(0)
+            kind = write["kind"]
+            if kind == "model_change":
+                await self._session.append_model_change(write["provider"], write["model_id"])
+            elif kind == "thinking_level_change":
+                await self._session.append_thinking_level_change(write["level"])
+            elif kind == "active_tools_change":
+                await self._session.append_active_tools_change(write["active_tool_names"])
         self._pending_mutations = 0
 
     # ------------------------------------------------------------------
@@ -834,7 +890,11 @@ class AgentHarness(Generic[TContext]):
                 await self._emit_any(event, signal)
             except BaseException as error:
                 event_error = error
-            had_pending = self._pending_mutations > 0 or bool(self._pending_message_writes)
+            had_pending = (
+                self._pending_mutations > 0
+                or bool(self._pending_message_writes)
+                or bool(self._pending_session_writes)
+            )
             await self._flush_pending_writes()
             await self._emit_own(
                 SavePointEvent(
@@ -910,11 +970,12 @@ class AgentHarness(Generic[TContext]):
         turn_state: _TurnState,
         text: str,
         signal: asyncio.Event,
-        images: list[ImageContent] | None = None,
+        images: list[ImageContent] | dict[str, Any] | None = None,
     ) -> AssistantMessage:
         self._assert_not_shut_down()
         active_turn_state = turn_state
-        messages: list[AgentMessage] = [_create_user_message(text, images)]
+        normalized_images = _normalize_images_option(images)
+        messages: list[AgentMessage] = [_create_user_message(text, normalized_images)]
 
         # nextTurn 队列消息先于本次 prompt 注入
         if self._next_turn_queue:
@@ -932,7 +993,7 @@ class AgentHarness(Generic[TContext]):
             BeforeAgentStartEvent(
                 type="before_agent_start",
                 prompt=text,
-                images=images,
+                images=normalized_images,
                 system_prompt=turn_state.system_prompt,
                 resources=turn_state.resources,
             ),
@@ -974,10 +1035,23 @@ class AgentHarness(Generic[TContext]):
                         return cast(AssistantMessage, message)
             raise
         except BaseException as error:
-            return cast(
-                AssistantMessage,
-                (await self._emit_run_failure(turn_state.model, error, signal))[-1],
-            )
+            try:
+                return cast(
+                    AssistantMessage,
+                    (await self._emit_run_failure(turn_state.model, error, signal))[-1],
+                )
+            except BaseException as report_error:
+                raise AgentHarnessError(
+                    "unknown",
+                    "AgentHarness failed while reporting run failure",
+                    cause=_AggregateError(
+                        "run failure report",
+                        [
+                            error,
+                            report_error,
+                        ],
+                    ),
+                ) from report_error
         finally:
             await self._flush_pending_writes()
 
@@ -992,7 +1066,7 @@ class AgentHarness(Generic[TContext]):
     async def prompt(
         self,
         text: str,
-        images: list[ImageContent] | None = None,
+        images: list[ImageContent] | dict[str, Any] | None = None,
     ) -> AssistantMessage:
         """发送用户消息，运行完整 agent loop。返回最后一条 assistant 消息。"""
 
@@ -1099,35 +1173,35 @@ class AgentHarness(Generic[TContext]):
     async def steer(
         self,
         text: str,
-        images: list[ImageContent] | None = None,
+        images: list[ImageContent] | dict[str, Any] | None = None,
     ) -> None:
         """运行中注入引导消息（趁 agent 还在工作时调整方向）。"""
         self._assert_not_shut_down()
         if self._phase == "idle":
             raise AgentHarnessError("invalid_state", "Cannot steer while idle")
-        self._steer_queue.append(_create_user_message(text, images))
+        self._steer_queue.append(_create_user_message(text, _normalize_images_option(images)))
         await self._emit_queue_update()
 
     async def follow_up(
         self,
         text: str,
-        images: list[ImageContent] | None = None,
+        images: list[ImageContent] | dict[str, Any] | None = None,
     ) -> None:
         """Agent 即将停止时注入后续消息。"""
         self._assert_not_shut_down()
         if self._phase == "idle":
             raise AgentHarnessError("invalid_state", "Cannot follow up while idle")
-        self._follow_up_queue.append(_create_user_message(text, images))
+        self._follow_up_queue.append(_create_user_message(text, _normalize_images_option(images)))
         await self._emit_queue_update()
 
     async def next_turn(
         self,
         text: str,
-        images: list[ImageContent] | None = None,
+        images: list[ImageContent] | dict[str, Any] | None = None,
     ) -> None:
         """排队一条消息，在下次 prompt() 时先于新 prompt 注入。"""
         self._assert_not_shut_down()
-        self._next_turn_queue.append(_create_user_message(text, images))
+        self._next_turn_queue.append(_create_user_message(text, _normalize_images_option(images)))
         await self._emit_queue_update()
 
     async def append_message(self, message: AgentMessage) -> None:
@@ -1136,10 +1210,13 @@ class AgentHarness(Generic[TContext]):
         await self._track("mutation", lambda: self._apply_append_message(message))
 
     async def _apply_append_message(self, message: AgentMessage) -> None:
-        if self._phase == "idle":
-            await self._session.append_message(message)
-        else:
-            self._pending_message_writes.append(message)
+        try:
+            if self._phase == "idle":
+                await self._session.append_message(message)
+            else:
+                self._pending_message_writes.append(message)
+        except BaseException as error:
+            raise _normalize_harness_error(error, "session") from error
 
     async def compact(self, custom_instructions: str | None = None) -> CompactResult:
         """上下文压缩（telemetry span 包裹）。"""
@@ -1295,12 +1372,17 @@ class AgentHarness(Generic[TContext]):
             summary_data: dict[str, Any] | None = None
             from_hook = False
             if hook_result is not None and hook_result.summary is not None:
-                summary_data = {
-                    "summary": str(hook_result.summary),
-                    "fromHook": True,
-                }
+                hook_summary = hook_result.summary
+                if isinstance(hook_summary, str):
+                    summary_data = {"summary": hook_summary, "fromHook": True}
+                else:
+                    summary_data = {"summary": hook_summary.summary, "fromHook": True}
+                    if hook_summary.details is not None:
+                        summary_data["details"] = hook_summary.details
+                    if hook_summary.usage is not None:
+                        summary_data["usage"] = hook_summary.usage
                 from_hook = True
-            elif opts.summarize:
+            elif opts.summarize and len(collected["entries"]) > 0:
                 custom_instructions = (
                     hook_result.custom_instructions
                     if hook_result is not None and hook_result.custom_instructions is not None
@@ -1334,7 +1416,16 @@ class AgentHarness(Generic[TContext]):
                     "fromHook": False,
                 }
 
-            summary_entry_id = await self._session.move_to(target_id, summary_data)
+            target_entry = await self._session.get_entry(target_id)
+            move_target_id: str | None = target_id
+            editor_text: str | None = None
+            if target_entry is not None and target_entry["type"] == "message":
+                target_message = cast(dict[str, Any], target_entry["message"])
+                if target_message.get("role") in ("user", "custom"):
+                    move_target_id = target_entry["parentId"]
+                    editor_text = _message_content_text(target_message.get("content"))
+
+            summary_entry_id = await self._session.move_to(move_target_id, summary_data)
             label = (
                 hook_result.label
                 if hook_result is not None and hook_result.label is not None
@@ -1357,7 +1448,11 @@ class AgentHarness(Generic[TContext]):
                     from_hook=from_hook,
                 )
             )
-            return NavigateTreeResult(cancelled=False, summary_entry=summary_entry)
+            return NavigateTreeResult(
+                cancelled=False,
+                editor_text=editor_text,
+                summary_entry=summary_entry,
+            )
         except BaseException as error:
             raise _normalize_harness_error(error, "branch_summary") from error
         finally:
@@ -1393,7 +1488,13 @@ class AgentHarness(Generic[TContext]):
         except BaseException as error:
             errors.append(error)
         if errors:
-            raise AgentHarnessError("hook", "Abort completed with errors", cause=errors[0])
+            if len(errors) == 1:
+                raise AgentHarnessError("hook", "Abort completed with errors", cause=errors[0])
+            raise AgentHarnessError(
+                "hook",
+                "Abort completed with errors",
+                cause=_AggregateError("abort errors", list(errors)),
+            )
         return AbortResult(cleared_steer=cleared_steer, cleared_follow_up=cleared_follow_up)
 
     def request_shutdown(self) -> None:
@@ -1405,6 +1506,7 @@ class AgentHarness(Generic[TContext]):
         self._follow_up_queue = []
         self._next_turn_queue = []
         self._pending_message_writes = []
+        self._pending_session_writes = []
         if self._abort_event is not None:
             self._abort_event.set()
         self._shutdown_task = asyncio.create_task(self._wait_for_tasks())
@@ -1446,6 +1548,11 @@ class AgentHarness(Generic[TContext]):
         previous_model = self._model
         if self._phase != "idle":
             self._pending_mutations += 1
+            self._pending_session_writes.append(
+                {"kind": "model_change", "provider": model.provider, "model_id": model.id}
+            )
+        else:
+            await self._session.append_model_change(model.provider, model.id)
         self._model = model
         await self._emit_own(
             ModelUpdateEvent(
@@ -1467,6 +1574,9 @@ class AgentHarness(Generic[TContext]):
         previous_level = self._thinking_level
         if self._phase != "idle":
             self._pending_mutations += 1
+            self._pending_session_writes.append({"kind": "thinking_level_change", "level": level})
+        else:
+            await self._session.append_thinking_level_change(level)
         self._thinking_level = level
         await self._emit_own(
             ThinkingLevelUpdateEvent(
@@ -1512,6 +1622,11 @@ class AgentHarness(Generic[TContext]):
         previous_active = list(self._active_tool_names)
         if self._phase != "idle":
             self._pending_mutations += 1
+            self._pending_session_writes.append(
+                {"kind": "active_tools_change", "active_tool_names": list(next_active)}
+            )
+        else:
+            await self._session.append_active_tools_change(list(next_active))
         self._tools = next_tools
         self._active_tool_names = next_active
         await self._emit_own(
@@ -1538,6 +1653,11 @@ class AgentHarness(Generic[TContext]):
         previous_active = list(self._active_tool_names)
         if self._phase != "idle":
             self._pending_mutations += 1
+            self._pending_session_writes.append(
+                {"kind": "active_tools_change", "active_tool_names": list(tool_names)}
+            )
+        else:
+            await self._session.append_active_tools_change(list(tool_names))
         self._active_tool_names = list(tool_names)
         await self._emit_own(
             ToolsUpdateEvent(

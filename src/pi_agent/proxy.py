@@ -57,34 +57,48 @@ def _empty_usage() -> Usage:
     }
 
 
+def _snake_to_camel(key: str) -> str:
+    head, *tail = key.split("_")
+    return head + "".join(word[:1].upper() + word[1:] for word in tail if word)
+
+
 def _to_jsonable(value: Any) -> Any:
+    """把 Python 载荷转为 proxy 线协议 JSON（camelCase，对齐 TS）。"""
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return {
-            field.name: _to_jsonable(getattr(value, field.name))
+            _snake_to_camel(field.name): _to_jsonable(getattr(value, field.name))
             for field in dataclasses.fields(value)
         }
     if isinstance(value, dict):
-        return {key: _to_jsonable(item) for key, item in value.items()}
+        return {
+            _snake_to_camel(str(key)) if "_" in str(key) else str(key): _to_jsonable(item)
+            for key, item in value.items()
+        }
     if isinstance(value, (list, tuple)):
         return [_to_jsonable(item) for item in value]
     return value
 
 
 def build_proxy_request_options(options: dict[str, Any]) -> dict[str, Any]:
-    """挑选可序列化的流选项（对齐 TS buildProxyRequestOptions）。"""
+    """挑选可序列化的流选项并映射为 TS 线协议键（buildProxyRequestOptions）。"""
     keys = (
-        "temperature",
-        "max_tokens",
-        "reasoning",
-        "cache_retention",
-        "session_id",
-        "headers",
-        "metadata",
-        "transport",
-        "thinking_budgets",
-        "max_retry_delay_ms",
+        ("temperature", "temperature"),
+        ("sampling_params", "samplingParams"),
+        ("max_tokens", "maxTokens"),
+        ("reasoning", "reasoning"),
+        ("cache_retention", "cacheRetention"),
+        ("session_id", "sessionId"),
+        ("headers", "headers"),
+        ("metadata", "metadata"),
+        ("transport", "transport"),
+        ("thinking_budgets", "thinkingBudgets"),
+        ("max_retry_delay_ms", "maxRetryDelayMs"),
     )
-    return {key: options[key] for key in keys if key in options and options[key] is not None}
+    return {
+        wire_key: _to_jsonable(options[key])
+        for key, wire_key in keys
+        if key in options and options[key] is not None
+    }
 
 
 def process_proxy_event(
@@ -204,7 +218,8 @@ def process_proxy_event(
         block = content[proxy_event["contentIndex"]]
         if not isinstance(block, dict) or block.get("type") != "toolCall":
             return None
-        block.pop("partialJson", None)
+        raw_arguments = block.pop("partialJson", "")
+        block["raw_arguments"] = raw_arguments
         return cast(
             AssistantMessageEvent,
             {
@@ -216,7 +231,9 @@ def process_proxy_event(
         )
 
     if event_type == "done":
-        done_reason = proxy_event["reason"]
+        done_reason: Any = proxy_event["reason"]
+        if done_reason == "toolUse":
+            done_reason = "tool_call"
         partial["stop_reason"] = done_reason
         usage = proxy_event.get("usage")
         if isinstance(usage, dict):

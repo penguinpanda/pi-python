@@ -50,6 +50,7 @@ class ShellCaptureResult:
         self.exit_code = exit_code
         self.cancelled = cancelled
         self.execution_error = execution_error
+        self.truncated = truncation.truncated
 
 
 def sanitize_binary_output(text: str) -> str:
@@ -176,7 +177,8 @@ async def execute_shell_with_capture(
         truncation = TruncationResult(
             content=tail_truncation.content,
             truncated=truncated,
-            truncated_by=(tail_truncation.truncated_by if truncated else None),
+            truncated_by=tail_truncation.truncated_by
+            or ("bytes" if total_bytes > DEFAULT_MAX_BYTES else "lines"),
             total_lines=total_lines,
             total_bytes=total_bytes,
             output_lines=tail_truncation.output_lines,

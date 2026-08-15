@@ -142,8 +142,8 @@ async def test_retry_succeeds_on_second_attempt() -> None:
 
 
 @pytest.mark.asyncio
-async def test_default_policy_enabled() -> None:
-    """retry_policy=None → 默认启用重试。"""
+async def test_default_policy_disabled() -> None:
+    """retry_policy=None → 默认不重试（对齐 TS agent-loop）。"""
     core = _make_faux(
         [
             _llm_error("503 Service Unavailable"),
@@ -154,9 +154,9 @@ async def test_default_policy_enabled() -> None:
 
     result, events = await _run(core.stream, config)
 
-    assert core.call_count == 2
-    assert result[-1]["stop_reason"] == "stop"
-    assert len(_events_of(events, "auto_retry_start")) == 1
+    assert core.call_count == 1
+    assert result[-1]["stop_reason"] == "error"
+    assert not _events_of(events, "auto_retry_start")
 
 
 @pytest.mark.asyncio

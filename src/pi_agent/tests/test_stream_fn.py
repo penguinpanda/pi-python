@@ -23,7 +23,7 @@ class TestSetDefaultStreamFn:
     def test_get_unset_raises(self):
         """未设置时抛 RuntimeError。"""
         set_default_stream_fn(None)
-        with pytest.raises(RuntimeError, match="No default stream function"):
+        with pytest.raises(RuntimeError, match="setDefaultStreamFn"):
             get_default_stream_fn()
 
     def test_set_none_clears(self):

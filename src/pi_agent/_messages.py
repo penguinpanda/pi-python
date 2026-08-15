@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from pi_ai.types import Message
+from pi_ai.types import Message, TextContent
 
 from ._types import AgentMessage
 
@@ -63,7 +63,12 @@ def convert_to_llm(messages: list[AgentMessage]) -> list[Message]:
                     Message,
                     {
                         "role": "user",
-                        "content": bash_execution_to_text(cast(dict[str, Any], m)),
+                        "content": [
+                            TextContent(
+                                type="text",
+                                text=bash_execution_to_text(cast(dict[str, Any], m)),
+                            )
+                        ],
                         "timestamp": m.get("timestamp"),
                     },
                 )
@@ -81,18 +86,21 @@ def convert_to_llm(messages: list[AgentMessage]) -> list[Message]:
                     Message,
                     {
                         "role": "user",
-                        "content": prefix + summary + suffix,
+                        "content": [TextContent(type="text", text=prefix + summary + suffix)],
                         "timestamp": m.get("timestamp"),
                     },
                 )
             )
         elif role == "custom":
+            custom_content = m.get("content")
+            if isinstance(custom_content, str):
+                custom_content = [TextContent(type="text", text=custom_content)]
             result.append(
                 cast(
                     Message,
                     {
                         "role": "user",
-                        "content": m.get("content"),
+                        "content": custom_content,
                         "timestamp": m.get("timestamp"),
                     },
                 )

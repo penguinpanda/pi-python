@@ -33,6 +33,24 @@ class SkillDiagnostic:
         self.path = path
 
 
+class LoadedSkill(dict):
+    """dict 形式技能，同时提供 snake_case 属性访问。
+
+    既保持既有 dict 消费方兼容，也可直接传给
+    format_skills_for_system_prompt。
+    """
+
+    def __getattr__(self, name: str) -> Any:
+        key = {
+            "file_path": "filePath",
+            "disable_model_invocation": "disableModelInvocation",
+        }.get(name, name)
+        try:
+            return self[key]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
+
+
 def _xml_escape(text: str) -> str:
     return (
         text.replace("&", "&amp;")
@@ -44,13 +62,28 @@ def _xml_escape(text: str) -> str:
 
 
 def format_skill_invocation(
-    name: str,
-    description: str,
-    content: str,
-    file_path: str,
+    skill_or_name: Any = None,
+    description: str = "",
+    content: str = "",
+    file_path: str = "",
     additional_instructions: str | None = None,
+    **kwargs: Any,
 ) -> str:
-    """把技能格式化为模型可见的调用块（对齐 TS formatSkillInvocation）。"""
+    """把技能格式化为模型可见的调用块（对齐 TS formatSkillInvocation）。
+
+    兼容 Skill 对象调用、旧的位置参数调用与 name 关键字调用。
+    """
+    if isinstance(skill_or_name, str):
+        name = skill_or_name
+    elif skill_or_name is None and isinstance(kwargs.get("name"), str):
+        name = kwargs["name"]
+    else:
+        skill = skill_or_name
+        name = str(skill.name)
+        description = str(getattr(skill, "description", description or ""))
+        content = str(getattr(skill, "content", content or ""))
+        file_path = str(getattr(skill, "file_path", file_path or ""))
+        additional_instructions = additional_instructions
     directory = _dirname_env_path(file_path)
     skill_block = (
         f'<skill name="{_xml_escape(name)}" location="{_xml_escape(file_path)}">\n'
@@ -248,18 +281,24 @@ async def _load_skill_from_file(
     for error in _validate_description(description):
         diagnostics.append(SkillDiagnostic("invalid_metadata", error, file_path))
     frontmatter_name = frontmatter.get("name")
-    name = frontmatter_name if isinstance(frontmatter_name, str) else parent_dir_name
+    name = (
+        frontmatter_name
+        if isinstance(frontmatter_name, str) and frontmatter_name
+        else parent_dir_name
+    )
     for error in _validate_name(name, parent_dir_name):
         diagnostics.append(SkillDiagnostic("invalid_metadata", error, file_path))
     if not description or not description.strip():
         return None, diagnostics
-    return {
-        "name": name,
-        "description": description,
-        "content": body,
-        "filePath": file_path,
-        "disableModelInvocation": frontmatter.get("disable-model-invocation") is True,
-    }, diagnostics
+    return LoadedSkill(
+        {
+            "name": name,
+            "description": description,
+            "content": body,
+            "filePath": file_path,
+            "disableModelInvocation": frontmatter.get("disable-model-invocation") is True,
+        }
+    ), diagnostics
 
 
 async def _load_skills_from_dir(

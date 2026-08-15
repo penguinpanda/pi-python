@@ -41,6 +41,11 @@ async def test_unknown_provider_returns_friendly_error(monkeypatch, capsys):
     monkeypatch.setattr(_cli, "_create_runtime", _fake_runtime)
     monkeypatch.setattr(_cli, "_resolve_initial_model", fake_resolve)
 
+    async def fake_session_create(cwd, **kwargs):
+        return SessionManager.in_memory(cwd=cwd)
+
+    monkeypatch.setattr(_cli, "create_session_manager", fake_session_create)
+
     code = await _cli._async_main(["--provider", "bogus", "--model", "x", "-p", "hi"])
 
     captured = capsys.readouterr()

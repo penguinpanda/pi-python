@@ -79,7 +79,15 @@ class TestHarnessWithV4Session:
         await harness.prompt("q1")
         first_leaf = await harness.get_leaf_id()
         assert first_leaf is not None
-        first_entry = (await session.get_branch())[0]["id"]
+        branch = await session.get_branch()
+        user_entry = branch[0]["id"]
+        first_entry = branch[-1]["id"]
+
+        result = await harness.navigate_tree(user_entry)
+
+        assert result.cancelled is False
+        assert result.editor_text == "q1"
+        assert await harness.get_leaf_id() is None
 
         result = await harness.navigate_tree(first_entry)
 

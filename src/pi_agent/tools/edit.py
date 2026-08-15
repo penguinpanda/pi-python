@@ -31,7 +31,8 @@ def _prepare_edit_arguments(input_data: dict) -> dict:
         except json.JSONDecodeError:
             pass
     if isinstance(args.get("oldText"), str) and isinstance(args.get("newText"), str):
-        edits = list(args.get("edits") or [])
+        legacy_edits = args.get("edits")
+        edits = list(legacy_edits) if isinstance(legacy_edits, list) else []
         edits.append({"oldText": args["oldText"], "newText": args["newText"]})
         args.pop("oldText", None)
         args.pop("newText", None)
@@ -136,11 +137,27 @@ def create_edit_tool() -> AgentTool:
                 },
                 "edits": {
                     "type": "array",
+                    "description": (
+                        "One or more targeted replacements. Each edit is matched against "
+                        "the original file, not incrementally. Do not include overlapping "
+                        "or nested edits. If two changes touch the same block or nearby "
+                        "lines, merge them into one edit instead."
+                    ),
                     "items": {
                         "type": "object",
                         "properties": {
-                            "oldText": {"type": "string"},
-                            "newText": {"type": "string"},
+                            "oldText": {
+                                "type": "string",
+                                "description": (
+                                    "Exact text for one targeted replacement. It must be "
+                                    "unique in the original file and must not overlap with "
+                                    "any other edits[].oldText in the same call."
+                                ),
+                            },
+                            "newText": {
+                                "type": "string",
+                                "description": "Replacement text for this targeted edit.",
+                            },
                         },
                         "required": ["oldText", "newText"],
                     },

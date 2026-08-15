@@ -39,21 +39,23 @@ def _bmp_bytes(size=(40, 30), color=(0, 255, 0)) -> bytes:
 
 
 class TestImagePipeline:
-    def test_process_jpeg_converts_to_png(self):
-        result = process_image_sync(_jpeg_with_orientation(1), "image/jpeg")
+    def test_process_small_jpeg_preserved(self):
+        data = _jpeg_with_orientation(1)
+        result = process_image_sync(data, "image/jpeg")
         assert result["ok"] is True
-        assert result["mimeType"] == "image/png"
+        assert result["mimeType"] == "image/jpeg"
+        assert result["data"] == data
         with Image.open(io.BytesIO(result["data"])) as image:
-            assert image.format == "PNG"
             assert image.size == (200, 100)
 
-    def test_exif_orientation_applied(self):
+    def test_small_image_bytes_preserved_without_reencode(self):
         data = _jpeg_with_orientation(6)
         result = process_image_sync(data, "image/jpeg")
         assert result["ok"] is True
+        assert result["data"] == data
+        assert result["hints"] == []
         with Image.open(io.BytesIO(result["data"])) as image:
-            # orientation=6 旋转 90°，宽高互换。
-            assert image.size == (100, 200)
+            assert image.size == (200, 100)
 
     def test_exif_orientation_helper_preserves_format(self):
         data = _jpeg_with_orientation(6)
@@ -84,7 +86,7 @@ class TestImagePipeline:
     def test_invalid_data_returns_error_dict(self):
         result = process_image_sync(b"not an image", "image/png")
         assert result["ok"] is False
-        assert "failed" in result["message"].lower()
+        assert "omitted" in result["message"].lower()
 
     def test_auto_resize_hint(self):
         data = _png_bytes(size=(3000, 1500))
@@ -97,7 +99,7 @@ class TestImagePipeline:
 
 class TestReadToolPipeline:
     @pytest.mark.asyncio
-    async def test_read_tool_converts_bmp_by_default(self, tmp_path):
+    async def test_read_tool_omits_bmp_without_processor(self, tmp_path):
         from pi_agent import PythonExecutionEnv, create_read_tool
 
         (tmp_path / "pic.bmp").write_bytes(_bmp_bytes())
@@ -111,6 +113,24 @@ class TestReadToolPipeline:
         context.env = env
         result = await tool.execute("t1", {"path": "pic.bmp"}, None, None, context)
         texts = [block.get("text", "") for block in result.content]
+        assert any("Image omitted" in text for text in texts)
+        assert not any(block.get("type") == "image" for block in result.content)
+
+    @pytest.mark.asyncio
+    async def test_read_tool_converts_bmp_with_explicit_processor(self, tmp_path):
+        from pi_agent import PythonExecutionEnv, ReadToolOptions, create_read_tool
+        from pi_agent.tools.image_pipeline import process_image
+
+        (tmp_path / "pic.bmp").write_bytes(_bmp_bytes())
+        env = PythonExecutionEnv(str(tmp_path))
+        tool = create_read_tool(ReadToolOptions(image_processor=process_image))
+
+        class _Context:
+            pass
+
+        context = _Context()
+        context.env = env
+        result = await tool.execute("t1", {"path": "pic.bmp"}, None, None, context)
+        texts = [block.get("text", "") for block in result.content]
         assert any("Read image file [image/png]" in text for text in texts)
-        assert not any("Image omitted" in text for text in texts)
         assert any(block.get("type") == "image" for block in result.content)

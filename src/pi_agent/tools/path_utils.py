@@ -40,8 +40,9 @@ async def resolve_tool_path(env: ExecutionEnv, path: str, signal=None) -> str:
 
 
 async def resolve_read_tool_path(env: ExecutionEnv, path: str, signal=None) -> str:
-    # read 工具允许全盘读取（对齐 TS）；仅当调用方显式开启限制时校验。
-    resolved = await resolve_tool_path(env, path, signal)
+    # read 工具允许全盘读取（对齐 TS），即使调用方为写工具开启了 cwd 限制。
+    result = await env.absolute_path(_normalize_tool_path(path), signal)
+    resolved = get_or_throw(result)
     variants = [
         resolved,
         re.sub(
@@ -53,6 +54,8 @@ async def resolve_read_tool_path(env: ExecutionEnv, path: str, signal=None) -> s
     ]
     for variant in dict.fromkeys(variants):
         exists = await env.exists(variant, signal)
-        if exists[0] and exists[1]:
+        if not exists[0]:
+            raise exists[1]
+        if exists[1]:
             return variant
     return resolved

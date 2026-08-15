@@ -17,12 +17,10 @@ from ._types import AgentMessage
 from .session.v4.context import (
     _branch_summary_message,
     _compaction_summary_message,
-    _custom_message,
 )
 from .session.v4.types import (
     BranchSummaryEntry,
     CompactionEntry,
-    CustomEntry,
     Entry,
     MessageEntry,
 )
@@ -75,19 +73,21 @@ def format_file_operations(read_files: list[str], modified_files: list[str]) -> 
 
 
 def safe_json_stringify(value: Any) -> str:
+    if value is None:
+        return "undefined"
     try:
         return json.dumps(value, ensure_ascii=False)
     except Exception:
         return "[unserializable]"
 
 
-def _content_text(content: Any, default: str = "") -> str:
+def _content_text(content: Any, default: str = "", separator: str = "") -> str:
     if isinstance(content, str):
         return content
     if not isinstance(content, list):
         return default
     return (
-        "".join(
+        separator.join(
             block.get("text", "")
             for block in content
             if isinstance(block, dict) and block.get("type") == "text"
@@ -134,7 +134,9 @@ def serialize_conversation(messages: list[AgentMessage]) -> str:
                 isinstance(block, dict) and block.get("type") == "text"
                 for block in (cast(dict[str, Any], message).get("content") or [])
             ):
-                parts.append(f"[Assistant]: {_content_text(message.get('content'), '')}")
+                parts.append(
+                    f"[Assistant]: {_content_text(message.get('content'), '', separator=chr(10))}"
+                )
             if tool_calls:
                 parts.append(f"[Assistant tool calls]: {'; '.join(tool_calls)}")
         elif role == "toolResult":
@@ -164,14 +166,8 @@ def get_message_from_entry(entry: Entry) -> AgentMessage | None:
     if entry_type == "message":
         return cast(MessageEntry, entry)["message"]
     if entry_type == "custom":
-        custom_entry = cast(CustomEntry, entry)
-        return _custom_message(
-            custom_entry["customType"],
-            custom_entry.get("data"),
-            True,
-            None,
-            custom_entry["timestamp"],
-        )
+        # TS getMessageFromEntry 对 custom 条目返回 undefined。
+        return None
     if entry_type == "branch_summary":
         branch_entry = cast(BranchSummaryEntry, entry)
         return _branch_summary_message(

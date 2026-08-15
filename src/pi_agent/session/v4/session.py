@@ -167,8 +167,10 @@ class Session:
         return await self._storage.find_entries(query)
 
     async def find_entry(self, query: EntryQuery | None = None) -> Entry | None:
-        _assert_valid_limit((query or {}).get("limit"))
-        entries = await self._storage.find_entries({**(query or {}), "limit": 1})
+        merged: dict[str, Any] = cast(dict[str, Any], query) if query else {}
+        _assert_valid_limit(merged.get("limit"))
+        _assert_valid_cursor((merged.get("cursor") or {}).get("afterSeq"))
+        entries = await self._storage.find_entries(cast(EntryQuery, {**merged, "limit": 1}))
         return entries[0] if entries else None
 
     async def find_entries_on_branch(self, query: dict[str, Any] | None = None) -> list[Entry]:

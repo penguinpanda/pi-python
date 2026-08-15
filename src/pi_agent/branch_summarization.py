@@ -24,7 +24,6 @@ from .compaction_utils import (
 from .session.v4.context import (
     _branch_summary_message,
     _compaction_summary_message,
-    _custom_message,
 )
 from .session.v4.types import Entry, SessionError
 
@@ -63,7 +62,7 @@ async def collect_entries_for_branch_summary(
     while current and current != common_ancestor_id:
         entry = await session.get_entry(current)
         if entry is None:
-            raise SessionError("not_found", f"Entry {current} not found")
+            raise SessionError("invalid_entry", f"Entry {current} not found")
         entries.append(entry)
         current = entry.get("parentId")
     entries.reverse()
@@ -75,14 +74,6 @@ def _get_message_from_entry(entry: Entry) -> AgentMessage | None:
         if entry["message"].get("role") == "toolResult":
             return None
         return entry["message"]
-    if entry["type"] == "custom_message":
-        return _custom_message(
-            entry["customType"],
-            entry.get("data"),
-            True,
-            None,
-            entry["timestamp"],
-        )
     if entry["type"] == "branch_summary":
         return _branch_summary_message(entry["summary"], entry["fromId"], entry["timestamp"])
     if entry["type"] == "compaction":
@@ -101,11 +92,7 @@ def prepare_branch_entries(
     file_ops = create_file_ops()
     total_tokens = 0
     for entry in entries:
-        if (
-            entry["type"] == "branch_summary"
-            and not entry.get("fromHook")
-            and isinstance(entry.get("details"), dict)
-        ):
+        if entry["type"] == "branch_summary" and isinstance(entry.get("details"), dict):
             details = entry["details"]
             if isinstance(details.get("readFiles"), list):
                 for file_path in details["readFiles"]:
@@ -243,7 +230,7 @@ async def generate_branch_summary(
 def _content_text(content: Any) -> str:
     if isinstance(content, str):
         return content
-    return "".join(
+    return "\n".join(
         block.get("text", "")
         for block in (content or [])
         if isinstance(block, dict) and block.get("type") == "text"

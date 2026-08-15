@@ -60,7 +60,8 @@ async def test_configuration_getters_and_setters() -> None:
     await harness.set_follow_up_mode("all")
     assert harness.get_follow_up_mode() == "all"
 
-    assert await harness.get_leaf_id() is None
+    # 配置 setter 现在持久化到会话路径（H1）。
+    assert await harness.get_leaf_id() is not None
 
 
 @pytest.mark.asyncio

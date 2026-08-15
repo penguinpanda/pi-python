@@ -57,7 +57,7 @@ def test_find_cut_points_and_turn_start() -> None:
         {"type": "message", "id": "c", "message": {"role": "toolResult", "content": "x"}},
         {"type": "message", "id": "d", "message": {"role": "user", "content": "q"}},
     ]
-    assert _find_valid_cut_points(entries, 0, 4) == [0, 1, 3]
+    assert _find_valid_cut_points(entries, 0, 4) == [0, 3]
     assert find_turn_start_index(entries, 3, 0) == 3
     assert (
         find_turn_start_index(

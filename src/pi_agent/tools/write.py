@@ -25,10 +25,11 @@ def create_write_tool() -> AgentTool:
             get_or_throw(await env.write_file(absolute_path, content, signal))
             if signal is not None and signal.is_set():
                 raise ValueError("Operation aborted")
+            byte_count = len(content.encode("utf-8")) if isinstance(content, str) else len(content)
             return AgentToolResult(
                 content=[
                     TextContent(
-                        type="text", text=f"Successfully wrote {len(content)} bytes to {path}"
+                        type="text", text=f"Successfully wrote {byte_count} bytes to {path}"
                     )
                 ],
                 details=None,

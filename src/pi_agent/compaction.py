@@ -14,6 +14,7 @@ from typing import Any, Callable, cast
 from pi_ai.types import Message, Usage
 from pi_ai.utils.retry import RetryPolicy, retry_assistant_call
 
+from ._messages import convert_to_llm
 from ._types import AgentMessage
 from .compaction_utils import (
     compute_file_lists,
@@ -70,7 +71,7 @@ def _find_valid_cut_points(
     cut_points: list[int] = []
     for index in range(start_index, end_index):
         entry = entries[index]
-        if entry["type"] in ("branch_summary", "custom_message"):
+        if entry["type"] == "branch_summary":
             cut_points.append(index)
             continue
         if entry["type"] != "message":
@@ -95,7 +96,7 @@ def find_turn_start_index(
 ) -> int:
     for index in range(entry_index, start_index - 1, -1):
         entry = entries[index]
-        if entry["type"] in ("branch_summary", "custom_message"):
+        if entry["type"] == "branch_summary":
             return index
         if entry["type"] == "message":
             if entry["message"].get("role") in ("user", "bashExecution"):
@@ -303,7 +304,7 @@ def _combine_usage(first: Usage, second: Usage) -> Usage:
 def _content_text(content: Any) -> str:
     if isinstance(content, str):
         return content
-    return "".join(
+    return "\n".join(
         block.get("text", "")
         for block in (content or [])
         if isinstance(block, dict) and block.get("type") == "text"
@@ -330,7 +331,9 @@ async def generate_summary_with_usage(
     base_prompt = UPDATE_SUMMARIZATION_PROMPT if previous_summary else SUMMARIZATION_PROMPT
     if custom_instructions:
         base_prompt = f"{base_prompt}\n\nAdditional focus: {custom_instructions}"
-    conversation_text = serialize_conversation(current_messages)
+    conversation_text = serialize_conversation(
+        cast(list[AgentMessage], convert_to_llm(current_messages))
+    )
     prompt_text = f"<conversation>\n{conversation_text}\n</conversation>\n\n"
     if previous_summary:
         prompt_text += f"<previous-summary>\n{previous_summary}\n</previous-summary>\n\n"
@@ -375,6 +378,36 @@ async def generate_summary_with_usage(
     }
 
 
+async def generate_summary(
+    current_messages: list[AgentMessage],
+    stream_fn: Callable,
+    model: Any,
+    reserve_tokens: int,
+    signal: Any = None,
+    custom_instructions: str | None = None,
+    previous_summary: str | None = None,
+    thinking_level: str | None = None,
+    retry: RetryPolicy | None = None,
+    callbacks: Any = None,
+) -> tuple[bool, Any]:
+    """生成摘要并返回纯文本 Result（对齐 TS generateSummary）。"""
+    ok_flag, result = await generate_summary_with_usage(
+        current_messages,
+        stream_fn,
+        model,
+        reserve_tokens,
+        signal,
+        custom_instructions,
+        previous_summary,
+        thinking_level,
+        retry,
+        callbacks,
+    )
+    if not ok_flag:
+        return False, result
+    return True, result["text"]
+
+
 @dataclass(slots=True)
 class CompactionPreparation:
     first_kept_entry_id: str
@@ -403,28 +436,42 @@ def prepare_compaction(
             break
 
     previous_summary: str | None = None
-    boundary_start = 0
+    compactable_entries = path_entries
     if prev_compaction_index >= 0:
         prev = cast_compaction(path_entries[prev_compaction_index])
         previous_summary = prev.get("summary")
-        first_kept_entry_id = prev.get("firstKeptEntryId")
-        first_kept_index = (
-            next(
-                (i for i, e in enumerate(path_entries) if e["id"] == first_kept_entry_id),
-                -1,
+        # TS prepareCompaction：把上次 compaction 的 retainedTail 重建为虚拟
+        # 条目并入可压缩区间，确保第二次压缩不会静默丢失旧 retainedTail。
+        virtual_entries: list[Entry] = []
+        for index, message in enumerate(prev.get("retainedTail") or []):
+            virtual_entries.append(
+                cast(
+                    Entry,
+                    {
+                        "type": "message",
+                        "id": f"{prev['id']}:retained:{index}",
+                        "parentId": (
+                            prev["id"] if index == 0 else f"{prev['id']}:retained:{index - 1}"
+                        ),
+                        "seq": prev["seq"],
+                        "timestamp": message.get("timestamp", prev["timestamp"]),
+                        "message": message,
+                    },
+                )
             )
-            if first_kept_entry_id
-            else -1
-        )
-        boundary_start = first_kept_index if first_kept_index >= 0 else prev_compaction_index + 1
+        compactable_entries = [
+            *virtual_entries,
+            *path_entries[prev_compaction_index + 1 :],
+        ]
 
-    boundary_end = len(path_entries)
+    boundary_start = 0
+    boundary_end = len(compactable_entries)
     tokens_before = estimate_context_tokens(build_session_context(path_entries)["messages"]).tokens
 
     cut_point = find_cut_point(
-        path_entries, boundary_start, boundary_end, settings.keep_recent_tokens
+        compactable_entries, boundary_start, boundary_end, settings.keep_recent_tokens
     )
-    first_kept_entry = path_entries[cut_point.first_kept_entry_index]
+    first_kept_entry = compactable_entries[cut_point.first_kept_entry_index]
     first_kept_entry_id = first_kept_entry.get("id")
     if not first_kept_entry_id:
         return False, CompactionError(
@@ -435,23 +482,22 @@ def prepare_compaction(
     history_end = (
         cut_point.turn_start_index if cut_point.is_split_turn else cut_point.first_kept_entry_index
     )
-    messages_to_summarize = [
-        message
-        for index in range(boundary_start, history_end)
-        if (message := get_message_from_entry_for_compaction(path_entries[index])) is not None
-    ]
+    messages_to_summarize: list[AgentMessage] = []
+    for index in range(boundary_start, history_end):
+        summary_message = get_message_from_entry_for_compaction(compactable_entries[index])
+        if summary_message is not None:
+            messages_to_summarize.append(summary_message)
     turn_prefix_messages: list[AgentMessage] = []
     if cut_point.is_split_turn:
-        turn_prefix_messages = [
-            message
-            for index in range(cut_point.turn_start_index, cut_point.first_kept_entry_index)
-            if (message := get_message_from_entry_for_compaction(path_entries[index])) is not None
-        ]
-    retained_tail: list[AgentMessage] = [
-        message
-        for index in range(cut_point.first_kept_entry_index, boundary_end)
-        if (message := get_message_from_entry_for_compaction(path_entries[index])) is not None
-    ]
+        for index in range(cut_point.turn_start_index, cut_point.first_kept_entry_index):
+            prefix_message = get_message_from_entry_for_compaction(compactable_entries[index])
+            if prefix_message is not None:
+                turn_prefix_messages.append(prefix_message)
+    retained_tail: list[AgentMessage] = []
+    for index in range(cut_point.first_kept_entry_index, boundary_end):
+        tail_message = get_message_from_entry_for_compaction(compactable_entries[index])
+        if tail_message is not None:
+            retained_tail.append(tail_message)
     file_ops = _extract_file_operations(messages_to_summarize, path_entries, prev_compaction_index)
     if cut_point.is_split_turn:
         for message in turn_prefix_messages:
@@ -482,7 +528,7 @@ def _extract_file_operations(
     file_ops = create_file_ops()
     if prev_compaction_index >= 0:
         prev = cast_compaction(entries[prev_compaction_index])
-        if not prev.get("fromHook") and isinstance(prev.get("details"), dict):
+        if isinstance(prev.get("details"), dict):
             details = prev["details"]
             if isinstance(details.get("readFiles"), list):
                 file_ops["read"].update(details["readFiles"])
@@ -517,7 +563,7 @@ async def _generate_turn_prefix_summary(
         math.floor(0.5 * reserve_tokens),
         model.max_tokens if getattr(model, "max_tokens", 0) > 0 else float("inf"),
     )
-    conversation_text = serialize_conversation(messages)
+    conversation_text = serialize_conversation(cast(list[AgentMessage], convert_to_llm(messages)))
     prompt_text = f"<conversation>\n{conversation_text}\n</conversation>\n\n{TURN_PREFIX_SUMMARIZATION_PROMPT}"
     from pi_ai import Context, now_ms
 

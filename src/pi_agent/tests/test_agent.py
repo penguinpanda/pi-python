@@ -896,7 +896,7 @@ def test_convert_to_llm_wraps_custom_roles():
     assert "secret-command" not in str(llm_messages[0]["content"])
     assert "compacted" in str(llm_messages[1]["content"])
     assert "branched" in str(llm_messages[2]["content"])
-    assert llm_messages[3]["content"] == "hello custom"
+    assert llm_messages[3]["content"] == [{"type": "text", "text": "hello custom"}]
     assert llm_messages[4]["content"] == "keep"
 
 

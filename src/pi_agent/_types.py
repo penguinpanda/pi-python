@@ -418,6 +418,16 @@ class AgentLoopTurnUpdate:
 
 
 @dataclass(slots=True)
+class ShouldStopAfterTurnContext:
+    """shouldStopAfterTurn 专用 context（对齐 TS ShouldStopAfterTurnContext）。"""
+
+    message: AssistantMessage
+    tool_results: list[ToolResultMessage]
+    context: AgentContext
+    new_messages: list[AgentMessage]
+
+
+@dataclass(slots=True)
 class PrepareNextTurnContext:
     """prepareNextTurnWithContext 上下文（PrepareNextTurnContext）。
 
@@ -453,7 +463,7 @@ class AgentLoopConfig:
         tool_execution: 工具执行模式（默认 "parallel"）
         session_id / cache_retention: 提示缓存与会话标识（透传给 StreamOptions）
         thinking_budgets / transport: 透传给 StreamOptions
-        retry_policy: LLM 调用重试策略（None 使用默认策略）
+        retry_policy: LLM 调用重试策略（None 不重试）
     """
 
     model: Model
@@ -462,7 +472,9 @@ class AgentLoopConfig:
     # 可选钩子
     transform_context: Callable[[list[AgentMessage]], Awaitable[list[AgentMessage]]] | None = None
     get_api_key: Callable[[str], str | None] | None = None
-    should_stop_after_turn: Callable[[AgentContext], bool | Awaitable[bool]] | None = None
+    should_stop_after_turn: (
+        Callable[[ShouldStopAfterTurnContext], bool | Awaitable[bool]] | None
+    ) = None
     prepare_next_turn: (
         Callable[
             [PrepareNextTurnContext],
@@ -504,6 +516,12 @@ class AgentLoopConfig:
     # 推理级别（透传给 StreamOptions.reasoning；None 表示不覆盖）。
     thinking_level: ThinkingLevel | None = None
 
-    # 重试策略。None 表示使用默认策略（enabled=True, max_retries=3）。
-    # 显式传入 RetryPolicy(enabled=False) 可关闭重试。
+    # 流选项透传（SimpleStreamOptions 子集；None 表示不覆盖）。
+    api_key: str | None = None
+    on_payload: Callable[[Any, Any], Awaitable[Any] | Any] | None = None
+    on_response: Callable[[Any, Any], Awaitable[None] | None] | None = None
+    max_retry_delay_ms: int | None = None
+
+    # 重试策略。None 表示不重试（与 TS agent-loop 对齐）。
+    # 显式传入 RetryPolicy(enabled=True) 可启用应用层重试。
     retry_policy: RetryPolicy | None = None

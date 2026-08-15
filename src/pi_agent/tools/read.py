@@ -7,7 +7,7 @@ from typing import Any
 from pi_ai.types import ImageContent, TextContent
 
 from .._types import AgentTool, AgentToolResult
-from ..env import FileError, get_or_throw
+from ..env import get_or_throw
 from ..truncate import (
     DEFAULT_MAX_BYTES,
     DEFAULT_MAX_LINES,
@@ -16,7 +16,6 @@ from ..truncate import (
     truncate_head,
 )
 from .image import detect_supported_image_mime_type, encode_base64
-from .image_pipeline import process_image
 from .path_utils import resolve_read_tool_path
 
 
@@ -24,7 +23,7 @@ class ReadToolOptions:
     def __init__(
         self,
         auto_resize_images: bool = True,
-        image_processor=process_image,
+        image_processor=None,
     ) -> None:
         self.auto_resize_images = auto_resize_images
         self.image_processor = image_processor
@@ -39,17 +38,7 @@ def create_read_tool(options: ReadToolOptions | None = None) -> AgentTool:
         env = context.env
         path = params["path"]
         absolute_path = await resolve_read_tool_path(env, path, signal)
-        bytes_result = await env.read_binary_file(absolute_path, signal)
-        try:
-            data = get_or_throw(bytes_result)
-        except FileError as exc:
-            if exc.code == "not_found":
-                raise ValueError(
-                    f"{exc} The file is not in the working directory. Report this to "
-                    "the user directly; do not search the whole disk "
-                    "(e.g. find /, grep -r /, locate)."
-                ) from exc
-            raise
+        data = get_or_throw(await env.read_binary_file(absolute_path, signal))
 
         mime_type = detect_supported_image_mime_type(data)
         if mime_type:
@@ -120,7 +109,7 @@ def create_read_tool(options: ReadToolOptions | None = None) -> AgentTool:
                 f"Offset {params.get('offset')} is beyond end of file ({total_file_lines} lines total)"
             )
 
-        if "limit" in params:
+        if params.get("limit") is not None:
             end_line = min(start_line + params["limit"], total_file_lines)
             selected = "\n".join(all_lines[start_line:end_line])
             user_limited_lines = end_line - start_line
@@ -175,10 +164,7 @@ def create_read_tool(options: ReadToolOptions | None = None) -> AgentTool:
             f"Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). "
             f"Images are sent as attachments. For text files, output is truncated to {DEFAULT_MAX_LINES} lines "
             f"or {DEFAULT_MAX_BYTES // 1024}KB (whichever is hit first). Use offset/limit for large files. "
-            "When you need the full file, continue with offset until complete. "
-            "Only operate on files inside the current working directory. If a file is "
-            "not found, report that to the user; do not search the whole disk "
-            "(e.g. find /, grep -r /, locate)."
+            "When you need the full file, continue with offset until complete."
         ),
         input_schema={
             "type": "object",
@@ -188,10 +174,10 @@ def create_read_tool(options: ReadToolOptions | None = None) -> AgentTool:
                     "description": "Path to the file to read (relative or absolute)",
                 },
                 "offset": {
-                    "type": "integer",
+                    "type": "number",
                     "description": "Line number to start reading from (1-indexed)",
                 },
-                "limit": {"type": "integer", "description": "Maximum number of lines to read"},
+                "limit": {"type": "number", "description": "Maximum number of lines to read"},
             },
             "required": ["path"],
         },

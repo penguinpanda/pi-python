@@ -107,7 +107,7 @@ def test_get_message_from_entry_variants() -> None:
         _get_message_from_entry(
             _entry("custom_message", customType="note", data={"x": 1}, display=True)
         )
-        is not None
+        is None
     )
     assert _get_message_from_entry(_entry("branch_summary", summary="s", fromId="old")) is not None
     assert _get_message_from_entry(_entry("compaction", summary="s", tokensBefore=10)) is not None
