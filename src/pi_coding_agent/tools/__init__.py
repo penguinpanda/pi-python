@@ -18,6 +18,18 @@ import os
 from pi_agent import AgentTool
 from pi_agent.tools import BashToolOptions
 from pi_agent.env import FileError, PythonExecutionEnv
+from pi_agent.shell_output import execute_shell_with_capture
+from pi_agent.tools.file_mutation_queue import with_file_mutation_queue
+from pi_agent.truncate import (
+    DEFAULT_MAX_BYTES,
+    DEFAULT_MAX_LINES,
+    GREP_MAX_LINE_LENGTH,
+    TruncationResult,
+    format_size,
+    truncate_head,
+    truncate_line,
+    truncate_tail,
+)
 from pi_agent.tools import (
     ReadToolOptions,
     create_bash_tool as _create_pi_bash_tool,
@@ -249,6 +261,91 @@ def filter_tools_by_names(
     return tools
 
 
+# ---------------------------------------------------------------------------
+# ToolDefinition compatibility helpers
+# ---------------------------------------------------------------------------
+
+
+def _tool_to_definition(tool: AgentTool) -> dict:
+    return {
+        "name": tool.name,
+        "label": tool.label,
+        "description": tool.description,
+        "parameters": tool.input_schema,
+        "prompt_snippet": tool.prompt_snippet,
+        "prompt_guidelines": tool.prompt_guidelines,
+        "execution_mode": getattr(tool, "execution_mode", "parallel"),
+        "execute": tool.execute,
+    }
+
+
+def create_read_tool_definition(cwd: str, options: dict | None = None):
+    return _tool_to_definition(create_read_tool(cwd))
+
+
+def create_write_tool_definition(cwd: str, options: dict | None = None):
+    return _tool_to_definition(create_write_tool(cwd))
+
+
+def create_edit_tool_definition(cwd: str, options: dict | None = None):
+    return _tool_to_definition(create_edit_tool(cwd))
+
+
+def create_bash_tool_definition(cwd: str, options: dict | None = None):
+    return _tool_to_definition(create_bash_tool(cwd, **(options or {})))
+
+
+def create_grep_tool_definition(cwd: str, options: dict | None = None):
+    return _tool_to_definition(create_grep_tool(cwd))
+
+
+def create_find_tool_definition(cwd: str, options: dict | None = None):
+    return _tool_to_definition(create_find_tool(cwd))
+
+
+def create_ls_tool_definition(cwd: str, options: dict | None = None):
+    return _tool_to_definition(create_ls_tool(cwd))
+
+
+def create_local_bash_operations(cwd: str):
+    """返回 TS BashOperations 兼容的本地 exec 实现。"""
+
+    env = PythonExecutionEnv(cwd)
+
+    class LocalBashOperations:
+        async def exec(self, command, cwd_override=None, options=None):
+            options = dict(options or {})
+            ok, result = await execute_shell_with_capture(
+                env,
+                command,
+                {
+                    "cwd": cwd_override or cwd,
+                    "inheritEnv": True,
+                    "timeout": options.get("timeout"),
+                    "abortSignal": options.get("abortSignal"),
+                    "onChunk": options.get("onChunk"),
+                    "returnExecutionErrors": True,
+                },
+            )
+            if not ok:
+                raise result
+            if result.execution_error is not None:
+                raise result.execution_error
+            return {
+                "output": result.output,
+                "exitCode": result.exit_code,
+                "cancelled": result.cancelled,
+                "truncated": result.truncated,
+                "fullOutputPath": result.full_output_path,
+            }
+
+    return LocalBashOperations()
+
+
+class TruncationOptions(dict):
+    """Truncation options placeholder (TS TruncationOptions)."""
+
+
 __all__ = [
     "create_all_tools",
     "create_coding_tools",
@@ -261,4 +358,23 @@ __all__ = [
     "create_grep_tool",
     "create_find_tool",
     "create_ls_tool",
+    # Tool definitions / operations / truncation (TS core/tools exports)
+    "create_read_tool_definition",
+    "create_write_tool_definition",
+    "create_edit_tool_definition",
+    "create_bash_tool_definition",
+    "create_grep_tool_definition",
+    "create_find_tool_definition",
+    "create_ls_tool_definition",
+    "create_local_bash_operations",
+    "with_file_mutation_queue",
+    "DEFAULT_MAX_BYTES",
+    "DEFAULT_MAX_LINES",
+    "GREP_MAX_LINE_LENGTH",
+    "TruncationResult",
+    "TruncationOptions",
+    "format_size",
+    "truncate_head",
+    "truncate_line",
+    "truncate_tail",
 ]

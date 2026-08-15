@@ -218,6 +218,17 @@ async def _async_main(args: list[str] | None = None) -> int:
             runtime, provider_id=parsed.provider, search=parsed.list_models or None
         )
 
+    # --help：加载扩展后打印 help（TS 会在 Extension CLI Flags 段展示扩展 flags）。
+    if parsed.help:
+        return await _print_cli_help(
+            parser,
+            runtime,
+            cwd=cwd,
+            project_trusted=project_trusted,
+            explicit_paths=parsed.extensions,
+            no_extensions=parsed.no_extensions,
+        )
+
     # --export: 导出会话 HTML 后退出（对齐 TS main.ts --export <in> [out]）
     if parsed.export:
         try:
@@ -242,10 +253,7 @@ async def _async_main(args: list[str] | None = None) -> int:
 
     # 会话 flags 冲突校验（对齐 TS validateForkFlags / validateSessionIdFlags）
     if parsed.fork and (
-        parsed.session
-        or parsed.continue_session
-        or parsed.resume
-        or parsed.no_session
+        parsed.session or parsed.continue_session or parsed.resume or parsed.no_session
     ):
         print(
             "Error: --fork cannot be combined with --session/--continue/--resume/--no-session",
@@ -272,9 +280,7 @@ async def _async_main(args: list[str] | None = None) -> int:
     # 会话管理
     session_manager: SessionManagerLike
     if parsed.no_session:
-        session_manager = await in_memory_session_manager(
-            cwd, session_id=parsed.session_id or None
-        )
+        session_manager = await in_memory_session_manager(cwd, session_id=parsed.session_id or None)
     elif parsed.fork:
         source_path = await _resolve_fork_target(parsed.fork, sessions_dir)
         if source_path is None:
@@ -405,8 +411,7 @@ async def _async_main(args: list[str] | None = None) -> int:
         selected_tools = []
     elif tools_exclude:
         selected_tools = [
-            tool.name
-            for tool in filter_tools_by_names(default_coding_tools, exclude=tools_exclude)
+            tool.name for tool in filter_tools_by_names(default_coding_tools, exclude=tools_exclude)
         ]
     else:
         # TS default active tool set is read/bash/edit/write.
@@ -647,11 +652,7 @@ async def _async_main(args: list[str] | None = None) -> int:
             ui_mode=parsed.tui_mode or None,
             theme_name=(
                 next(
-                    (
-                        item
-                        for item in (parsed.theme or [])
-                        if Path(item).suffix.lower() != ".json"
-                    ),
+                    (item for item in (parsed.theme or []) if Path(item).suffix.lower() != ".json"),
                     None,
                 )
                 if isinstance(parsed.theme, list)
@@ -663,6 +664,8 @@ async def _async_main(args: list[str] | None = None) -> int:
                 if isinstance(parsed.theme, list)
                 else None
             ),
+            no_themes=bool(parsed.no_themes),
+            project_themes_dir=(Path(cwd) / ".pi" / "themes" if project_trusted else None),
             initial_message=initial_message,
             initial_messages=initial_messages,
             initial_images=initial_images,
@@ -688,8 +691,20 @@ async def _async_main(args: list[str] | None = None) -> int:
         messages_to_send.append(initial_message)
     messages_to_send.extend(remaining_messages)
     if parsed.json:
-        return await run_print_mode_json(session, messages_to_send, images)
-    return await run_print_mode(session, messages_to_send, images)
+        return await run_print_mode_json(
+            session,
+            messages_to_send,
+            images,
+            session_factory=session_factory,
+            session_rebuilder=rebuilder,
+        )
+    return await run_print_mode(
+        session,
+        messages_to_send,
+        images,
+        session_factory=session_factory,
+        session_rebuilder=rebuilder,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -832,9 +847,7 @@ async def _auth_print(kind: str, args: list[str]) -> int:
         return 1
     target_model = resolved.model
 
-    overrides: Any = (
-        {"min_oauth_validity_ms": min_expiry_ms} if min_expiry_ms is not None else None
-    )
+    overrides: Any = {"min_oauth_validity_ms": min_expiry_ms} if min_expiry_ms is not None else None
     auth = await runtime.get_auth(target_model, overrides=overrides)
     if auth is None or not auth.auth.get("api_key"):
         print(
@@ -1042,7 +1055,11 @@ def _create_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="pi-python",
         description="Pi Coding Agent — AI-powered coding assistant",
+        add_help=False,
     )
+
+    # help 在扩展加载后统一打印（对齐 TS printHelp 包含 extension flags）。
+    p.add_argument("-h", "--help", action="store_true", help="Show this help message and exit")
 
     # 运行模式
     p.add_argument(
@@ -1260,6 +1277,43 @@ def _register_extension_flags(parser: argparse.ArgumentParser, runner) -> None:
             )
         else:
             parser.add_argument(option, default=flag.default, help=flag.description or "")
+
+
+async def _print_cli_help(
+    parser: argparse.ArgumentParser,
+    runtime: ModelRuntime,
+    *,
+    cwd: str,
+    project_trusted: bool,
+    explicit_paths: list[str] | None,
+    no_extensions: bool,
+) -> int:
+    """打印 CLI help，并包含当前可发现的扩展注册 flags。"""
+    project_extensions_dir = Path(cwd) / ".pi" / "extensions" if project_trusted else None
+    loader = ExtensionLoader(
+        global_dir=get_agent_dir() / "extensions",
+        project_dir=project_extensions_dir,
+        cwd=cwd,
+    )
+    result = await loader.load(explicit_paths=explicit_paths, discover=not no_extensions)
+    runner = ExtensionRunner(
+        result.extensions,
+        runtime=result.runtime,
+        cwd=cwd,
+        model_runtime=runtime,
+    )
+    flags = runner.get_flags()
+    if flags:
+        _register_extension_flags(parser, runner)
+    print(parser.format_help().rstrip())
+    if flags:
+        print("\nExtension CLI Flags:")
+        for flag in flags:
+            option = f"--{flag.name}"
+            value = " <value>" if flag.type != "boolean" else ""
+            description = flag.description or f"Registered by {flag.extension_path}"
+            print(f"  {option}{value:<24} {description}")
+    return 0
 
 
 def _resolve_preset(parsed, settings: dict) -> dict | None:
@@ -1524,6 +1578,11 @@ async def _pick_session_to_resume(
     """交互选择要恢复的会话（对齐 TS selectSession 的 CLI 简化版）。"""
     directory = Path(sessions_dir).expanduser() if sessions_dir else get_sessions_dir()
     current = await list_sessions(directory, cwd=cwd)
+    if not current and sessions_dir is None:
+        # TS selectSession 在当前项目无会话时回退到全局项目列表。
+        current = await list_sessions(directory)
+        if current:
+            print("No saved sessions in the current project; showing all projects:")
     if not current:
         print("No saved sessions found", file=sys.stderr)
         return None
@@ -1541,7 +1600,10 @@ async def _pick_session_to_resume(
             continue
         if 1 <= choice <= len(current):
             break
-    return await open_session_manager(current[choice - 1].path, cwd_override=cwd)
+    selected = current[choice - 1]
+    if selected.cwd and Path(selected.cwd) != Path(cwd):
+        print(f"Opening session from project: {selected.cwd}")
+    return await open_session_manager(selected.path, cwd_override=cwd)
 
 
 async def _resolve_fork_target(arg: str, sessions_dir: str | Path | None) -> str | None:

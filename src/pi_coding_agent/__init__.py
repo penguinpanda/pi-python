@@ -17,6 +17,7 @@ pi-coding-agent  CLI 编码代理
 from ._session import AgentSession
 from ._types import AgentSessionConfig, PrintModeOptions
 from ._session_manager import SessionInfo, SessionManager, SessionTreeNode
+from ._args import parseArgs, printHelp
 from ._cli import main
 from ._print_mode import run_print_mode
 from .sdk import CreateAgentSessionOptions, CreateAgentSessionResult, create_agent_session
@@ -70,18 +71,50 @@ from .model_utils import (
 from .resolve_config_value import resolve_config_value
 from .rpc import RpcClient, RpcMessageHandler, RpcUiContext, run_rpc_mode
 from .modes.interactive import PiTuiApp, SlashCommandRegistry, SlashContext, run_tui_mode
+from .modes.interactive.components import (
+    ExtensionSelectorComponent,
+    LoginDialogComponent,
+    ModelSelectorComponent,
+    OAuthSelectorComponent,
+    ScopedModelsSelectorComponent,
+    SessionSelectorComponent,
+    SettingsSelectorComponent,
+    ShowImagesSelectorComponent,
+    ThinkingSelectorComponent,
+    TreeSelectorComponent,
+    TrustSelectorComponent,
+    renderDiff,
+)
 from pi_tui import Keybinding, KeybindingsManager, Theme, ThemeLoader
 from .tools import (
+    DEFAULT_MAX_BYTES,
+    DEFAULT_MAX_LINES,
+    GREP_MAX_LINE_LENGTH,
+    TruncationOptions,
+    TruncationResult,
     create_all_tools,
-    create_coding_tools,
-    create_readonly_tools,
-    create_read_tool,
-    create_write_tool,
-    create_edit_tool,
     create_bash_tool,
-    create_grep_tool,
+    create_bash_tool_definition,
+    create_coding_tools,
+    create_edit_tool,
+    create_edit_tool_definition,
     create_find_tool,
+    create_find_tool_definition,
+    create_grep_tool,
+    create_grep_tool_definition,
+    create_local_bash_operations,
     create_ls_tool,
+    create_ls_tool_definition,
+    create_read_tool,
+    create_read_tool_definition,
+    create_readonly_tools,
+    create_write_tool,
+    create_write_tool_definition,
+    format_size,
+    truncate_head,
+    truncate_line,
+    truncate_tail,
+    with_file_mutation_queue,
 )
 
 __all__ = [
@@ -94,6 +127,8 @@ __all__ = [
     "SessionInfo",
     # Modes
     "main",
+    "parseArgs",
+    "printHelp",
     "run_print_mode",
     "create_agent_session",
     "CreateAgentSessionOptions",
@@ -126,6 +161,18 @@ __all__ = [
     # TUI mode (Phase 3)
     "PiTuiApp",
     "run_tui_mode",
+    "ModelSelectorComponent",
+    "SessionSelectorComponent",
+    "TreeSelectorComponent",
+    "SettingsSelectorComponent",
+    "ThinkingSelectorComponent",
+    "OAuthSelectorComponent",
+    "ScopedModelsSelectorComponent",
+    "ExtensionSelectorComponent",
+    "TrustSelectorComponent",
+    "LoginDialogComponent",
+    "ShowImagesSelectorComponent",
+    "renderDiff",
     "Keybinding",
     "KeybindingsManager",
     "SlashCommandRegistry",
@@ -183,4 +230,22 @@ __all__ = [
     "create_grep_tool",
     "create_find_tool",
     "create_ls_tool",
+    "create_read_tool_definition",
+    "create_write_tool_definition",
+    "create_edit_tool_definition",
+    "create_bash_tool_definition",
+    "create_grep_tool_definition",
+    "create_find_tool_definition",
+    "create_ls_tool_definition",
+    "create_local_bash_operations",
+    "with_file_mutation_queue",
+    "DEFAULT_MAX_BYTES",
+    "DEFAULT_MAX_LINES",
+    "GREP_MAX_LINE_LENGTH",
+    "TruncationOptions",
+    "TruncationResult",
+    "format_size",
+    "truncate_head",
+    "truncate_line",
+    "truncate_tail",
 ]

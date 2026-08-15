@@ -37,6 +37,77 @@ def _to_json_event(event: AgentEvent) -> dict:
     return to_json_event(cast(dict, event))
 
 
+async def _maybe_await(value: Any) -> Any:
+    return await value if inspect.isawaitable(value) else value
+
+
+def _bind_print_extensions(
+    session: AgentSession,
+    *,
+    mode: str,
+    session_factory=None,
+    session_rebuilder=None,
+    replace_session=None,
+) -> None:
+    """为 print/json 模式绑定扩展 mode 与 command context actions。"""
+    runner = getattr(session, "extension_runner", None)
+    if runner is None:
+        return
+
+    async def new_session(options=None):
+        if session_factory is None:
+            raise NotImplementedError("new_session is not available in this print host")
+        created = await _maybe_await(session_factory())
+        if replace_session is not None:
+            await replace_session(created)
+        return None
+
+    async def fork(entry_id: str, options=None):
+        if session_rebuilder is None:
+            raise NotImplementedError("fork is not available in this print host")
+        manager = session.session_manager
+        forked_manager = await manager.fork(entry_id)
+        created = await _maybe_await(session_rebuilder(forked_manager))
+        if replace_session is not None:
+            await replace_session(created)
+        return None
+
+    async def navigate_tree(target_id: str, options=None):
+        options = options or {}
+        await session.navigate_to(
+            target_id,
+            summarize=bool(options.get("summarize", True)),
+            custom_instructions=options.get("customInstructions"),
+        )
+        return None
+
+    async def switch_session(session_path: str, options=None):
+        if session_rebuilder is None:
+            raise NotImplementedError("switch_session is not available in this print host")
+        from ._session_manager_v4 import open_session_manager
+
+        manager = await open_session_manager(session_path)
+        created = await _maybe_await(session_rebuilder(manager))
+        if replace_session is not None:
+            await replace_session(created)
+        return None
+
+    async def reload():
+        await session.rebuild_system_prompt()
+        return None
+
+    runner.bind(
+        mode=mode,
+        command_handlers={
+            "new_session": new_session,
+            "fork": fork,
+            "navigate_tree": navigate_tree,
+            "switch_session": switch_session,
+            "reload": reload,
+        },
+    )
+
+
 def _install_signal_handlers(dispose: Callable[[], Any]) -> list[tuple[int, Any]]:
     """SIGTERM → 143 / SIGHUP（非 Windows）→ 129（对齐 TS print-mode.ts）。
 
@@ -88,6 +159,9 @@ async def run_print_mode(
     session: AgentSession,
     message: str | list[str],
     images: list | None = None,
+    *,
+    session_factory=None,
+    session_rebuilder=None,
 ) -> int:
     """运行 Print 模式：发送消息（可多条）→ 等待完成 → 输出最后一条 assistant 文本。
 
@@ -97,6 +171,7 @@ async def run_print_mode(
     """
     messages = [message] if isinstance(message, str) else list(message)
     disposed = False
+    unsub = session.subscribe(lambda _event: None)
 
     async def dispose() -> None:
         nonlocal disposed
@@ -105,12 +180,28 @@ async def run_print_mode(
         disposed = True
         await session.dispose()
 
-    runner = getattr(session, "extension_runner", None)
-    if runner is not None:
-        runner.bind(mode="print")
-    handlers = _install_signal_handlers(dispose)
+    async def replace_session(new_session: AgentSession) -> None:
+        nonlocal session, unsub
+        if new_session is session:
+            return
+        old = session
+        if unsub is not None:
+            unsub()
+        session = new_session
+        unsub = new_session.subscribe(lambda _event: None)
+        try:
+            await old.dispose()
+        except Exception:
+            pass
 
-    unsub = session.subscribe(lambda _event: None)
+    _bind_print_extensions(
+        session,
+        mode="print",
+        session_factory=session_factory,
+        session_rebuilder=session_rebuilder,
+        replace_session=replace_session,
+    )
+    handlers = _install_signal_handlers(dispose)
 
     try:
         for index, prompt in enumerate(messages):
@@ -120,7 +211,8 @@ async def run_print_mode(
         print(f"Error: {e}", file=sys.stderr)
         return 1
     finally:
-        unsub()
+        if unsub is not None:
+            unsub()
         _remove_signal_handlers(handlers)
         if not disposed:
             await dispose()
@@ -151,12 +243,16 @@ async def run_print_mode_json(
     session: AgentSession,
     message: str | list[str],
     images: list | None = None,
+    *,
+    session_factory=None,
+    session_rebuilder=None,
 ) -> int:
     """Print 模式 JSON Lines 输出：session header + 逐条 agent 事件（对齐 TS print-mode）。"""
     messages = [message] if isinstance(message, str) else list(message)
     has_error = False
     pipe_closed = False
     disposed = False
+    unsub: Callable[[], None] | None = None
 
     async def dispose() -> None:
         nonlocal disposed
@@ -165,10 +261,23 @@ async def run_print_mode_json(
         disposed = True
         await session.dispose()
 
-    runner = getattr(session, "extension_runner", None)
-    if runner is not None:
-        runner.bind(mode="json")
-    handlers = _install_signal_handlers(dispose)
+    def subscribe_current() -> None:
+        nonlocal unsub
+        if unsub is not None:
+            unsub()
+        unsub = session.subscribe(on_event)
+
+    async def replace_session(new_session: AgentSession) -> None:
+        nonlocal session
+        if new_session is session:
+            return
+        old = session
+        session = new_session
+        subscribe_current()
+        try:
+            await old.dispose()
+        except Exception:
+            pass
 
     def on_event(event: AgentEvent) -> None:
         nonlocal pipe_closed
@@ -180,7 +289,15 @@ async def run_print_mode_json(
             # 下游提前关闭管道（如 `--json | grep -m1`）：停止输出，静默收尾。
             pipe_closed = True
 
-    unsub = session.subscribe(on_event)
+    _bind_print_extensions(
+        session,
+        mode="json",
+        session_factory=session_factory,
+        session_rebuilder=session_rebuilder,
+        replace_session=replace_session,
+    )
+    handlers = _install_signal_handlers(dispose)
+    subscribe_current()
     try:
         # session header 作为首条记录（对齐 TS getHeader()）。
         manager = session.session_manager
@@ -198,7 +315,8 @@ async def run_print_mode_json(
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     finally:
-        unsub()
+        if unsub is not None:
+            unsub()
         _remove_signal_handlers(handlers)
         if not disposed:
             await dispose()

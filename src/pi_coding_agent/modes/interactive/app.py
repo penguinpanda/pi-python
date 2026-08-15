@@ -172,6 +172,8 @@ class PiTuiApp(App):
         theme_loader: ThemeLoader | None = None,
         theme_name: str | None = "auto",
         theme_paths: list[str] | None = None,
+        no_themes: bool = False,
+        project_themes_dir: str | Path | None = None,
         session_factory: Callable[[], AgentSession] | None = None,
         resume_factory: Callable[[str], AgentSession] | None = None,
         session_rebuilder=None,
@@ -195,9 +197,16 @@ class PiTuiApp(App):
         if self._settings:
             self._keybindings.load_from_settings(self._settings)
         self._settings_manager = settings_manager
-        self._theme_loader = theme_loader or ThemeLoader()
+        from ..._config import get_themes_dir
+
+        self._no_themes = no_themes
+        self._project_themes_dir = Path(project_themes_dir) if project_themes_dir else None
+        # --no-themes 禁用全局/项目自定义主题发现，只保留内置主题；
+        # 显式 --theme <file.json> 仍会加载（对齐 TS additionalThemePaths）。
+        custom_theme_dir = None if no_themes else get_themes_dir()
+        self._theme_loader = theme_loader or ThemeLoader(custom_theme_dir)
         self._theme_name = theme_name
-        self._theme = self._theme_loader.resolve(theme_name)
+        self._theme = self._resolve_theme(theme_name)
         if theme_paths:
             for theme_path in theme_paths:
                 path = Path(theme_path).expanduser().resolve()
@@ -442,6 +451,18 @@ class PiTuiApp(App):
         self._unsubscribe = self._session.subscribe(
             cast(Callable[[AgentEvent], None], self._on_session_event)
         )
+
+    def _resolve_theme(self, theme_name: str | None) -> Theme:
+        """解析内置/全局/项目主题（--no-themes 时只解析内置）。"""
+        try:
+            return self._theme_loader.resolve(theme_name)
+        except Exception:
+            if self._no_themes or self._project_themes_dir is None:
+                raise
+            try:
+                return ThemeLoader(self._project_themes_dir).resolve(theme_name)
+            except Exception:
+                raise
 
     def _apply_theme(self) -> None:
         theme = self._theme
@@ -2335,7 +2356,7 @@ class PiTuiApp(App):
 
         # 主题：重新解析并刷新样式。
         try:
-            self._theme = self._theme_loader.resolve(self._theme_name)
+            self._theme = self._resolve_theme(self._theme_name)
             self._apply_theme()
             details.append(f"theme {self._theme.name}")
         except Exception as exc:

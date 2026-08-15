@@ -16,6 +16,17 @@ from .dialogs import (
     ShowImagesSelectorComponent,
 )
 from .diff import DiffEntry, render_diff_lines
+from pi_tui.selectors import (
+    ExtensionSelector as ExtensionSelectorComponent,
+    ModelSelector as ModelSelectorComponent,
+    OAuthSelector as OAuthSelectorComponent,
+    ScopedModelsSelector as ScopedModelsSelectorComponent,
+    SessionPicker as SessionSelectorComponent,
+    SettingsSelector as SettingsSelectorComponent,
+    ThinkingSelector as ThinkingSelectorComponent,
+    TreeSelector as TreeSelectorComponent,
+    TrustSelector as TrustSelectorComponent,
+)
 from .first_time_setup import FirstTimeSetupComponent
 from .basic import (
     PiChatContainer,
@@ -26,6 +37,8 @@ from .basic import (
     PiStatusBar,
     PiToolbar,
 )
+
+renderDiff = render_diff_lines
 
 __all__ = [
     "ArminComponent",
@@ -51,4 +64,14 @@ __all__ = [
     "PiStatusBar",
     "PiToolbar",
     "render_diff_lines",
+    "renderDiff",
+    "ModelSelectorComponent",
+    "SessionSelectorComponent",
+    "TreeSelectorComponent",
+    "SettingsSelectorComponent",
+    "ThinkingSelectorComponent",
+    "OAuthSelectorComponent",
+    "ScopedModelsSelectorComponent",
+    "ExtensionSelectorComponent",
+    "TrustSelectorComponent",
 ]
