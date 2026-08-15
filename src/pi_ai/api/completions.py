@@ -270,7 +270,6 @@ async def chat_completions_stream(
 
         client: Any = None
         try:
-            client: Any = None
             # 创建 OpenAI SDK 客户端。
             #
             # 重试参数从 StreamOptions 读取（缺省保持 SDK 默认 2）。
