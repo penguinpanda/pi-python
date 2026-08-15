@@ -101,3 +101,11 @@ def test_short_and_long_cache_write_split():
     calculate_cost(model, usage)
     cost = usage["cost"]
     assert cost["cache_write"] == pytest.approx((0.1 * 1_500 + 1.0 * 2 * 500) / 1_000_000)
+
+
+def test_cache_write_1h_exceeds_cache_write_clamped():
+    """异常 usage（cache_write_1h > cache_write）不得产生负费用。"""
+    model = _model(ModelCost(input=1.0, output=0.0, cache_read=0.0, cache_write=0.1))
+    usage = _usage(cache_write=100, cache_write_1h=1000)
+    calculate_cost(model, usage)
+    assert usage["cost"]["cache_write"] >= 0

@@ -4,7 +4,7 @@ import json
 
 from typing import Any
 
-from .partial_json import partial_json
+from .partial_json import _finite_constant, _finite_float, partial_json
 
 _VALID_JSON_ESCAPES = {'"', "\\", "/", "b", "f", "n", "r", "t", "u"}
 
@@ -79,11 +79,21 @@ def repair_json(json_str: str) -> str:
 def parse_json_with_repair(json_str: str) -> Any:
     """JSON.parse → 失败则 repairJson 后重试；仍失败抛原异常。"""
     try:
-        return json.loads(json_str)
+        # parse_float/parse_constant 拒绝非有限数值（1e999 → inf、
+        # Infinity/NaN 字面量），否则产出无法再序列化的非法 JSON。
+        return json.loads(
+            json_str,
+            parse_float=_finite_float,
+            parse_constant=_finite_constant,
+        )
     except (ValueError, TypeError):
         repaired = repair_json(json_str)
         if repaired != json_str:
-            return json.loads(repaired)
+            return json.loads(
+                repaired,
+                parse_float=_finite_float,
+                parse_constant=_finite_constant,
+            )
         raise
 
 

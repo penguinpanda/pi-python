@@ -5,7 +5,8 @@
     pi-ai list               列出可用 OAuth provider
     pi-ai help               用法
 
-凭证保存到当前目录 auth.json（对齐 TS AUTH_FILE 语义）；
+凭证默认保存到 ~/.pi/agent/auth.json（与 pi_coding_agent / README 约定一致），
+可用环境变量 PI_AUTH_FILE 覆盖路径；
 OAuth 引擎见 pi_ai.auth.oauth（builtin_oauth_providers）。
 
 入口：
@@ -14,8 +15,10 @@ OAuth 引擎见 pi_ai.auth.oauth（builtin_oauth_providers）。
 """
 
 import asyncio
+import os
 import sys
 
+from pathlib import Path
 from typing import Sequence
 
 from .auth.types import AuthEvent, AuthPrompt
@@ -23,8 +26,20 @@ from .auth.types import AuthEvent, AuthPrompt
 from .auth import FileCredentialStore
 from .auth.oauth import builtin_oauth_providers
 
-# 对齐 TS packages/ai/src/cli.ts 的 AUTH_FILE。
-AUTH_FILE = "auth.json"
+
+def _default_auth_file() -> str:
+    """凭证文件路径：PI_AUTH_FILE 优先，否则 ~/.pi/agent/auth.json。
+
+    不沿用 TS 的 CWD auth.json：长期有效的 refresh token 落到任意/共享目录
+    会被 git add、同步工具或同目录用户读到。
+    """
+    env_file = os.environ.get("PI_AUTH_FILE")
+    if env_file:
+        return env_file
+    return str(Path.home() / ".pi" / "agent" / "auth.json")
+
+
+AUTH_FILE = _default_auth_file()
 
 
 class _CliAuthInteraction:
@@ -64,7 +79,7 @@ class _CliAuthInteraction:
 
 
 def _auth_store() -> FileCredentialStore:
-    """凭证存储：当前目录 auth.json（对齐 TS AUTH_FILE）。"""
+    """凭证存储：AUTH_FILE 指向的路径（默认 ~/.pi/agent/auth.json）。"""
     return FileCredentialStore(AUTH_FILE)
 
 

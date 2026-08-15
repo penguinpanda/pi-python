@@ -118,19 +118,23 @@ def is_context_overflow(message: AssistantMessage, context_window: int | None = 
                 return True
 
     usage: Usage | dict[str, Any] = message.get("usage") or {}
+    if not isinstance(usage, dict):
+        # 外部构造/旧会话的 usage 可能不是 dict：按无 usage 处理。
+        usage = {}
     stop_reason = message.get("stop_reason")
 
     # Case 2: 静默溢出（z.ai 风格）——成功但 usage 超出上下文窗口。
     if context_window and stop_reason == "stop":
-        input_tokens = usage.get("input", 0) + usage.get("cache_read", 0)
+        input_tokens = _usage_int(usage.get("input")) + _usage_int(usage.get("cache_read"))
         if input_tokens > context_window:
             return True
 
     # Case 3: 截断式溢出（Xiaomi MiMo 风格）——length 停止且无输出、
     #         输入填满上下文窗口。
-    if context_window and stop_reason == "length" and usage.get("output", 0) == 0:
-        input_tokens = usage.get("input", 0) + usage.get("cache_read", 0)
-        if input_tokens >= context_window * 0.99:
+    if context_window and stop_reason == "length" and _usage_int(usage.get("output")) == 0:
+        input_tokens = _usage_int(usage.get("input")) + _usage_int(usage.get("cache_read"))
+        # 整数运算避免 float 精度丢失（窗口 > 2^53 时 * 0.99 会向下舍入）。
+        if input_tokens * 100 >= context_window * 99:
             return True
 
     return False
@@ -149,12 +153,23 @@ def is_recoverable_length(message: AssistantMessage, desired_max_output: int) ->
     compact-and-retry。`desired_max_output` 必须为上下文压缩前的原始上限。
     """
     usage = message.get("usage")
-    output = usage.get("output", 0) if isinstance(usage, dict) else 0
+    if not isinstance(usage, dict):
+        return False
+    output = usage.get("output", 0)
+    output = _usage_int(output)
     return (
         message.get("stop_reason") == "length"
         and desired_max_output > 0
         and output < desired_max_output
     )
+
+
+def _usage_int(value: Any) -> int:
+    """usage 数值字段归一化：None/非数值按 0 处理。"""
+    try:
+        return int(value) if value is not None else 0
+    except (TypeError, ValueError):
+        return 0
 
 
 __all__ = [

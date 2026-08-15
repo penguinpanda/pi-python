@@ -52,21 +52,24 @@ class TestList:
 
 class TestLogin:
     def test_login_with_provider_persists(self, fake_providers, monkeypatch, tmp_path, capsys):
-        monkeypatch.chdir(tmp_path)
+        auth_file = tmp_path / "auth.json"
+        monkeypatch.setattr(cli, "AUTH_FILE", str(auth_file))
         assert cli.main(["login", "fake"]) == 0
-        assert "Credentials saved to auth.json" in capsys.readouterr().out
+        assert "Credentials saved to" in capsys.readouterr().out
 
-        raw = json.loads((tmp_path / "auth.json").read_text(encoding="utf-8"))
+        raw = json.loads(auth_file.read_text(encoding="utf-8"))
         assert raw["fake"]["access"] == "sk-fake"
         assert raw["fake"]["refresh"] == "rf-fake"
 
     def test_login_select_provider(self, fake_providers, monkeypatch, tmp_path, capsys):
-        monkeypatch.chdir(tmp_path)
+        auth_file = tmp_path / "auth.json"
+        monkeypatch.setattr(cli, "AUTH_FILE", str(auth_file))
         monkeypatch.setattr("builtins.input", lambda _prompt: "1")
         assert cli.main(["login"]) == 0
         out = capsys.readouterr().out
         assert "Select a provider:" in out
-        assert "Credentials saved to auth.json" in out
+        assert "Credentials saved to" in out
+        assert auth_file.exists()
 
     def test_login_unknown_provider(self, fake_providers, capsys):
         assert cli.main(["login", "nope"]) == 1

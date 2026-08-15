@@ -249,10 +249,7 @@ class _SimpleImagesProvider:
 
             task = asyncio.create_task(_impl())
             self._inflight = task
-            try:
-                await task
-            finally:
-                self._inflight = None
+            await task
 
         self.refresh_models = _do_refresh
 

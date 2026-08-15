@@ -344,3 +344,13 @@ async def test_retry_callbacks_finished_on_exhaustion() -> None:
 
     assert result["stop_reason"] == "error"
     assert finished == [(False, 2, "503 Service Unavailable")]
+
+
+def test_compute_backoff_delay_huge_attempt_no_overflow():
+    """极大 attempt 不得抛 OverflowError（指数先封顶再计算）。"""
+    delay = compute_backoff_delay(10**7, base_delay_ms=2000.0, jitter=False)
+    assert delay == 60000.0
+
+
+def test_compute_backoff_delay_negative_base_clamped():
+    assert compute_backoff_delay(3, base_delay_ms=-5.0, jitter=False) == 0.0

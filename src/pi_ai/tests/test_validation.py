@@ -442,3 +442,13 @@ class TestExtendedKeywords:
         with pytest.raises(ValidationError, match=r"tags\.1"):
             validate_arguments("t", schema, {"tags": ["ok", "BAD"]})
         assert validate_arguments("t", schema, {"tags": ["ok", "fine"]}) == {"tags": ["ok", "fine"]}
+
+
+def test_multiple_of_decimal_tolerance():
+    """十进制倍率（multipleOf: 0.1）不得因二进制浮点取模误拒合法值。"""
+    schema = {"type": "number", "multipleOf": 0.1}
+    assert validate_arguments("t", schema, 0.3) == 0.3
+    assert validate_arguments("t", schema, 1.1) == 1.1
+    assert validate_arguments("t", schema, 2.5) == 2.5
+    with pytest.raises(ValidationError):
+        validate_arguments("t", schema, 0.35)

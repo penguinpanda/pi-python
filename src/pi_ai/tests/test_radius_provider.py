@@ -172,3 +172,11 @@ async def test_fetch_radius_models_abort_signal(monkeypatch) -> None:
 def test_radius_provider_custom_gateway() -> None:
     provider = radius_provider(gateway="custom.example.com")
     assert provider.name == "Radius"
+
+
+def test_normalize_radius_gateway_forces_https() -> None:
+    """非回环网关强制 https；回环地址允许明文（本地开发）。"""
+    assert normalize_radius_gateway_url("http://radius.internal") == "https://radius.internal"
+    assert normalize_radius_gateway_url("radius.pi.dev") == "https://radius.pi.dev"
+    assert normalize_radius_gateway_url("http://127.0.0.1:8080") == "http://127.0.0.1:8080"
+    assert normalize_radius_gateway_url("http://localhost:1456") == "http://localhost:1456"

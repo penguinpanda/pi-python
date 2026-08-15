@@ -412,6 +412,8 @@ def google_generative_ai_stream(
         stop_reason: StopReason = "stop"
         response_id: str | None = None
         has_tool_call = False
+        client: Any = None
+        response: Any = None
 
         def _partial() -> AssistantMessage:
             return AssistantMessage(
@@ -617,9 +619,6 @@ def google_generative_ai_stream(
                                 partial=_partial(),
                             )
                         )
-            await response.aclose()
-            await client.aclose()
-
             _end_current_block()
             if has_tool_call and stop_reason != "error":
                 stop_reason = "tool_call"
@@ -645,6 +644,19 @@ def google_generative_ai_stream(
         except Exception as exc:
             err_msg = build_error_message(model, exc)
             stream.push({"type": "error", "reason": "error", "error": err_msg})
+        finally:
+            # 取消/异常路径也必须关闭流式响应与客户端（httpx 无 __del__，
+            # 否则每次中止都泄漏一个持有连接池的 AsyncClient）。
+            if response is not None:
+                try:
+                    await response.aclose()
+                except Exception:
+                    pass
+            if client is not None:
+                try:
+                    await client.aclose()
+                except Exception:
+                    pass
 
     track_background_task(_run())
     return stream

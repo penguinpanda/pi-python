@@ -1,12 +1,17 @@
 """凭证存储（InMemory / File）测试。"""
 
 import asyncio
+import json
 import sys
 
 import pytest
 
 from pi_ai.auth import ApiKeyCredential
-from pi_ai.auth.credential_store import FileCredentialStore, InMemoryCredentialStore
+from pi_ai.auth.credential_store import (
+    CredentialStoreCorruptError,
+    FileCredentialStore,
+    InMemoryCredentialStore,
+)
 
 
 @pytest.mark.asyncio
@@ -85,6 +90,59 @@ async def test_file_store_corrupt(tmp_path):
     store = FileCredentialStore(path)
     assert await store.read("p") is None
     assert await store.list() == []
+    # 损坏文件被备份而非被覆盖。
+    assert (tmp_path / "auth.json.corrupt").exists()
+
+
+@pytest.mark.asyncio
+async def test_file_store_corrupt_write_raises(tmp_path):
+    """损坏文件上执行写入必须报错，不得静默清空全部凭证。"""
+    path = tmp_path / "auth.json"
+    path.write_text("{not json")
+    store = FileCredentialStore(path)
+
+    async def _set(_current):
+        return {"type": "oauth", "access": "a", "refresh": "r", "expires": 1}
+
+    with pytest.raises(CredentialStoreCorruptError):
+        await store.write("p", _set)
+    assert (tmp_path / "auth.json.corrupt").exists()
+
+
+@pytest.mark.asyncio
+async def test_file_store_concurrent_cross_provider_no_lost_update(tmp_path):
+    """不同 provider 的并发 modify 不得互相覆盖（读-改-写全程串行化）。"""
+    path = tmp_path / "auth.json"
+    store = FileCredentialStore(path)
+    await store.write("a", ApiKeyCredential(key="key-a"))
+    await store.write("b", ApiKeyCredential(key="key-b"))
+
+    async def fn_a(_current):
+        await asyncio.sleep(0.05)
+        return ApiKeyCredential(key="key-a-updated")
+
+    async def fn_b(_current):
+        await asyncio.sleep(0.01)
+        return ApiKeyCredential(key="key-b-updated")
+
+    await asyncio.gather(store.modify("a", fn_a), store.modify("b", fn_b))
+
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    assert raw["a"]["key"] == "key-a-updated"
+    assert raw["b"]["key"] == "key-b-updated"
+
+
+@pytest.mark.asyncio
+async def test_file_store_atomic_write_no_tmp_leftovers(tmp_path):
+    """原子写不得在目录中残留临时文件。"""
+    path = tmp_path / "auth.json"
+    store = FileCredentialStore(path)
+    for i in range(5):
+        await store.write(f"p{i}", ApiKeyCredential(key=f"k{i}"))
+    leftovers = [
+        p.name for p in tmp_path.iterdir() if p.name not in ("auth.json", "auth.json.lock")
+    ]
+    assert leftovers == []
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="posix file modes only")

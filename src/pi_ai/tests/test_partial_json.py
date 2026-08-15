@@ -54,3 +54,15 @@ def test_partial_json_ignores_trailing_garbage():
 def test_partial_json_never_raises():
     for text in ["", "not json", "{{{{", '{"a":', "tru", '{"a": tru']:
         assert partial_json(text) == {}
+
+
+def test_partial_json_deep_nesting_returns_empty():
+    """深嵌套输入不得抛 RecursionError（按解析失败返回 {}）。"""
+    deep = "[" * 10000 + "1" + "]" * 10000
+    assert partial_json(deep) == {}
+
+
+def test_partial_json_long_integer_not_truncated():
+    """超长整数不得静默截断成 4300 位前缀。"""
+    huge = '{"a": ' + "9" * 5000 + "}"
+    assert partial_json(huge) == {}

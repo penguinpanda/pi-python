@@ -151,7 +151,13 @@ def compute_backoff_delay(
     """
     if attempt < 1:
         attempt = 1
-    cap = min(base_delay_ms * (2 ** (attempt - 1)), max_delay_ms)
+    # 指数封顶：2**1074 超出 float 范围会抛 OverflowError；
+    # 实际退避也必然被 max_delay_ms 截断，先封指数再算即可。
+    exponent = min(attempt - 1, 1023)
+    cap = min(base_delay_ms * (2**exponent), max_delay_ms)
+    # 防御负/零 base_delay（asyncio.sleep(负值) 会抛 ValueError）。
+    if cap <= 0:
+        cap = 0.0
     if jitter:
         return random.uniform(0, cap)
     return cap

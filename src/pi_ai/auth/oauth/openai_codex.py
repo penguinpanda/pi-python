@@ -32,6 +32,8 @@ DEVICE_REDIRECT_URI = f"{AUTH_BASE_URL}/deviceauth/callback"
 BROWSER_REDIRECT_URI = "http://localhost:1455/auth/callback"
 BROWSER_SCOPE = "openid profile email offline_access"
 BROWSER_PORT = 1455
+# 回调请求读取超时：防止慢连接/不发数据的连接挂起 handler 任务。
+CALLBACK_READ_TIMEOUT = 10.0
 DEVICE_CODE_TIMEOUT_SECONDS = 15 * 60
 JWT_CLAIM_PATH = "https://api.openai.com/auth"
 
@@ -72,9 +74,12 @@ async def start_device_auth(signal: Any = None) -> dict[str, Any]:
         )
     data = response.json()
     interval = data.get("interval")
-    interval_seconds = (
-        float(str(interval).strip()) if isinstance(interval, (int, float, str)) else None
-    )
+    try:
+        interval_seconds = (
+            float(str(interval).strip()) if isinstance(interval, (int, float, str)) else None
+        )
+    except ValueError as exc:
+        raise RuntimeError(f"Invalid OpenAI Codex device code response: {data}") from exc
     if (
         not isinstance(data.get("device_auth_id"), str)
         or not isinstance(data.get("user_code"), str)
@@ -161,7 +166,7 @@ async def exchange_authorization_code(
         )
     if not response.is_success:
         raise RuntimeError(
-            f"OpenAI Codex token exchange failed ({response.status_code}): {response.text}"
+            f"OpenAI Codex token exchange failed ({response.status_code}): {response.text[:500]}"
         )
     data = response.json()
     if not isinstance(data.get("access_token"), str) or not isinstance(
@@ -184,7 +189,7 @@ async def refresh_access_token(refresh_token: str) -> dict[str, Any]:
         )
     if not response.is_success:
         raise RuntimeError(
-            f"OpenAI Codex token refresh failed ({response.status_code}): {response.text}"
+            f"OpenAI Codex token refresh failed ({response.status_code}): {response.text[:500]}"
         )
     data = response.json()
     if not isinstance(data.get("access_token"), str) or not isinstance(
@@ -235,7 +240,11 @@ async def _wait_for_browser_code(state: str, signal: Any) -> dict | None:
     completed = asyncio.Event()
 
     async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        request_line = await reader.readline()
+        try:
+            request_line = await asyncio.wait_for(reader.readline(), timeout=CALLBACK_READ_TIMEOUT)
+        except asyncio.TimeoutError:
+            writer.close()
+            return
         parts = request_line.decode("utf-8", "replace").split()
         path = parts[1] if len(parts) > 1 else "/"
         parsed = urlparse(path)
@@ -302,15 +311,16 @@ def _respond_html(writer: asyncio.StreamWriter, status: int, message: str) -> No
     asyncio.get_running_loop().create_task(_finish())
 
 
-def _extract_code_from_pasted(value: str) -> str | None:
-    """从手动粘贴的授权 URL 提取 code 参数（对齐 TS 手动粘贴回退）。"""
+def _extract_code_from_pasted(value: str) -> tuple[str | None, str | None]:
+    """从手动粘贴的授权 URL 提取 (code, state)（对齐 TS 手动粘贴回退）。"""
     try:
         parsed = urlparse(value.strip())
         if parsed.scheme:
-            return parse_qs(parsed.query).get("code", [None])[0]
+            query = parse_qs(parsed.query)
+            return query.get("code", [None])[0], query.get("state", [None])[0]
     except Exception:
         pass
-    return None
+    return None, None
 
 
 async def _browser_login(interaction: AuthInteraction) -> OAuthCredential:
@@ -353,7 +363,10 @@ async def _browser_login(interaction: AuthInteraction) -> OAuthCredential:
         pasted = manual_task.result() if not manual_task.cancelled() else None
         if pasted is None:
             raise RuntimeError("OpenAI Codex browser login was cancelled")
-        code = _extract_code_from_pasted(pasted) or pasted.strip()
+        pasted_code, pasted_state = _extract_code_from_pasted(pasted)
+        if pasted_state is not None and pasted_state != flow["state"]:
+            raise RuntimeError("OpenAI Codex login failed: state mismatch in pasted URL")
+        code = pasted_code or pasted.strip()
     if not code:
         raise RuntimeError("OpenAI Codex browser login was cancelled")
     token = await exchange_authorization_code(code, flow["verifier"], BROWSER_REDIRECT_URI)

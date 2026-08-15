@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 
 from pi_ai.provider import EnvApiKeyAuth, Provider, RefreshModelsContext, create_provider
+from pi_ai.auth.oauth.radius import normalize_gateway_url
 from pi_ai.types import Model, ModelCost
 
 DEFAULT_RADIUS_GATEWAY = "https://radius.pi.dev"
@@ -20,10 +21,8 @@ _client_factory = httpx.AsyncClient
 
 
 def normalize_radius_gateway_url(value: str) -> str:
-    """补 https:// 并去尾斜杠（对齐 TS normalizeRadiusGatewayUrl）。"""
-    if not value.startswith(("http://", "https://")):
-        value = f"https://{value}"
-    return value.rstrip("/")
+    """补 https:// 并去尾斜杠（对齐 TS normalizeRadiusGatewayUrl；非回环强制 https）。"""
+    return normalize_gateway_url(value)
 
 
 def _sanitize_gateway_config(config: Any) -> dict[str, Any] | None:

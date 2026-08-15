@@ -449,6 +449,42 @@ class TestCompletionsStream:
         ]
 
     @pytest.mark.asyncio
+    async def test_parallel_tool_calls_interleaved(self):
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "two tools?"}])
+        # 标准 OpenAI 兼容流：首个 chunk 带两个调用（id + index），
+        # 后续参数增量 chunk 只带 index（id 为 None），且交错到达。
+        chunks = [
+            _chunk(
+                tool_calls=[
+                    _tool_call(0, "call_0", "tool_a", '{"x":'),
+                    _tool_call(1, "call_1", "tool_b", '{"y":'),
+                ],
+                finish_reason=None,
+            ),
+            _chunk(tool_calls=[_tool_call(0, None, None, "1}")], finish_reason=None),
+            _chunk(tool_calls=[_tool_call(1, None, None, "2}")], finish_reason=None),
+            _chunk(tool_calls=[_tool_call(0, None, None, "")], finish_reason="tool_calls"),
+        ]
+        client = _mock_client(chunks)
+
+        events, _ = await _collect_events(model, context, client)
+        msg = events[-1]["message"]
+        assert msg["stop_reason"] == "tool_call"
+        assert [b["type"] for b in msg["content"]] == ["toolCall", "toolCall"]
+        blocks = {b["id"]: b for b in msg["content"]}
+        assert blocks["call_0"]["raw_arguments"] == '{"x":1}'
+        assert blocks["call_0"]["arguments"] == {"x": 1}
+        assert blocks["call_1"]["raw_arguments"] == '{"y":2}'
+        assert blocks["call_1"]["arguments"] == {"y": 2}
+
+        # 事件流：每个调用一次 start，流末统一 end。
+        types = [e["type"] for e in events]
+        assert types.count("toolcall_start") == 2
+        assert types.count("toolcall_end") == 2
+        assert [e["content_index"] for e in events if e["type"] == "toolcall_end"] == [0, 1]
+
+    @pytest.mark.asyncio
     async def test_usage_extraction(self):
         model = _make_model()
         context = Context(messages=[{"role": "user", "content": "Hi"}])

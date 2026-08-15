@@ -29,8 +29,11 @@ def test_create_authorization_flow_url() -> None:
 
 
 def test_extract_code_from_pasted() -> None:
-    assert _extract_code_from_pasted(f"{BROWSER_REDIRECT_URI}?code=abc123&state=x") == "abc123"
-    assert _extract_code_from_pasted("plain-code") is None
+    assert _extract_code_from_pasted(f"{BROWSER_REDIRECT_URI}?code=abc123&state=x") == (
+        "abc123",
+        "x",
+    )
+    assert _extract_code_from_pasted("plain-code") == (None, None)
 
 
 class _Interaction:
@@ -44,7 +47,11 @@ class _Interaction:
 
     async def prompt(self, prompt):
         self.prompt_calls.append(prompt)
-        return f"{BROWSER_REDIRECT_URI}?code=pasted-code&state=x"
+        from urllib.parse import parse_qs, urlparse
+
+        # 回贴授权 URL 时 state 必须与本次 flow 一致（否则登录被拒绝）。
+        state = parse_qs(urlparse(self.notified["url"]).query)["state"][0]
+        return f"{BROWSER_REDIRECT_URI}?code=pasted-code&state={state}"
 
 
 async def _fake_token_exchange(code: str, verifier: str, redirect_uri: str):

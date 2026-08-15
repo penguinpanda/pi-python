@@ -27,14 +27,15 @@ from ..types import (
 )
 from ..utils._event_stream import AssistantMessageEventStream
 from ..utils.uuid import uuidv7
-from ..utils.cost import calculate_cost
 from ._shared import empty_usage, parse_tool_arguments
-from .responses import responses_stream
+from .responses import _build_responses_request_kwargs, _parse_response_usage, responses_stream
 
 _DEFAULT_BASE_URL = "https://chatgpt.com/backend-api"
 
 
 _websocket_sse_fallback_sessions: set[str] = set()
+# 回退标记集合的上限：防止 session_id 长期累积无界增长。
+_WEBSOCKET_SSE_FALLBACK_MAX_ENTRIES = 256
 
 
 class _CodexWsConnectError(Exception):
@@ -52,6 +53,8 @@ def _is_ws_sse_fallback_active(session_id: str | None) -> bool:
 
 def _record_ws_failure(session_id: str | None) -> None:
     if session_id:
+        if len(_websocket_sse_fallback_sessions) >= _WEBSOCKET_SSE_FALLBACK_MAX_ENTRIES:
+            _websocket_sse_fallback_sessions.clear()
         _websocket_sse_fallback_sessions.add(session_id)
 
 
@@ -136,12 +139,16 @@ class _CodexWebSocketResponses:
         url: str,
         headers: dict[str, str],
         options: dict[str, Any],
+        events: "_CodexWebSocketEvents | None" = None,
     ) -> None:
         self._url = url
         self._headers = headers
         self._options = options
+        self._events = events
 
     async def create(self, **kwargs: Any) -> "_CodexWebSocketEvents":
+        if self._events is not None:
+            return self._events
         return _CodexWebSocketEvents(
             url=self._url,
             headers=self._headers,
@@ -156,8 +163,9 @@ class _CodexWebSocketClient:
         url: str,
         headers: dict[str, str],
         options: dict[str, Any],
+        events: "_CodexWebSocketEvents | None" = None,
     ) -> None:
-        self.responses = _CodexWebSocketResponses(url, headers, options)
+        self.responses = _CodexWebSocketResponses(url, headers, options, events)
 
 
 class _CodexWebSocketEvents:
@@ -179,6 +187,10 @@ class _CodexWebSocketEvents:
 
     def __aiter__(self) -> "_CodexWebSocketEvents":
         return self
+
+    async def connect(self) -> None:
+        """建立 WebSocket 连接并发送 response.create（连接失败抛 _CodexWsConnectError）。"""
+        await self._open()
 
     async def __anext__(self) -> Any:
         while True:
@@ -292,7 +304,10 @@ async def openai_codex_responses_stream(
         except _CodexWsConnectError:
             # 连接阶段失败：记录会话级回退并转 SSE（对齐 TS
             # recordWebSocketSseFallback → SSE 路径）。
-            _record_ws_failure(session_id)
+            # 仅记录调用方显式提供的稳定 session_id：每次请求生成的
+            # 一次性 uuid 永不复用，记录只会无界增长且回退记忆不生效。
+            if opts.get("session_id"):
+                _record_ws_failure(session_id)
 
     codex_headers = _codex_headers(api_key, opts, compressed=True)
 
@@ -339,6 +354,23 @@ async def _websocket_stream(
 ) -> AssistantMessageEventStream:
     ws_url = _resolve_codex_websocket_url(base_url or model.base_url or "")
     ws_headers = _codex_websocket_headers(api_key, opts, request_id)
+    # 先构造完整请求体并提前建立连接：连接失败在调用点同步抛出
+    # _CodexWsConnectError，让 openai_codex_responses_stream 的 except
+    # 分支能真正触发 SSE 回退（延迟到后台任务连接则永远到不了调用点）。
+    kwargs, _web_search = _build_responses_request_kwargs(
+        model,
+        context,
+        endpoint,
+        cast(StreamOptions, opts),
+        request_model_id=model.id,
+    )
+    events = _CodexWebSocketEvents(
+        url=ws_url,
+        headers=ws_headers,
+        body=kwargs,
+        options=opts,
+    )
+    await events.connect()
 
     def _ws_factory(
         _api_key: str,
@@ -348,7 +380,7 @@ async def _websocket_stream(
         max_retries: int,
         headers: dict[str, str] | None,
     ) -> _CodexWebSocketClient:
-        return _CodexWebSocketClient(ws_url, ws_headers, opts)
+        return _CodexWebSocketClient(ws_url, ws_headers, opts, events)
 
     return await responses_stream(
         model,
@@ -420,13 +452,10 @@ async def codex_fetch_deferred(
                     arguments=parse_tool_arguments(raw),
                 )
             )
-    usage = empty_usage()
     raw_usage = getattr(response, "usage", None)
-    if raw_usage is not None:
-        usage["input"] = int(getattr(raw_usage, "input_tokens", 0) or 0)
-        usage["output"] = int(getattr(raw_usage, "output_tokens", 0) or 0)
-        usage["total_tokens"] = usage["input"] + usage["output"]
-        calculate_cost(model, usage)
+    # 与 responses_stream 共用 usage 解析：input_tokens 已含缓存 token，
+    # 统一扣减 cache_read/cache_write，避免双重计费。
+    usage = _parse_response_usage(response, model) if raw_usage is not None else empty_usage()
     status = getattr(response, "status", "")
     return AssistantMessage(
         role="assistant",

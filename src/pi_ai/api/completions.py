@@ -267,6 +267,7 @@ async def chat_completions_stream(
             构造最终 AssistantMessage
         """
         try:
+            client: Any = None
             # 创建 OpenAI SDK 客户端。
             #
             # 重试参数从 StreamOptions 读取（缺省保持 SDK 默认 2）。
@@ -506,13 +507,16 @@ async def chat_completions_stream(
             # 最终 AssistantMessage.content。
             content_blocks: list[ContentBlock] = []
 
-            # 当前正在累积的内容块（text / toolCall）。
+            # 当前正在累积的内容块（text / thinking）。
             current_index: int | None = None
             current_kind: str | None = None
 
-            # 当前 toolCall 的流式状态。
-            current_tool_id: str | None = None
-            current_raw_args: str = ""
+            # 并行工具调用累积状态（标准协议按 chunk 的 index 唯一标识；
+            # index 缺失的非标准端点退回按 id / 出现顺序累积）。
+            #
+            # key → {"block_index", "id", "name", "raw_arguments"}
+            tool_call_states: dict[int, dict[str, Any]] = {}
+            tool_call_order: list[int] = []
 
             # Token 使用统计。
             usage: Usage = empty_usage()
@@ -535,7 +539,7 @@ async def chat_completions_stream(
 
             def _end_current_block() -> None:
                 """结束当前累积块并发射对应的 *_end 事件。"""
-                nonlocal current_kind, current_index, current_tool_id
+                nonlocal current_kind, current_index
                 if current_kind == "text" and current_index is not None:
                     text_block = cast(TextContent, content_blocks[current_index])
                     stream.push(
@@ -556,21 +560,25 @@ async def chat_completions_stream(
                             partial=_partial(),
                         )
                     )
-                elif current_kind == "toolCall" and current_index is not None:
-                    tool_block = cast(ToolCall, content_blocks[current_index])
-                    tool_block["raw_arguments"] = current_raw_args
-                    tool_block["arguments"] = parse_tool_arguments(current_raw_args)
+                current_kind = None
+                current_index = None
+
+            def _finalize_tool_blocks() -> None:
+                """流结束时统一收尾全部待定工具调用（并行调用参数交错，
+                只有流结束才能确定每个调用的完整参数）。"""
+                for key in tool_call_order:
+                    state = tool_call_states[key]
+                    tool_block = cast(ToolCall, content_blocks[state["block_index"]])
+                    tool_block["raw_arguments"] = state["raw_arguments"]
+                    tool_block["arguments"] = parse_tool_arguments(state["raw_arguments"])
                     stream.push(
                         ToolCallEndEvent(
                             type="toolcall_end",
-                            content_index=current_index,
+                            content_index=state["block_index"],
                             tool_call=tool_block,
                             partial=_partial(),
                         )
                     )
-                current_kind = None
-                current_index = None
-                current_tool_id = None
 
             # 流开始事件。
             stream.push(StartEvent(type="start", partial=_partial()))
@@ -670,16 +678,36 @@ async def chat_completions_stream(
                 # 块结束时再解析为 JSON。
                 if delta.tool_calls:
                     for tc in delta.tool_calls:
-                        tc_id = tc.id or current_tool_id
+                        tc_index = getattr(tc, "index", None)
+                        tc_id = tc.id or None
                         tc_name = tc.function.name if tc.function else None
                         tc_args = tc.function.arguments if tc.function else None
 
-                        # 块切换：当前块不是 toolCall，或出现了新的 toolCall id。
-                        if current_kind != "toolCall" or (tc_id and tc_id != current_tool_id):
+                        # 定位该工具调用的累积状态。
+                        state: dict[str, Any] | None = None
+                        if isinstance(tc_index, int) and tc_index >= 0:
+                            state = tool_call_states.get(tc_index)
+                            if state is None and tc_id is not None:
+                                state = next(
+                                    (s for s in tool_call_states.values() if s["id"] == tc_id),
+                                    None,
+                                )
+                                if state is not None:
+                                    tool_call_states[tc_index] = state
+                        elif tc_id is not None:
+                            state = next(
+                                (s for s in tool_call_states.values() if s["id"] == tc_id),
+                                None,
+                            )
+
+                        if state is None:
+                            # 新工具调用：结束当前 text/thinking 块并新建块。
                             _end_current_block()
-                            current_kind = "toolCall"
-                            current_tool_id = tc_id
-                            current_raw_args = ""
+                            state_key = (
+                                tc_index
+                                if isinstance(tc_index, int) and tc_index >= 0
+                                else len(tool_call_order)
+                            )
                             content_blocks.append(
                                 ToolCall(
                                     type="toolCall",
@@ -689,27 +717,41 @@ async def chat_completions_stream(
                                     arguments=None,
                                 )
                             )
-                            current_index = len(content_blocks) - 1
+                            state = {
+                                "block_index": len(content_blocks) - 1,
+                                "id": tc_id or "",
+                                "name": tc_name or "",
+                                "raw_arguments": "",
+                            }
+                            tool_call_states[state_key] = state
+                            tool_call_order.append(state_key)
                             stream.push(
                                 ToolCallStartEvent(
                                     type="toolcall_start",
-                                    content_index=current_index,
+                                    content_index=state["block_index"],
                                     partial=_partial(),
                                 )
                             )
 
-                        tool_block = cast(ToolCall, content_blocks[cast(int, current_index)])
+                        tool_block = cast(ToolCall, content_blocks[state["block_index"]])
 
                         # 工具名称可能延迟到达。
                         if tc_name:
+                            state["name"] = tc_name
                             tool_block["name"] = tc_name
 
+                        # id 可能延迟到达（index 已出现时）。
+                        if tc_id and tc_id != state["id"]:
+                            state["id"] = tc_id
+                            tool_block["id"] = tc_id
+
                         if tc_args:
-                            current_raw_args += tc_args
+                            state["raw_arguments"] += tc_args
+                            tool_block["raw_arguments"] = state["raw_arguments"]
                             stream.push(
                                 ToolCallDeltaEvent(
                                     type="toolcall_delta",
-                                    content_index=cast(int, current_index),
+                                    content_index=state["block_index"],
                                     delta=tc_args,
                                     partial=_partial(),
                                 )
@@ -723,6 +765,8 @@ async def chat_completions_stream(
             #
             # 结束最后一个块（若有）。
             _end_current_block()
+            # 并行工具调用在流结束时统一收尾。
+            _finalize_tool_blocks()
 
             # 构造最终 AssistantMessage。
             msg = AssistantMessage(
@@ -758,6 +802,14 @@ async def chat_completions_stream(
             err_msg = build_error_message(model, exc)
             stream.push({"type": "error", "reason": "error", "error": err_msg})
             # stream.end(err_msg)
+        finally:
+            # 显式关闭客户端：openai SDK 依赖 __del__ 调度异步关闭，
+            # 取消/异常路径与循环引用场景下可能永不执行（连接池泄漏）。
+            if client is not None:
+                try:
+                    await client.close()
+                except Exception:
+                    pass
 
     # 后台启动网络请求。
     #

@@ -24,26 +24,31 @@ AUTHORIZE_URL = "https://openrouter.ai/auth"
 TOKEN_URL = "https://openrouter.ai/api/v1/auth/keys"
 CALLBACK_HOST = "127.0.0.1"
 CALLBACK_PATH = "/oauth/callback"
+# 回调请求读取超时：防止慢连接/不发数据的连接挂起 handler 任务。
+CALLBACK_READ_TIMEOUT = 10.0
 # 手动粘贴占位地址（loopback server 不可用时）。
 FALLBACK_CALLBACK_URL = f"http://{CALLBACK_HOST}:1457{CALLBACK_PATH}"
 
 
-def _parse_authorization_input(value: str | None) -> str | None:
-    """从用户输入提取授权码（URL / code= 串 / 原始码）。"""
+def _parse_authorization_input(value: str | None) -> tuple[str | None, str | None]:
+    """从用户输入提取 (授权码, state)（URL / code= 串 / 原始码）。"""
     if not isinstance(value, str):
-        return None
+        return None, None
     trimmed = value.strip()
     if not trimmed:
-        return None
+        return None, None
     if trimmed.startswith(("http://", "https://")):
         parsed = urllib.parse.urlparse(trimmed)
-        code = urllib.parse.parse_qs(parsed.query).get("code")
-        return code[0] if code else None
+        query = urllib.parse.parse_qs(parsed.query)
+        code = query.get("code")
+        state = query.get("state")
+        return (code[0] if code else None), (state[0] if state else None)
     if "code=" in trimmed:
         params = urllib.parse.parse_qs(trimmed)
         code = params.get("code")
-        return code[0] if code else None
-    return trimmed
+        state = params.get("state")
+        return (code[0] if code else None), (state[0] if state else None)
+    return trimmed, None
 
 
 async def exchange_authorization_code(code: str, verifier: str) -> OAuthCredential:
@@ -138,7 +143,10 @@ async def _login(interaction: AuthInteraction) -> OAuthCredential:
     if not manual:
         raise RuntimeError("OpenRouter login cancelled")
 
-    code = _parse_authorization_input(manual)
+    pasted_code, pasted_state = _parse_authorization_input(manual)
+    if pasted_state is not None and pasted_state != state:
+        raise RuntimeError("OpenRouter login failed: state mismatch in pasted URL")
+    code = pasted_code
     if not code:
         raise RuntimeError("Missing authorization code")
     interaction.notify({"type": "progress", "message": "Exchanging authorization code..."})
@@ -162,7 +170,11 @@ async def _start_loopback_callback(
     waiter_task: asyncio.Task | None = None
 
     async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        request_line = await reader.readline()
+        try:
+            request_line = await asyncio.wait_for(reader.readline(), timeout=CALLBACK_READ_TIMEOUT)
+        except asyncio.TimeoutError:
+            writer.close()
+            return
         parts = request_line.decode("utf-8", "replace").split()
         path = parts[1] if len(parts) > 1 else "/"
         parsed = urllib.parse.urlparse(path)

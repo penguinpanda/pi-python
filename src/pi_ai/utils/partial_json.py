@@ -9,19 +9,52 @@
 """
 
 import json
+import math
 
 from typing import Any
 
 _WHITESPACE = " \t\n\r"
 _LITERALS = ("true", "false", "null")
 
+# Python 3.11+ 的 int 字符串转换位数上限（sys.int_max_str_digits 默认值）。
+_INT_MAX_STR_DIGITS = 4300
+
+
+def _finite_float(text: str) -> float:
+    """parse_float：拒绝 1e999 之类解析为 inf 的数字（否则 dumps 出非法 JSON）。"""
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError(f"non-finite number: {text}")
+    return value
+
+
+def _finite_constant(text: str) -> Any:
+    """parse_constant：拒绝 Infinity / -Infinity / NaN 字面量。"""
+    raise ValueError(f"non-finite constant: {text}")
+
+
+def _loads(text: str) -> Any:
+    """带有限性检查的 json.loads。"""
+    return json.loads(
+        text,
+        parse_float=_finite_float,
+        parse_constant=_finite_constant,
+    )
+
 
 def _number_prefix_length(token: str) -> int:
     """返回 token 中最长合法 JSON 数字前缀的长度；无合法前缀返回 0。"""
-    for end in range(len(token), 0, -1):
+    # Python 3.11+ 对 int 字符串转换有 4300 位上限：超过上限的数字前缀
+    # 永远无法解析，返回 0（视为不可解析），避免静默截断出错误数值；
+    # 同时把线性尝试次数限制在常数内（长数字串不再 O(n²)）。
+    for end in range(min(len(token), _INT_MAX_STR_DIGITS + 8), 0, -1):
         try:
-            json.loads(token[:end])
-        except (ValueError, TypeError):
+            _loads(token[:end])
+        except ValueError as exc:
+            if "Exceeds the limit" in str(exc):
+                return 0
+            continue
+        except TypeError:
             continue
         return end
     return 0
@@ -138,8 +171,8 @@ def partial_json(text: str) -> Any:
         return {}
 
     try:
-        return json.loads(text)
-    except (ValueError, TypeError):
+        return _loads(text)
+    except (ValueError, TypeError, RecursionError):
         pass
 
     candidates, stack, in_string, n = _scan(text)
@@ -168,8 +201,8 @@ def partial_json(text: str) -> Any:
         if not candidate.strip():
             continue
         try:
-            return json.loads(candidate)
-        except (ValueError, TypeError):
+            return _loads(candidate)
+        except (ValueError, TypeError, RecursionError):
             continue
     return {}
 

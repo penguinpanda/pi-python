@@ -24,6 +24,8 @@ _AsyncClient = httpx.AsyncClient
 CALLBACK_HOST = "127.0.0.1"
 CALLBACK_PORT = 1456
 CALLBACK_PATH = "/oauth/callback"
+# 回调请求读取超时：防止慢连接/不发数据的连接挂起 handler 任务。
+CALLBACK_READ_TIMEOUT = 10.0
 REDIRECT_URI = f"http://{CALLBACK_HOST}:{CALLBACK_PORT}{CALLBACK_PATH}"
 TOKEN_EXPIRY_SKEW_SECONDS = 60
 OAUTH_CLIENT_ID = "pi-gateway"
@@ -31,10 +33,20 @@ OAUTH_SCOPE = "gateway offline_access"
 DEFAULT_AUTHORIZATION_ENDPOINT = "https://radius.pi.dev/oauth/authorize"
 
 
-def _normalize_gateway(value: str) -> str:
+def normalize_gateway_url(value: str) -> str:
+    """补 https:// 并去尾斜杠；非回环地址强制 https。
+
+    显式 http:// 的网关会把 refresh/access token 明文暴露给局域网嗅探，
+    仅允许 127.0.0.1 / localhost / ::1 使用明文（本地开发）。
+    """
     if not value.startswith(("http://", "https://")):
         value = f"https://{value}"
-    return value.rstrip("/")
+    normalized = value.rstrip("/")
+    parsed = urllib.parse.urlparse(normalized)
+    host = parsed.hostname or ""
+    if parsed.scheme != "https" and host not in ("127.0.0.1", "localhost", "::1"):
+        normalized = "https://" + normalized[len("http://") :]
+    return normalized
 
 
 async def _discover_authorization_endpoint(gateway: str) -> str:
@@ -45,7 +57,18 @@ async def _discover_authorization_endpoint(gateway: str) -> str:
             if response.is_success:
                 data = response.json()
                 if isinstance(data, dict) and isinstance(data.get("authorization_endpoint"), str):
-                    return data["authorization_endpoint"]
+                    endpoint = data["authorization_endpoint"]
+                    parsed_endpoint = urllib.parse.urlparse(endpoint)
+                    gateway_host = urllib.parse.urlparse(gateway).hostname
+                    is_loopback = parsed_endpoint.hostname in ("127.0.0.1", "localhost", "::1")
+                    # 校验 scheme/host 与网关一致：防止 MITM/恶意网关把
+                    # 授权端点指到任意 URL（钓鱼 + code 回调劫持）。
+                    if (
+                        parsed_endpoint.scheme in ("https", "http")
+                        and parsed_endpoint.hostname == gateway_host
+                        and (parsed_endpoint.scheme == "https" or is_loopback)
+                    ):
+                        return endpoint
     except (httpx.HTTPError, ValueError):
         pass
     return f"{gateway}/oauth/authorize"
@@ -106,7 +129,11 @@ async def _wait_for_browser_code(state: str, signal: Any) -> str | None:
     completed = asyncio.Event()
 
     async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        request_line = await reader.readline()
+        try:
+            request_line = await asyncio.wait_for(reader.readline(), timeout=CALLBACK_READ_TIMEOUT)
+        except asyncio.TimeoutError:
+            writer.close()
+            return
         parts = request_line.decode("utf-8", "replace").split()
         path = parts[1] if len(parts) > 1 else "/"
         parsed = urllib.parse.urlparse(path)
@@ -163,7 +190,7 @@ async def _respond(writer: asyncio.StreamWriter, status: int, message: str) -> N
 
 
 async def _login(interaction: AuthInteraction, gateway: str = "") -> OAuthCredential:
-    gateway = _normalize_gateway(gateway or getattr(interaction, "gateway", "") or "")
+    gateway = normalize_gateway_url(gateway or getattr(interaction, "gateway", "") or "")
     verifier, challenge = generate_pkce()
     state = uuid.uuid4().hex
     authorize_endpoint = await _discover_authorization_endpoint(gateway)
@@ -217,7 +244,11 @@ async def _login(interaction: AuthInteraction, gateway: str = "") -> OAuthCreden
             raise RuntimeError("Radius OAuth login was cancelled")
         parsed = urllib.parse.urlparse(pasted.strip())
         if parsed.scheme:
-            code = urllib.parse.parse_qs(parsed.query).get("code", [None])[0]
+            query = urllib.parse.parse_qs(parsed.query)
+            pasted_state = query.get("state", [None])[0]
+            if pasted_state is not None and pasted_state != state:
+                raise RuntimeError("Radius OAuth login failed: state mismatch in pasted URL")
+            code = query.get("code", [None])[0]
         else:
             code = pasted.strip() or None
     if not code:
@@ -239,7 +270,7 @@ async def _login(interaction: AuthInteraction, gateway: str = "") -> OAuthCreden
 async def _refresh(credential: OAuthCredential, signal: Any = None) -> OAuthCredential:
     gateway = credential.get("gateway") or ""
     return await _request_oauth_token(
-        _normalize_gateway(str(gateway) if gateway else ""),
+        normalize_gateway_url(str(gateway) if gateway else ""),
         {
             "grant_type": "refresh_token",
             "client_id": OAUTH_CLIENT_ID,
@@ -266,7 +297,7 @@ def create_radius_oauth(gateway: str) -> OAuthAuth:
 
         async def refresh(self, credential: OAuthCredential, signal: Any = None) -> OAuthCredential:
             return await _request_oauth_token(
-                _normalize_gateway(gateway),
+                normalize_gateway_url(gateway),
                 {
                     "grant_type": "refresh_token",
                     "client_id": OAUTH_CLIENT_ID,

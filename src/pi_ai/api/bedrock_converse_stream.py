@@ -451,9 +451,10 @@ def bedrock_converse_stream(
         content_blocks: list[ContentBlock] = []
         current_index: int | None = None
         current_kind: str | None = None
-        current_tool_id = ""
-        current_tool_name = ""
-        current_raw_args = ""
+        # 并行 toolUse 累积状态：contentBlockIndex → {block_index, id, name, raw_args}。
+        tool_call_states: dict[int, dict[str, Any]] = {}
+        tool_call_order: list[int] = []
+        finalized_tool_blocks: set[int] = set()
         usage: Usage = empty_usage()
         stop_reason: StopReason = "stop"
 
@@ -491,20 +492,29 @@ def bedrock_converse_stream(
                         partial=_partial(),
                     )
                 )
-            elif current_kind == "toolCall" and current_index is not None:
-                tool_block = cast(ToolCall, content_blocks[current_index])
-                tool_block["raw_arguments"] = current_raw_args
-                tool_block["arguments"] = parse_tool_arguments(current_raw_args)
-                stream.push(
-                    ToolCallEndEvent(
-                        type="toolcall_end",
-                        content_index=current_index,
-                        tool_call=tool_block,
-                        partial=_partial(),
-                    )
-                )
             current_kind = None
             current_index = None
+
+        def _finalize_tool_block(block_index: int) -> None:
+            """按 contentBlockStop 收尾单个 toolUse（并行调用按索引独立结束）。"""
+            if block_index in finalized_tool_blocks:
+                return
+            finalized_tool_blocks.add(block_index)
+            tool_block = cast(ToolCall, content_blocks[block_index])
+            state = next(
+                (s for s in tool_call_states.values() if s["block_index"] == block_index), None
+            )
+            raw = state["raw_arguments"] if state is not None else ""
+            tool_block["raw_arguments"] = raw
+            tool_block["arguments"] = parse_tool_arguments(raw)
+            stream.push(
+                ToolCallEndEvent(
+                    type="toolcall_end",
+                    content_index=block_index,
+                    tool_call=tool_block,
+                    partial=_partial(),
+                )
+            )
 
         try:
             region = (
@@ -561,24 +571,32 @@ def bedrock_converse_stream(
                             start = event.get("start") or {}
                             if start.get("toolUse"):
                                 _end_current_block()
-                                current_tool_id = start["toolUse"].get("toolUseId") or ""
-                                current_tool_name = start["toolUse"].get("name") or ""
-                                current_raw_args = ""
+                                block_key = event.get("contentBlockIndex")
+                                state_key = (
+                                    block_key
+                                    if isinstance(block_key, int) and block_key >= 0
+                                    else len(tool_call_order)
+                                )
                                 content_blocks.append(
                                     ToolCall(
                                         type="toolCall",
-                                        id=current_tool_id,
-                                        name=current_tool_name,
+                                        id=start["toolUse"].get("toolUseId") or "",
+                                        name=start["toolUse"].get("name") or "",
                                         raw_arguments="",
                                         arguments=None,
                                     )
                                 )
-                                current_index = len(content_blocks) - 1
-                                current_kind = "toolCall"
+                                tool_call_states[state_key] = {
+                                    "block_index": len(content_blocks) - 1,
+                                    "id": start["toolUse"].get("toolUseId") or "",
+                                    "name": start["toolUse"].get("name") or "",
+                                    "raw_arguments": "",
+                                }
+                                tool_call_order.append(state_key)
                                 stream.push(
                                     ToolCallStartEvent(
                                         type="toolcall_start",
-                                        content_index=current_index,
+                                        content_index=len(content_blocks) - 1,
                                         partial=_partial(),
                                     )
                                 )
@@ -610,9 +628,20 @@ def bedrock_converse_stream(
                                     )
                                 )
                             elif delta.get("toolUse"):
-                                index = cast(int, current_index)
                                 chunk = delta["toolUse"].get("input") or ""
-                                current_raw_args += chunk
+                                block_key = event.get("contentBlockIndex")
+                                state = None
+                                if isinstance(block_key, int) and block_key >= 0:
+                                    state = tool_call_states.get(block_key)
+                                if state is None and tool_call_order:
+                                    state = tool_call_states[tool_call_order[-1]]
+                                if state is None:
+                                    continue
+                                state["raw_arguments"] += chunk
+                                index = state["block_index"]
+                                cast(ToolCall, content_blocks[index])["raw_arguments"] = state[
+                                    "raw_arguments"
+                                ]
                                 stream.push(
                                     ToolCallDeltaEvent(
                                         type="toolcall_delta",
@@ -651,12 +680,25 @@ def bedrock_converse_stream(
                                         )
                                     )
                         elif etype == "contentBlockStop":
-                            _end_current_block()
+                            block_key = event.get("contentBlockIndex")
+                            state = (
+                                tool_call_states.get(block_key)
+                                if isinstance(block_key, int) and block_key >= 0
+                                else None
+                            )
+                            if state is not None:
+                                _finalize_tool_block(state["block_index"])
+                            else:
+                                _end_current_block()
                         elif etype == "messageStop":
                             stop_reason = _map_stop_reason(event.get("stopReason"))
                         elif etype == "metadata":
                             _update_usage(model, usage, event)
             _end_current_block()
+            # 未收到 contentBlockStop 的残留 toolUse（非标准端点）统一收尾。
+            for state in tool_call_states.values():
+                if state["block_index"] not in finalized_tool_blocks:
+                    _finalize_tool_block(state["block_index"])
             msg = AssistantMessage(
                 role="assistant",
                 content=content_blocks,

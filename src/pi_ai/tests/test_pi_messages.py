@@ -110,6 +110,11 @@ async def test_stream_full_sequence(monkeypatch):
     assert message["stop_reason"] == "stop"
     assert message["content"][0]["text"] == "Hello"
     assert message["usage"]["input"] == 5
+    # wire usage 的 camelCase 键必须映射为 SDK snake_case。
+    assert message["usage"]["cache_read"] == 0
+    assert message["usage"]["total_tokens"] == 6
+    assert message["usage"]["cost"]["cache_read"] == 0
+    assert "cacheRead" not in message["usage"]
 
 
 @pytest.mark.asyncio

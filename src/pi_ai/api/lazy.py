@@ -76,6 +76,9 @@ def lazy_stream(
             inner = await setup()
             await forward_stream(outer, inner)
         except asyncio.CancelledError:
+            # 让等待 outer.result() / async for 的消费方以取消结束，
+            # 而不是永久挂起（Future 永不完成、队列无 sentinel）。
+            outer.error(asyncio.CancelledError())
             raise
         except BaseException as exc:
             message = _create_setup_error_message(model, exc)

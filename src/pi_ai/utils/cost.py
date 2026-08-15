@@ -22,7 +22,8 @@ def calculate_cost(model: Model, usage: Usage) -> None:
             matched_threshold = tier.input_tokens_above
 
     long_write = usage.get("cache_write_1h") or 0
-    short_write = usage["cache_write"] - long_write
+    # 防御异常 usage（cache_write_1h 超出 cache_write）产生负费用。
+    short_write = max(0, usage["cache_write"] - long_write)
     cost = usage["cost"]
     cost["input"] = rates.input / 1_000_000 * usage["input"]
     cost["output"] = rates.output / 1_000_000 * usage["output"]

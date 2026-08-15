@@ -80,7 +80,10 @@ async def _fetch_json(
     async with _AsyncClient(timeout=timeout) as client:
         response = await client.request(method, url, headers=headers, data=data)
     if not response.is_success:
-        raise RuntimeError(f"{response.status_code} {response.reason_phrase}: {response.text}")
+        # 截断错误体：避免上游回显的 token 进入 stderr/诊断。
+        raise RuntimeError(
+            f"{response.status_code} {response.reason_phrase}: {response.text[:500]}"
+        )
     return response.json()
 
 

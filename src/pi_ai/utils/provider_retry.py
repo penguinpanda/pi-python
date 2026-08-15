@@ -110,17 +110,11 @@ async def _abortable_sleep(delay_ms: float, signal: Any) -> None:
     if signal is None:
         await asyncio.sleep(delay_ms / 1000)
         return
-    waiter = asyncio.create_task(signal.wait())
-    sleeper = asyncio.create_task(asyncio.sleep(delay_ms / 1000))
-    done, pending = await asyncio.wait({waiter, sleeper}, return_when=asyncio.FIRST_COMPLETED)
-    for task in pending:
-        task.cancel()
-    for task in pending:
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-    if waiter in done and signal.is_set():
+    try:
+        await asyncio.wait_for(signal.wait(), timeout=delay_ms / 1000)
+    except asyncio.TimeoutError:
+        return
+    if signal.is_set():
         raise _AbortError("Request aborted")
 
 
@@ -139,6 +133,10 @@ async def retry_provider_request(
         except _AbortError:
             raise
         except BaseException as error:
+            # 任务被取消（wait_for 超时 / 调用方 cancel）必须原样传播，
+            # 不得在 signal 恰好置位时被转换成 _AbortError 吞掉。
+            if isinstance(error, asyncio.CancelledError):
+                raise
             if signal is not None and signal.is_set():
                 raise _AbortError("Request aborted") from None
             if retries_remaining <= 0 or not _is_retryable_provider_error(error):

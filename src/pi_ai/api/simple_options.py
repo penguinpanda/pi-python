@@ -33,7 +33,9 @@ def clamp_max_tokens_to_context(model: Model, context: Context, max_tokens: int)
     available = (
         model.context_window - estimate_context_tokens(context).tokens - CONTEXT_SAFETY_TOKENS
     )
-    return min(max_tokens, max(MIN_MAX_TOKENS, available))
+    # 两条分支都收敛到 [MIN_MAX_TOKENS, +∞)：负/零 max_tokens 不得透传给
+    # provider（会被拒绝），长上下文时也不得静默把输出压到 0。
+    return min(max(MIN_MAX_TOKENS, max_tokens), max(MIN_MAX_TOKENS, available))
 
 
 __all__ = [

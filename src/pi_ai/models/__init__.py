@@ -65,6 +65,7 @@ Models 相当于整个 SDK 的调度中心，
 """
 
 import asyncio
+import os
 
 from dataclasses import dataclass, field
 from typing import Any
@@ -80,7 +81,7 @@ from ..types import (
 )
 from ..auth import InMemoryCredentialStore
 from ..auth.context import AuthContext, default_auth_context
-from ..auth.resolve import ModelsError, resolve_provider_auth
+from ..auth.resolve import ModelsError, resolve_provider_auth, resolve_stored_oauth
 from ..auth.types import AuthInteraction, AuthResult, Credential, credential_type
 from pi_telemetry import SpanOptions
 from ..provider import Provider, RefreshModelsContext
@@ -109,6 +110,24 @@ class ModelsRefreshResult:
 
     aborted: bool = False
     errors: dict[str, Exception] = field(default_factory=dict)
+
+
+def _resolve_env_credential(provider: Provider) -> Credential | None:
+    """环境变量认证回退（对齐 TS resolveRefreshCredential）。
+
+    refresh 只读 CredentialStore 时，仅用环境变量 API Key 的动态 provider
+    会拿到空凭证，抓取返回空列表并覆写缓存。此处按 provider.auth 的
+    env_vars 解析 ambient key（与 _DefaultAuthContext.env 语义一致）。
+    """
+    auth = getattr(provider, "auth", None)
+    env_vars = getattr(auth, "env_vars", None)
+    if not env_vars:
+        return None
+    for var in env_vars:
+        value = os.environ.get(var)
+        if value:
+            return {"type": "api_key", "key": value}
+    return None
 
 
 class Models:
@@ -322,6 +341,23 @@ class Models:
                 return
             store = provider_models_store(self._models_store, provider.id)
             credential = await self._credentials.read(provider.id)
+            if credential is None:
+                credential = _resolve_env_credential(provider)
+            elif credential_type(credential) == "oauth":
+                # 目录抓取前先刷新过期 OAuth token（与 Provider.stream 路径
+                # 一致）：否则带过期 access token 请求 /v1/config 直接 401，
+                # 目录停留在旧缓存。
+                oauth = getattr(getattr(provider, "auth", None), "oauth", None)
+                if oauth is not None:
+                    try:
+                        await resolve_stored_oauth(
+                            self._credentials, provider.id, oauth, credential
+                        )
+                    except ModelsError:
+                        pass  # 刷新失败不阻断;抓取阶段的错误由 result.errors 收集
+                    refreshed_credential = await self._credentials.read(provider.id)
+                    if refreshed_credential is not None:
+                        credential = refreshed_credential
             context = RefreshModelsContext(
                 credential=credential,
                 store=store,

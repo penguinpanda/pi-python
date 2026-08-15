@@ -723,7 +723,8 @@ class TestResponsesStream:
         msg = await stream.result()
         assert msg["content"] == [{"type": "text", "text": "Hi"}]
         assert msg["usage"] == {
-            "input": 7,
+            # OpenAI 的 input_tokens 已包含缓存 token：扣减后不再双重计费。
+            "input": 1,
             "output": 3,
             "cache_read": 4,
             "cache_write": 2,
@@ -731,6 +732,38 @@ class TestResponsesStream:
             "cost": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0},
             "reasoning": 1,
         }
+
+    @pytest.mark.asyncio
+    async def test_completed_output_text_no_duplication_after_tool_call(self):
+        """文本→toolCall→文本 的多段响应不得把整段 output_text 重复进首个文本块。"""
+        model = _make_model()
+        context = Context(messages=[{"role": "user", "content": "Hi"}])
+        fc_item = SimpleNamespace(
+            type="function_call",
+            call_id="call_1",
+            id="fc_abc",
+            name="tool_a",
+            arguments="{}",
+        )
+        events = [
+            _event("response.output_text.delta", delta="Before "),
+            _event("response.output_item.added", item=fc_item),
+            _event("response.function_call_arguments.delta", delta='{"q":'),
+            _event("response.function_call_arguments.done"),
+            _event("response.output_item.done", item=fc_item),
+            _event("response.output_text.delta", delta="After"),
+            _event(
+                "response.completed",
+                response=SimpleNamespace(output_text="Before After", usage=None),
+            ),
+        ]
+        client = _mock_client(events)
+
+        collected, stream = await _collect_events(model, context, client)
+        msg = await stream.result()
+        assert [b["type"] for b in msg["content"]] == ["text", "toolCall", "text"]
+        assert msg["content"][0]["text"] == "Before "
+        assert msg["content"][2]["text"] == "After"
 
     @pytest.mark.asyncio
     async def test_completed_no_response(self):

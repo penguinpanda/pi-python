@@ -61,6 +61,31 @@ def _length_stop_msg(input_tokens: int, cache_read: int, output: int) -> Assista
     return msg
 
 
+def test_is_context_overflow_case3_integer_precision():
+    """窗口 > 2^53 时 99% 阈值不得因浮点舍入误判。"""
+    window = 100_000_000_000_000_001
+    msg = _length_stop_msg(99_000_000_000_000_000, 0, 0)
+    assert is_context_overflow(msg, window) is False
+
+
+def test_is_recoverable_length_requires_usage():
+    """usage 缺失时不得误判可恢复（无法证明输出未达上限）。"""
+    from pi_ai.utils.overflow import is_recoverable_length
+
+    msg = _usage_msg(10)
+    msg["stop_reason"] = "length"
+    msg["usage"] = None
+    assert is_recoverable_length(msg, 100) is False
+
+
+def test_is_context_overflow_non_dict_usage():
+    """外部构造的非 dict usage 不得崩溃。"""
+    msg = _usage_msg(10)
+    msg["stop_reason"] = "length"
+    msg["usage"] = "oops"
+    assert is_context_overflow(msg, 1000) is False
+
+
 # ============================================================================
 # Case 1: 错误式溢出
 # ============================================================================

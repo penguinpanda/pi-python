@@ -309,3 +309,81 @@ async def test_bedrock_tool_stream(monkeypatch) -> None:
     assert tool["name"] == "read"
     assert tool["arguments"] == {"path": "a"}
     assert message["stop_reason"] == "tool_call"
+
+
+@pytest.mark.asyncio
+async def test_bedrock_parallel_tool_stream(monkeypatch) -> None:
+    """并行 toolUse 按 contentBlockIndex 独立累积参数，交错增量不串线。"""
+    events = [
+        _frame({"type": "messageStart"}, "messageStart"),
+        _frame(
+            {
+                "type": "contentBlockStart",
+                "contentBlockIndex": 0,
+                "start": {"toolUse": {"toolUseId": "t1", "name": "read"}},
+            },
+            "contentBlockStart",
+        ),
+        _frame(
+            {
+                "type": "contentBlockStart",
+                "contentBlockIndex": 1,
+                "start": {"toolUse": {"toolUseId": "t2", "name": "search"}},
+            },
+            "contentBlockStart",
+        ),
+        _frame(
+            {
+                "type": "contentBlockDelta",
+                "contentBlockIndex": 0,
+                "delta": {"toolUse": {"input": '{"path":"'}},
+            },
+            "contentBlockDelta",
+        ),
+        _frame(
+            {
+                "type": "contentBlockDelta",
+                "contentBlockIndex": 1,
+                "delta": {"toolUse": {"input": '{"q":"x"'}},
+            },
+            "contentBlockDelta",
+        ),
+        _frame(
+            {
+                "type": "contentBlockDelta",
+                "contentBlockIndex": 0,
+                "delta": {"toolUse": {"input": 'a"}'}},
+            },
+            "contentBlockDelta",
+        ),
+        _frame(
+            {
+                "type": "contentBlockDelta",
+                "contentBlockIndex": 1,
+                "delta": {"toolUse": {"input": "}"}},
+            },
+            "contentBlockDelta",
+        ),
+        _frame({"type": "contentBlockStop", "contentBlockIndex": 0}, "contentBlockStop"),
+        _frame({"type": "contentBlockStop", "contentBlockIndex": 1}, "contentBlockStop"),
+        _frame({"type": "messageStop", "stopReason": "tool_use"}, "messageStop"),
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"".join(events))
+
+    monkeypatch.setattr(
+        bedrock_converse_stream,
+        "_AsyncClient",
+        lambda **kwargs: httpx.AsyncClient(transport=httpx.MockTransport(handler), **kwargs),
+    )
+    stream = bedrock_converse_stream.bedrock_converse_stream(
+        _model(), _context(), "token", "", {"region": "us-east-1"}
+    )
+    events_out = [event async for event in stream]
+    message = events_out[-1]["message"]
+    blocks = {b["id"]: b for b in message["content"] if b["type"] == "toolCall"}
+    assert blocks["t1"]["raw_arguments"] == '{"path":"a"}'
+    assert blocks["t1"]["arguments"] == {"path": "a"}
+    assert blocks["t2"]["raw_arguments"] == '{"q":"x"}'
+    assert blocks["t2"]["arguments"] == {"q": "x"}

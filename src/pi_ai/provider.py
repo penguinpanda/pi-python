@@ -561,30 +561,57 @@ def _build_refresh_models(
 
     对齐 TS createProvider 的 refreshModels：
     - 先恢复 store 中的目录（allow_network=False 时仅此一步）；
-    - 网络失败时保留上一次的列表（dynamic 不变），错误由 Models.refresh 收集；
-    - 并发调用共享同一个 in-flight 任务。
+    - 空抓取结果不覆盖非空缓存（认证缺失时 fetch 可能返回 []）；
+    - 并发调用共享同一个 in-flight 任务，但仅合并同语义调用；
+    - in-flight 引用只由任务自身完成回调清除，调用方取消不产生孤儿任务。
     """
     inflight: asyncio.Task | None = None
+    inflight_context: RefreshModelsContext | None = None
+
+    def _same_semantics(left: RefreshModelsContext, right: RefreshModelsContext) -> bool:
+        """两个调用的刷新语义是否一致（可安全共享同一个 in-flight 任务）。"""
+        return (
+            left.allow_network == right.allow_network
+            and left.force == right.force
+            and left.signal is right.signal
+            and left.credential is right.credential
+        )
 
     async def _refresh(context: RefreshModelsContext) -> None:
-        nonlocal inflight
-        if inflight is not None:
+        nonlocal inflight, inflight_context
+        while inflight is not None and inflight_context is not None:
+            if _same_semantics(context, inflight_context):
+                try:
+                    await inflight
+                except asyncio.CancelledError:
+                    current = asyncio.current_task()
+                    cancelling = getattr(current, "cancelling", None)
+                    if cancelling is not None and cancelling() > 0:
+                        raise
+                    # 共享任务被其它调用方取消：不继承取消，按自己的 context 重试。
+                    continue
+                return
+            # 语义不同（离线/在线、force、signal、credential）：等待前一个
+            # 完成后按自己的 context 串行执行，而不是被前者的参数绑架。
             await inflight
-            return
 
         async def _impl() -> None:
+            stored = None
             if context.store is not None:
-                stored = await context.store.read()
-                if stored is not None:
-                    provider._dynamic_models[:] = [
-                        m for m in stored.models if m.provider == provider.id
-                    ]
+                stored_entry = await context.store.read()
+                if stored_entry is not None:
+                    stored = stored_entry.models
+                    provider._dynamic_models[:] = [m for m in stored if m.provider == provider.id]
             if not context.allow_network or (
                 context.signal is not None and context.signal.is_set()
             ):
                 return
             refreshed = await fetch_models(context)
             if context.signal is not None and context.signal.is_set():
+                return
+            # 空抓取结果不发布：认证缺失/失败时 fetch 返回 []，覆盖非空缓存
+            # 会静默清空已持久化的模型目录（且离线恢复也只能恢复空列表）。
+            if not refreshed and stored:
                 return
             provider._dynamic_models[:] = refreshed
             if context.store is not None:
@@ -597,9 +624,17 @@ def _build_refresh_models(
 
         task = asyncio.create_task(_impl())
         inflight = task
-        try:
-            await task
-        finally:
-            inflight = None
+        inflight_context = context
+
+        def _on_done(_task: asyncio.Task) -> None:
+            nonlocal inflight, inflight_context
+            if inflight is _task:
+                inflight = None
+                inflight_context = None
+
+        task.add_done_callback(_on_done)
+        # 调用方被取消时异常原样传播；共享任务不受影响继续运行，
+        # inflight 由 _on_done 清理，后续调用仍能复用去重。
+        await task
 
     return _refresh

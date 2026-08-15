@@ -296,6 +296,90 @@ def _build_responses_reasoning(
     return result
 
 
+def _build_responses_request_kwargs(
+    model: Model,
+    context: Context,
+    base_url: str,
+    options: StreamOptions | None,
+    *,
+    request_model_id: str | None = None,
+) -> tuple[dict[str, Any], bool]:
+    """构造 Responses API 请求参数（含 web_search 开关，供调用方复用）。
+
+    与 Codex WebSocket 路径共享：WS 需要先于流启动建立连接（连接失败
+    才能同步回退 SSE），而连接需要完整的请求体。
+    """
+    opts = options or {}
+    web_search_enabled = _resolve_web_search(model, base_url, options)
+    tool_search_enabled = compat_value(model, "supportsToolSearch", False)
+    immediate_tools, deferred_tools = split_deferred_tools(context, tool_search_enabled)
+    transformed_messages = transform_messages(
+        context.messages, model, normalize_responses_tool_call_id
+    )
+    input_items = _to_responses_input(
+        transformed_messages,
+        model,
+        replay_web_search_items=web_search_enabled,
+        deferred_tools=deferred_tools,
+    )
+    tools: list[dict[str, Any]] = []
+    if web_search_enabled:
+        tools.append({"type": "web_search"})
+    if immediate_tools:
+        tools.extend(
+            to_responses_tools(
+                immediate_tools,
+                supports_strict_mode=supports_strict_mode(model),
+            )
+        )
+
+    kwargs: dict[str, Any] = {
+        "model": request_model_id or model.id,
+        "input": input_items,
+        "stream": True,
+        "store": False,
+    }
+    include_system_prompt = opts.get("include_system_prompt", True)
+    if include_system_prompt and context.system_prompt:
+        kwargs["instructions"] = context.system_prompt
+    if tools:
+        kwargs["tools"] = tools
+    temperature = opts.get("temperature")
+    if temperature is not None:
+        kwargs["temperature"] = temperature
+    # max_output_tokens 收敛到模型上下文窗口内（对齐 TS buildBaseOptions）：
+    # 未指定时使用模型默认 max_tokens，始终发送收敛后的值。
+    requested = opts.get("max_tokens")
+    kwargs["max_output_tokens"] = clamp_max_tokens_to_context(
+        model,
+        context,
+        requested if requested is not None else model.max_tokens,
+    )
+    reasoning = _build_responses_reasoning(
+        model,
+        opts.get("reasoning"),
+        opts.get("reasoning_summary"),
+    )
+    if reasoning is not None:
+        kwargs["reasoning"] = reasoning
+        if reasoning.get("effort") not in (None, "none"):
+            kwargs["include"] = ["reasoning.encrypted_content"]
+    elif model.provider == "xai" and model.reasoning:
+        kwargs["include"] = ["reasoning.encrypted_content"]
+
+    # 提示缓存（Prompt Cache，对齐 TS openai-responses.ts）：
+    #   prompt_cache_key：仅 supportsExplicitPromptCacheMode 时发送
+    #   prompt_cache_retention：long 且支持长缓存时发送 "24h"
+    if compat_value(model, "supportsExplicitPromptCacheMode", True):
+        cache_retention = resolve_cache_retention(opts.get("cache_retention"), opts.get("env"))
+        supports_long = supports_long_cache_retention(model)
+        if cache_retention != "none":
+            kwargs["prompt_cache_key"] = clamp_openai_prompt_cache_key(opts.get("session_id"))
+        if cache_retention == "long" and supports_long:
+            kwargs["prompt_cache_retention"] = "24h"
+    return kwargs, web_search_enabled
+
+
 def _parse_response_usage(resp: Any, model: Model) -> Usage:
     """从 Responses response 提取 usage，包含缓存与推理 token 明细。"""
     usage_obj = getattr(resp, "usage", None)
@@ -316,12 +400,15 @@ def _parse_response_usage(resp: Any, model: Model) -> Usage:
     if output_details is not None:
         reasoning_tokens = getattr(output_details, "reasoning_tokens", 0) or 0
 
+    # OpenAI 的 input_tokens 已包含 cached / cache-write token：
+    # 不扣减会导致缓存命中部分既按全价 input 计费、又按缓存价计费。
+    input_tokens = max(0, input_tokens - cache_read - cache_write)
     usage = Usage(
         input=input_tokens,
         output=output_tokens,
         cache_read=cache_read,
         cache_write=cache_write,
-        total_tokens=total_tokens or (input_tokens + output_tokens),
+        total_tokens=total_tokens or (input_tokens + output_tokens + cache_read + cache_write),
         cost={"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0},
     )
     if reasoning_tokens:
@@ -685,6 +772,7 @@ async def responses_stream(
         """
 
         try:
+            client: Any = None
             # 创建 OpenAI SDK 客户端。
             #
             # 重试参数从 StreamOptions 读取（缺省保持 SDK 默认 2）。
@@ -718,98 +806,14 @@ async def responses_stream(
                     max_retries=opts.get("max_retries", 2),
                     headers=resolved_headers,
                 )
-            # 跨 Provider 消息规范化。
-            #
-            # 图片降级 / thinking 块 / 工具调用 ID 规范化 /
-            # 孤立 tool call 合成错误结果。
-            #
-            # Responses 系 provider 使用管道分隔 ID（call_id|fc_item_id）。
-            web_search_enabled = _resolve_web_search(model, base_url, options)
-            tool_search_enabled = compat_value(model, "supportsToolSearch", False)
-            immediate_tools, deferred_tools = split_deferred_tools(context, tool_search_enabled)
-            transformed_messages = transform_messages(
-                context.messages, model, normalize_responses_tool_call_id
-            )
-            input_items = _to_responses_input(
-                transformed_messages,
-                model,
-                replay_web_search_items=web_search_enabled,
-                deferred_tools=deferred_tools,
-            )
-            tools: list[dict[str, Any]] = []
-            if web_search_enabled:
-                tools.append({"type": "web_search"})
-            if immediate_tools:
-                tools.extend(
-                    to_responses_tools(
-                        immediate_tools,
-                        supports_strict_mode=supports_strict_mode(model),
-                    )
-                )
-
-            # Responses API 请求参数。
-            #
-            # 根据用户配置，
-            #
-            # 动态添加：
-            #
-            # temperature
-            #
-            # max_output_tokens
-            #
-            # instructions
-            #
-            # reasoning
-            #
-            # tools。
-            kwargs: dict[str, Any] = {
-                "model": request_model_id or model.id,
-                "input": input_items,
-                "stream": True,
-                "store": False,
-            }
-            include_system_prompt = opts.get("include_system_prompt", True)
-            if include_system_prompt and context.system_prompt:
-                kwargs["instructions"] = context.system_prompt
-            if tools:
-                kwargs["tools"] = tools
-            temperature = opts.get("temperature")
-            if temperature is not None:
-                kwargs["temperature"] = temperature
-            # max_output_tokens 收敛到模型上下文窗口内（对齐 TS buildBaseOptions）：
-            # 未指定时使用模型默认 max_tokens，始终发送收敛后的值。
-            requested = opts.get("max_tokens")
-            kwargs["max_output_tokens"] = clamp_max_tokens_to_context(
+            # 请求参数构造（与 Codex WebSocket 路径共享，保证 body 一致）。
+            kwargs, web_search_enabled = _build_responses_request_kwargs(
                 model,
                 context,
-                requested if requested is not None else model.max_tokens,
+                base_url,
+                options,
+                request_model_id=request_model_id,
             )
-            reasoning = _build_responses_reasoning(
-                model,
-                opts.get("reasoning"),
-                opts.get("reasoning_summary"),
-            )
-            if reasoning is not None:
-                kwargs["reasoning"] = reasoning
-                if reasoning.get("effort") not in (None, "none"):
-                    kwargs["include"] = ["reasoning.encrypted_content"]
-            elif model.provider == "xai" and model.reasoning:
-                kwargs["include"] = ["reasoning.encrypted_content"]
-
-            # 提示缓存（Prompt Cache，对齐 TS openai-responses.ts）：
-            #   prompt_cache_key：仅 supportsExplicitPromptCacheMode 时发送
-            #   prompt_cache_retention：long 且支持长缓存时发送 "24h"
-            if compat_value(model, "supportsExplicitPromptCacheMode", True):
-                cache_retention = resolve_cache_retention(
-                    opts.get("cache_retention"), opts.get("env")
-                )
-                supports_long = supports_long_cache_retention(model)
-                if cache_retention != "none":
-                    kwargs["prompt_cache_key"] = clamp_openai_prompt_cache_key(
-                        opts.get("session_id")
-                    )
-                if cache_retention == "long" and supports_long:
-                    kwargs["prompt_cache_retention"] = "24h"
 
             # 发起流式请求。
             #
@@ -1187,18 +1191,17 @@ async def responses_stream(
                         # 若尚未有 text 块（如仅 completed 事件），则新建。
                         output_text = getattr(resp, "output_text", "")
                         if output_text:
-                            existing_text = next(
-                                (block for block in content_blocks if block.get("type") == "text"),
-                                None,
-                            )
-                            if existing_text is not None:
+                            text_blocks = [
+                                block for block in content_blocks if block.get("type") == "text"
+                            ]
+                            if len(text_blocks) == 1:
                                 # output_text 是整段文本的权威值；已有 text 块时
                                 # 直接覆盖，避免 toolCall 结束后再次追加，导致回放时
                                 # function_call 与 function_call_output 之间插入
                                 # 多余 message item（DeepSeek 会报
                                 # "No tool output found for tool call ..."）。
-                                cast(TextContent, existing_text)["text"] = output_text
-                            else:
+                                cast(TextContent, text_blocks[0])["text"] = output_text
+                            elif not text_blocks:
                                 _end_current_block()
                                 current_kind = "text"
                                 content_blocks.append(TextContent(type="text", text=output_text))
@@ -1210,6 +1213,9 @@ async def responses_stream(
                                         partial=_partial(),
                                     )
                                 )
+                                # 多个 text 块（文本→toolCall→文本）：各块已按
+                                # delta/done 累积自身文本，整体覆盖第一个块会把
+                                # 整段 output_text 重复进最终消息，跳过覆盖。
                                 stream.push(
                                     TextEndEvent(
                                         type="text_end",
@@ -1277,6 +1283,14 @@ async def responses_stream(
             err_msg = build_error_message(model, exc)
             stream.push({"type": "error", "reason": "error", "error": err_msg})
             # stream.end(err_msg)
+        finally:
+            # 显式关闭客户端：openai SDK 依赖 __del__ 调度异步关闭，
+            # 取消/异常路径与循环引用场景下可能永不执行（连接池泄漏）。
+            if client is not None:
+                try:
+                    await client.close()
+                except Exception:
+                    pass
 
     track_background_task(_run())
     return stream

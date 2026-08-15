@@ -57,6 +57,39 @@ def _empty_usage() -> Usage:
     )
 
 
+def _normalize_wire_usage(raw: dict[str, Any]) -> dict[str, Any]:
+    """wire usage（camelCase）→ SDK usage（snake_case）映射。
+
+    pi-messages 线协议的 usage 键为 cacheRead / cacheWrite / totalTokens，
+    SDK Usage / Cost 契约要求 cache_read / cache_write / total_tokens；
+    原样透传会让下游按 snake_case 读取时全部静默为 0。
+    """
+    field_map = (
+        ("input", "input"),
+        ("output", "output"),
+        ("cacheRead", "cache_read"),
+        ("cacheWrite", "cache_write"),
+        ("totalTokens", "total_tokens"),
+    )
+    normalized: dict[str, Any] = {dst: raw[src] for src, dst in field_map if src in raw}
+    cost = raw.get("cost")
+    if isinstance(cost, dict):
+        cost_map = (
+            ("input", "input"),
+            ("output", "output"),
+            ("cacheRead", "cache_read"),
+            ("cacheWrite", "cache_write"),
+            ("total", "total"),
+        )
+        normalized_cost = {dst: cost[src] for src, dst in cost_map if src in cost}
+        if normalized_cost:
+            normalized["cost"] = normalized_cost
+    for key in ("reasoning", "cache_write_1h"):
+        if key in raw:
+            normalized[key] = raw[key]
+    return normalized
+
+
 def _map_done_reason(reason: str | None) -> StopReason:
     if reason == "toolUse":
         return "tool_call"
@@ -127,7 +160,7 @@ def _create_event_converter(model: Model):
             done_reason = _map_done_reason(event.get("reason"))
             partial["stop_reason"] = done_reason
             if isinstance(event.get("usage"), dict):
-                partial["usage"] = event["usage"]
+                partial["usage"] = cast(Usage, _normalize_wire_usage(event["usage"]))
             if event.get("responseId"):
                 partial["response_id"] = event["responseId"]
             _append_rewrite_diagnostic(partial, event.get("rewrite"))
@@ -142,7 +175,7 @@ def _create_event_converter(model: Model):
             )
             partial["stop_reason"] = reason
             if isinstance(event.get("usage"), dict):
-                partial["usage"] = event["usage"]
+                partial["usage"] = cast(Usage, _normalize_wire_usage(event["usage"]))
             if event.get("errorMessage"):
                 partial["error_message"] = event["errorMessage"]
             if event.get("responseId"):

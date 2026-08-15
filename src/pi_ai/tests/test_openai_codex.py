@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from unittest.mock import AsyncMock, patch
 
@@ -167,7 +168,22 @@ async def test_codex_websocket_event_stream(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_codex_stream_uses_websocket_factory() -> None:
+async def test_codex_stream_uses_websocket_factory(monkeypatch) -> None:
+    class _FakeConn:
+        async def send(self, data: str) -> None:
+            pass
+
+        async def recv(self) -> str:
+            await asyncio.sleep(3600)
+            return ""
+
+        async def close(self) -> None:
+            pass
+
+    async def fake_connect(*args, **kwargs):
+        return _FakeConn()
+
+    monkeypatch.setattr("websockets.connect", fake_connect)
     fake_responses = AsyncMock(return_value=AssistantMessageEventStream())
     with patch("pi_ai.api.openai_codex_responses.responses_stream", new=fake_responses):
         await openai_codex_responses.codex_stream(
@@ -233,18 +249,18 @@ async def test_codex_websocket_stream_integration(monkeypatch) -> None:
 async def test_websocket_connect_failure_falls_back_to_sse(monkeypatch) -> None:
     """WS 连接阶段失败回退 SSE；同会话后续请求直接 SSE（对齐 TS fallback 会话记忆）。"""
     from pi_ai.api.openai_codex_responses import (
-        _CodexWsConnectError,
         _is_ws_sse_fallback_active,
     )
+
+    async def fake_connect(*args, **kwargs):
+        raise ConnectionError("ws refused")
+
+    monkeypatch.setattr("websockets.connect", fake_connect)
 
     calls: list[str] = []
 
     async def fake_responses_stream(model, context, api_key, base_url, options=None, **kwargs):
-        client_factory = kwargs.get("client_factory")
-        kind = "ws" if client_factory.__name__ == "_ws_factory" else "sse"
-        calls.append(kind)
-        if kind == "ws":
-            raise _CodexWsConnectError("connect failed")
+        calls.append("sse")
         stream = AssistantMessageEventStream()
         output = {
             "content": [{"type": "text", "text": "from-sse"}],
@@ -269,21 +285,18 @@ async def test_websocket_connect_failure_falls_back_to_sse(monkeypatch) -> None:
         {"transport": "websocket", "api_key": "k", "session_id": session_id},
     )
     events = [event async for event in stream]
-    assert calls == ["ws", "sse"]
+    assert calls == ["sse"]
     assert events[-1]["message"]["content"][0]["text"] == "from-sse"
     assert _is_ws_sse_fallback_active(session_id)
-
-    # 同会话再次请求：跳过 WS 直接 SSE
-    stream2 = await openai_codex_responses.openai_codex_responses_stream(
+    # 同会话第二次请求：回退记忆生效，不再尝试 WS。
+    await openai_codex_responses.openai_codex_responses_stream(
         _model(),
         _context(),
         "k",
         "",
         {"transport": "websocket", "api_key": "k", "session_id": session_id},
     )
-    async for _event in stream2:
-        pass
-    assert calls == ["ws", "sse", "sse"]
+    assert calls == ["sse", "sse"]
 
 
 @pytest.mark.asyncio

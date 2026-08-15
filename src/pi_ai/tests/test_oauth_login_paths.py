@@ -255,14 +255,13 @@ async def test_radius_token_missing_fields(monkeypatch) -> None:
 
 def test_openrouter_parse_input_variants() -> None:
     """URL / code= 串 / 原始码三种输入形式。"""
-    assert (
-        openrouter._parse_authorization_input(f"{openrouter.FALLBACK_CALLBACK_URL}?code=u1&state=x")
-        == "u1"
-    )
-    assert openrouter._parse_authorization_input("code=u2") == "u2"
-    assert openrouter._parse_authorization_input("raw-code") == "raw-code"
-    assert openrouter._parse_authorization_input(None) is None
-    assert openrouter._parse_authorization_input("") is None
+    assert openrouter._parse_authorization_input(
+        f"{openrouter.FALLBACK_CALLBACK_URL}?code=u1&state=x"
+    ) == ("u1", "x")
+    assert openrouter._parse_authorization_input("code=u2") == ("u2", None)
+    assert openrouter._parse_authorization_input("raw-code") == ("raw-code", None)
+    assert openrouter._parse_authorization_input(None) == (None, None)
+    assert openrouter._parse_authorization_input("") == (None, None)
 
 
 @pytest.mark.asyncio

@@ -333,3 +333,46 @@ def test_added_tool_names_unknown_tool_not_counted():
     }
     estimate = estimate_context_tokens(Context(messages=[assistant, tool_result], tools=[]))
     assert estimate.tokens == 100 + 1  # usage 100 + toolResult "ok"(1)
+
+
+def test_calculate_context_tokens_tolerates_bad_fields():
+    """usage 字段为 None/字符串（外部构造消息）时不得抛 TypeError。"""
+    from pi_ai.utils.estimate import calculate_context_tokens
+
+    assert calculate_context_tokens({"input": None, "output": "5", "total_tokens": None}) == 5
+
+
+def test_estimate_message_tokens_missing_content():
+    """缺失/None content 的消息按空内容估算，不得崩溃。"""
+    from pi_ai.utils.estimate import estimate_message_tokens
+
+    assert estimate_message_tokens({"role": "user"}) == 0
+    assert estimate_message_tokens({"role": "user", "content": None}) == 0
+    assert estimate_message_tokens({"role": "toolResult", "content": None}) == 0
+
+
+def test_estimate_context_tokens_string_timestamp():
+    """字符串 timestamp 不得导致比较 TypeError。"""
+    from pi_ai.utils.estimate import estimate_context_tokens
+
+    messages = [
+        {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "hi"}],
+            "api": "x",
+            "provider": "x",
+            "model": "x",
+            "timestamp": "abc",
+            "stop_reason": "stop",
+            "usage": {
+                "input": 5,
+                "output": 1,
+                "cache_read": 0,
+                "cache_write": 0,
+                "total_tokens": 6,
+                "cost": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "total": 0},
+            },
+        }
+    ]
+    estimate = estimate_context_tokens(messages)
+    assert estimate.tokens >= 0

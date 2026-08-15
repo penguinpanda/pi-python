@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass
-from typing import cast
+from typing import Any, cast
 
 from ..types import (
     AssistantMessage,
@@ -58,9 +58,23 @@ def calculate_context_tokens(usage: Usage) -> int:
 
     total_tokens 优先；缺失或为 0 时按 input/output/cache_read/cache_write 求和。
     """
-    return usage.get("total_tokens") or usage.get("input", 0) + usage.get("output", 0) + usage.get(
-        "cache_read", 0
-    ) + usage.get("cache_write", 0)
+    total = _as_int(usage.get("total_tokens"))
+    if total:
+        return total
+    return (
+        _as_int(usage.get("input"))
+        + _as_int(usage.get("output"))
+        + _as_int(usage.get("cache_read"))
+        + _as_int(usage.get("cache_write"))
+    )
+
+
+def _as_int(value: Any) -> int:
+    """usage 字段归一化：None/非数值（外部构造消息）按 0 处理。"""
+    try:
+        return int(value) if value is not None else 0
+    except (TypeError, ValueError):
+        return 0
 
 
 def _safe_json_stringify(value: object) -> str:
@@ -100,9 +114,9 @@ def estimate_message_tokens(message: Message) -> int:
     - system / agent：字符串内容按长度（Python 防御分支，TS 无）
     """
     if message["role"] == "user":
-        return estimate_text_and_image_content_tokens(message["content"])
+        return estimate_text_and_image_content_tokens(message.get("content") or [])
     if message["role"] == "toolResult":
-        return estimate_text_and_image_content_tokens(message["content"])
+        return estimate_text_and_image_content_tokens(message.get("content") or [])
 
     content = message.get("content")
     if isinstance(content, str):
@@ -140,8 +154,8 @@ def _get_last_assistant_usage_info(messages: list[Message]) -> tuple[Usage, int]
     for i, message in enumerate(messages):
         if message["role"] == "assistant":
             assistant = cast(AssistantMessage, message)
-            usage_applies_to_prefix = (
-                assistant.get("timestamp", float("-inf")) >= latest_prefix_timestamp
+            usage_applies_to_prefix = _timestamp_ms(assistant.get("timestamp")) >= (
+                latest_prefix_timestamp
             )
             usage = assistant.get("usage")
             if (
@@ -152,10 +166,18 @@ def _get_last_assistant_usage_info(messages: list[Message]) -> tuple[Usage, int]
             ):
                 usage_info = (usage, i)
         latest_prefix_timestamp = max(
-            latest_prefix_timestamp, message.get("timestamp", float("-inf"))
+            latest_prefix_timestamp, _timestamp_ms(message.get("timestamp"))
         )
 
     return usage_info
+
+
+def _timestamp_ms(value: Any) -> float:
+    """消息时间戳归一化：缺失/非数值按 -inf 处理（避免 str 比较 TypeError）。"""
+    try:
+        return float(value) if value is not None else float("-inf")
+    except (TypeError, ValueError):
+        return float("-inf")
 
 
 def _estimate_messages(messages: list[Message]) -> ContextUsageEstimate:

@@ -388,7 +388,10 @@ def _check_schema(
             errors.append((path, f"Expected < {exclusive_maximum}"))
         multiple_of = schema.get("multipleOf")
         if isinstance(multiple_of, (int, float)) and multiple_of > 0:
-            if value % multiple_of != 0:
+            # 二进制浮点无法精确表示十进制倍率（0.3 % 0.1 != 0），
+            # 直接取模会误拒合法值；改用相对容差比较。
+            quotient = value / multiple_of
+            if abs(quotient - round(quotient)) > 1e-9:
                 errors.append((path, f"Expected multiple of {multiple_of}"))
 
     return errors

@@ -176,6 +176,8 @@
 
 ### Changed
 
+- `pi-ai` CLI 凭证默认路径由 CWD `auth.json` 改为 `~/.pi/agent/auth.json`
+  （`PI_AUTH_FILE` 可覆盖），与 README / `pi_coding_agent` 约定一致
 - 对齐 TS 工具管理：移除 fd/rg 下载的版本标记文件与
   `PI_FD_PATH` / `PI_RG_PATH` 外部路径覆盖；`@` 路径补全在 fd 缺失或
   失败时返回空，不再回退 readdir
@@ -327,6 +329,41 @@
   state 校验、回调响应连接回收；包管理命令注入防护（npm/git `--` 分隔、
   空源与路径逃逸拒绝、子进程超时）；远程目录 404/501 清空动态模型
 - mermaid `bt` 方向行序反转、节点框按 CJK 显示宽度计算、空图保留原代码块
+- 修复 completions 流式并行工具调用参数错配：按 chunk `index` 独立累积
+  各调用的参数（id 为 None 的交错增量不再拼到错误的调用上），流末统一收尾；
+  Bedrock 并行 toolUse 按 `contentBlockIndex` 独立累积（修复同源问题）
+- 修复 `FileCredentialStore` 跨 provider 并发 modify 丢失更新：读-改-写全程
+  进程内全局串行化；凭证文件损坏时备份为 `.corrupt` 并拒绝静默覆盖
+- 凭证/模型目录原子写改用随机后缀 + `O_CREAT|O_EXCL` 临时文件（创建即 0600、
+  不跟随符号链接），失败时清理，不再残留可预测的 `.tmp`
+- 修复 `Models.refresh()` 在仅环境变量认证时静默清空已缓存模型目录：
+  从 `provider.auth` 解析 ambient key；空抓取结果不覆盖非空缓存
+- `refresh_models` in-flight 去重改为任务自身完成回调清理引用，调用方取消
+  不再产生孤儿任务；语义不同（force/signal/credential/离线）的并发调用按
+  各自 context 串行执行而非被吸收
+- 修复 Responses 系 usage 双重计费：`input_tokens` 扣减 cache_read/cache_write
+  （`responses_stream` 与 Codex deferred fetch 统一）
+- 修复 responses 多文本块（文本→toolCall→文本）时 `output_text` 整段覆盖
+  首个文本块导致的重复内容
+- pi-messages wire usage 增加 camelCase→snake_case 映射，修复下游按
+  `cache_read`/`total_tokens` 读取全部为 0
+- 修复 Codex WebSocket→SSE 回退永不触发：WS 连接提前建立，连接失败在调用点
+  同步抛出并真正回退；回退集合仅记录显式 session_id 且限容
+- Google 流取消/异常路径关闭 HTTP 客户端与流式响应；completions/responses
+  显式 `await client.close()`，不再依赖 `__del__`
+- `provider_retry` 取消原样传播（不再被 signal 转成 `_AbortError`）；退避改用
+  `wait_for` 不再泄漏任务；`lazy_stream` 取消时以 `CancelledError` 结束流
+- 修复 `multipleOf` 浮点取模误拒合法值（十进制倍率容差比较）；json 解析拒绝
+  非有限数值（`1e999`/`Infinity`）、超长整数不再静默截断、深嵌套输入返回 `{}`
+- 负 `max_tokens` 收敛到 1；`compute_backoff_delay` 指数封顶防溢出；
+  cost/overflow/estimate 对异常 usage（None/字符串/非 dict）防御
+- Radius 网关非回环地址强制 https；授权端点发现校验 scheme/host 与网关一致
+- OAuth 错误消息截断响应体（防 token 回显进诊断）；device code 非法 interval
+  报 `RuntimeError` 而非 `ValueError`
+- OAuth 手动粘贴回退校验 `state`（不匹配拒绝，防任意 URL 的 code 被兑换）；
+  loopback 回调 handler 增加请求读取超时，慢连接不再挂起任务
+- `Models.refresh` 对过期 OAuth 凭证先刷新再抓取目录（与 stream 路径一致），
+  修复 Radius 过期 token 401 后目录停留旧缓存
 
 ## [0.1.0]
 

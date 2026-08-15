@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from ..types import Model
+from ..utils.atomic_write import atomic_write_json
 
 
 @dataclass(slots=True)
@@ -197,11 +198,7 @@ class FileModelsStore:
             return {}
 
     def _save(self, data: dict[str, dict[str, Any]]) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self._path.with_suffix(self._path.suffix + ".tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        tmp.replace(self._path)
+        atomic_write_json(self._path, data)
 
     async def read(self, provider_id: str) -> ModelsStoreEntry | None:
         with self._file_lock:

@@ -88,3 +88,23 @@ def test_parse_json_with_repair_fixes_control_chars_in_nested_value():
 )
 def test_parse_streaming_json_partial_scenarios(partial, expected):
     assert parse_streaming_json(partial) == expected
+
+
+def test_parse_json_with_repair_rejects_non_finite():
+    """1e999 → inf、Infinity 字面量必须被拒绝（否则 dumps 出非法 JSON）。"""
+    import pytest
+
+    from pi_ai.utils.json_parse import parse_json_with_repair
+
+    with pytest.raises(ValueError):
+        parse_json_with_repair('{"a": 1e999}')
+    with pytest.raises(ValueError):
+        parse_json_with_repair('{"a": Infinity}')
+
+
+def test_parse_streaming_json_long_integer_not_truncated():
+    """超长整数不得静默截断成 4300 位前缀。"""
+    from pi_ai.utils.json_parse import parse_streaming_json
+
+    huge = '{"a": ' + "9" * 5000 + "}"
+    assert parse_streaming_json(huge) == {}

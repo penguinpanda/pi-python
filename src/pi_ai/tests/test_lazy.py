@@ -139,3 +139,26 @@ def _make_stream() -> AssistantMessageEventStream:
     message = _done_message()
     stream.push({"type": "done", "reason": "stop", "message": message})
     return stream
+
+
+@pytest.mark.asyncio
+async def test_lazy_stream_cancel_ends_result():
+    """后台任务被取消时，result() 必须抛 CancelledError 而非永久挂起。"""
+    from pi_ai.utils._background import pending_background_tasks
+
+    started = asyncio.Event()
+
+    async def setup():
+        started.set()
+        await asyncio.sleep(3600)
+        return _make_stream()
+
+    before = set(pending_background_tasks())
+    stream = lazy_stream(_model(), setup)
+    await started.wait()
+    new_tasks = [t for t in pending_background_tasks() if t not in before]
+    assert new_tasks
+    for task in new_tasks:
+        task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(stream.result(), timeout=1.0)
