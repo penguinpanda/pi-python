@@ -684,11 +684,7 @@ async def generate_summary_with_usage(
     if previous_summary:
         prompt_text += f"<previous-summary>\n{previous_summary}\n</previous-summary>\n\n"
     if custom_instructions:
-        prompt_text += (
-            "<custom-instructions>\n"
-            f"{custom_instructions}\n"
-            "</custom-instructions>\n\n"
-        )
+        prompt_text += f"<custom-instructions>\n{custom_instructions}\n</custom-instructions>\n\n"
     prompt_text += base_prompt
 
     summarization_messages: list[Message] = [
@@ -752,11 +748,7 @@ async def _generate_turn_prefix_summary(
     conversation_text = serialize_conversation(messages)
     prompt_text = f"<conversation>\n{conversation_text}\n</conversation>\n\n"
     if custom_instructions:
-        prompt_text += (
-            "<custom-instructions>\n"
-            f"{custom_instructions}\n"
-            "</custom-instructions>\n\n"
-        )
+        prompt_text += f"<custom-instructions>\n{custom_instructions}\n</custom-instructions>\n\n"
     prompt_text += TURN_PREFIX_SUMMARIZATION_PROMPT
     summarization_messages: list[Message] = [
         {

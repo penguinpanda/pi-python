@@ -224,7 +224,9 @@ class AgentSession:
         self._after_response_tasks: set[asyncio.Task] = set()
         self._pending_writes: set[asyncio.Task[object]] = set()
         # None 对齐 TS 默认：turn 级重试开启（enabled=true, maxRetries=3）。
-        self._turn_retry_policy = turn_retry_policy if turn_retry_policy is not None else RetryPolicy()
+        self._turn_retry_policy = (
+            turn_retry_policy if turn_retry_policy is not None else RetryPolicy()
+        )
         self._compaction_settings = compaction_settings or DEFAULT_COMPACTION_SETTINGS
         # 溢出恢复已尝试标记（每次 prompt 重置；单次压缩+重试保护）。
         self._overflow_recovery_attempted = False
@@ -1462,9 +1464,9 @@ class AgentSession:
                         "('steer' or 'followUp') to queue the message."
                     )
                 if streaming_behavior in ("followUp", "follow_up"):
-                    await self.follow_up(expanded, current_images)
+                    self.follow_up(expanded, current_images)
                 else:
-                    await self.steer(expanded, current_images)
+                    self.steer(expanded, current_images)
                 preflight_ok = True
                 if preflight_result is not None:
                     preflight_result(True)

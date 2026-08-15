@@ -364,9 +364,7 @@ def resolve_cli_model(
             ]
             if len(authenticated) == 1:
                 return ResolveCliModelResult(authenticated[0], None, None, None)
-            matches = ", ".join(
-                sorted(f"{model.provider}/{model.id}" for model in exact_matches)
-            )
+            matches = ", ".join(sorted(f"{model.provider}/{model.id}" for model in exact_matches))
             auth_hint = (
                 "No matching provider is authenticated."
                 if not authenticated
@@ -544,7 +542,10 @@ async def find_initial_model(
         if resolved.model is not None:
             return InitialModelResult(
                 resolved.model,
-                cast(ThinkingLevel, resolved.thinking_level or default_thinking_level or DEFAULT_THINKING_LEVEL),
+                cast(
+                    ThinkingLevel,
+                    resolved.thinking_level or default_thinking_level or DEFAULT_THINKING_LEVEL,
+                ),
                 None,
             )
 
@@ -555,11 +556,7 @@ async def find_initial_model(
             saved = model_runtime.get_model(default_provider, default_model_id)
             if saved is not None:
                 saved_in_scope = next(
-                    (
-                        scoped
-                        for scoped in scoped_models
-                        if models_are_equal(scoped.model, saved)
-                    ),
+                    (scoped for scoped in scoped_models if models_are_equal(scoped.model, saved)),
                     None,
                 )
                 if saved_in_scope is not None:

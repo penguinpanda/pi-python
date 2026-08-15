@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 from pathlib import Path
+from typing import Any
 
 from pi_ai import ImageContent
 
@@ -244,7 +245,7 @@ def _resize_image_bytes(data: bytes, mime_type: str) -> tuple[bytes, str, bool]:
 
     from PIL import Image
 
-    image = Image.open(BytesIO(data))
+    image: Image.Image = Image.open(BytesIO(data))
     image.load()
     resized = False
     if max(image.size) > _MAX_IMAGE_DIMENSION:
@@ -253,7 +254,7 @@ def _resize_image_bytes(data: bytes, mime_type: str) -> tuple[bytes, str, bool]:
     out_mime = mime_type if mime_type in _SUPPORTED_IMAGE_MIME_TYPES else "image/png"
     out_format = _image_format_for_mime(out_mime)
     buffer = BytesIO()
-    save_options = {}
+    save_options: dict[str, Any] = {}
     if out_format == "JPEG" and image.mode not in ("RGB", "L"):
         image = image.convert("RGB")
     try:
@@ -324,11 +325,7 @@ async def process_file_arguments(
                     mime_type=mime_type,
                 )
             )
-            text += (
-                f'<file name="{path}">'
-                + ("\n".join(hints) if hints else "")
-                + "</file>\n"
-            )
+            text += f'<file name="{path}">' + ("\n".join(hints) if hints else "") + "</file>\n"
             continue
 
         try:

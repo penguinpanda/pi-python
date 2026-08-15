@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import inspect
 import json
 import os
@@ -1005,6 +1006,7 @@ async def run_rpc_mode(
     # 绑定 RPC UI 上下文与 mode（对齐 TS rpc-mode bindExtensions）。
     runner = getattr(handler.session, "extension_runner", None)
     if runner is not None:
+
         async def _rpc_new_session(options=None):
             response = await handler._handle_new_session(
                 {"type": "new_session", **(options or {})}, None
@@ -1064,7 +1066,9 @@ async def run_rpc_mode(
         if unsubscribe is not None:
             unsubscribe()
             unsubscribe = None
-        unsubscribe = handler.session.subscribe(lambda event: output(to_json_event(cast(dict[Any, Any], event))))
+        unsubscribe = handler.session.subscribe(
+            lambda event: output(to_json_event(cast(dict[Any, Any], event)))
+        )
 
     rebind()
 
@@ -1123,7 +1127,7 @@ async def run_rpc_mode(
     writer_task = asyncio.create_task(_writer_loop())
 
     # SIGTERM/SIGHUP：等待当前会话清理与输出 flush 后退出（对齐 TS rpc-mode）。
-    signal_handlers: list[tuple[int, Any]] = []
+    signal_handlers: list[int] = []
     loop = asyncio.get_running_loop()
 
     def _signal_exit(code: int) -> None:
@@ -1145,7 +1149,7 @@ async def run_rpc_mode(
         if sys.platform == "win32" and sig == getattr(signal, "SIGHUP", None):
             continue
         try:
-            loop.add_signal_handler(sig, lambda code=code: _signal_exit(code))
+            loop.add_signal_handler(sig, functools.partial(_signal_exit, code))
             signal_handlers.append(sig)
         except (NotImplementedError, RuntimeError):
             pass

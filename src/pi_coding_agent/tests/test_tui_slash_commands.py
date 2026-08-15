@@ -577,7 +577,7 @@ class TestPhase7Commands:
         await registry.execute("/share", context)
         assert "gist.github.com/abc" in notifications[-1]
 
-    async def test_import_and_resume(self, tmp_path):
+    async def test_import_and_resume(self, tmp_path, monkeypatch):
         from pi_ai._types import UserMessage
 
         from pi_coding_agent._session_manager import SessionManager
@@ -610,6 +610,11 @@ class TestPhase7Commands:
         assert len(rebuilt) == 2
         assert rebuilt[1].session_id == "saved1"
 
+        # /resume 使用默认会话目录；测试目录并非默认目录，因此指向 saved
+        # 所在目录，保证列表断言确定性。
+        import pi_coding_agent._config as config
+
+        monkeypatch.setattr(config, "get_sessions_dir", lambda: str(tmp_path / "sessions"))
         await registry.execute("/resume", context)
         assert "Saved sessions" in notifications[-1]
 

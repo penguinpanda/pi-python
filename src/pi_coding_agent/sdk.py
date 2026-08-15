@@ -343,7 +343,9 @@ async def create_agent_session(
         if provider_retry_settings.get("maxRetries") is not None:
             stream_options.setdefault("max_retries", provider_retry_settings["maxRetries"])
         if provider_retry_settings.get("maxRetryDelayMs") is not None:
-            stream_options.setdefault("max_retry_delay_ms", provider_retry_settings["maxRetryDelayMs"])
+            stream_options.setdefault(
+                "max_retry_delay_ms", provider_retry_settings["maxRetryDelayMs"]
+            )
         return await runtime.stream(model, context, stream_options)
 
     def convert_to_llm_with_block_images(messages):

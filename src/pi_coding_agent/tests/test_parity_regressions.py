@@ -157,9 +157,66 @@ async def test_build_initial_message_merges_stdin_file_and_first_message(
         parsed, str(tmp_path), stdin_text="stdin\n"
     )
     assert initial == (
-        "stdin\n"
-        f'<file name="{tmp_path / "ctx.txt"}">\nfile context\n\n</file>\n'
-        "Explain it"
+        f'stdin\n<file name="{tmp_path / "ctx.txt"}">\nfile context\n\n</file>\nExplain it'
     )
     assert images is None
     assert remaining == ["Second message"]
+
+
+def test_parse_args_exposes_unknown_flags_and_file_args() -> None:
+    from pi_coding_agent import parseArgs
+
+    parsed = parseArgs(["--plan", "-p", "hi", "@ctx.txt"])
+    assert parsed.unknown_flags == {"plan": True}
+    assert parsed.messages == ["hi"]
+    assert parsed.file_args == ["ctx.txt"]
+
+
+def test_tool_definition_and_truncation_exports(tmp_path: Path) -> None:
+    from pi_coding_agent import (
+        create_bash_tool_definition,
+        format_size,
+        truncate_head,
+    )
+
+    definition = create_bash_tool_definition(str(tmp_path))
+    assert definition["name"] == "bash"
+    assert callable(definition["execute"])
+    assert format_size(2048) == "2.0KB"
+    result = truncate_head("a\nb\nc", max_lines=1, max_bytes=1024)
+    assert result.truncated is True
+    assert result.content == "a"
+
+
+@pytest.mark.asyncio
+async def test_resume_falls_back_to_global_sessions(monkeypatch, tmp_path: Path) -> None:
+    from pi_coding_agent import _cli
+    from pi_coding_agent._session_manager import SessionInfo
+
+    info = SessionInfo(
+        path=str(tmp_path / "other.jsonl"),
+        session_id="other-1",
+        cwd="/other/project",
+        modified=1.0,
+    )
+    calls = {"cwd": None}
+
+    async def fake_list(directory, cwd=None):
+        calls["cwd"] = cwd
+        return [] if cwd is not None else [info]
+
+    monkeypatch.setattr(_cli, "list_sessions", fake_list)
+    monkeypatch.setattr(_cli, "get_sessions_dir", lambda: tmp_path)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "1")
+
+    opened = {}
+
+    async def fake_open(path, cwd_override=None):
+        opened["path"] = path
+        opened["cwd_override"] = cwd_override
+        return object()
+
+    monkeypatch.setattr(_cli, "open_session_manager", fake_open)
+    manager = await _cli._pick_session_to_resume(str(tmp_path), None)
+    assert manager is not None
+    assert opened["path"] == info.path

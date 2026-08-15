@@ -15,7 +15,7 @@ import re
 import signal
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pi_agent import Agent, AgentOptions
 from pi_agent import set_default_stream_fn as set_agent_stream_fn
@@ -394,7 +394,7 @@ async def _async_main(args: list[str] | None = None) -> int:
     allowed_tool_names: set[str] | None = None
     if parsed.no_tools:
         # TS --no-tools = no built-in/extension/custom tools.
-        allowed_tool_names: set[str] = set()
+        allowed_tool_names = set()
         selected_tools: list[str] = []
     elif tools_include is not None:
         allowed_tool_names = set(tools_include)
@@ -535,10 +535,10 @@ async def _async_main(args: list[str] | None = None) -> int:
                 model=session_model,
                 # 会话标识透传给 provider，启用提示缓存（prompt_cache_key）
                 session_id=sm.session_id,
-                steering_mode=settings_manager.get_steering_mode(),
-                follow_up_mode=settings_manager.get_follow_up_mode(),
-                transport=settings_manager.get_transport(),
-                thinking_budgets=settings_manager.get_thinking_budgets(),
+                steering_mode=cast(Any, settings_manager.get_steering_mode()),
+                follow_up_mode=cast(Any, settings_manager.get_follow_up_mode()),
+                transport=cast(Any, settings_manager.get_transport()),
+                thinking_budgets=cast(Any, settings_manager.get_thinking_budgets()),
                 max_retry_delay_ms=(
                     settings_manager.get_provider_retry_settings().get("maxRetryDelayMs")
                 ),
