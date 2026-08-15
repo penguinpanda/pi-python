@@ -86,4 +86,5 @@ async def test_create_agent_session_custom_tools_and_filters() -> None:
         )
     )
     tool_names = [tool.name for tool in result.session._agent.state.tools]
-    assert tool_names == ["custom"]
+    # TS noTools="all" disables SDK custom tools unless explicitly allowlisted.
+    assert tool_names == []

@@ -39,7 +39,7 @@ from .extensions import (
     UIContext,
 )
 from .export_html import export_session_to_html
-from .file_processor import process_at_files
+from .file_processor import process_at_files, process_file_arguments
 from .first_time_setup import run_first_time_setup, run_first_time_setup_sync
 from .config_selector import (
     build_config_selector_model,
@@ -60,6 +60,7 @@ from .skills import (
     SkillLoader,
     format_skills_for_prompt,
 )
+from .resource_loader import DefaultResourceLoader, ResourceLoadResult
 from .model_utils import (
     DEFAULT_THINKING_LEVEL,
     THINKING_LEVELS,
@@ -161,12 +162,16 @@ __all__ = [
     "project_has_local_resources",
     "resolve_project_trusted",
     "process_at_files",
+    "process_file_arguments",
     "run_first_time_setup",
     "run_first_time_setup_sync",
     "build_config_selector_model",
     "persist_resource_toggle",
     "run_config_selector",
     "run_config_selector_sync",
+    # Resources
+    "DefaultResourceLoader",
+    "ResourceLoadResult",
     # Tools
     "create_all_tools",
     "create_coding_tools",

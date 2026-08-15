@@ -15,7 +15,8 @@ from pi_agent import Agent, AgentOptions, AgentTool, AgentToolResult
 from pi_agent.compaction import CompactionSettings
 
 from ._session import AgentSession
-from ._session_manager_v4 import SessionManagerLike, in_memory_session_manager
+from .messages import convert_to_llm
+from ._session_manager_v4 import SessionManagerLike, create_session_manager
 from .extensions import ExtensionRunner, ToolDefinition
 from .model_resolver import ScopedModel, find_initial_model
 from .model_runtime import ModelRuntime
@@ -24,7 +25,7 @@ from .prompt_templates import PromptTemplateLoader
 from .resource_loader import DefaultResourceLoader, ResourceLoadResult
 from .settings_manager import SettingsManager
 from .skills import SkillLoader
-from .tools import create_all_tools
+from .tools import create_all_tools, create_coding_tools
 
 
 @dataclass(slots=True)
@@ -78,12 +79,18 @@ class AgentSessionRuntime:
         *,
         diagnostics: list[dict] | None = None,
         model_fallback_message: str | None = None,
+        services: Any = None,
     ) -> None:
         self._session = session
         self._cwd = cwd
         self._diagnostics = list(diagnostics or [])
         self._model_fallback_message = model_fallback_message
+        self._services = services
         self._rebind: Callable[[AgentSession], Any] | None = None
+
+    @property
+    def services(self) -> Any:
+        return self._services
 
     @property
     def session(self) -> AgentSession:
@@ -191,7 +198,8 @@ async def create_agent_session(
     if opts.resource_loader is None:
         await resource_loader.reload()
 
-    session_manager = opts.session_manager or await in_memory_session_manager(cwd)
+    # TS SDK default is a persistent SessionManager.create(cwd).
+    session_manager = opts.session_manager or await create_session_manager(cwd)
     existing_messages = session_manager.build_context()
     has_existing_session = bool(existing_messages)
 
@@ -248,19 +256,35 @@ async def create_agent_session(
     thinking_level = clamp_thinking_level(model, raw_thinking_level)
 
     default_tools = create_all_tools(cwd)
+    default_coding_tools = create_coding_tools(cwd)
+    allowed_tool_names: set[str] | None = None
     if opts.tools is not None:
+        allowed_tool_names = set(opts.tools)
         selected_tool_names = list(opts.tools)
-    elif opts.no_tools in ("all", "builtin"):
+    elif opts.no_tools == "all":
+        # TS noTools="all" disables built-in and custom/extension tools.
+        allowed_tool_names = set()
+        selected_tool_names = []
+    elif opts.no_tools == "builtin":
         selected_tool_names = []
     else:
-        selected_tool_names = [tool.name for tool in default_tools]
-    excluded = set(opts.exclude_tools or [])
-    selected_tool_names = [name for name in selected_tool_names if name not in excluded]
+        selected_tool_names = [tool.name for tool in default_coding_tools]
+    excluded_tool_names = set(opts.exclude_tools or []) or None
     builtin_by_name = {tool.name: tool for tool in default_tools}
     tools_override = [
-        builtin_by_name[name] for name in selected_tool_names if name in builtin_by_name
+        builtin_by_name[name]
+        for name in selected_tool_names
+        if name in builtin_by_name
+        and (allowed_tool_names is None or name in allowed_tool_names)
+        and not (excluded_tool_names and name in excluded_tool_names)
     ]
-    tools_override.extend(_as_agent_tool(tool) for tool in opts.custom_tools or [])
+    if opts.no_tools != "all":
+        tools_override.extend(
+            tool
+            for tool in (_as_agent_tool(item) for item in opts.custom_tools or [])
+            if (allowed_tool_names is None or tool.name in allowed_tool_names)
+            and not (excluded_tool_names and tool.name in excluded_tool_names)
+        )
 
     extension_runner = opts.extension_runner
     if extension_runner is None:
@@ -294,18 +318,79 @@ async def create_agent_session(
         await session_manager.append_model_change(model.provider, model.id)
         await session_manager.append_thinking_level_change(thinking_level)
 
+    retry_settings = settings_manager.get_retry_settings()
+    turn_retry_policy = opts.turn_retry_policy
+    if turn_retry_policy is None:
+        turn_retry_policy = RetryPolicy(
+            enabled=bool(retry_settings.get("enabled", True)),
+            max_retries=int(retry_settings.get("maxRetries", 3) or 3),
+            base_delay_ms=float(retry_settings.get("baseDelayMs", 2000) or 2000),
+        )
+
+    provider_retry_settings = settings_manager.get_provider_retry_settings()
+    http_idle_timeout_ms = settings_manager.get_http_idle_timeout_ms()
+    # SDK 将 timeout=0 视为“不超时”（对齐 TS 使用 max int32）。
+    effective_http_timeout_ms = 2147483647 if http_idle_timeout_ms == 0 else http_idle_timeout_ms
+    websocket_connect_timeout_ms = settings_manager.get_web_socket_connect_timeout_ms()
+
+    async def stream_with_settings(model, context, options=None):
+        stream_options = dict(options or {})
+        stream_options.setdefault(
+            "timeout_ms", provider_retry_settings.get("timeoutMs") or effective_http_timeout_ms
+        )
+        if websocket_connect_timeout_ms is not None:
+            stream_options.setdefault("websocket_connect_timeout_ms", websocket_connect_timeout_ms)
+        if provider_retry_settings.get("maxRetries") is not None:
+            stream_options.setdefault("max_retries", provider_retry_settings["maxRetries"])
+        if provider_retry_settings.get("maxRetryDelayMs") is not None:
+            stream_options.setdefault("max_retry_delay_ms", provider_retry_settings["maxRetryDelayMs"])
+        return await runtime.stream(model, context, stream_options)
+
+    def convert_to_llm_with_block_images(messages):
+        """settings.images.blockImages=true 时过滤图片内容（对齐 TS SDK）。"""
+        converted = convert_to_llm(messages)
+        if not settings_manager.get_block_images():
+            return converted
+        placeholder = "Image reading is disabled."
+        filtered: list = []
+        for message in converted:
+            content = message.get("content")
+            if (
+                message.get("role") in ("user", "toolResult")
+                and isinstance(content, list)
+                and any(part.get("type") == "image" for part in content if isinstance(part, dict))
+            ):
+                new_content = []
+                for _index, part in enumerate(content):
+                    if isinstance(part, dict) and part.get("type") == "image":
+                        if (
+                            new_content
+                            and isinstance(new_content[-1], dict)
+                            and new_content[-1].get("type") == "text"
+                            and new_content[-1].get("text") == placeholder
+                        ):
+                            continue
+                        new_content.append({"type": "text", "text": placeholder})
+                    else:
+                        new_content.append(part)
+                message = {**message, "content": new_content}
+            filtered.append(message)
+        return filtered
+
     agent = Agent(
         AgentOptions(
             system_prompt=system_prompt_builder(),
             model=model,
             thinking_level=thinking_level,
             tools=tools_override,
-            stream_fn=runtime.stream,
+            stream_fn=stream_with_settings,
+            convert_to_llm=convert_to_llm_with_block_images,
             session_id=session_manager.session_id,
             steering_mode=cast(Any, settings_manager.get_steering_mode()),
             follow_up_mode=cast(Any, settings_manager.get_follow_up_mode()),
             transport=cast(Any, settings_manager.get_transport()),
-            retry_policy=opts.turn_retry_policy,
+            thinking_budgets=cast(Any, settings_manager.get_thinking_budgets()),
+            retry_policy=turn_retry_policy,
         )
     )
 
@@ -315,9 +400,12 @@ async def create_agent_session(
         cwd=cwd,
         model=model,
         tools_override=tools_override,
-        turn_retry_policy=opts.turn_retry_policy,
+        turn_retry_policy=turn_retry_policy,
         compaction_settings=opts.compaction_settings,
         model_runtime=runtime,
+        settings_manager=settings_manager,
+        allowed_tool_names=allowed_tool_names,
+        excluded_tool_names=excluded_tool_names,
         scoped_models=opts.scoped_models,
         skill_loader=skill_loader,
         template_loader=template_loader,

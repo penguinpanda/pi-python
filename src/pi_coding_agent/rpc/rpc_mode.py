@@ -13,6 +13,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import os
+import signal
 import sys
 from dataclasses import asdict
 from typing import Any, Awaitable, Callable, cast
@@ -21,6 +23,7 @@ from pi_ai.models.models_store import model_to_dict
 from pi_ai.types.common import ModelThinkingLevel
 from pi_ai.types.content import ImageContent
 
+from .._json_event import to_json_event
 from .._session import AgentSession
 from ..model_runtime import ModelRuntime
 from .jsonl import serialize_json_line
@@ -452,8 +455,13 @@ class RpcMessageHandler:
         message = cmd.get("message")
         if not isinstance(message, str) or not message.strip():
             return error_response(command_id, "prompt", "Message is required")
-        if self.session.is_streaming:
-            return error_response(command_id, "prompt", "Agent is busy streaming")
+        streaming_behavior = cmd.get("streamingBehavior")
+        if self.session.is_streaming and not streaming_behavior:
+            return error_response(
+                command_id,
+                "prompt",
+                "Agent is already processing. Specify streamingBehavior ('steer' or 'followUp').",
+            )
         images = _parse_images(cmd.get("images"))
 
         # 对齐 TS prompt preflight：preflight 成功才发 success；
@@ -468,7 +476,13 @@ class RpcMessageHandler:
 
         async def _run() -> None:
             try:
-                await self.session.prompt(message, images or None, preflight_result=_on_preflight)
+                await self.session.prompt(
+                    message,
+                    images or None,
+                    preflight_result=_on_preflight,
+                    streaming_behavior=streaming_behavior,
+                    source="rpc",
+                )
             except Exception as exc:
                 if not preflight_succeeded:
                     self.output(error_response(command_id, "prompt", str(exc)))
@@ -988,6 +1002,45 @@ async def run_rpc_mode(
         output=output,
     )
 
+    # 绑定 RPC UI 上下文与 mode（对齐 TS rpc-mode bindExtensions）。
+    runner = getattr(handler.session, "extension_runner", None)
+    if runner is not None:
+        async def _rpc_new_session(options=None):
+            response = await handler._handle_new_session(
+                {"type": "new_session", **(options or {})}, None
+            )
+            return None if response and response.get("success") else None
+
+        async def _rpc_fork(entry_id: str, options=None):
+            await handler._handle_fork({"type": "fork", "entryId": entry_id}, None)
+            return None
+
+        async def _rpc_navigate_tree(target_id: str, options=None):
+            await handler.session.navigate_to(target_id)
+            return None
+
+        async def _rpc_switch_session(session_path: str, options=None):
+            await handler._handle_switch_session(
+                {"type": "switch_session", "sessionPath": session_path}, None
+            )
+            return None
+
+        async def _rpc_reload():
+            await handler.session.rebuild_system_prompt()
+            return None
+
+        runner.bind(
+            ui_context=handler.ui_context,
+            mode="rpc",
+            command_handlers={
+                "new_session": _rpc_new_session,
+                "fork": _rpc_fork,
+                "navigate_tree": _rpc_navigate_tree,
+                "switch_session": _rpc_switch_session,
+                "reload": _rpc_reload,
+            },
+        )
+
     async def _flush_output() -> None:
         await write_queue.join()
 
@@ -1011,7 +1064,7 @@ async def run_rpc_mode(
         if unsubscribe is not None:
             unsubscribe()
             unsubscribe = None
-        unsubscribe = handler.session.subscribe(lambda event: output(cast(dict[Any, Any], event)))
+        unsubscribe = handler.session.subscribe(lambda event: output(to_json_event(cast(dict[Any, Any], event))))
 
     rebind()
 
@@ -1068,6 +1121,35 @@ async def run_rpc_mode(
             rebind_extension_errors()
 
     writer_task = asyncio.create_task(_writer_loop())
+
+    # SIGTERM/SIGHUP：等待当前会话清理与输出 flush 后退出（对齐 TS rpc-mode）。
+    signal_handlers: list[tuple[int, Any]] = []
+    loop = asyncio.get_running_loop()
+
+    def _signal_exit(code: int) -> None:
+        async def _shutdown() -> None:
+            try:
+                try:
+                    await handler.session.abort()
+                except Exception:
+                    pass
+                await handler._dispose_session(handler.session)
+            finally:
+                os._exit(code)
+
+        loop.create_task(_shutdown())
+
+    for sig, code in ((signal.SIGTERM, 143), (getattr(signal, "SIGHUP", None), 129)):
+        if sig is None:
+            continue
+        if sys.platform == "win32" and sig == getattr(signal, "SIGHUP", None):
+            continue
+        try:
+            loop.add_signal_handler(sig, lambda code=code: _signal_exit(code))
+            signal_handlers.append(sig)
+        except (NotImplementedError, RuntimeError):
+            pass
+
     try:
         while True:
             raw = await _readline()
@@ -1105,6 +1187,11 @@ async def run_rpc_mode(
         for created in list(handler.created_sessions):
             await handler._dispose_session(created)
         await handler._dispose_session(handler.session)
+        for sig in signal_handlers:
+            try:
+                loop.remove_signal_handler(sig)
+            except (NotImplementedError, RuntimeError):
+                pass
         write_queue.put_nowait(None)
         await writer_task
     return 0

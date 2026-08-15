@@ -171,6 +171,7 @@ class PiTuiApp(App):
         keybindings_manager: KeybindingsManager | None = None,
         theme_loader: ThemeLoader | None = None,
         theme_name: str | None = "auto",
+        theme_paths: list[str] | None = None,
         session_factory: Callable[[], AgentSession] | None = None,
         resume_factory: Callable[[str], AgentSession] | None = None,
         session_rebuilder=None,
@@ -182,6 +183,9 @@ class PiTuiApp(App):
         needs_trust_decision: bool = False,
         no_context_files: bool = False,
         startup_resources: dict | None = None,
+        initial_message: str | None = None,
+        initial_messages: list[str] | None = None,
+        initial_images: list | None = None,
         terminal: Terminal | FakeTerminal | None = None,
         size: tuple[int, int] = (80, 24),
         ui_mode: str | None = None,
@@ -194,12 +198,27 @@ class PiTuiApp(App):
         self._theme_loader = theme_loader or ThemeLoader()
         self._theme_name = theme_name
         self._theme = self._theme_loader.resolve(theme_name)
+        if theme_paths:
+            for theme_path in theme_paths:
+                path = Path(theme_path).expanduser().resolve()
+                if not path.is_file():
+                    continue
+                try:
+                    loaded = ThemeLoader(path.parent).load(path.stem)
+                except Exception:
+                    continue
+                self._theme = loaded
+                self._theme_name = loaded.name
+                break
         self._extension_loader = extension_loader
         self._trust_manager = trust_manager
         self._project_trusted = project_trusted
         self._needs_trust_decision = needs_trust_decision
         self._no_context_files = no_context_files
         self._startup_resources = startup_resources
+        self._initial_message = initial_message
+        self._initial_messages = list(initial_messages or [])
+        self._initial_images = initial_images
 
         self._ui_mode = ui_mode or str((settings or {}).get("uiMode", "regular"))
         super().__init__(
@@ -284,7 +303,17 @@ class PiTuiApp(App):
             extension_registry.apply()
             from .ui_context import TuiUIContext
 
-            session.extension_runner.bind(ui_context=TuiUIContext(self))
+            session.extension_runner.bind(
+                ui_context=TuiUIContext(self),
+                mode="tui",
+                command_handlers={
+                    "new_session": self._extension_new_session,
+                    "fork": self._extension_fork,
+                    "navigate_tree": self._extension_navigate_tree,
+                    "switch_session": self._extension_switch_session,
+                    "reload": self._extension_reload,
+                },
+            )
         self._slash_context = SlashContext(
             session=session,
             model_runtime=model_runtime,
@@ -370,9 +399,18 @@ class PiTuiApp(App):
         self._show_startup_resources_hint()
         self._show_startup_changelog_if_needed()
         self._run_task(self._ensure_fd_for_autocomplete())
+        if self._initial_message is not None or self._initial_messages:
+            self._run_task(self._send_initial_prompts())
         # 启动时对未定信任项目提示（对齐 TS 启动 trust 选择器）。
         if self._needs_trust_decision:
             self._open_trust_selector()
+
+    async def _send_initial_prompts(self) -> None:
+        """发送 CLI 提供的初始 prompt（对齐 TS InteractiveMode initialMessage(s)）。"""
+        if self._initial_message is not None:
+            await self._send_prompt(self._initial_message, self._initial_images)
+        for text in self._initial_messages:
+            await self._send_prompt(text)
 
     async def _ensure_fd_for_autocomplete(self) -> None:
         """后台确保 fd 可用，成功后重建补全 provider（对齐 TS ensureTool）。"""
@@ -1384,10 +1422,9 @@ class PiTuiApp(App):
     def on_pi_editor_completion_hide_requested(self, message) -> None:
         self._hide_slash_completion()
 
-    async def _send_prompt(self, text: str) -> None:
+    async def _send_prompt(self, text: str, images: list | None = None) -> None:
         self._set_status(self._working_message)
-        images: list | None = None
-        if self._pending_image is not None:
+        if images is None and self._pending_image is not None:
             # 粘贴的图片随下一条 prompt 附加(发送后清除)。
             images = [
                 {
@@ -2246,7 +2283,17 @@ class PiTuiApp(App):
                 session.set_extension_runner(new_runner)
                 from .ui_context import TuiUIContext
 
-                new_runner.bind(ui_context=TuiUIContext(self))
+                new_runner.bind(
+                    ui_context=TuiUIContext(self),
+                    mode="tui",
+                    command_handlers={
+                        "new_session": self._extension_new_session,
+                        "fork": self._extension_fork,
+                        "navigate_tree": self._extension_navigate_tree,
+                        "switch_session": self._extension_switch_session,
+                        "reload": self._extension_reload,
+                    },
+                )
                 if session.extension_state is not None:
                     session.extension_state["runner"] = new_runner
                 await new_runner.discover_resources()
@@ -2303,6 +2350,30 @@ class PiTuiApp(App):
             details.append(f"system prompt failed: {exc}")
 
         return "Reloaded: " + "; ".join(details)
+
+    # ------------------------------------------------------------------
+    # 扩展 command context actions（对齐 TS commandContextActions）
+    # ------------------------------------------------------------------
+
+    async def _extension_new_session(self, options=None):
+        self._handle_new_session()
+        return None
+
+    async def _extension_fork(self, entry_id: str, options=None):
+        await self._fork_from_entry(entry_id)
+        return None
+
+    async def _extension_navigate_tree(self, target_id: str, options=None):
+        await self._navigate_tree(target_id)
+        return None
+
+    async def _extension_switch_session(self, session_path: str, options=None):
+        await self._apply_resumed_session(session_path)
+        return None
+
+    async def _extension_reload(self):
+        await self._reload_all()
+        return None
 
     async def _replace_session(self, new_session: AgentSession) -> None:
         old = self._session

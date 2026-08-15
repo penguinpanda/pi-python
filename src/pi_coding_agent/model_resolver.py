@@ -18,7 +18,7 @@ from pi_ai import Model
 from pi_ai.types.common import ModelThinkingLevel, ThinkingLevel
 
 from .model_runtime import ModelRuntime
-from .model_utils import DEFAULT_THINKING_LEVEL
+from .model_utils import DEFAULT_THINKING_LEVEL, models_are_equal
 
 # 合法思考级别（含扩展级别）。
 VALID_THINKING_LEVELS: list[ModelThinkingLevel] = [
@@ -349,16 +349,36 @@ def resolve_cli_model(
 
     if not provider:
         lower = cli_model.lower()
-        exact = next(
-            (
+        exact_matches = [
+            model
+            for model in available_models
+            if model.id.lower() == lower or f"{model.provider}/{model.id}".lower() == lower
+        ]
+        if len(exact_matches) == 1:
+            return ResolveCliModelResult(exact_matches[0], None, None, None)
+        if len(exact_matches) > 1:
+            authenticated = [
                 model
-                for model in available_models
-                if model.id.lower() == lower or f"{model.provider}/{model.id}".lower() == lower
-            ),
-            None,
-        )
-        if exact is not None:
-            return ResolveCliModelResult(exact, None, None, None)
+                for model in exact_matches
+                if model_runtime.has_configured_auth(model.provider)
+            ]
+            if len(authenticated) == 1:
+                return ResolveCliModelResult(authenticated[0], None, None, None)
+            matches = ", ".join(
+                sorted(f"{model.provider}/{model.id}" for model in exact_matches)
+            )
+            auth_hint = (
+                "No matching provider is authenticated."
+                if not authenticated
+                else "More than one matching provider is authenticated."
+            )
+            return ResolveCliModelResult(
+                None,
+                None,
+                None,
+                f'Model "{cli_model}" is ambiguous across providers: {matches}. '
+                f"{auth_hint} Use --provider or provider/model.",
+            )
 
     if cli_provider and provider:
         prefix = f"{provider}/"
@@ -513,7 +533,7 @@ async def find_initial_model(
     model_runtime: ModelRuntime,
 ) -> InitialModelResult:
     """寻找初始模型（CLI > scope > settings > 第一个可用）。"""
-    if cli_provider and cli_model:
+    if cli_model:
         resolved = resolve_cli_model(
             cli_provider=cli_provider,
             cli_model=cli_model,
@@ -522,9 +542,37 @@ async def find_initial_model(
         if resolved.error:
             raise ValueError(resolved.error)
         if resolved.model is not None:
-            return InitialModelResult(resolved.model, DEFAULT_THINKING_LEVEL, None)
+            return InitialModelResult(
+                resolved.model,
+                cast(ThinkingLevel, resolved.thinking_level or default_thinking_level or DEFAULT_THINKING_LEVEL),
+                None,
+            )
 
     if scoped_models and not is_continuing:
+        # TS buildSessionOptions prefers a saved default model when it is
+        # present in the scoped list, otherwise the first scoped model.
+        if default_provider and default_model_id:
+            saved = model_runtime.get_model(default_provider, default_model_id)
+            if saved is not None:
+                saved_in_scope = next(
+                    (
+                        scoped
+                        for scoped in scoped_models
+                        if models_are_equal(scoped.model, saved)
+                    ),
+                    None,
+                )
+                if saved_in_scope is not None:
+                    return InitialModelResult(
+                        saved_in_scope.model,
+                        cast(
+                            ThinkingLevel,
+                            saved_in_scope.thinking_level
+                            or default_thinking_level
+                            or DEFAULT_THINKING_LEVEL,
+                        ),
+                        None,
+                    )
         first = scoped_models[0]
         return InitialModelResult(
             first.model,

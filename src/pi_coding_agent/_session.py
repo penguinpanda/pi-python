@@ -187,6 +187,11 @@ class AgentSession:
         restrict_untrusted_tools: bool = False,
         # 会话启动事件附加元数据（对齐 TS SessionStartEvent）。
         session_start_event: dict | None = None,
+        # 设置管理器（模型/思考级别/队列模式持久化，对齐 TS AgentSession）。
+        settings_manager=None,
+        # 工具允许/排除集合（同时作用于内置、SDK 自定义与扩展工具）。
+        allowed_tool_names: set[str] | None = None,
+        excluded_tool_names: set[str] | None = None,
     ):
         self._agent = agent
         # 编码代理使用完整消息转换器（bashExecution/compactionSummary/custom 等
@@ -205,6 +210,9 @@ class AgentSession:
         self._extension_tool_names: set[str] = set()
         self._system_prompt_builder = system_prompt_builder
         self._restrict_untrusted_tools = restrict_untrusted_tools
+        self._settings_manager = settings_manager
+        self._allowed_tool_names = allowed_tool_names
+        self._excluded_tool_names = excluded_tool_names
         self._session_start_event = dict(session_start_event or {})
         if extension_runner is not None:
             extension_runner.bind_session(self)
@@ -215,7 +223,8 @@ class AgentSession:
         self.project_trusted: bool | None = None
         self._after_response_tasks: set[asyncio.Task] = set()
         self._pending_writes: set[asyncio.Task[object]] = set()
-        self._turn_retry_policy = turn_retry_policy
+        # None 对齐 TS 默认：turn 级重试开启（enabled=true, maxRetries=3）。
+        self._turn_retry_policy = turn_retry_policy if turn_retry_policy is not None else RetryPolicy()
         self._compaction_settings = compaction_settings or DEFAULT_COMPACTION_SETTINGS
         # 溢出恢复已尝试标记（每次 prompt 重置；单次压缩+重试保护）。
         self._overflow_recovery_attempted = False
@@ -237,6 +246,7 @@ class AgentSession:
                 cwd,
                 bash_session_env_provider=self._session_env_vars,
             )
+        tools = self._filter_tools_by_name(tools)
         self._agent.state.tools = tools
         self._apply_extension_tools()
 
@@ -592,6 +602,10 @@ class AgentSession:
     @steering_mode.setter
     def steering_mode(self, mode) -> None:
         self._agent.steering_mode = mode
+        if self._settings_manager is not None:
+            setter = getattr(self._settings_manager, "set_steering_mode", None)
+            if setter is not None:
+                setter(mode)
 
     @property
     def follow_up_mode(self):
@@ -600,6 +614,10 @@ class AgentSession:
     @follow_up_mode.setter
     def follow_up_mode(self, mode) -> None:
         self._agent.follow_up_mode = mode
+        if self._settings_manager is not None:
+            setter = getattr(self._settings_manager, "set_follow_up_mode", None)
+            if setter is not None:
+                setter(mode)
 
     @property
     def auto_compaction_enabled(self) -> bool:
@@ -652,12 +670,30 @@ class AgentSession:
             runner.bind_session(self)
         self._apply_extension_tools()
 
+    def _tool_is_allowed(self, name: str) -> bool:
+        """按 TS allowedToolNames/excludedToolNames 过滤（None 表示不限制）。"""
+        if self._allowed_tool_names is not None and name not in self._allowed_tool_names:
+            return False
+        if self._excluded_tool_names is not None and name in self._excluded_tool_names:
+            return False
+        return True
+
+    def _filter_tools_by_name(self, tools: list[Any]) -> list[Any]:
+        return [tool for tool in tools if self._tool_is_allowed(tool.name)]
+
     def _apply_extension_tools(self) -> None:
-        """把扩展注册的工具合并进 agent 工具集（同名覆盖内置，结果归一化为 AgentToolResult）。"""
+        """把扩展注册的工具合并进 agent 工具集（同名覆盖内置，结果归一化为 AgentToolResult）。
+
+        扩展工具同样遵守 allowed/excluded 工具集合（对齐 TS _refreshToolRegistry）。
+        """
         runner = self._extension_runner
         if runner is None:
             return
-        definitions = runner.get_registered_tools()
+        definitions = [
+            definition
+            for definition in runner.get_registered_tools()
+            if self._tool_is_allowed(definition.name)
+        ]
         current = list(self._agent.state.tools or [])
         # 移除上一轮已应用的扩展工具（同名由新 runner 覆盖）。
         current = [tool for tool in current if tool.name not in self._extension_tool_names]
@@ -758,6 +794,15 @@ class AgentSession:
             return text or None
         return None
 
+    def get_context_usage(self) -> dict | None:
+        """估算当前上下文 token 用量（对齐 TS getContextUsage）。"""
+        from pi_agent.compaction_utils import estimate_context_tokens
+
+        estimate = estimate_context_tokens(self._agent.state.messages)
+        if estimate.last_usage_index is None:
+            return None
+        return {"tokens": estimate.tokens}
+
     def get_session_stats(self) -> dict:
         """汇总会话统计（对齐 TS SessionStats）。"""
         messages = self.get_messages()
@@ -800,7 +845,7 @@ class AgentSession:
             "totalMessages": len(messages),
             "tokens": tokens,
             "cost": cost,
-            "contextUsage": None,
+            "contextUsage": self.get_context_usage(),
             "turnTimings": {
                 "turnCount": turn_count,
                 "totalMs": int(total_turn_ms),
@@ -813,10 +858,13 @@ class AgentSession:
     async def compact(self, custom_instructions: str | None = None) -> CompactionResult | None:
         """手动压缩（RPC compact 命令）。
 
-        custom_instructions 预留（当前摘要提示词固定，与 TS 对齐后启用）。
+        对齐 TS compact()：压缩前中止当前运行；custom_instructions 会写入
+        摘要请求的自定义指令段。
         """
         if self._model is None:
             return None
+        # 对齐 TS compact()：压缩前先中止当前 agent 运行。
+        await self.abort()
         entries = self._session_manager.get_entries()
         context_messages = self._agent.state.messages
         preparation: CompactionPreparation | None = prepare_compaction(
@@ -858,6 +906,7 @@ class AgentSession:
                     headers=summarization_auth.get("headers"),
                     env=summarization_auth.get("env"),
                     stream_fn=self._agent._resolve_stream_fn(),
+                    custom_instructions=custom_instructions,
                     thinking_level=self._agent.state.thinking_level,
                 )
             else:
@@ -1092,6 +1141,13 @@ class AgentSession:
         )
         return True
 
+    def _persist_default_model(self, model: Model) -> None:
+        """切换模型时同步保存 settings 默认值（对齐 TS setDefaultModelAndProvider）。"""
+        if self._settings_manager is not None:
+            setter = getattr(self._settings_manager, "set_default_model_and_provider", None)
+            if setter is not None:
+                setter(model.provider, model.id)
+
     async def set_model(self, model: Model) -> None:
         """切换模型：校验认证 → 更新 agent state → 记录会话 → 重算思考级别。"""
         runtime = self._model_runtime
@@ -1104,6 +1160,7 @@ class AgentSession:
         thinking_level = self._get_thinking_level_for_model_switch()
         self._agent.state.model = model
         await self._session_manager.append_model_change(model.provider, model.id)
+        self._persist_default_model(model)
         self._model = model
         self.set_thinking_level(thinking_level)
         if not models_are_equal(previous_model, model):
@@ -1169,6 +1226,7 @@ class AgentSession:
         await self._session_manager.append_model_change(
             next_scoped.model.provider, next_scoped.model.id
         )
+        self._persist_default_model(next_scoped.model)
         self._model = next_scoped.model
         self.set_thinking_level(thinking_level)
         if not models_are_equal(previous_model, next_scoped.model):
@@ -1220,6 +1278,7 @@ class AgentSession:
         previous_model = self._model
         self._agent.state.model = next_model
         await self._session_manager.append_model_change(next_model.provider, next_model.id)
+        self._persist_default_model(next_model)
         self._model = next_model
         self.set_thinking_level(thinking_level)
         if not models_are_equal(previous_model, next_model):
@@ -1263,6 +1322,10 @@ class AgentSession:
             return
         self._agent.state.thinking_level = effective
         self._persist_thinking_level_change(effective)
+        if self._settings_manager is not None:
+            setter = getattr(self._settings_manager, "set_default_thinking_level", None)
+            if setter is not None and (self.supports_thinking() or effective != "off"):
+                setter(effective)
         self._emit(
             {
                 "type": "thinking_level_changed",
@@ -1295,6 +1358,9 @@ class AgentSession:
         if explicit_level is not None:
             return cast(ThinkingLevel, explicit_level)
         if not self.supports_thinking():
+            if self._settings_manager is not None:
+                saved = self._settings_manager.get_default_thinking_level()
+                return cast(ThinkingLevel, saved or DEFAULT_THINKING_LEVEL)
             return DEFAULT_THINKING_LEVEL
         return self.thinking_level
 
@@ -1324,19 +1390,17 @@ class AgentSession:
         images: list | None = None,
         *,
         preflight_result: Callable[[bool], Any] | None = None,
+        streaming_behavior: str | None = None,
+        source: str = "interactive",
+        expand_prompt_templates: bool = True,
     ) -> None:
         """发送用户消息，触发完整的 Agent 循环 + 工具执行。
 
-        阻塞直到 agent 完成本轮（但 wait_for_idle 可以等待事件监听器完成）。
-
-        Agent 内部重试耗尽后，若本轮仍以可重试错误结束，
-        自动移除错误消息并用 continue_() 恢复状态机重跑（turn 级重试）。
-
-        上下文溢出（is_context_overflow）时先压缩再自动重试；
-        上下文超阈值（should_compact）时压缩（不重试）。
-
-        preflight_result（对齐 TS prompt preflightResult）：提交成功（校验
-        通过、operation 已记录）时回调 True；提交失败抛异常且不回调。
+        对齐 TS AgentSession.prompt：
+        - 扩展命令在发送前执行（即使正在 streaming）；
+        - input 扩展事件可拦截/变换；
+        - 正在 streaming 时必须提供 streamingBehavior（steer/followUp）；
+        - 非 streaming 时校验 model 与认证后才回调 preflightResult(true)。
         """
         self._abort = asyncio.Event()
         started = time.perf_counter()
@@ -1354,24 +1418,84 @@ class AgentSession:
         )
         outcome = "completed"
         error: dict[str, str] | None = None
-        # preflight 成功标记：operation 记录完成即视为提交成功（对齐 TS）。
-        if preflight_result is not None:
-            preflight_result(True)
+        preflight_ok = False
         try:
             self._overflow_recovery_attempted = False
-            # 发送前检查：上一轮 aborted/error 响应触发压缩（不重试）。
-            # 新提示随后由 agent.prompt 发送，因此不调用 continue_()。
+
+            # 1. 扩展命令（/command）优先执行，不进入 LLM。
+            if expand_prompt_templates and text.startswith("/"):
+                if await self._try_execute_extension_command(text):
+                    preflight_ok = True
+                    if preflight_result is not None:
+                        preflight_result(True)
+                    return
+
+            # 2. input 事件（扩展可拦截/变换）。
+            current_text = text
+            current_images = images
+            if self._extension_runner is not None:
+                current_text, action = await self._extension_runner.emit_input(
+                    current_text,
+                    images=current_images,
+                    source=source,
+                    streaming_behavior=streaming_behavior,
+                )
+                if action == "handled":
+                    preflight_ok = True
+                    if preflight_result is not None:
+                        preflight_result(True)
+                    return
+
+            # 3. 技能与提示模板展开。
+            expanded = current_text
+            if expand_prompt_templates:
+                expanded = self.expand_prompt(expanded)
+            if current_text.startswith("/skill:") and expanded != current_text:
+                skill_name = current_text[7:].split(" ", 1)[0] if len(current_text) > 7 else ""
+                self._emit({"type": "skill_invocation", "skill": skill_name})
+
+            # 4. Streaming 时按 streamingBehavior 入队。
+            if self.is_streaming:
+                if streaming_behavior not in ("steer", "followUp", "follow_up"):
+                    raise RuntimeError(
+                        "Agent is already processing. Specify streamingBehavior "
+                        "('steer' or 'followUp') to queue the message."
+                    )
+                if streaming_behavior in ("followUp", "follow_up"):
+                    await self.follow_up(expanded, current_images)
+                else:
+                    await self.steer(expanded, current_images)
+                preflight_ok = True
+                if preflight_result is not None:
+                    preflight_result(True)
+                return
+
+            # 5. 发送前 flush 延迟 bash 消息。
+            self._flush_pending_bash_messages()
+
+            # 6. 校验 model 与认证（对齐 TS preflight）。
+            if self._model is None:
+                raise RuntimeError("No model selected.")
+            if self._model_runtime is not None:
+                has_auth = self._model_runtime.has_configured_auth(self._model.provider)
+                if not has_auth:
+                    checked = await self._model_runtime.check_auth(self._model.provider)
+                    has_auth = checked is not None
+                if not has_auth:
+                    provider = self._model.provider
+                    if self._model_runtime.is_using_oauth(provider):
+                        raise RuntimeError(
+                            f'Authentication failed for "{provider}". Credentials may have expired '
+                            f"or network is unavailable. Run '/login {provider}' to re-authenticate."
+                        )
+                    raise RuntimeError(f"No API key configured for provider '{provider}'.")
+
+            # 7. 发送前检查上一轮 aborted/error 响应是否需要压缩。
             if self._last_assistant_message() is not None:
                 await self._check_compaction(skip_aborted_check=False)
-            # 1. input 事件（扩展可拦截/变换）
-            if self._extension_runner is not None:
-                text, _action = await self._extension_runner.emit_input(text)
-            # 2. 扩展命令 /skill: 与 /template 展开
-            expanded = self.expand_prompt(text)
-            if text.startswith("/skill:") and expanded != text:
-                skill_name = text[7:].split(" ", 1)[0] if len(text) > 7 else ""
-                self._emit({"type": "skill_invocation", "skill": skill_name})
-            # 1.6 before_agent_start（扩展可覆盖系统提示 / 本轮 prompt）
+
+            # 8. before_agent_start（扩展可覆盖系统提示 / 本轮 prompt / 注入消息）。
+            injected_messages: list[dict] = []
             if self._extension_runner is not None and self._extension_runner.has_handlers(
                 "before_agent_start"
             ):
@@ -1384,7 +1508,6 @@ class AgentSession:
                     },
                 )
                 original_system_prompt = self._agent.state.system_prompt
-                injected_messages: list[dict] = []
                 try:
                     for result in reversed(results):
                         if not isinstance(result, dict):
@@ -1393,6 +1516,19 @@ class AgentSession:
                             self._agent.state.system_prompt = result["system_prompt"]
                         if isinstance(result.get("prompt"), str):
                             expanded = result["prompt"]
+                        for message in result.get("messages") or []:
+                            if isinstance(message, dict) and "content" in message:
+                                injected_messages.append(
+                                    {
+                                        "role": message.get("role", "custom"),
+                                        "customType": message.get("customType", "extension"),
+                                        "content": message.get("content"),
+                                        "display": message.get("display", False),
+                                        "details": message.get("details"),
+                                        "timestamp": now_ms(),
+                                    }
+                                )
+                        # 兼容旧版扩展单 message 返回。
                         message = result.get("message")
                         if isinstance(message, dict) and isinstance(message.get("content"), str):
                             injected_messages.append(
@@ -1406,24 +1542,31 @@ class AgentSession:
                             )
                         if result:
                             break
-                    if injected_messages:
-                        prompts = cast(
-                            list[AgentMessage],
-                            [
-                                *injected_messages,
-                                {"role": "user", "content": expanded, "timestamp": now_ms()},
-                            ],
+                    messages_to_send: list[AgentMessage] = [
+                        cast(AgentMessage, message) for message in injected_messages
+                    ]
+                    messages_to_send.append(
+                        cast(
+                            AgentMessage,
+                            {"role": "user", "content": expanded, "timestamp": now_ms()},
                         )
-                        await self._agent.prompt(prompts, images)
-                    else:
-                        await self._agent.prompt(expanded, images)
+                    )
+                    preflight_ok = True
+                    if preflight_result is not None:
+                        preflight_result(True)
+                    await self._agent.prompt(messages_to_send, current_images)
                 finally:
                     self._agent.state.system_prompt = original_system_prompt
             else:
-                await self._agent.prompt(expanded, images)
+                preflight_ok = True
+                if preflight_result is not None:
+                    preflight_result(True)
+                await self._agent.prompt(expanded, current_images)
             await self._check_compaction()
             await self._retry_failed_turn()
         except BaseException as exc:
+            if not preflight_ok and preflight_result is not None:
+                preflight_result(False)
             outcome = "aborted" if self._abort is not None and self._abort.is_set() else "failed"
             error = {"code": "error", "message": str(exc)}
             raise
@@ -1436,6 +1579,35 @@ class AgentSession:
                     "durationMs": (time.perf_counter() - started) * 1000,
                 }
             )
+
+    async def _try_execute_extension_command(self, text: str) -> bool:
+        """执行扩展注册的 /command；找到并执行返回 True（含 handler 报错）。"""
+        runner = self._extension_runner
+        if runner is None:
+            return False
+        space_index = text.find(" ")
+        command_name = text[1:] if space_index == -1 else text[1:space_index]
+        args = "" if space_index == -1 else text[space_index + 1 :]
+        command = runner.get_registered_command(command_name)
+        if command is None or command.handler is None:
+            return False
+        context = runner.create_command_context()
+        try:
+            result = command.handler(context, args)
+            if inspect.isawaitable(result):
+                await result
+            return True
+        except Exception as exc:
+            from .extensions.types import ExtensionError
+
+            runner.emit_error(
+                ExtensionError(
+                    extension_path=f"command:{command_name}",
+                    event="command",
+                    error=str(exc),
+                )
+            )
+            return True
 
     def expand_prompt(self, text: str) -> str:
         """展开 `/skill:name` 与 `/templateName`；未匹配时原样返回。"""

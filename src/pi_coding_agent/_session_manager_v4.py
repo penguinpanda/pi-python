@@ -341,14 +341,25 @@ class V4SessionManager:
     def get_header(self) -> dict[str, Any] | None:
         """合成 session header（对齐 TS SessionManager.getHeader）。
 
-        v4 JSONL 无 header 行，从缓存的 metadata 派生 {type, id, timestamp, cwd}。
+        v4 JSONL 无 v3 header 行，因此按 TS v3 契约合成：
+        ``{type:"session", version:3, id, timestamp: ISO-8601, cwd}``。
         """
         if not self._session_id:
             return None
+        timestamp = ""
+        if isinstance(self._created_at, (int, float)):
+            from datetime import datetime, timezone
+
+            timestamp = (
+                datetime.fromtimestamp(self._created_at / 1000, tz=timezone.utc)
+                .isoformat(timespec="milliseconds")
+                .replace("+00:00", "Z")
+            )
         header: dict[str, Any] = {
             "type": "session",
+            "version": 3,
             "id": self._session_id,
-            "timestamp": str(self._created_at or ""),
+            "timestamp": timestamp,
             "cwd": self._cwd,
         }
         return header

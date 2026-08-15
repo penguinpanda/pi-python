@@ -205,3 +205,136 @@ __all__ = [
     "is_image_path",
     "process_at_files",
 ]
+
+
+# ---------------------------------------------------------------------------
+# TS cli/file-processor.ts 兼容入口
+# ---------------------------------------------------------------------------
+
+_SUPPORTED_IMAGE_MIME_TYPES = {
+    "image/png": "PNG",
+    "image/jpeg": "JPEG",
+    "image/jpg": "JPEG",
+    "image/gif": "GIF",
+    "image/webp": "WEBP",
+}
+_MAX_IMAGE_DIMENSION = 2000
+
+
+def _sniff_image_mime_type(data: bytes) -> str | None:
+    """Sniff supported inline image MIME type from file content."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def _image_format_for_mime(mime_type: str) -> str:
+    return _SUPPORTED_IMAGE_MIME_TYPES.get(mime_type, "PNG")
+
+
+def _resize_image_bytes(data: bytes, mime_type: str) -> tuple[bytes, str, bool]:
+    """Resize oversized images and normalize unsupported formats to PNG."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    image = Image.open(BytesIO(data))
+    image.load()
+    resized = False
+    if max(image.size) > _MAX_IMAGE_DIMENSION:
+        image.thumbnail((_MAX_IMAGE_DIMENSION, _MAX_IMAGE_DIMENSION))
+        resized = True
+    out_mime = mime_type if mime_type in _SUPPORTED_IMAGE_MIME_TYPES else "image/png"
+    out_format = _image_format_for_mime(out_mime)
+    buffer = BytesIO()
+    save_options = {}
+    if out_format == "JPEG" and image.mode not in ("RGB", "L"):
+        image = image.convert("RGB")
+    try:
+        image.save(buffer, format=out_format, **save_options)
+    except (KeyError, ValueError):
+        # Some Pillow builds cannot encode WEBP; fall back to PNG.
+        out_mime = "image/png"
+        image.save(buffer, format="PNG")
+    return buffer.getvalue(), out_mime, resized
+
+
+async def process_file_arguments(
+    file_args: list[str],
+    cwd: str,
+    *,
+    auto_resize_images: bool = True,
+) -> tuple[str, list[ImageContent]]:
+    """Process TS-style ``@file`` arguments.
+
+    Returns one combined ``<file>...</file>`` text block and image attachments.
+    Missing files, unreadable files, and directories raise ``OSError`` (the TS
+    CLI prints the error and exits with status 1).
+    """
+    text = ""
+    images: list[ImageContent] = []
+    base = Path(cwd).expanduser().resolve()
+
+    for file_arg in file_args:
+        raw = file_arg[1:] if file_arg.startswith("@") else file_arg
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            path = base / path
+        path = path.resolve()
+        if not path.exists():
+            raise FileNotFoundError(str(path))
+        if path.is_dir():
+            raise IsADirectoryError(str(path))
+        size = path.stat().st_size
+        if size == 0:
+            continue
+        raw_bytes = path.read_bytes()
+        mime_type = _sniff_image_mime_type(raw_bytes)
+
+        if mime_type is not None:
+            image_data = base64.b64encode(raw_bytes).decode("ascii")
+            hints: list[str] = []
+            if auto_resize_images:
+                try:
+                    resized_bytes, out_mime, resized = _resize_image_bytes(raw_bytes, mime_type)
+                    image_data = base64.b64encode(resized_bytes).decode("ascii")
+                    mime_type = out_mime
+                    if resized:
+                        from PIL import Image
+                        from io import BytesIO
+
+                        width, height = Image.open(BytesIO(resized_bytes)).size
+                        hints.append(
+                            f"[Image resized from its original dimensions to {width}x{height}.]"
+                        )
+                except Exception:
+                    # Keep the original bytes when resize/convert fails.
+                    pass
+            images.append(
+                ImageContent(
+                    type="image",
+                    url=None,
+                    data=image_data,
+                    mime_type=mime_type,
+                )
+            )
+            text += (
+                f'<file name="{path}">'
+                + ("\n".join(hints) if hints else "")
+                + "</file>\n"
+            )
+            continue
+
+        try:
+            content = raw_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError(f"Could not read file {path}: {exc}") from exc
+        text += f'<file name="{path}">\n{content}\n</file>\n'
+
+    return text, images

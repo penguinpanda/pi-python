@@ -206,6 +206,17 @@ class PackageManager:
             sources.append(source)
             self._set_settings_sources(scope, sources)
 
+    async def remove(self, source: str, *, local: bool = False) -> None:
+        """删除已安装资源文件（对齐 TS DefaultPackageManager.remove）。"""
+        parsed = parse_source(source)
+        if parsed.type == "local":
+            return
+        scope = "project" if local else "user"
+        self._assert_project_trusted(scope)
+        destination = self._installed_path(source, scope)
+        if destination.exists():
+            shutil.rmtree(destination)
+
     async def remove_and_persist(self, source: str, *, local: bool = False) -> bool:
         scope = "project" if local else "user"
         self._assert_project_trusted(scope)

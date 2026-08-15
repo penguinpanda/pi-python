@@ -631,6 +631,13 @@ class ExtensionRunner:
                 return tool
         return None
 
+    def get_registered_command(self, name: str) -> RegisteredCommand | None:
+        """按调用名查找扩展命令（用于 AgentSession.prompt /command 执行）。"""
+        for command in self.get_registered_commands():
+            if command.name == name:
+                return command
+        return None
+
     def get_registered_commands(self) -> list[RegisteredCommand]:
         """聚合命令；同名命令以 `name:1`、`name:2` 区分调用名。"""
         commands: list[RegisteredCommand] = []

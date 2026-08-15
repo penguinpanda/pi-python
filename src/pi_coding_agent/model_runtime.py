@@ -1094,6 +1094,15 @@ class ModelRuntime:
     def has_configured_auth(self, provider_id: str) -> bool:
         return provider_id in self._configured_providers
 
+    def is_using_subscription(self, provider_id: str) -> bool:
+        """是否使用 subscription 型 OAuth（TS ModelRuntime.isUsingSubscription）。"""
+        if not self.is_using_oauth(provider_id):
+            return False
+        provider = self._models.get_provider(provider_id)
+        auth = getattr(provider, "auth", None)
+        oauth = getattr(auth, "oauth", None)
+        return bool(getattr(oauth, "is_subscription", False))
+
     def is_using_oauth(self, provider_id: str) -> bool:
         check = self._auth_checks.get(provider_id)
         return check is not None and check.get("type") == "oauth"
@@ -1276,6 +1285,15 @@ class ModelRuntime:
     ) -> AssistantMessageEventStream:
         return await self._models.stream(model, context, options)
 
+    async def stream_simple(
+        self,
+        model: Model,
+        context: Context,
+        options: Any | None = None,
+    ) -> AssistantMessageEventStream:
+        """streamSimple（对齐 TS ModelRuntime.streamSimple）。"""
+        return await self._models.stream_simple(model, context, options)
+
     async def complete(
         self,
         model: Model,
@@ -1283,6 +1301,15 @@ class ModelRuntime:
         options: StreamOptions | None = None,
     ) -> AssistantMessage:
         return await self._models.complete(model, context, options)
+
+    async def complete_simple(
+        self,
+        model: Model,
+        context: Context,
+        options: Any | None = None,
+    ) -> AssistantMessage:
+        """completeSimple（对齐 TS ModelRuntime.completeSimple）。"""
+        return await self._models.complete_simple(model, context, options)
 
     def supports_deferred(self, model: Model) -> bool:
         """模型所属 Provider 是否支持挂起响应。"""

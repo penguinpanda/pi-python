@@ -20,16 +20,17 @@ from typing import Any
 from pi_agent import Agent, AgentOptions
 from pi_agent import set_default_stream_fn as set_agent_stream_fn
 from pi_ai import Model
+from pi_ai.utils.retry import RetryPolicy
 from pi_ai.auth.oauth import builtin_oauth_providers
 
 from ._config import ensure_agent_dirs, get_agent_dir, get_sessions_dir
 from .extensions import Extension, ExtensionAPI, ExtensionLoader, ExtensionRunner
 from .extensions.builtin_llama import create_extension as create_llama_extension
 from ._print_mode import run_print_mode, run_print_mode_json
-from .file_processor import process_at_files
+from .file_processor import process_file_arguments
 from .first_time_setup import run_first_time_setup, should_run_first_time_setup
 from .http_dispatcher import apply_http_proxy_settings, configure_http_dispatcher
-from .tools import create_all_tools, filter_tools_by_names
+from .tools import create_all_tools, create_coding_tools, filter_tools_by_names
 from .rpc import run_rpc_mode
 from .modes.interactive import run_tui_mode
 from ._session import AgentSession
@@ -41,10 +42,12 @@ from ._session_manager_v4 import (
     open_session_manager,
 )
 from .auth_storage import AuthStorage, migrate_auth_to_auth_json
+from .migrations import run_migrations as run_filesystem_migrations
 from .compaction import compaction_settings_from_config
 from .model_resolver import (
     ScopedModel,
     find_initial_model,
+    is_valid_thinking_level,
     resolve_cli_model,
     resolve_model_scope,
     restore_model_from_session,
@@ -100,35 +103,59 @@ async def _async_main(args: list[str] | None = None) -> int:
     effective_args = args if args is not None else sys.argv[1:]
     if effective_args and effective_args[0] in ("login", "logout", "auth"):
         return await _run_auth_command(effective_args)
-    if effective_args and effective_args[0] in ("install", "remove", "update", "list"):
+    if effective_args and effective_args[0] in ("install", "remove", "uninstall", "update", "list"):
         return await _run_package_command(effective_args)
     if effective_args and effective_args[0] == "config":
         return await _run_config_command(effective_args[1:])
 
     parser = _create_parser()
-    parsed = parser.parse_args(args)
+    parsed, unknown = parser.parse_known_args(args)
+    for token in unknown:
+        # TS args.ts rejects short unknown options immediately; long options are
+        # collected as extension flags and resolved after extensions load.
+        if token.startswith("-") and not token.startswith("--"):
+            print(f"Error: Unknown option: {token}", file=sys.stderr)
+            return 1
 
     # 补齐 ~/.pi/agent 约定目录（sessions/prompts/skills/extensions/themes/tools/bin）。
     ensure_agent_dirs()
 
     # 一次性迁移：oauth.json / settings.json apiKeys → auth.json（对齐 TS）。
     migrate_auth_to_auth_json()
+    # 会话/commands/tools 旧目录迁移（对齐 TS runMigrations）。
+    run_filesystem_migrations(Path.cwd())
 
     # --help / --version 已在 argparse 中处理
 
-    # 对齐 TS：无参数且 stdin 为 TTY 时默认进入 TUI，而不是报缺消息。
-    if parsed.mode is None and not parsed.message and not parsed.json and sys.stdin.isatty():
+    # 对齐 TS resolveAppMode：stdin/stdout 均为 TTY 且未显式 -p/json/rpc
+    # 时默认进入 TUI（即使提供了位置参数，位置参数作为 initial prompt）。
+    interactive_default = (
+        not parsed.print
+        and not parsed.json
+        and sys.stdin.isatty()
+        and getattr(sys.stdout, "isatty", lambda: False)()
+    )
+    if parsed.mode is None and interactive_default:
         parsed.mode = "tui"
 
-    # TS 模式别名：text → print；json → print + --json（对齐 TS --mode json）。
+    # TS 模式别名：json → print + --json；text 仅是文本输出模式，
+    # 没有 -p 且是 TTY 时仍进入 interactive。
     if parsed.mode == "text":
-        parsed.mode = "print"
+        parsed.mode = "tui" if interactive_default else "print"
     elif parsed.mode == "json":
         parsed.mode = "print"
         parsed.json = True
 
-    # 首次启动向导（显式 --setup 或 TS 对齐的自动触发条件）。
-    if parsed.setup or should_run_first_time_setup():
+    if parsed.thinking is not None and not is_valid_thinking_level(parsed.thinking):
+        print(
+            f'Warning: Invalid thinking level "{parsed.thinking}". Valid values: '
+            "off, minimal, low, medium, high, xhigh, max",
+            file=sys.stderr,
+        )
+        parsed.thinking = None
+
+    # 首次启动向导（显式 --setup，或仅 interactive 模式自动触发，对齐 TS）。
+    if parsed.setup or (parsed.mode == "tui" and should_run_first_time_setup()):
         return await run_first_time_setup()
 
     # 确定工作目录
@@ -158,6 +185,8 @@ async def _async_main(args: list[str] | None = None) -> int:
         project_trusted = parsed.project_trust_override
     settings_manager.set_project_trusted(project_trusted)
     settings = settings_manager.as_dict()
+    if parsed.verbose:
+        settings["quietStartup"] = False
     if needs_trust_decision and not project_trusted and parsed.mode != "tui":
         print(
             "Warning: project not trusted; .pi settings and resources are ignored. "
@@ -183,16 +212,6 @@ async def _async_main(args: list[str] | None = None) -> int:
     runtime = await _create_runtime()
     set_agent_stream_fn(runtime.stream)
 
-    # --api-key：运行时 API key 覆盖（对齐 TS main.ts setRuntimeApiKey）。
-    if parsed.api_key:
-        if not parsed.provider:
-            print(
-                "Error: --api-key requires a provider via --provider",
-                file=sys.stderr,
-            )
-            return 1
-        await runtime.set_runtime_api_key(parsed.provider, parsed.api_key)
-
     # --list-models: 列出所有可用模型后直接退出（支持 --provider 过滤与模糊搜索）
     if parsed.list_models is not None:
         return _print_models(
@@ -204,7 +223,7 @@ async def _async_main(args: list[str] | None = None) -> int:
         try:
             from .export_html import export_session_to_html
 
-            export_manager = await open_session_manager(parsed.export)
+            export_manager = await open_session_manager(Path(parsed.export).expanduser())
             try:
                 out_path = parsed.message[0] if parsed.message else None
                 result = export_session_to_html(
@@ -223,10 +242,13 @@ async def _async_main(args: list[str] | None = None) -> int:
 
     # 会话 flags 冲突校验（对齐 TS validateForkFlags / validateSessionIdFlags）
     if parsed.fork and (
-        parsed.session or parsed.continue_session or parsed.resume or parsed.session_id
+        parsed.session
+        or parsed.continue_session
+        or parsed.resume
+        or parsed.no_session
     ):
         print(
-            "Error: --fork cannot be combined with --session/--continue/--resume/--session-id",
+            "Error: --fork cannot be combined with --session/--continue/--resume/--no-session",
             file=sys.stderr,
         )
         return 1
@@ -237,15 +259,22 @@ async def _async_main(args: list[str] | None = None) -> int:
         )
         return 1
 
-    # 会话目录解析：--session-dir > PI_CODING_AGENT_SESSION_DIR > 默认目录。
-    sessions_dir: str | Path | None = parsed.session_dir or os.environ.get(
-        "PI_CODING_AGENT_SESSION_DIR"
+    # 会话目录解析：--session-dir > PI_CODING_AGENT_SESSION_DIR > settings.sessionDir
+    # > 默认目录（对齐 TS main.ts sessionDir 优先级）。
+    sessions_dir: str | Path | None = (
+        parsed.session_dir
+        or os.environ.get("PI_CODING_AGENT_SESSION_DIR")
+        or settings_manager.get_session_dir()
     )
+    if sessions_dir is not None:
+        sessions_dir = Path(sessions_dir).expanduser()
 
     # 会话管理
     session_manager: SessionManagerLike
     if parsed.no_session:
-        session_manager = await in_memory_session_manager(cwd)
+        session_manager = await in_memory_session_manager(
+            cwd, session_id=parsed.session_id or None
+        )
     elif parsed.fork:
         source_path = await _resolve_fork_target(parsed.fork, sessions_dir)
         if source_path is None:
@@ -273,19 +302,33 @@ async def _async_main(args: list[str] | None = None) -> int:
     elif parsed.session_id:
         session_manager = await _open_or_create_session_by_id(parsed.session_id, cwd, sessions_dir)
     elif parsed.session:
-        session_manager = await open_session_manager(parsed.session, cwd_override=cwd)
+        resolved_session = await _resolve_session_target(parsed.session, cwd, sessions_dir)
+        if resolved_session is None:
+            print(f"No session found matching '{parsed.session}'", file=sys.stderr)
+            return 1
+        session_kind, session_path, session_cwd = resolved_session
+        if session_kind == "global" and session_cwd and Path(session_cwd) != Path(cwd):
+            print(f"Session found in different project: {session_cwd}")
+            should_fork = await _prompt_yes_no("Fork this session into current directory?")
+            if not should_fork:
+                print("Aborted.")
+                return 0
+            session_manager = await _fork_source_path(session_path, cwd, sessions_dir)
+        else:
+            session_manager = await open_session_manager(session_path, cwd_override=cwd)
     else:
         # 全新会话
         session_manager = await create_session_manager(cwd, sessions_dir=sessions_dir)
 
-    # --name：新建会话时设置会话名（对齐 TS appendSessionInfo）。
-    is_new_session = not (parsed.session or parsed.continue_session or parsed.resume or parsed.fork)
-    if parsed.name is not None and is_new_session:
+    # --name：TS 对任意会话（新建/继续）追加 session_info；空值报错。
+    if parsed.name is not None:
         name = parsed.name.strip()
-        if name:
-            setter = getattr(session_manager, "set_session_name", None)
-            if setter is not None:
-                setter(name)
+        if not name:
+            print("Error: --name requires a non-empty value", file=sys.stderr)
+            return 1
+        setter = getattr(session_manager, "set_session_name", None)
+        if setter is not None:
+            setter(name)
 
     # 解析模型（含 --models 循环列表；继续会话时优先恢复）
     is_continuing = bool(parsed.continue_session or parsed.session or parsed.resume or parsed.fork)
@@ -298,6 +341,10 @@ async def _async_main(args: list[str] | None = None) -> int:
         # 而不是把 Python traceback 抛给用户。
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+
+    # --api-key：模型解析后设置到目标 provider（对齐 TS main.ts setRuntimeApiKey）。
+    if parsed.api_key and model is not None:
+        await runtime.set_runtime_api_key(model.provider, parsed.api_key)
 
     # Phase 4：技能 / 提示模板加载器（全局 + 项目；未信任项目不加载 .pi 资源）。
     project_skills_dir = Path(cwd) / ".pi" / "skills" if project_trusted else None
@@ -327,6 +374,7 @@ async def _async_main(args: list[str] | None = None) -> int:
     # 系统提示构建器：默认结构化提示（工具说明 + 指南 + 上下文文件 + 技能），
     # /reload 时重新调用（上下文文件与技能会变化）。
     default_tools = create_all_tools(cwd)
+    default_coding_tools = create_coding_tools(cwd)
     tools_include = (
         [part.strip() for part in parsed.tools.split(",") if part.strip()] if parsed.tools else None
     )
@@ -337,9 +385,13 @@ async def _async_main(args: list[str] | None = None) -> int:
         if parsed.exclude_tools
         else None
     )
-    if parsed.no_tools or parsed.no_builtin_tools:
+    allowed_tool_names: set[str] | None = None
+    if parsed.no_tools:
+        # TS --no-tools = no built-in/extension/custom tools.
+        allowed_tool_names: set[str] = set()
         selected_tools: list[str] = []
-    elif tools_include is not None or tools_exclude:
+    elif tools_include is not None:
+        allowed_tool_names = set(tools_include)
         selected_tools = [
             tool.name
             for tool in filter_tools_by_names(
@@ -348,8 +400,18 @@ async def _async_main(args: list[str] | None = None) -> int:
                 exclude=tools_exclude,
             )
         ]
+    elif parsed.no_builtin_tools:
+        # --no-builtin-tools keeps extension/custom tools.
+        selected_tools = []
+    elif tools_exclude:
+        selected_tools = [
+            tool.name
+            for tool in filter_tools_by_names(default_coding_tools, exclude=tools_exclude)
+        ]
     else:
-        selected_tools = [tool.name for tool in default_tools]
+        # TS default active tool set is read/bash/edit/write.
+        selected_tools = [tool.name for tool in default_coding_tools]
+    excluded_tool_names: set[str] | None = set(tools_exclude) if tools_exclude else None
 
     extension_state: dict = {
         "runner": None,
@@ -367,7 +429,7 @@ async def _async_main(args: list[str] | None = None) -> int:
         custom_prompt = resolve_prompt_input(custom_prompt, "system prompt")
         append_parts = settings_manager.get_append_system_prompt()
         if parsed.append_system_prompt:
-            append_parts.append(parsed.append_system_prompt)
+            append_parts.extend(parsed.append_system_prompt)
         if preset is not None and isinstance(preset.get("instructions"), str):
             append_parts.append(preset["instructions"])
         if not append_parts:
@@ -434,7 +496,7 @@ async def _async_main(args: list[str] | None = None) -> int:
     extension_flags = extension_runner.get_flags()
     if extension_flags:
         _register_extension_flags(parser, extension_runner)
-        parsed = parser.parse_args(args)
+        parsed, _remaining = parser.parse_known_args(args)
         for flag in extension_flags:
             extension_runner.set_flag_value(flag.name, getattr(parsed, flag.name, None))
     await extension_runner.discover_resources()
@@ -447,23 +509,41 @@ async def _async_main(args: list[str] | None = None) -> int:
         session_scoped: list[ScopedModel],
     ) -> AgentSession:
         tools_override = None
-        if parsed.no_tools:
+        if parsed.no_tools or parsed.no_builtin_tools:
             tools_override = []
-        elif tools_include is not None or tools_exclude:
-            from .tools import create_all_tools
-
+        elif tools_include is not None:
             tools_override = filter_tools_by_names(
                 create_all_tools(cwd),
                 include=tools_include,
                 exclude=tools_exclude,
             )
+        elif tools_exclude:
+            tools_override = filter_tools_by_names(
+                create_coding_tools(cwd),
+                exclude=tools_exclude,
+            )
+        else:
+            tools_override = create_coding_tools(cwd)
         agent = Agent(
             AgentOptions(
                 system_prompt=system_prompt,
                 model=session_model,
                 # 会话标识透传给 provider，启用提示缓存（prompt_cache_key）
                 session_id=sm.session_id,
+                steering_mode=settings_manager.get_steering_mode(),
+                follow_up_mode=settings_manager.get_follow_up_mode(),
+                transport=settings_manager.get_transport(),
+                thinking_budgets=settings_manager.get_thinking_budgets(),
+                max_retry_delay_ms=(
+                    settings_manager.get_provider_retry_settings().get("maxRetryDelayMs")
+                ),
             )
+        )
+        retry_settings = settings.get("retry") or {}
+        turn_retry_policy = RetryPolicy(
+            enabled=bool(retry_settings.get("enabled", True)),
+            max_retries=int(retry_settings.get("maxRetries", 3) or 3),
+            base_delay_ms=float(retry_settings.get("baseDelayMs", 2000) or 2000),
         )
         session = AgentSession(
             agent=agent,
@@ -480,6 +560,10 @@ async def _async_main(args: list[str] | None = None) -> int:
             system_prompt_builder=system_prompt_builder,
             extension_state=extension_state,
             restrict_untrusted_tools=bool(settings.get("restrictUntrustedTools")),
+            settings_manager=settings_manager,
+            allowed_tool_names=allowed_tool_names,
+            excluded_tool_names=excluded_tool_names,
+            turn_retry_policy=turn_retry_policy,
         )
         session.project_trusted = project_trusted
         return session
@@ -489,6 +573,9 @@ async def _async_main(args: list[str] | None = None) -> int:
         session.set_thinking_level(preset["thinking"])
     if parsed.thinking:
         session.set_thinking_level(parsed.thinking)
+    elif getattr(parsed, "resolved_thinking_level", None):
+        # --model pattern:<thinking> 简写（显式 --thinking 优先）。
+        session.set_thinking_level(parsed.resolved_thinking_level)
 
     async def session_factory(manager=None) -> AgentSession:
         fresh_manager = manager if manager is not None else await create_session_manager(cwd)
@@ -521,6 +608,13 @@ async def _async_main(args: list[str] | None = None) -> int:
 
     # TUI 模式：自研引擎交互界面。
     if parsed.mode == "tui":
+        try:
+            initial_message, initial_images, initial_messages = await _build_initial_message(
+                parsed, cwd
+            )
+        except (OSError, ValueError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
         startup_resources = {
             "context_files": (
                 [] if parsed.no_context_files else load_project_context_files(cwd, get_agent_dir())
@@ -551,28 +645,51 @@ async def _async_main(args: list[str] | None = None) -> int:
             no_context_files=parsed.no_context_files,
             startup_resources=startup_resources,
             ui_mode=parsed.tui_mode or None,
-            theme_name=parsed.theme or None,
+            theme_name=(
+                next(
+                    (
+                        item
+                        for item in (parsed.theme or [])
+                        if Path(item).suffix.lower() != ".json"
+                    ),
+                    None,
+                )
+                if isinstance(parsed.theme, list)
+                else parsed.theme
+            )
+            or None,
+            theme_paths=(
+                [item for item in parsed.theme if Path(item).suffix.lower() == ".json"]
+                if isinstance(parsed.theme, list)
+                else None
+            ),
+            initial_message=initial_message,
+            initial_messages=initial_messages,
+            initial_images=initial_images,
         )
 
-    # 运行 print 模式
-    message_parts: list[str] = list(parsed.message)
-    if not message_parts:
-        stdin_text = _read_stdin()
-        if stdin_text:
-            message_parts = [stdin_text]
-    if not message_parts:
-        print(
-            "Error: No input message provided. Use -p 'message' or pipe via stdin.", file=sys.stderr
+    # 运行 print 模式：先读 piped stdin（即使同时给了 CLI message，TS 也会合并）。
+    stdin_text = _read_stdin()
+    try:
+        initial_message, images, remaining_messages = await _build_initial_message(
+            parsed, cwd, stdin_text=stdin_text
         )
+    except (OSError, ValueError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    # @file 注入（文本 / 图片）：逐个片段处理，非 @ 片段原样保留（对齐 TS file-processor）。
-    images = None
-    texts, images = await process_at_files(message_parts, cwd)
-    message = "\n\n".join(texts)
+    # TS print 模式没有输入时静默成功（runtime 已创建，无 prompt 可发）。
+    if initial_message is None and not remaining_messages:
+        await session.dispose()
+        return 0
+
+    messages_to_send: list[str] = []
+    if initial_message is not None:
+        messages_to_send.append(initial_message)
+    messages_to_send.extend(remaining_messages)
     if parsed.json:
-        return await run_print_mode_json(session, message, images)
-    return await run_print_mode(session, message, images)
+        return await run_print_mode_json(session, messages_to_send, images)
+    return await run_print_mode(session, messages_to_send, images)
 
 
 # ---------------------------------------------------------------------------
@@ -663,7 +780,8 @@ async def _auth_print(kind: str, args: list[str]) -> int:
     """
     provider: str | None = None
     model: str | None = None
-    min_expiry_ms: int | None = None
+    # TS 默认：bearer token 至少 30 分钟有效。
+    min_expiry_ms: int | None = 30 * 60_000 if kind == "bearer_token" else None
     index = 0
     while index < len(args):
         arg = args[index]
@@ -714,7 +832,9 @@ async def _auth_print(kind: str, args: list[str]) -> int:
         return 1
     target_model = resolved.model
 
-    overrides: Any = {"min_oauth_validity_ms": min_expiry_ms} if min_expiry_ms is not None else None
+    overrides: Any = (
+        {"min_oauth_validity_ms": min_expiry_ms} if min_expiry_ms is not None else None
+    )
     auth = await runtime.get_auth(target_model, overrides=overrides)
     if auth is None or not auth.auth.get("api_key"):
         print(
@@ -780,11 +900,13 @@ async def _run_package_command(args: list[str]) -> int:
     from .package_manager import PackageManager
 
     command, *rest = args
+    if command == "uninstall":
+        command = "remove"
     if "-h" in rest or "--help" in rest:
         print(
             {
                 "install": "Usage: pi install <source> [-l|--local]  (source: npm:name | git:url[@ref] | local dir)",
-                "remove": "Usage: pi remove <source> [-l|--local]",
+                "remove": "Usage: pi remove|uninstall <source> [-l|--local]",
                 "update": "Usage: pi update [<source>]  (re-install configured packages)",
                 "list": "Usage: pi list  (list configured packages)",
             }[command]
@@ -809,6 +931,7 @@ async def _run_package_command(args: list[str]) -> int:
             print(f"Installed {rest[0]}")
             return 0
         if command == "remove":
+            await manager.remove(rest[0], local=local)
             removed = await manager.remove_and_persist(rest[0], local=local)
             if not removed:
                 print(f"No matching package found for {rest[0]}", file=sys.stderr)
@@ -967,7 +1090,11 @@ def _create_parser() -> argparse.ArgumentParser:
 
     # 系统提示
     p.add_argument("--system-prompt", type=str, help="Override system prompt")
-    p.add_argument("--append-system-prompt", type=str, help="Append to system prompt")
+    p.add_argument(
+        "--append-system-prompt",
+        action="append",
+        help="Append to system prompt (repeatable)",
+    )
 
     # 会话
     p.add_argument("--session", type=str, help="Path to existing session file to continue")
@@ -1066,8 +1193,8 @@ def _create_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--theme",
-        type=str,
-        help="TUI theme name (repeatable to add theme files)",
+        action="append",
+        help="Load a theme file or select a TUI theme (repeatable)",
     )
     p.add_argument("--no-themes", action="store_true", help="Disable theme discovery")
     p.add_argument(
@@ -1100,7 +1227,12 @@ def _create_parser() -> argparse.ArgumentParser:
     )
 
     # 版本
-    p.add_argument("--version", action="version", version="pi-python 0.1.0 (minimal core)")
+    p.add_argument(
+        "-v",
+        "--version",
+        action="version",
+        version="pi-python 0.1.0 (minimal core)",
+    )
 
     # 位置参数：用户消息（可多个；@file 注入与普通片段混合，对齐 TS args.ts）
     p.add_argument(
@@ -1234,13 +1366,34 @@ async def _resolve_initial_model(
     session_manager: SessionManagerLike,
     is_continuing: bool,
 ) -> tuple[Model, list[ScopedModel]]:
-    """解析初始模型 + --models 循环列表。返回 (model, scoped_models)。"""
+    """解析初始模型 + --models 循环列表。返回 (model, scoped_models)。
+
+    优先级对齐 TS：显式 CLI --model > saved session model > scoped/default。
+    ``--model pattern:thinking`` 的 thinking 放在 ``parsed.resolved_thinking_level``。
+    """
     scoped_models: list[ScopedModel] = []
+    patterns: list[str] = []
     if parsed.models:
         patterns = [part.strip() for part in parsed.models.split(",") if part.strip()]
+    elif isinstance(settings.get("enabledModels"), list):
+        patterns = [str(item).strip() for item in settings["enabledModels"] if str(item).strip()]
+    if patterns:
         scoped_models = await resolve_model_scope(patterns, runtime)
 
-    # 继续会话：优先恢复会话记录的最后模型。
+    # 显式 CLI --model 优先（允许不提供 --provider）。
+    if parsed.model:
+        resolved = resolve_cli_model(
+            cli_provider=parsed.provider,
+            cli_model=parsed.model,
+            model_runtime=runtime,
+        )
+        if resolved.error:
+            raise ValueError(resolved.error)
+        if resolved.model is not None:
+            parsed.resolved_thinking_level = resolved.thinking_level
+            return resolved.model, scoped_models
+
+    # 继续会话：恢复会话记录的最后模型。
     if is_continuing:
         saved = session_manager.get_last_model_change()
         if saved is not None:
@@ -1274,16 +1427,90 @@ def _read_stdin() -> str | None:
         return None
 
 
+async def _build_initial_message(
+    parsed,
+    cwd: str,
+    *,
+    stdin_text: str | None = None,
+) -> tuple[str | None, list | None, list[str]]:
+    """构造 print/TUI 的 initial prompt（对齐 TS buildInitialMessage）。
+
+    TS 顺序：stdin + @file 文本 + 第一条 CLI message，剩余 message 分轮发送。
+    """
+    file_args = [part[1:] for part in parsed.message if part.startswith("@")]
+    messages = [part for part in parsed.message if not part.startswith("@")]
+    file_text, file_images = await process_file_arguments(file_args, cwd)
+    parts: list[str] = []
+    if stdin_text is not None:
+        parts.append(stdin_text)
+    if file_text:
+        parts.append(file_text)
+    remaining: list[str] = []
+    if messages:
+        parts.append(messages[0])
+        remaining = messages[1:]
+    initial_message = "".join(parts) if parts else None
+    return initial_message, (file_images or None), remaining
+
+
+async def _resolve_session_target(
+    arg: str,
+    cwd: str,
+    sessions_dir: str | Path | None,
+) -> tuple[str, str, str | None] | None:
+    """解析 --session 参数：path / local-id / global-id（对齐 TS resolveSessionPath）。"""
+    path = Path(arg).expanduser()
+    if path.is_file():
+        return "path", str(path), None
+    directory = Path(sessions_dir).expanduser() if sessions_dir else get_sessions_dir()
+    local = await list_sessions(directory, cwd=cwd)
+    match = next(
+        (info for info in local if info.session_id == arg),
+        next((info for info in local if info.session_id.startswith(arg)), None),
+    )
+    if match is not None:
+        return "local", match.path, match.cwd
+    all_sessions = await list_sessions(directory)
+    match = next(
+        (info for info in all_sessions if info.session_id == arg),
+        next((info for info in all_sessions if info.session_id.startswith(arg)), None),
+    )
+    if match is not None:
+        return "global", match.path, match.cwd
+    return None
+
+
+async def _prompt_yes_no(message: str) -> bool:
+    raw = input(f"{message} [y/N] ").strip().lower()
+    return raw in ("y", "yes")
+
+
+async def _fork_source_path(source_path: str, cwd: str, sessions_dir) -> SessionManagerLike:
+    source = await open_session_manager(source_path, cwd_override=cwd)
+    try:
+        leaf = source.get_leaf_id()
+        if leaf is None:
+            raise ValueError("Source session has no entries")
+        return await source.fork(leaf, sessions_dir=sessions_dir)
+    finally:
+        close = getattr(source, "close", None)
+        if close is not None:
+            await close()
+
+
 async def _find_latest_session(
     cwd: str, sessions_dir: str | Path | None = None
 ) -> SessionManagerLike:
-    """在会话目录中查找最近修改的会话文件并打开。"""
-    directory = Path(sessions_dir) if sessions_dir else get_sessions_dir()
+    """在会话目录中查找最近修改的会话文件并打开。
+
+    默认目录按 cwd 过滤；TS continueRecent 同样只继续当前项目。
+    """
+    directory = Path(sessions_dir).expanduser() if sessions_dir else get_sessions_dir()
     if not directory.exists():
         # 无会话目录，创建新会话
         return await create_session_manager(cwd, sessions_dir=sessions_dir)
 
-    infos = await list_sessions(directory)
+    infos = await list_sessions(directory, cwd=cwd)
     if infos:
         return await open_session_manager(infos[0].path, cwd_override=cwd)
 
@@ -1295,7 +1522,7 @@ async def _pick_session_to_resume(
     cwd: str, sessions_dir: str | Path | None
 ) -> SessionManagerLike | None:
     """交互选择要恢复的会话（对齐 TS selectSession 的 CLI 简化版）。"""
-    directory = Path(sessions_dir) if sessions_dir else get_sessions_dir()
+    directory = Path(sessions_dir).expanduser() if sessions_dir else get_sessions_dir()
     current = await list_sessions(directory, cwd=cwd)
     if not current:
         print("No saved sessions found", file=sys.stderr)
@@ -1322,7 +1549,7 @@ async def _resolve_fork_target(arg: str, sessions_dir: str | Path | None) -> str
     path = Path(arg).expanduser()
     if path.is_file():
         return str(path)
-    directory = Path(sessions_dir) if sessions_dir else get_sessions_dir()
+    directory = Path(sessions_dir).expanduser() if sessions_dir else get_sessions_dir()
     sessions = await list_sessions(directory)
     matches = [info for info in sessions if info.session_id.startswith(arg)]
     if len(matches) == 1:
@@ -1336,7 +1563,7 @@ async def _open_or_create_session_by_id(
     session_id: str, cwd: str, sessions_dir: str | Path | None
 ) -> SessionManagerLike:
     """精确 session ID 打开，缺失则新建（对齐 TS findLocalSessionByExactId → create）。"""
-    directory = Path(sessions_dir) if sessions_dir else get_sessions_dir()
+    directory = Path(sessions_dir).expanduser() if sessions_dir else get_sessions_dir()
     sessions = await list_sessions(directory, cwd=cwd)
     for info in sessions:
         if info.session_id == session_id:

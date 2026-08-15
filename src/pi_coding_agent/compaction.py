@@ -662,6 +662,7 @@ async def generate_summary_with_usage(
     env: dict[str, str] | None = None,
     base_url: str | None = None,
     previous_summary: str | None = None,
+    custom_instructions: str | None = None,
     thinking_level: str | None = None,
     stream_fn,
     retry: RetryPolicy | None = None,
@@ -682,6 +683,12 @@ async def generate_summary_with_usage(
     prompt_text = f"<conversation>\n{conversation_text}\n</conversation>\n\n"
     if previous_summary:
         prompt_text += f"<previous-summary>\n{previous_summary}\n</previous-summary>\n\n"
+    if custom_instructions:
+        prompt_text += (
+            "<custom-instructions>\n"
+            f"{custom_instructions}\n"
+            "</custom-instructions>\n\n"
+        )
     prompt_text += base_prompt
 
     summarization_messages: list[Message] = [
@@ -729,6 +736,7 @@ async def _generate_turn_prefix_summary(
     headers: dict[str, str | None] | None = None,
     env: dict[str, str] | None = None,
     base_url: str | None = None,
+    custom_instructions: str | None = None,
     thinking_level: str | None = None,
     stream_fn,
     retry: RetryPolicy | None = None,
@@ -742,7 +750,14 @@ async def _generate_turn_prefix_summary(
         model.max_tokens if model.max_tokens > 0 else float("inf"),
     )
     conversation_text = serialize_conversation(messages)
-    prompt_text = f"<conversation>\n{conversation_text}\n</conversation>\n\n{TURN_PREFIX_SUMMARIZATION_PROMPT}"
+    prompt_text = f"<conversation>\n{conversation_text}\n</conversation>\n\n"
+    if custom_instructions:
+        prompt_text += (
+            "<custom-instructions>\n"
+            f"{custom_instructions}\n"
+            "</custom-instructions>\n\n"
+        )
+    prompt_text += TURN_PREFIX_SUMMARIZATION_PROMPT
     summarization_messages: list[Message] = [
         {
             "role": "user",
@@ -784,6 +799,7 @@ async def compact(
     headers: dict[str, str | None] | None = None,
     env: dict[str, str] | None = None,
     base_url: str | None = None,
+    custom_instructions: str | None = None,
     thinking_level: str | None = None,
     stream_fn,
     retry: RetryPolicy | None = None,
@@ -818,6 +834,7 @@ async def compact(
                 env=env,
                 base_url=base_url,
                 previous_summary=previous_summary,
+                custom_instructions=custom_instructions,
                 thinking_level=thinking_level,
                 stream_fn=stream_fn,
                 retry=retry,
@@ -831,6 +848,7 @@ async def compact(
             headers=headers,
             env=env,
             base_url=base_url,
+            custom_instructions=custom_instructions,
             thinking_level=thinking_level,
             stream_fn=stream_fn,
             retry=retry,
@@ -850,6 +868,7 @@ async def compact(
             env=env,
             base_url=base_url,
             previous_summary=previous_summary,
+            custom_instructions=custom_instructions,
             thinking_level=thinking_level,
             stream_fn=stream_fn,
             retry=retry,
