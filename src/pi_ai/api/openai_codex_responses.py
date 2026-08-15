@@ -238,11 +238,18 @@ class _CodexWebSocketEvents:
                 additional_headers=self._headers,
                 open_timeout=timeout_ms / 1000.0,
             )
+            await self._ws.send(json.dumps({"type": "response.create", **self._body}))
         except Exception as exc:
-            # 连接阶段失败（未产生任何事件）：可回退 SSE（对齐 TS websocketStarted=false）。
+            # 连接/发送阶段失败（未产生任何事件）：可回退 SSE
+            # （对齐 TS websocketStarted=false）。
+            if self._ws is not None:
+                try:
+                    await self._ws.close()
+                except Exception:
+                    pass
+                self._ws = None
             raise _CodexWsConnectError(f"Codex WebSocket connect failed: {exc}") from exc
         self._events = True
-        await self._ws.send(json.dumps({"type": "response.create", **self._body}))
 
     async def aclose(self) -> None:
         if getattr(self, "_ws", None) is not None:

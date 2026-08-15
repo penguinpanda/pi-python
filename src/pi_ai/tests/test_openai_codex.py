@@ -300,6 +300,54 @@ async def test_websocket_connect_failure_falls_back_to_sse(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_websocket_send_failure_falls_back_to_sse(monkeypatch) -> None:
+    """WS 连接成功但 response.create 发送失败：未产生事件，应回退 SSE。"""
+    from pi_ai.api.openai_codex_responses import _is_ws_sse_fallback_active
+
+    class _FakeConn:
+        async def send(self, data: str) -> None:
+            raise ConnectionError("send refused")
+
+        async def close(self) -> None:
+            pass
+
+    async def fake_connect(*args, **kwargs):
+        return _FakeConn()
+
+    monkeypatch.setattr("websockets.connect", fake_connect)
+    calls: list[str] = []
+
+    async def fake_responses_stream(model, context, api_key, base_url, options=None, **kwargs):
+        calls.append("sse")
+        stream = AssistantMessageEventStream()
+        output = {
+            "content": [{"type": "text", "text": "from-sse"}],
+            "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+            "stop_reason": "stop",
+        }
+        stream.push({"type": "start", "partial": output})
+        stream.push({"type": "done", "reason": "stop", "message": output})
+        stream.end()
+        return stream
+
+    monkeypatch.setattr(
+        "pi_ai.api.openai_codex_responses.responses_stream",
+        fake_responses_stream,
+    )
+    stream = await openai_codex_responses.openai_codex_responses_stream(
+        _model(),
+        _context(),
+        "k",
+        "",
+        {"transport": "websocket", "api_key": "k", "session_id": "codex-send-fail-test"},
+    )
+    events = [event async for event in stream]
+    assert calls == ["sse"]
+    assert events[-1]["message"]["content"][0]["text"] == "from-sse"
+    assert _is_ws_sse_fallback_active("codex-send-fail-test")
+
+
+@pytest.mark.asyncio
 async def test_codex_fetch_deferred(monkeypatch) -> None:
     class _TextBlock:
         type = "output_text"

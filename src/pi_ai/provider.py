@@ -589,11 +589,23 @@ def _build_refresh_models(
                     if cancelling is not None and cancelling() > 0:
                         raise
                     # 共享任务被其它调用方取消：不继承取消，按自己的 context 重试。
+                    # 已取消任务的 await 会同步抛错而不让出循环：先让出一次，
+                    # 等 _on_done 清理 inflight，避免忙等饿死事件循环。
+                    await asyncio.sleep(0)
                     continue
                 return
             # 语义不同（离线/在线、force、signal、credential）：等待前一个
             # 完成后按自己的 context 串行执行，而不是被前者的参数绑架。
-            await inflight
+            try:
+                await inflight
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                pass  # 前一个调用失败：不继承异常，按自己的 context 重新执行
+            # 已完成任务的 await 不会让出事件循环：显式让出一次，确保
+            # _on_done 有机会清理 inflight，否则 while 循环会忙等饿死
+            # 整个事件循环（livelock）。
+            await asyncio.sleep(0)
 
         async def _impl() -> None:
             stored = None

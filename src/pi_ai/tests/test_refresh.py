@@ -116,6 +116,43 @@ async def test_refresh_models_mismatched_context_not_merged():
 
 
 @pytest.mark.asyncio
+async def test_refresh_mismatch_caller_does_not_inherit_failure():
+    """语义不同的调用者不得继承 in-flight 任务的异常（离线恢复不被跳过）。"""
+    calls: list[bool] = []
+
+    async def fetch(context):
+        calls.append(context.force)
+        if context.force:
+            await asyncio.sleep(0.03)
+            raise RuntimeError("force fetch failed")
+        return [_model("dyn-1")]
+
+    provider = create_provider(id="dyn", name="Dynamic", auth=None, models=[], fetch_models=fetch)
+    store = InMemoryModelsStore()
+    forced = RefreshModelsContext(
+        store=provider_models_store(store, "dyn"),
+        allow_network=True,
+        force=True,
+    )
+    normal = RefreshModelsContext(
+        store=provider_models_store(store, "dyn"),
+        allow_network=True,
+        force=False,
+    )
+
+    first = asyncio.create_task(provider.refresh_models(forced))
+    await asyncio.sleep(0.005)
+    # 后到的正常调用不得继承 force 任务的异常，应按自己的 context 执行。
+    await provider.refresh_models(normal)
+    try:
+        await first
+    except RuntimeError:
+        pass
+    assert calls == [True, False]
+    assert [m.id for m in provider.get_models()] == ["dyn-1"]
+
+
+@pytest.mark.asyncio
 async def test_models_refresh_collects_errors(dynamic_provider):
     async def fetch(context):
         raise RuntimeError("boom")
