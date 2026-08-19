@@ -47,7 +47,7 @@ import os
 
 import httpx
 
-from ..types import Model, ModelCost
+from ..types import Model, ModelCost, ThinkingLevelMap
 from ..provider import create_provider, Provider, RefreshModelsContext
 
 
@@ -65,6 +65,21 @@ def _ollama_base_url() -> str:
     容器内运行时可指向宿主机（如 http://host.docker.internal:11434）。
     """
     return os.environ.get("OLLAMA_BASE_URL", OLLAMA_BASE_URL)
+
+
+# Qwen3 系列走 Ollama 的 OpenAI 兼容端点（/v1/chat/completions）。
+# 该端点不会把顶层 ``think: false`` / ``enable_thinking: false`` 传给模板；
+# 关闭思考必须映射为 OpenAI 兼容的 ``reasoning_effort: "none"``。
+# 高级别保留 Ollama 支持的原生值；xhigh/max 收敛到 high，避免发送无效枚举。
+_QWEN3_THINKING_LEVEL_MAP: ThinkingLevelMap = {
+    "off": "none",
+    "minimal": "minimal",
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+    "xhigh": "high",
+    "max": "high",
+}
 
 
 # ------------------------------------------------------
@@ -101,6 +116,7 @@ OLLAMA_MODELS: list[Model] = [
         max_tokens=32768,
         context_window=131072,
         reasoning=True,
+        thinking_level_map=_QWEN3_THINKING_LEVEL_MAP,
         cost=ModelCost(),  # 本地运行，无费用
     ),
     # Qwen3 30B-A3B（MoE 版本）
@@ -114,6 +130,7 @@ OLLAMA_MODELS: list[Model] = [
         max_tokens=32768,
         context_window=131072,
         reasoning=True,
+        thinking_level_map=_QWEN3_THINKING_LEVEL_MAP,
         cost=ModelCost(),
     ),
     # Qwen3 14B Abliterated（社区去审查版）
@@ -127,6 +144,7 @@ OLLAMA_MODELS: list[Model] = [
         max_tokens=8192,
         context_window=131072,
         reasoning=True,
+        thinking_level_map=_QWEN3_THINKING_LEVEL_MAP,
         cost=ModelCost(),
     ),
     # GPT-OSS 20B
@@ -210,6 +228,7 @@ OLLAMA_MODELS: list[Model] = [
         max_tokens=8192,
         context_window=40960,
         reasoning=True,
+        thinking_level_map=_QWEN3_THINKING_LEVEL_MAP,
         cost=ModelCost(),
     ),
     Model(
@@ -222,6 +241,7 @@ OLLAMA_MODELS: list[Model] = [
         max_tokens=8192,
         context_window=16384,
         reasoning=True,
+        thinking_level_map=_QWEN3_THINKING_LEVEL_MAP,
         cost=ModelCost(),
     ),
 ]

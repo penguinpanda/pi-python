@@ -176,6 +176,8 @@ def test_query_terminal_background_posix(monkeypatch) -> None:
     except ImportError:
         pytest.skip("termios is POSIX-only")
 
+    # TERM=dumb 会按产品逻辑直接返回 None；测试需要真实终端的 TERM 值。
+    monkeypatch.setenv("TERM", "xterm-256color")
     monkeypatch.setattr(sys, "stdin", _FakeTtyIn())
     monkeypatch.setattr(sys, "stdout", _FakeTtyOut())
     monkeypatch.setattr(os, "name", "posix")

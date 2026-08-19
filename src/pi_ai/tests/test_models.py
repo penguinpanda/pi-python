@@ -63,8 +63,8 @@ class TestModelsRegistry:
         all_models = models.get_models()
         # 内置静态目录 + 从生成 TS 目录反推的直连模型 overlay。
         # 除原有 351 个外，nvidia/moonshotai/xiaomi/zai/xai 等 provider
-        # 现在也带静态能力元数据，总计 418。
-        assert len(all_models) == 418
+        # 现在也带静态能力元数据，另加 Ollama 新增的两个 Qwen3 模型，总计 420。
+        assert len(all_models) == 420
 
     def test_get_models_by_provider(self):
         models = create_default_models()

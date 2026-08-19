@@ -13,10 +13,10 @@ FROM ghcr.io/astral-sh/uv:0.12.0 AS uv-image
 
 FROM python:3.12-slim
 
-# 构建期 PyPI 镜像源。默认 TUNA 与 uv.lock 保持一致（当前锁文件由 TUNA 生成）；
-# 如需官方源，先用 `UV_INDEX_URL=https://pypi.org/simple uv lock --refresh` 重新生成锁文件，
-# 或用 --build-arg 覆盖并接受 uv 按新索引重新解析。
-ARG PYPI_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+# 构建期 PyPI 镜像源。uv.lock 内的 artifact 与 registry 均为官方 PyPI；
+# 默认与锁文件一致，避免 uv 因索引不匹配重新解析（TUNA 对容器/uv 请求可能返回 403）。
+# 网络可达的自建镜像可用 --build-arg PYPI_INDEX_URL=... 覆盖。
+ARG PYPI_INDEX_URL=https://pypi.org/simple
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src \

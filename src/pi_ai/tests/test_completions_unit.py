@@ -963,6 +963,30 @@ class TestThinkingFormatMatrix:
         assert kwargs["extra_body"]["enable_thinking"] is False
 
     @pytest.mark.asyncio
+    async def test_openai_style_off_uses_configured_effort(self):
+        """Ollama qwen3：off 必须显式发送 reasoning_effort=none 才会停止思考。"""
+        model = self._model("openai", supportsReasoningEffort=True)
+        model.provider = "ollama"
+        model.id = "qwen38-q3km-16k"
+        model.thinking_level_map = {
+            "off": "none",
+            "minimal": "minimal",
+            "low": "low",
+            "medium": "medium",
+            "high": "high",
+        }
+        client = _mock_client([_chunk(content="ok", finish_reason="stop")])
+        _, _ = await _collect_events(
+            model,
+            Context(messages=[{"role": "user", "content": "Hi"}]),
+            client,
+            options={"reasoning": "off"},
+        )
+        kwargs = client.chat.completions.create.call_args.kwargs
+        assert kwargs["reasoning_effort"] == "none"
+        assert "thinking" not in (kwargs.get("extra_body") or {})
+
+    @pytest.mark.asyncio
     async def test_openrouter_nested_reasoning(self):
         model = self._model("openrouter")
         client = _mock_client([_chunk(content="ok", finish_reason="stop")])

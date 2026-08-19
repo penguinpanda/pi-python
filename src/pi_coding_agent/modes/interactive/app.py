@@ -160,6 +160,23 @@ def _camel_to_snake(name: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
 
 
+def _completion_secondary_text(item: dict[str, Any]) -> str:
+    """补全行第二列文本。
+
+    优先显示 label；label 与待插入值相同时回退到 description。
+    两者都与值相同（例如 cwd 下的 ``.pi/``）则留空，
+    避免出现 ``→ .pi/   .pi/`` 这样的重复列。
+    """
+    value = str(item.get("value", "")).strip()
+    label = str(item.get("label", "")).strip()
+    if label and label != value:
+        return label
+    description = str(item.get("description", "") or "").strip()
+    if description and description != value:
+        return description
+    return ""
+
+
 class PiTuiApp(App):
     """pi 编码代理 TUI（引擎版）。"""
 
@@ -1346,7 +1363,7 @@ class PiTuiApp(App):
         items = [
             (
                 str(item.get("value", "")).strip(),
-                str(item.get("label", str(item.get("value", ""))).strip()),
+                _completion_secondary_text(item),
             )
             for item in self._completion_items
         ]

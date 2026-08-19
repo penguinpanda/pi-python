@@ -67,7 +67,7 @@ def create_default_models() -> Models:
     models.add_provider(mistral_provider())
     models.add_provider(azure_openai_responses_provider())
     models.add_provider(github_copilot_provider())
-    # models.add_provider(openrouter_provider())
+    models.add_provider(openrouter_provider())
     models.add_provider(ant_ling_provider())
     models.add_provider(openai_codex_provider())
     models.add_provider(radius_provider())

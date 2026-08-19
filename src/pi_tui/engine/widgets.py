@@ -1306,7 +1306,8 @@ class Editor(Widget):
     def _should_autocomplete_after_insert(self) -> bool:
         """输入后自然触发补全：slash 命令、@ 文件或路径上下文。"""
         line = self.lines[self.cursor_row][: self.cursor_col]
-        if line.startswith("/") and " " not in line:
+        if line.startswith("/"):
+            # slash 命令本身与命令参数（命令名后输入空格）都触发补全。
             return True
         if line.startswith("@"):
             return True
@@ -1314,7 +1315,9 @@ class Editor(Widget):
             "/" in line
             or line.startswith(".")
             or line.startswith("~/")
-            or line.endswith((" ", "/", '"'))
+            # 路径分隔符与引号触发；普通文本后的空格不触发，
+            # 避免把整个 cwd 当成候选弹出来。
+            or line.endswith(("/", '"'))
         ):
             return True
         return False

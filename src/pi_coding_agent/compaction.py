@@ -138,23 +138,31 @@ def is_turn_start_message(message: AgentMessage) -> bool:
 
 
 def is_cut_point_entry(entry: dict[str, Any]) -> bool:
-    """条目是否可作为切割点（compaction 条目不可）。"""
-    if entry.get("type") == "compaction":
+    """条目是否可作为切割点（仅 message 条目；compaction/配置类条目不可）。"""
+    entry_type = entry.get("type")
+    if entry_type == "compaction":
+        return False
+    if entry_type != "message":
+        # thinking_level_change / model_change / active_tools_change / custom 等
+        # 不承载 LLM 消息，不能作为切割点。
         return False
     return is_cut_point_message(entry["message"])
 
 
 def is_turn_start_entry(entry: dict[str, Any]) -> bool:
-    """条目是否为轮次起点。"""
-    if entry.get("type") == "compaction":
+    """条目是否为轮次起点（仅 message 条目）。"""
+    if entry.get("type") != "message":
         return False
     return is_turn_start_message(entry["message"])
 
 
 def _estimate_entry_tokens(entry: dict[str, Any]) -> int:
     """估算单个条目的 token 数（compaction 条目 = summary 文本）。"""
-    if entry.get("type") == "compaction":
+    entry_type = entry.get("type")
+    if entry_type == "compaction":
         return math.ceil(len(entry.get("summary", "")) / CHARS_PER_TOKEN)
+    if entry_type != "message":
+        return 0
     return estimate_tokens(entry["message"])
 
 

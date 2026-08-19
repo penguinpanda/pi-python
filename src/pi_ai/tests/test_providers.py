@@ -25,7 +25,7 @@ from pi_ai.providers import (
     qwen_token_plan_cn_provider,
     qwen_token_plan_provider,
 )
-from pi_ai.providers.ollama import _merge_ollama_models
+from pi_ai.providers.ollama import _QWEN3_THINKING_LEVEL_MAP, _merge_ollama_models
 
 import httpx
 
@@ -239,6 +239,8 @@ class TestModelConstants:
             "llama3.2-vision:latest",
             "qwen2.5:7b-instruct-q8_0",
             "deepseek-r1:14b",
+            "qwen3-14b-q5km-coding",
+            "qwen38-q3km-16k",
         ]
 
     def test_qwen_models_constant(self):
@@ -317,6 +319,8 @@ class TestOllamaProvider:
             "llama3.2-vision:latest",
             "qwen2.5:7b-instruct-q8_0",
             "deepseek-r1:14b",
+            "qwen3-14b-q5km-coding",
+            "qwen38-q3km-16k",
         ]
 
     def test_model_metadata(self):
@@ -333,6 +337,13 @@ class TestOllamaProvider:
 
         qwen3 = by_id["qwen3:30b"]
         assert qwen3.reasoning is True
+        assert qwen3.thinking_level_map == _QWEN3_THINKING_LEVEL_MAP
+        assert qwen3.thinking_level_map["off"] == "none"
+
+        qwen38 = by_id["qwen38-q3km-16k"]
+        assert qwen38.reasoning is True
+        assert qwen38.thinking_level_map == _QWEN3_THINKING_LEVEL_MAP
+        assert qwen38.thinking_level_map["off"] == "none"
 
     def test_all_models_are_local_and_free(self):
         for model in OLLAMA_MODELS:

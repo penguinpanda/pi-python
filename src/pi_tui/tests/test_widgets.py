@@ -27,6 +27,28 @@ def _mouse(type_: str, row: int, col: int, button: str = "left") -> MouseEvent:
     return MouseEvent(type=type_, button=button, row=row, col=col)
 
 
+def test_editor_natural_autocomplete_triggers() -> None:
+    editor = Editor()
+
+    editor.text = "hello"
+    assert editor._should_autocomplete_after_insert() is False
+
+    editor.text = "hello "
+    assert editor._should_autocomplete_after_insert() is False
+
+    editor.text = "/model"
+    assert editor._should_autocomplete_after_insert() is True
+
+    editor.text = "/model "
+    assert editor._should_autocomplete_after_insert() is True
+
+    editor.text = "./src"
+    assert editor._should_autocomplete_after_insert() is True
+
+    editor.text = "src/"
+    assert editor._should_autocomplete_after_insert() is True
+
+
 def test_sgr_mouse_coordinates_are_zero_based() -> None:
     events = parse_input(b"\x1b[<0;3;5M")
     mouse = events[0].mouse

@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from pi_coding_agent.modes.interactive.app import PiTuiApp
+from pi_coding_agent.modes.interactive.app import PiTuiApp, _completion_secondary_text
 from pi_coding_agent.modes.interactive.components import PiEditor
 from pi_tui.autocomplete import AutocompleteItem, AutocompleteSuggestions
 from pi_tui.components import BashExecutionEntry, MessageEntry, ToolExecutionEntry
@@ -137,6 +137,45 @@ async def test_pending_image_attached_to_next_prompt() -> None:
             }
         ]
         assert _app._pending_image is None
+
+    await _run(app, term, actions)
+
+
+def test_completion_secondary_text_omits_duplicate_path_label() -> None:
+    assert (
+        _completion_secondary_text({"value": ".pi/", "label": ".pi/", "description": ".pi/"}) == ""
+    )
+    assert (
+        _completion_secondary_text(
+            {"value": "model", "label": "model", "description": "Switch model"}
+        )
+        == "Switch model"
+    )
+    assert (
+        _completion_secondary_text(
+            {
+                "value": "ollama/qwen3:30b",
+                "label": "qwen3:30b",
+                "description": "ollama · Qwen3 30B",
+            }
+        )
+        == "qwen3:30b"
+    )
+
+
+@pytest.mark.asyncio
+async def test_space_does_not_open_cwd_path_completion(tmp_path) -> None:
+    """普通 prompt 中输入空格不应弹出整个 cwd 的路径补全。"""
+    term = FakeTerminal(size=(100, 30))
+    session = _make_session()
+    session.cwd = str(tmp_path)
+    (tmp_path / "pi-python").mkdir()
+    app = _make_app(term, session)
+
+    async def actions(_term, _app) -> None:
+        term.feed_text(" ")
+        await asyncio.sleep(0.4)
+        assert _app._completion_items == []
 
     await _run(app, term, actions)
 

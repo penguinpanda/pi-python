@@ -272,10 +272,12 @@ class CombinedAutocompleteProvider:
         last_delimiter = _find_last_delimiter(before)
         path_prefix = before if last_delimiter == -1 else before[last_delimiter + 1 :]
         if force:
+            # 普通文本后输入空格会得到空前缀；此时列出整个 cwd 没有意义，
+            # 且大目录/网络目录会拖慢补全。空输入上的 Tab 仍保留列目录行为。
+            if path_prefix == "" and before != "" and before.endswith(" "):
+                return None
             return path_prefix
         if "/" in path_prefix or path_prefix.startswith(".") or path_prefix.startswith("~/"):
-            return path_prefix
-        if path_prefix == "" and before.endswith(" "):
             return path_prefix
         return None
 

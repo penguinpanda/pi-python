@@ -150,6 +150,21 @@ async def test_path_completion_quotes_spaces(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_trailing_space_does_not_dump_cwd(tmp_path) -> None:
+    """普通文本后的空格不应把整个 cwd 列为候选。"""
+    (tmp_path / "alpha.txt").write_text("a", encoding="utf-8")
+    (tmp_path / "beta").mkdir()
+    provider = CombinedAutocompleteProvider(base_path=str(tmp_path))
+    assert await provider.get_suggestions(" ", force=True) is None
+    assert await provider.get_suggestions("hello ", force=True) is None
+    assert await provider.get_suggestions(" ", force=False) is None
+    # 空输入上的显式补全（Tab）仍可列出当前目录。
+    suggestions = await provider.get_suggestions("", force=True)
+    assert suggestions is not None
+    assert suggestions.kind == "path"
+
+
+@pytest.mark.asyncio
 async def test_apply_completion() -> None:
     provider = CombinedAutocompleteProvider(
         commands=[SimpleNamespace(name="model", description="", argument_hint=None)],
@@ -185,6 +200,10 @@ def test_path_prefix_helpers() -> None:
     assert provider._extract_path_prefix("src/foo", force=False) == "src/foo"
     assert provider._extract_path_prefix("plain", force=True) == "plain"
     assert provider._extract_path_prefix("plain", force=False) is None
+    assert provider._extract_path_prefix(" ", force=True) is None
+    assert provider._extract_path_prefix("hello ", force=True) is None
+    assert provider._extract_path_prefix("", force=True) == ""
+    assert provider._extract_path_prefix("./", force=True) == "./"
 
 
 def test_build_completion_value_quoting() -> None:

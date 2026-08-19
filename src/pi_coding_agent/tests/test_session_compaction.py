@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pi_agent import Agent, AgentOptions, set_default_stream_fn
@@ -19,7 +20,13 @@ from pi_ai.utils.retry import RetryPolicy
 
 from pi_coding_agent._session import AgentSession
 from pi_coding_agent._session_manager import SessionManager
-from pi_coding_agent.compaction import CompactionSettings
+from pi_coding_agent.compaction import (
+    CompactionSettings,
+    _estimate_entry_tokens,
+    find_cut_point,
+    is_cut_point_entry,
+    is_turn_start_entry,
+)
 
 
 @pytest.fixture
@@ -460,6 +467,39 @@ class TestPostRunChecksOnCrash:
 
         assert check_mock.await_count == 1
         assert retry_mock.await_count == 1
+
+
+def test_compaction_ignores_non_message_session_entries() -> None:
+    """thinking/model/active_tools 等配置条目不应被当作消息切割点。
+
+    回归：thinking_level_change 写入后下一次 prompt 的自动压缩检查
+    曾因 `entry["message"]` 不存在而抛 KeyError('message')。
+    """
+    entries: list[dict[str, Any]] = [
+        {
+            "type": "message",
+            "id": "m1",
+            "message": {"role": "user", "content": "hello", "timestamp": 1},
+        },
+        {
+            "type": "thinking_level_change",
+            "id": "t1",
+            "thinkingLevel": "minimal",
+        },
+        {
+            "type": "message",
+            "id": "m2",
+            "message": {"role": "assistant", "content": "ok", "timestamp": 2},
+        },
+    ]
+
+    assert is_cut_point_entry(entries[1]) is False
+    assert is_turn_start_entry(entries[1]) is False
+    assert _estimate_entry_tokens(entries[1]) == 0
+
+    cut = find_cut_point(entries, 0, len(entries), keep_recent_tokens=1_000_000)
+    assert cut.first_kept_entry_index == 0
+    assert cut.is_split_turn is False
 
 
 @pytest.mark.asyncio
