@@ -200,6 +200,30 @@ OLLAMA_MODELS: list[Model] = [
         reasoning=True,
         cost=ModelCost(),
     ),
+    Model(
+        id="qwen3-14b-q5km-coding",
+        provider="ollama",
+        api="openai-completions",
+        name="Qwen 3 14B Q5KM Coding",
+        input=["text"],
+        output=["text"],
+        max_tokens=8192,
+        context_window=40960,
+        reasoning=True,
+        cost=ModelCost(),
+    ),
+    Model(
+        id="qwen38-q3km-16k",
+        provider="ollama",
+        api="openai-completions",
+        name="Qwen 38 Q3KM 16K",
+        input=["text"],
+        output=["text"],
+        max_tokens=8192,
+        context_window=16384,
+        reasoning=True,
+        cost=ModelCost(),
+    ),
 ]
 
 
